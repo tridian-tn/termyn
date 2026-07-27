@@ -66,7 +66,42 @@ public sealed class SyncEngine
     }
 
     /// <summary>The raw model. Only touch this while holding the gate — readers want <see cref="Snapshot"/>.</summary>
-    public TodoistModel Model { get; } = new();
+    internal TodoistModel Model { get; } = new();
+
+    /// <summary>The token the next incremental sync will use.</summary>
+    public string SyncToken
+    {
+        get { lock (_gate) return Model.SyncToken; }
+    }
+
+    /// <summary>Returns a copy of a resource's raw JSON, or null if it isn't held.</summary>
+    public JsonObject? RawResource(string type, string id)
+    {
+        lock (_gate) return Model.Get(type, id)?.DeepClone().AsObject();
+    }
+
+    /// <summary>
+    /// Finds a project by name. A narrow lookup rather than a full <see cref="Snapshot"/>, because
+    /// the capture preview runs this on every keystroke.
+    /// </summary>
+    public Project? FindProjectByName(string name)
+    {
+        lock (_gate)
+            return Model.Projects().FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Finds the sections matching a name, optionally within one project. Section names are only
+    /// unique inside a project, so the caller decides what to do when more than one comes back.
+    /// </summary>
+    public IReadOnlyList<Section> FindSectionsByName(string name, string? projectId)
+    {
+        lock (_gate)
+            return Model.Sections()
+                .Where(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+                .Where(s => projectId is null || s.ProjectId == projectId)
+                .ToList();
+    }
 
     /// <summary>Takes a consistent view of the model and queue depths.</summary>
     public ModelSnapshot Snapshot()
@@ -270,26 +305,21 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            var existing = Model.Get(ResourceType.Items, id);
-            JsonObject? updated = null;
-            string? prior = null;
-            StoredResource[] upserts = [];
+            // Nothing held locally means the task is already gone; sending the edit anyway would
+            // queue a command that can only fail until it poisons.
+            if (Model.Get(ResourceType.Items, id) is not { } existing)
+                return;
 
-            if (existing is not null)
-            {
-                prior = existing.ToJsonString();
-                updated = existing.DeepClone().AsObject();
-                foreach (var kv in changes)
-                    updated[kv.Key] = kv.Value?.DeepClone();
-                upserts = [new StoredResource(ResourceType.Items, id, updated.ToJsonString())];
-            }
+            var prior = existing.ToJsonString();
+            var updated = existing.DeepClone().AsObject();
+            foreach (var kv in changes)
+                updated[kv.Key] = kv.Value?.DeepClone();
 
             var args = changes.DeepClone().AsObject();
             args["id"] = id;
 
-            Persist("item_update", args, null, prior, upserts, []);
-            if (updated is not null)
-                Model.Upsert(ResourceType.Items, id, updated);
+            Persist("item_update", args, null, prior, [new StoredResource(ResourceType.Items, id, updated.ToJsonString())], []);
+            Model.Upsert(ResourceType.Items, id, updated);
         }
     }
 
@@ -372,29 +402,46 @@ public sealed class SyncEngine
     /// parent — and queues an <c>item_reorder</c>. Ordering is computed over the whole sibling set,
     /// never over a filtered view, so hidden tasks keep their positions.
     /// </summary>
-    public void MoveItem(string id, int offset)
+    /// <returns>False when the task is already at that end, or isn't held.</returns>
+    public bool MoveItem(string id, int offset)
     {
         lock (_gate)
         {
             if (Model.Get(ResourceType.Items, id) is not { } json)
-                return;
+                return false;
 
             var item = Projections.ToTaskItem(json);
             var siblings = Model.Items()
                 .Where(i => i.ProjectId == item.ProjectId && i.ParentId == item.ParentId)
                 .OrderBy(i => i.ChildOrder)
                 .ThenBy(i => i.Id, StringComparer.Ordinal)
-                .Select(i => i.Id)
                 .ToList();
 
-            var from = siblings.IndexOf(id);
-            var to = from + offset;
-            if (from < 0 || to < 0 || to >= siblings.Count)
-                return;
+            var from = siblings.FindIndex(i => i.Id == id);
+            if (from < 0)
+                return false;
 
-            siblings.RemoveAt(from);
-            siblings.Insert(to, id);
-            ReorderLocked(siblings);
+            // Step over completed siblings: they aren't on screen, so swapping with one would look
+            // like the keypress did nothing.
+            var step = Math.Sign(offset);
+            var to = from;
+            for (var moved = 0; moved < Math.Abs(offset); moved++)
+            {
+                do
+                {
+                    to += step;
+                }
+                while (to >= 0 && to < siblings.Count && siblings[to].Completed);
+
+                if (to < 0 || to >= siblings.Count)
+                    return false;
+            }
+
+            var ids = siblings.Select(i => i.Id).ToList();
+            ids.RemoveAt(from);
+            ids.Insert(to, id);
+            ReorderLocked(ids);
+            return true;
         }
     }
 
@@ -413,13 +460,19 @@ public sealed class SyncEngine
         var priors = new JsonArray();
 
         var order = 0;
-        foreach (var id in orderedIds)
+        foreach (var id in orderedIds.Distinct(StringComparer.Ordinal))
         {
             // Skip ids we no longer hold: sending them would fail forever in the outbox.
             if (Model.Get(ResourceType.Items, id) is not { } existing)
                 continue;
 
             order++;
+
+            // Only the tasks whose position actually changed need sending. Without this a one-place
+            // move rewrites and re-persists every sibling in the project.
+            if (JsonRead.Int(existing, "child_order") == order)
+                continue;
+
             entries.Add(new JsonObject { ["id"] = id, ["child_order"] = order });
             priors.Add(existing.DeepClone());
 
@@ -446,38 +499,43 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (_undoStack.Count == 0)
-                return false;
-
-            var uuid = _undoStack[^1];
-            _undoStack.RemoveAt(_undoStack.Count - 1);
-            var record = _undoable.GetValueOrDefault(uuid);
-            _undoable.Remove(uuid);
-
-            var queued = _outbox.FirstOrDefault(c => c.Uuid == uuid);
-            if (queued is { InFlight: false })
+            // Keep going past entries that can no longer be reversed — the task was deleted on
+            // another device, say — rather than reporting "nothing to undo" with history left.
+            while (_undoStack.Count > 0)
             {
-                RevertLocked(queued);
-                return true;
-            }
+                var uuid = _undoStack[^1];
+                _undoStack.RemoveAt(_undoStack.Count - 1);
+                var record = _undoable.GetValueOrDefault(uuid);
+                _undoable.Remove(uuid);
 
-            if (record is null)
-                return false;
+                var queued = _outbox.FirstOrDefault(c => c.Uuid == uuid);
+                if (queued is { InFlight: false })
+                {
+                    RevertLocked(queued);
+                    return true;
+                }
 
-            if (record.Type == "item_close")
-            {
-                // Already applied server-side; only meaningful if the task is still there.
-                if (Model.Get(ResourceType.Items, record.Id) is null)
-                    return false;
-                ReopenItem(record.Id);
-                return true;
-            }
+                if (record is null)
+                    continue;
 
-            // Todoist cannot undelete, so the task is recreated from the state we last held.
-            if (record.PriorJson is { } json && TryParse(json) is { } prior)
-            {
-                AddItem(ItemFields.ForRecreate(prior));
-                return true;
+                if (record.Type == "item_close")
+                {
+                    // Already applied server-side; only meaningful if the task is still there.
+                    if (Model.Get(ResourceType.Items, record.Id) is null)
+                        continue;
+                    ReopenItem(record.Id);
+                    return true;
+                }
+
+                // Todoist cannot undelete, so the task is recreated from the state we last held.
+                if (record.PriorJson is { } json && TryParse(json) is { } prior)
+                {
+                    var fields = ItemFields.ForRecreate(prior);
+                    if (fields["content"] is null)
+                        continue;
+                    AddItem(fields);
+                    return true;
+                }
             }
 
             return false;
@@ -705,10 +763,21 @@ public sealed class SyncEngine
                 continue;
             }
 
+            var args = ParseArgs(c);
+
+            // A reorder carries its targets in an array rather than a single id.
+            if (args["items"] is JsonArray items)
+            {
+                foreach (var entry in items)
+                    if (entry?["id"] is JsonValue entryId)
+                        ids.Add(entryId.ToString());
+                continue;
+            }
+
             // Only a command that actually mutated a local copy has something to protect. A command
             // aimed at a resource we never held must not shadow the server's version of it, which
             // would be dropped for good once the sync token advances past that change.
-            if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
+            if (c.PriorJson is not null && args["id"] is JsonValue v)
                 ids.Add(v.ToString());
         }
         return ids;

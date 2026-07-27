@@ -168,7 +168,7 @@ internal sealed class MainForm : Form
 
         var preview = _presenter.Preview(_capture.Text);
         var parse = preview.Parse;
-        var parts = new List<string> { $"\"{parse.Content}\"" };
+        var parts = new List<string> { $"\"{preview.Content}\"" };
 
         if (parse.ProjectName is { } project)
             parts.Add(preview.ProjectResolved ? "#" + project : $"#{project} (unknown — goes to Inbox)");
@@ -221,10 +221,12 @@ internal sealed class MainForm : Form
                 Guarded(() => _presenter.SetPriority(id!, (Priority)(e.KeyCode - Keys.D0)));
                 break;
             case Keys.Up when e.Alt && id is not null:
-                Guarded(() => _presenter.Move(id!, -1));
+                wrote = false;
+                Guarded(() => wrote = _presenter.Move(id!, -1));
                 break;
             case Keys.Down when e.Alt && id is not null:
-                Guarded(() => _presenter.Move(id!, 1));
+                wrote = false;
+                Guarded(() => wrote = _presenter.Move(id!, 1));
                 break;
             case Keys.F5:
                 _scheduler.RequestNow();
@@ -274,8 +276,15 @@ internal sealed class MainForm : Form
 
         var current = _presenter.Rows.FirstOrDefault(r => r.Id == id)?.Content;
         if (text == current)
+        {
+            OnRowsChanged(); // catch up on anything a sync published while the edit was open
             return;
+        }
 
+        // The list is rebuilt from the presenter as soon as the rename publishes, and the control
+        // indexes the edited row again after this handler returns — which throws if the rebuild
+        // dropped or moved it. Cancelling the control's own commit leaves the repaint to us.
+        e.CancelEdit = true;
         Guarded(() => _presenter.Rename(id, text));
         _scheduler.NotifyWrite();
     }
@@ -294,6 +303,7 @@ internal sealed class MainForm : Form
         }
 
         var parse = _presenter.Preview(answer).Parse;
+
         if (parse.DueDate is null)
         {
             _status.Text = $"Couldn't read \"{answer}\" as a date.";

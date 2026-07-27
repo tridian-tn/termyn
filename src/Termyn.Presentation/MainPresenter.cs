@@ -9,8 +9,12 @@ namespace Termyn.Presentation;
 /// <summary>A single row rendered in the task list.</summary>
 public sealed record TaskRow(string Id, string Content, Priority Priority, string Project, string Due, IReadOnlyList<string> Labels);
 
-/// <summary>What the local parser made of some capture text, and whether its names resolved.</summary>
-public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved);
+/// <summary>What the local parser made of some capture text, and how its names resolved.</summary>
+public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved)
+{
+    /// <summary>The text the task would actually be created with.</summary>
+    public string Content { get; init; } = Parse.Content;
+}
 
 /// <summary>
 /// Drives the task list: exposes the engine's model as rows and turns user intents into engine
@@ -20,6 +24,14 @@ public sealed class MainPresenter
 {
     private readonly SyncEngine _engine;
     private readonly QuickAddParser _parser;
+
+    /// <summary>
+    /// Serialises publishing. Intents run on the UI thread while the background sync publishes from
+    /// its worker; without this an older snapshot can be assigned after a newer one and put a
+    /// completed task back on screen.
+    /// </summary>
+    private readonly Lock _publishing = new();
+
     private IReadOnlyList<TaskRow> _allRows = [];
 
     public MainPresenter(SyncEngine engine, QuickAddParser parser)
@@ -69,7 +81,9 @@ public sealed class MainPresenter
         }
 
         Publish();
-        return _engine.PendingCount > 0 && !IsOffline;
+
+        // Only ask for another round while the network is answering, or the loop would spin.
+        return !IsOffline && _engine.PendingCount > 0;
     }
 
     /// <summary>
@@ -95,15 +109,8 @@ public sealed class MainPresenter
 
         if (!captured)
         {
-            var parse = _parser.Parse(text);
-
-            // Every word was a token, so there is no task text left. Keep the raw input rather than
-            // creating a blank task the server would reject and silently discard.
-            var content = string.IsNullOrWhiteSpace(parse.Content) ? text.Trim() : parse.Content;
-            var resolved = parse with { Content = content };
-
-            var projectId = ResolveProjectId(parse.ProjectName);
-            _engine.AddItem(ItemFields.ForAdd(resolved, projectId, ResolveSectionId(parse.SectionName, projectId)));
+            var (parse, content, projectId, sectionId) = Resolve(text);
+            _engine.AddItem(ItemFields.ForAdd(parse with { Content = content }, projectId, sectionId));
         }
 
         Publish();
@@ -112,12 +119,14 @@ public sealed class MainPresenter
     /// <summary>Shows what the local parser understood, for the capture preview.</summary>
     public CapturePreview Preview(string text)
     {
-        var parse = _parser.Parse(text);
-        var projectId = ResolveProjectId(parse.ProjectName);
+        var (parse, content, projectId, sectionId) = Resolve(text);
         return new CapturePreview(
             parse,
             parse.ProjectName is null || projectId is not null,
-            parse.SectionName is null || ResolveSectionId(parse.SectionName, projectId) is not null);
+            parse.SectionName is null || sectionId is not null)
+        {
+            Content = content,
+        };
     }
 
     public void Search(string query)
@@ -151,12 +160,6 @@ public sealed class MainPresenter
         Publish();
     }
 
-    public void Reopen(string id)
-    {
-        _engine.ReopenItem(id);
-        Publish();
-    }
-
     public void Delete(string id)
     {
         _engine.DeleteItem(id);
@@ -172,61 +175,94 @@ public sealed class MainPresenter
     }
 
     /// <summary>Moves a task one place up or down among its siblings.</summary>
-    public void Move(string id, int offset)
+    /// <returns>False when it was already at that end, so the caller can skip a needless sync.</returns>
+    public bool Move(string id, int offset)
     {
-        _engine.MoveItem(id, offset);
-        Publish();
+        var moved = _engine.MoveItem(id, offset);
+        if (moved)
+            Publish();
+        return moved;
     }
 
-    private string? ResolveProjectId(string? name)
-        => name is null
-            ? null
-            : _engine.Snapshot().Projects
-                .FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
-
     /// <summary>
-    /// Resolves a section name within its project. Section names are only unique inside a project,
-    /// so without one an ambiguous name resolves to nothing rather than filing the task under an
-    /// unrelated project's section.
+    /// Works out what a capture would actually create: the text, and the ids its <c>#project</c> and
+    /// <c>/section</c> names resolve to. Shared by the preview and the capture itself so the two
+    /// can never disagree.
     /// </summary>
-    private string? ResolveSectionId(string? name, string? projectId)
+    private (QuickAddParse Parse, string Content, string? ProjectId, string? SectionId) Resolve(string text)
     {
-        if (name is null)
-            return null;
+        var parse = _parser.Parse(text);
 
-        var matches = _engine.Snapshot().Sections
-            .Where(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
-            .Where(s => projectId is null || s.ProjectId == projectId)
-            .ToList();
+        // Every word was a token, so there is no task text left. Keep the raw input rather than
+        // creating a blank task the server would reject and silently discard.
+        var content = string.IsNullOrWhiteSpace(parse.Content) ? text.Trim() : parse.Content;
 
-        return matches.Count == 1 ? matches[0].Id : null;
+        var projectId = parse.ProjectName is null ? null : _engine.FindProjectByName(parse.ProjectName)?.Id;
+
+        string? sectionId = null;
+        if (parse.SectionName is not null)
+        {
+            // A named project that didn't resolve means we don't know where this task belongs, so a
+            // section matching by name alone would file it somewhere the user never asked for.
+            var projectKnown = parse.ProjectName is null || projectId is not null;
+            if (projectKnown)
+            {
+                var matches = _engine.FindSectionsByName(parse.SectionName, projectId);
+                if (matches.Count == 1)
+                {
+                    sectionId = matches[0].Id;
+                    // A bare section implies its project; sending one without the other is invalid.
+                    projectId ??= matches[0].ProjectId;
+                }
+            }
+        }
+
+        return (parse, content, projectId, sectionId);
     }
 
     /// <summary>Re-reads the model and republishes. Call after anything that mutates the engine.</summary>
     private void Publish()
     {
-        var snapshot = _engine.Snapshot();
-        var projects = snapshot.Projects
-            .DistinctBy(p => p.Id)
-            .ToDictionary(p => p.Id, p => p.Name);
+        lock (_publishing)
+        {
+            var snapshot = _engine.Snapshot();
+            var projects = snapshot.Projects
+                .DistinctBy(p => p.Id)
+                .ToDictionary(p => p.Id, p => p.Name);
 
-        _allRows = snapshot.Items
-            .Where(i => !i.Completed)
-            .OrderBy(i => i.ChildOrder)
-            .Select(i => new TaskRow(
-                i.Id,
-                i.Content,
-                i.Priority,
-                i.ProjectId is not null && projects.TryGetValue(i.ProjectId, out var name) ? name : string.Empty,
-                i.DueText ?? i.DueDate ?? string.Empty,
-                i.Labels))
-            .ToList();
+            // Ordered the way the engine groups siblings, so moving a task one place on screen is
+            // the same move it makes in the model.
+            _allRows = snapshot.Items
+                .Where(i => !i.Completed)
+                .OrderBy(i => i.ProjectId ?? string.Empty, StringComparer.Ordinal)
+                .ThenBy(i => i.ParentId ?? string.Empty, StringComparer.Ordinal)
+                .ThenBy(i => i.ChildOrder)
+                .ThenBy(i => i.Id, StringComparer.Ordinal)
+                .Select(i => new TaskRow(
+                    i.Id,
+                    i.Content,
+                    i.Priority,
+                    i.ProjectId is not null && projects.TryGetValue(i.ProjectId, out var name) ? name : string.Empty,
+                    i.DueText ?? i.DueDate ?? string.Empty,
+                    i.Labels))
+                .ToList();
 
-        Republish(snapshot);
+            ApplyFilter(snapshot.PendingCount, snapshot.FailedCount);
+        }
+
+        RowsChanged?.Invoke();
     }
 
     /// <summary>Re-applies the search filter to the rows already projected.</summary>
-    private void Republish(ModelSnapshot? snapshot = null)
+    private void Republish()
+    {
+        lock (_publishing)
+            ApplyFilter(_engine.PendingCount, _engine.FailedCount);
+
+        RowsChanged?.Invoke();
+    }
+
+    private void ApplyFilter(int pending, int failed)
     {
         var rows = _allRows.AsEnumerable();
 
@@ -241,8 +277,6 @@ public sealed class MainPresenter
 
         Rows = rows.ToList();
 
-        var pending = snapshot?.PendingCount ?? _engine.PendingCount;
-        var failed = snapshot?.FailedCount ?? _engine.FailedCount;
         Status = string.Join(" · ",
             new[]
             {
@@ -251,7 +285,5 @@ public sealed class MainPresenter
                 pending > 0 ? $"{pending} pending" : null,
                 failed > 0 ? $"{failed} failed" : null,
             }.Where(s => s is not null));
-
-        RowsChanged?.Invoke();
     }
 }

@@ -5,9 +5,6 @@ public sealed record SyncCadence(TimeSpan Interval, TimeSpan WriteDebounce)
 {
     /// <summary>A background sync every 45 seconds, with writes coalesced over 800 ms.</summary>
     public static readonly SyncCadence Default = new(TimeSpan.FromSeconds(45), TimeSpan.FromMilliseconds(800));
-
-    /// <summary>No timer: sync only on an explicit request or after a write.</summary>
-    public static readonly SyncCadence Manual = new(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(800));
 }
 
 /// <summary>

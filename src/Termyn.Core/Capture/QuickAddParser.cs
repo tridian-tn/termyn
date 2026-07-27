@@ -76,7 +76,9 @@ public sealed partial class QuickAddParser
             // the content and is skipped, so a weekday or time inside it can't become a due date.
             if (token.Equals("every", StringComparison.OrdinalIgnoreCase))
             {
-                var run = tokens[i..].TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+')).ToArray();
+                var run = tokens[i..]
+                    .TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+') && !TryParsePriority(t, out _))
+                    .ToArray();
                 unsupported.Add(string.Join(' ', run));
                 content.AddRange(run);
                 i += run.Length - 1;

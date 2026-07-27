@@ -9,8 +9,8 @@ namespace Termyn.Presentation.Tests;
 
 /// <summary>
 /// The background sync loop mutates the model on a worker thread while the UI thread reads it to
-/// render. Reading off-gate used to throw "Collection was modified" within a few hundred
-/// milliseconds of the two overlapping.
+/// render. Reading off-gate used to throw "Collection was modified" within a second of the two
+/// overlapping; both of these fail against that version.
 /// </summary>
 public class ConcurrencyTests
 {
@@ -19,7 +19,7 @@ public class ConcurrencyTests
     [Fact]
     public async Task A_write_publishing_while_a_background_sync_churns_the_model_does_not_throw()
     {
-        var (presenter, _) = Churning(out var cts);
+        var presenter = Churning(out var cts);
 
         var failure = await RaceAsync(presenter, cts, () =>
         {
@@ -34,7 +34,7 @@ public class ConcurrencyTests
     [Fact]
     public async Task Reading_rows_while_a_background_sync_churns_the_model_does_not_throw()
     {
-        var (presenter, _) = Churning(out var cts);
+        var presenter = Churning(out var cts);
 
         var failure = await RaceAsync(presenter, cts, () =>
         {
@@ -47,7 +47,7 @@ public class ConcurrencyTests
     }
 
     /// <summary>An engine whose every sync adds a fresh batch of tasks and tombstones the last one.</summary>
-    private static (MainPresenter Presenter, SyncEngine Engine) Churning(out CancellationTokenSource cts)
+    private static MainPresenter Churning(out CancellationTokenSource cts)
     {
         var round = 0;
         var api = new FakeApi
@@ -69,10 +69,9 @@ public class ConcurrencyTests
 
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
         engine.Load();
-        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(new DateOnly(2026, 7, 31))));
 
         cts = new CancellationTokenSource(RunFor);
-        return (presenter, engine);
+        return new MainPresenter(engine, new QuickAddParser(new FixedClock(new DateOnly(2026, 7, 31))));
     }
 
     private static async Task<Exception?> RaceAsync(MainPresenter presenter, CancellationTokenSource cts, Action uiWork)

@@ -25,7 +25,7 @@ public class MainPresenterTests
                     Json.Change("projects", "p1", """{"id":"p1","name":"Work"}"""),
                     Json.Change("items", "done", """{"id":"done","content":"Done","checked":true,"child_order":0}"""),
                     Json.Change("items", "b", """{"id":"b","content":"Second","project_id":"p1","priority":1,"child_order":2}"""),
-                    Json.Change("items", "a", """{"id":"a","content":"First","project_id":"pX","priority":4,"child_order":1}"""),
+                    Json.Change("items", "a", """{"id":"a","content":"First","project_id":"p1","priority":4,"child_order":1}"""),
                 ],
             },
         };
@@ -34,7 +34,6 @@ public class MainPresenterTests
         await presenter.LoadAsync();
 
         Assert.Equal(new[] { "First", "Second" }, presenter.Rows.Select(r => r.Content).ToArray());
-        Assert.Equal(string.Empty, presenter.Rows.Single(r => r.Content == "First").Project); // unknown project id
         Assert.Equal("Work", presenter.Rows.Single(r => r.Content == "Second").Project);
         Assert.Equal(Priority.P1, presenter.Rows.Single(r => r.Content == "First").Priority); // API 4 -> P1
         Assert.False(presenter.IsOffline);
@@ -300,23 +299,51 @@ public class MainPresenterTests
     }
 
     [Fact]
-    public void Moving_while_a_search_filter_is_active_does_not_scramble_hidden_rows()
+    public void Moving_while_a_search_filter_is_active_moves_one_place_in_the_full_list()
     {
         var store = new InMemorySnapshotStore();
-        store.PutResource("items", "a", """{"id":"a","content":"alpha","child_order":1}""");
-        store.PutResource("items", "b", """{"id":"b","content":"beta match","child_order":2}""");
-        store.PutResource("items", "c", """{"id":"c","content":"gamma","child_order":3}""");
-        store.PutResource("items", "d", """{"id":"d","content":"delta match","child_order":4}""");
-        var presenter = NewPresenter(new FakeApi(), store);
+        store.PutResource("items", "a", """{"id":"a","content":"alpha","project_id":"p","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"beta match","project_id":"p","child_order":2}""");
+        store.PutResource("items", "c", """{"id":"c","content":"gamma","project_id":"p","child_order":3}""");
+        store.PutResource("items", "d", """{"id":"d","content":"delta match","project_id":"p","child_order":4}""");
+        var engine = NewEngine(new FakeApi(), store);
+        var presenter = new MainPresenter(engine, Parser());
 
         presenter.Search("match");
         presenter.Move("d", -1);
         presenter.Search("");
 
-        // Every task still has a distinct position, and the hidden ones kept their relative order.
-        var orders = presenter.Rows.Select(r => r.Id).ToArray();
-        Assert.Equal(4, orders.Distinct().Count());
-        Assert.True(Array.IndexOf(orders, "a") < Array.IndexOf(orders, "c"));
+        // One place up in the real list, not one place up among the two visible rows.
+        Assert.Equal(new[] { "a", "b", "d", "c" }, presenter.Rows.Select(r => r.Id).ToArray());
+
+        // And no two tasks ended up sharing a position.
+        var orders = engine.Snapshot().Items.Select(i => i.ChildOrder).ToArray();
+        Assert.Equal(orders.Length, orders.Distinct().Count());
+    }
+
+    [Fact]
+    public void Rows_are_ordered_so_that_moving_one_place_on_screen_is_one_place_in_the_model()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a1", """{"id":"a1","content":"A1","project_id":"pA","child_order":1}""");
+        store.PutResource("items", "a2", """{"id":"a2","content":"A2","project_id":"pA","child_order":2}""");
+        store.PutResource("items", "b1", """{"id":"b1","content":"B1","project_id":"pB","child_order":1}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+
+        // Projects are kept together, so a task's on-screen neighbour is a real sibling.
+        Assert.Equal(new[] { "a1", "a2", "b1" }, presenter.Rows.Select(r => r.Id).ToArray());
+
+        Assert.True(presenter.Move("a2", -1));
+        Assert.Equal(new[] { "a2", "a1", "b1" }, presenter.Rows.Select(r => r.Id).ToArray());
+    }
+
+    [Fact]
+    public void Moving_a_task_that_cannot_move_reports_that_nothing_changed()
+    {
+        var presenter = NewPresenter(new FakeApi(), SeededStore());
+
+        Assert.False(presenter.Move("i1", -1));
+        Assert.False(presenter.Move("unknown", 1));
     }
 
     [Fact]
@@ -333,10 +360,13 @@ public class MainPresenterTests
     // ---- Helpers -------------------------------------------------------------------------------
 
     private static MainPresenter NewPresenter(FakeApi api, InMemorySnapshotStore store)
+        => new(NewEngine(api, store), Parser());
+
+    private static SyncEngine NewEngine(FakeApi api, InMemorySnapshotStore store)
     {
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
         engine.Load();
-        return new MainPresenter(engine, Parser());
+        return engine;
     }
 
     private static QuickAddParser Parser() => new(new FixedClock(Today));
