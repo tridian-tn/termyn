@@ -60,12 +60,20 @@ internal sealed class OutlineView : ListView
             _rows = value;
             _cache = new ListViewItem?[value.Count];
             VirtualListSize = value.Count;
-            Invalidate();
 
-            if (selected is not null)
-                SelectId(selected);
-            else if (_rows.Count > 0 && SelectedIndices.Count == 0)
-                SelectIndex(0);
+            // Put the selection back on the same task, if it's still here. Deliberately no
+            // scrolling and no fallback selection: a background sync refreshes these rows every
+            // 45 seconds, and it must not move the selection or the viewport under the user.
+            if (selected is not null && IndexOf(selected) is var index and >= 0)
+            {
+                if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+                {
+                    SelectedIndices.Clear();
+                    SelectedIndices.Add(index);
+                }
+            }
+
+            Invalidate();
         }
     }
 
@@ -75,27 +83,26 @@ internal sealed class OutlineView : ListView
     public TaskRow? SelectedRow
         => SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count ? _rows[SelectedIndices[0]] : null;
 
+    /// <summary>Selects a task and scrolls it into view. For explicit navigation, not for refreshes.</summary>
     public void SelectId(string id)
     {
-        var index = -1;
-        for (var i = 0; i < _rows.Count; i++)
+        if (IndexOf(id) is var index and >= 0)
         {
-            if (_rows[i].Id != id)
-                continue;
-            index = i;
-            break;
+            SelectedIndices.Clear();
+            SelectedIndices.Add(index);
+            EnsureVisible(index);
         }
-
-        if (index >= 0)
-            SelectIndex(index);
     }
 
-    private void SelectIndex(int index)
+    private bool IsSelected(int index)
+        => SelectedIndices.Count > 0 && SelectedIndices[0] == index;
+
+    private int IndexOf(string id)
     {
-        SelectedIndices.Clear();
-        SelectedIndices.Add(index);
-        Items[index].Focused = true;
-        EnsureVisible(index);
+        for (var i = 0; i < _rows.Count; i++)
+            if (_rows[i].Id == id)
+                return i;
+        return -1;
     }
 
     // Tab and Shift+Tab indent and outdent here rather than moving focus out of the list.
@@ -141,7 +148,10 @@ internal sealed class OutlineView : ListView
             return;
 
         var row = _rows[e.ItemIndex];
-        var selected = (e.ItemState & ListViewItemStates.Selected) != 0;
+
+        // Not e.ItemState: in virtual owner-draw mode its Selected flag is unreliable for sub-items,
+        // which painted rows as selected simply because the mouse passed over them.
+        var selected = IsSelected(e.ItemIndex);
         var text = selected ? SystemColors.HighlightText : ForeColor;
         var muted = selected ? SystemColors.HighlightText : SystemColors.GrayText;
 

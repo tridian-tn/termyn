@@ -26,6 +26,9 @@ internal sealed class MainForm : Form
     private bool _reconnectNeeded;
     private bool _syncingSidebar;
 
+    /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
+    private string _sidebarKey = SmartView.Today.ToString();
+
     public MainForm(MainPresenter presenter, SyncScheduler scheduler)
     {
         _presenter = presenter;
@@ -138,8 +141,12 @@ internal sealed class MainForm : Form
             {
                 var label = node.Count > 0 ? $"{node.Label}  ({node.Count})" : node.Label;
                 var tree = new TreeNode(label) { Tag = node };
-                if (node.IsFavorite && node.Kind == SidebarKind.Project)
+
+                if (node.Kind == SidebarKind.Header)
+                {
                     tree.NodeFont = new Font(_sidebar.Font, FontStyle.Bold);
+                    tree.ForeColor = SystemColors.GrayText;
+                }
 
                 if (node.Depth > 0 && parents.TryGetValue(node.Depth - 1, out var parent))
                     parent.Nodes.Add(tree);
@@ -147,7 +154,9 @@ internal sealed class MainForm : Form
                     _sidebar.Nodes.Add(tree);
 
                 parents[node.Depth] = tree;
-                if (SelectionKeyOf(node) == _presenter.Selection.Key)
+
+                // Match the exact row that was clicked: a favourited project appears twice.
+                if (node.Key == _sidebarKey)
                     _sidebar.SelectedNode = tree;
             }
 
@@ -160,8 +169,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    private static string SelectionKeyOf(SidebarNode node)
-        => node.View?.ToString() ?? node.Id;
 
     private void OnSyncFailed(Exception ex)
     {
@@ -186,6 +193,11 @@ internal sealed class MainForm : Form
         if (_syncingSidebar || e.Node?.Tag is not SidebarNode node)
             return;
 
+        // A group label isn't a view; leave the outline where it was.
+        if (node.Kind == SidebarKind.Header)
+            return;
+
+        _sidebarKey = node.Key;
         Guarded(() => _presenter.Select(node.Kind switch
         {
             SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),

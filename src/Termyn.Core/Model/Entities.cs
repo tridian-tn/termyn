@@ -24,6 +24,7 @@ public sealed class Project
     public string? ParentId { get; init; }
     public bool IsInboxProject { get; init; }
     public bool IsFavorite { get; init; }
+    public bool IsArchived { get; init; }
     public int ChildOrder { get; init; }
 }
 
@@ -33,4 +34,5 @@ public sealed class Section
     public required string Id { get; init; }
     public required string Name { get; init; }
     public string? ProjectId { get; init; }
+    public bool IsArchived { get; init; }
 }

@@ -35,6 +35,7 @@ public static class Projections
         // Todoist has used both field names across API versions; accept either.
         IsInboxProject = JsonRead.Bool(o, "is_inbox_project") || JsonRead.Bool(o, "inbox_project"),
         IsFavorite = JsonRead.Bool(o, "is_favorite"),
+        IsArchived = JsonRead.Bool(o, "is_archived"),
         ChildOrder = JsonRead.Int(o, "child_order"),
     };
 
@@ -63,6 +64,7 @@ public static class Projections
         Id = JsonRead.String(o, "id") ?? string.Empty,
         Name = JsonRead.String(o, "name") ?? string.Empty,
         ProjectId = JsonRead.String(o, "project_id"),
+        IsArchived = JsonRead.Bool(o, "is_archived"),
     };
 
     private static IReadOnlyList<string> ReadLabels(JsonObject o)

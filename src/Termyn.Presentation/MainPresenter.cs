@@ -351,7 +351,11 @@ public sealed class MainPresenter
     {
         var today = snapshot.Today;
         var inbox = snapshot.InboxProjectId;
-        var active = snapshot.Items.Where(i => !i.Completed).ToList();
+        var active = VisibleItems(snapshot);
+
+        // Archived projects and sections are still returned by sync; they don't belong in the sidebar.
+        var projects = snapshot.Projects.Where(p => !p.IsArchived).ToList();
+        var sections = snapshot.Sections.Where(s => !s.IsArchived).ToList();
 
         var nodes = new List<SidebarNode>
         {
@@ -360,13 +364,31 @@ public sealed class MainPresenter
             View(SmartView.Inbox, "Inbox", active.Count(i => SmartViews.IsInbox(i, inbox))),
         };
 
-        foreach (var favorite in snapshot.Projects.Where(p => p.IsFavorite).OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase))
-            nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1, IsFavorite: true, Count: active.Count(i => i.ProjectId == favorite.Id)));
+        var favorites = projects
+            .Where(p => p.IsFavorite)
+            .OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        if (favorites.Count > 0)
+        {
+            nodes.Add(Header("Favourites"));
+            foreach (var favorite in favorites)
+            {
+                // Keyed apart from its copy in the tree, so clicking one doesn't select the other.
+                nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
+                    Key: "favourite:" + favorite.Id, IsFavorite: true, Count: active.Count(i => i.ProjectId == favorite.Id)));
+            }
+        }
+
+        nodes.Add(Header("Projects"));
 
         // Projects nest, and each carries its sections beneath it.
-        var byParent = snapshot.Projects
+        var byParent = projects
             .GroupBy(p => p.ParentId ?? string.Empty)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.ChildOrder).ThenBy(p => p.Id, StringComparer.Ordinal).ToList());
+
+        AddProjects(string.Empty, 1);
+        return nodes;
 
         void AddProjects(string parentKey, int depth)
         {
@@ -376,21 +398,30 @@ public sealed class MainPresenter
             foreach (var project in children)
             {
                 nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
-                    IsFavorite: project.IsFavorite, Count: active.Count(i => i.ProjectId == project.Id)));
+                    Key: project.Id, IsFavorite: project.IsFavorite, Count: active.Count(i => i.ProjectId == project.Id)));
 
-                foreach (var section in snapshot.Sections.Where(s => s.ProjectId == project.Id).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase))
+                foreach (var section in sections.Where(s => s.ProjectId == project.Id).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase))
                     nodes.Add(new SidebarNode(SidebarKind.Section, section.Id, section.Name, depth + 1,
-                        Count: active.Count(i => i.SectionId == section.Id)));
+                        Key: section.Id, Count: active.Count(i => i.SectionId == section.Id)));
 
                 AddProjects(project.Id, depth + 1);
             }
         }
 
-        AddProjects(string.Empty, 1);
-        return nodes;
-
         SidebarNode View(SmartView view, string label, int count)
-            => new(SidebarKind.SmartView, view.ToString(), label, 0, View: view, Count: count);
+            => new(SidebarKind.SmartView, view.ToString(), label, 0, Key: view.ToString(), View: view, Count: count);
+
+        SidebarNode Header(string label)
+            => new(SidebarKind.Header, label, label, 0, Key: "header:" + label);
+    }
+
+    /// <summary>Active tasks that aren't filed under an archived project.</summary>
+    private static List<TaskItem> VisibleItems(ModelSnapshot snapshot)
+    {
+        var archived = snapshot.Projects.Where(p => p.IsArchived).Select(p => p.Id).ToHashSet();
+        return snapshot.Items
+            .Where(i => !i.Completed && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
+            .ToList();
     }
 
     /// <summary>
@@ -400,7 +431,7 @@ public sealed class MainPresenter
     private List<TaskRow> BuildOutline(ModelSnapshot snapshot)
     {
         var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
-        var visible = snapshot.Items.Where(i => !i.Completed && InSelection(i, snapshot)).ToList();
+        var visible = VisibleItems(snapshot).Where(i => InSelection(i, snapshot)).ToList();
         var present = visible.Select(i => i.Id).ToHashSet();
 
         var byParent = visible

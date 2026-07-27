@@ -32,11 +32,57 @@ public class SidebarAndOutlineTests
         var presenter = NewPresenter(store);
 
         var structure = presenter.Sidebar
-            .Where(n => n.Kind != SidebarKind.SmartView)
+            .Where(n => n.Kind is SidebarKind.Project or SidebarKind.Section)
             .Select(n => (n.Label, n.Depth))
             .ToArray();
 
         Assert.Equal([("Work", 1), ("Admin", 2), ("Client", 2)], structure);
+    }
+
+    [Fact]
+    public void Smart_views_sit_at_the_top_level_not_under_one_another()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        var presenter = NewPresenter(store);
+
+        // Everything that isn't a project or section belongs at depth 0, or the tree rebuild hangs
+        // the projects off whichever smart view happened to come last.
+        Assert.All(
+            presenter.Sidebar.Where(n => n.Kind is SidebarKind.SmartView or SidebarKind.Header),
+            n => Assert.Equal(0, n.Depth));
+
+        Assert.Contains(presenter.Sidebar, n => n.Kind == SidebarKind.Header && n.Label == "Projects");
+    }
+
+    [Fact]
+    public void A_favourite_is_keyed_apart_from_its_copy_in_the_tree()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Music","is_favorite":true}""");
+        var presenter = NewPresenter(store);
+
+        var music = presenter.Sidebar.Where(n => n.Id == "p1").ToList();
+
+        // The same project listed twice, but the two rows must be distinguishable.
+        Assert.Equal(2, music.Count);
+        Assert.Equal(2, music.Select(n => n.Key).Distinct().Count());
+    }
+
+    [Fact]
+    public void Archived_projects_and_their_tasks_are_left_out()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Live"}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Old","is_archived":true,"is_favorite":true}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Gone","project_id":"p1","is_archived":true}""");
+        store.PutResource("items", "i1", """{"id":"i1","content":"Current","project_id":"p1"}""");
+        store.PutResource("items", "i2", """{"id":"i2","content":"Archived away","project_id":"p2"}""");
+        var presenter = All(store);
+
+        Assert.DoesNotContain(presenter.Sidebar, n => n.Label == "Old");
+        Assert.DoesNotContain(presenter.Sidebar, n => n.Label == "Gone");
+        Assert.Equal(new[] { "Current" }, presenter.Rows.Select(r => r.Content).ToArray());
     }
 
     [Fact]
