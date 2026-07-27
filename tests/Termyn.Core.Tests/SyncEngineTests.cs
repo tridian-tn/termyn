@@ -253,6 +253,20 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public async Task A_write_aimed_at_an_item_we_never_held_does_not_shadow_the_server_copy()
+    {
+        var api = new FakeApi();
+        var engine = NewEngine(api);
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" }); // nothing cached for i1
+
+        api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")]);
+        await engine.SyncAsync();
+
+        // The token has advanced past this change, so dropping it would lose it permanently.
+        Assert.Equal("SERVER", engine.Model.Items().Single().Content);
+    }
+
+    [Fact]
     public async Task A_tombstone_withheld_by_a_pending_write_is_applied_once_that_write_resolves()
     {
         var api = new FakeApi();

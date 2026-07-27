@@ -10,7 +10,9 @@ namespace Termyn.Core.Sync;
 /// <remarks>
 /// The database runs in WAL mode, so it is accompanied on disk by <c>-wal</c> and <c>-shm</c>
 /// sidecar files holding recent writes. <see cref="Purge"/> and <see cref="Dispose"/> checkpoint
-/// and truncate the log so cached task data does not linger beside a deleted database.
+/// and truncate the log so cached task data does not linger beside a deleted database, and
+/// <see cref="Purge"/> compacts the file so purged rows are not left readable in freed pages.
+/// The database itself is not encrypted.
 /// </remarks>
 public sealed class SqliteSnapshotStore : ISnapshotStore
 {
@@ -33,6 +35,9 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         _conn = new SqliteConnection(connectionString);
         _conn.Open();
         Execute("PRAGMA journal_mode=WAL;");
+        // Overwrite deleted content rather than leaving it readable in freed pages, so purging a
+        // previous account's tasks actually removes them.
+        Execute("PRAGMA secure_delete=ON;");
         Execute("""
             CREATE TABLE IF NOT EXISTS resources (type TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id));
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -237,6 +242,9 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             }
             tx.Commit();
         }
+
+        // Compact outside the transaction so freed pages are released rather than reused in place.
+        Execute("VACUUM;");
         Checkpoint();
     }
 

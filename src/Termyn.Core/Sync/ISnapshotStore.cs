@@ -47,6 +47,6 @@ public interface ISnapshotStore : IDisposable
     /// </summary>
     void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys);
 
-    /// <summary>Erases all cached data — resources, outbox and sync token — leaving no residue on disk.</summary>
+    /// <summary>Erases all cached data: resources, outbox, withheld deletions and the sync token.</summary>
     void Purge();
 }

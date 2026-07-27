@@ -414,8 +414,15 @@ public sealed class SyncEngine
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
         {
             if (c.TempId is not null)
+            {
                 ids.Add(c.TempId);
-            if (ParseArgs(c)["id"] is JsonValue v)
+                continue;
+            }
+
+            // Only a command that actually mutated a local copy has something to protect. A command
+            // aimed at a resource we never held must not shadow the server's version of it, which
+            // would be dropped for good once the sync token advances past that change.
+            if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
                 ids.Add(v.ToString());
         }
         return ids;
