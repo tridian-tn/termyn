@@ -9,6 +9,8 @@ public class PriorityMapTests
     [InlineData(3, Priority.P2)]
     [InlineData(2, Priority.P3)]
     [InlineData(1, Priority.P4)]
+    [InlineData(0, Priority.P4)]
+    [InlineData(99, Priority.P4)]
     public void FromApi_inverts_priority(int apiPriority, Priority expected)
         => Assert.Equal(expected, PriorityMap.FromApi(apiPriority));
 

@@ -1,5 +1,6 @@
 using Termyn.Core.Api;
 using Termyn.Core.Platform;
+using Termyn.Core.Sync;
 using Termyn.Platform.Windows;
 using Termyn.Presentation;
 
@@ -12,7 +13,12 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        using var http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+            // Bound the response we will buffer, so a runaway or hostile body can't exhaust memory.
+            MaxResponseContentBufferSize = 128 * 1024 * 1024,
+        };
         ITodoistApi api = new TodoistApiClient(http);
         IAppPaths paths = new WindowsAppPaths();
         ISecretStore secrets = new DpapiSecretStore(paths);
@@ -25,6 +31,10 @@ internal static class Program
                 return;
         }
 
-        Application.Run(new MainForm(new MainPresenter(api, secrets)));
+        using var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
+        var engine = new SyncEngine(api, store, secrets);
+        engine.Load();
+
+        Application.Run(new MainForm(new MainPresenter(engine)));
     }
 }

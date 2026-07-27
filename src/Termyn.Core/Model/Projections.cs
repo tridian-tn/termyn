@@ -1,0 +1,36 @@
+using System.Text.Json.Nodes;
+
+namespace Termyn.Core.Model;
+
+/// <summary>
+/// Maps raw resource JSON to the typed views the UI consumes. The JSON remains authoritative;
+/// these projections read only the fields Termyn displays and never mutate the source.
+/// </summary>
+public static class Projections
+{
+    public static TaskItem ToTaskItem(JsonObject o)
+    {
+        var due = o["due"] as JsonObject;
+        return new TaskItem
+        {
+            Id = JsonRead.String(o, "id") ?? string.Empty,
+            Content = JsonRead.String(o, "content") ?? string.Empty,
+            ProjectId = JsonRead.String(o, "project_id"),
+            ParentId = JsonRead.String(o, "parent_id"),
+            ChildOrder = JsonRead.Int(o, "child_order"),
+            Priority = PriorityMap.FromApi(JsonRead.Int(o, "priority")),
+            Completed = JsonRead.Bool(o, "checked"),
+            DueDate = due is null ? null : JsonRead.String(due, "date"),
+            DueText = due is null ? null : JsonRead.String(due, "string"),
+        };
+    }
+
+    public static Project ToProject(JsonObject o) => new()
+    {
+        Id = JsonRead.String(o, "id") ?? string.Empty,
+        Name = JsonRead.String(o, "name") ?? string.Empty,
+        // Todoist has used both field names across API versions; accept either.
+        IsInboxProject = JsonRead.Bool(o, "is_inbox_project") || JsonRead.Bool(o, "inbox_project"),
+        ChildOrder = JsonRead.Int(o, "child_order"),
+    };
+}

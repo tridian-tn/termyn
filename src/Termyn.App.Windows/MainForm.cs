@@ -3,7 +3,7 @@ using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
 
-/// <summary>Main window: a read-only list of active tasks from a full sync.</summary>
+/// <summary>Main window: a read-only list of active tasks, rendered from cache then reconciled.</summary>
 internal sealed class MainForm : Form
 {
     private readonly MainPresenter _presenter;
@@ -44,9 +44,48 @@ internal sealed class MainForm : Form
         Controls.Add(_list);
         Controls.Add(_status);
 
+        _presenter.RowsChanged += OnRowsChanged;
         Load += async (_, _) => await LoadAsync();
         FormClosing += (_, _) => _cts.Cancel();
-        FormClosed += (_, _) => _cts.Dispose();
+        FormClosed += (_, _) =>
+        {
+            _presenter.RowsChanged -= OnRowsChanged;
+            _cts.Dispose();
+        };
+    }
+
+    private void OnRowsChanged()
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(Render);
+            return;
+        }
+        Render();
+    }
+
+    private void Render()
+    {
+        if (IsDisposed)
+            return;
+
+        _list.BeginUpdate();
+        _list.Items.Clear();
+        foreach (var row in _presenter.Rows)
+        {
+            _list.Items.Add(new ListViewItem(new[]
+            {
+                row.Priority.ToString(),
+                row.Content,
+                row.Project,
+                row.Due,
+            }));
+        }
+        _list.EndUpdate();
+
+        _status.Text = _presenter.Status;
     }
 
     private async Task LoadAsync()
@@ -54,24 +93,6 @@ internal sealed class MainForm : Form
         try
         {
             await _presenter.LoadAsync(_cts.Token);
-            if (IsDisposed)
-                return;
-
-            _list.BeginUpdate();
-            _list.Items.Clear();
-            foreach (var row in _presenter.Rows)
-            {
-                _list.Items.Add(new ListViewItem(new[]
-                {
-                    row.Priority.ToString(),
-                    row.Content,
-                    row.Project,
-                    row.Due,
-                }));
-            }
-            _list.EndUpdate();
-
-            _status.Text = $"{_presenter.Rows.Count} tasks · read-only";
         }
         catch (OperationCanceledException)
         {

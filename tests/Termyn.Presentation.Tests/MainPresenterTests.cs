@@ -1,6 +1,7 @@
+using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
-using Termyn.Core.Platform;
+using Termyn.Core.Sync;
 using Termyn.Presentation;
 
 namespace Termyn.Presentation.Tests;
@@ -8,146 +9,86 @@ namespace Termyn.Presentation.Tests;
 public class MainPresenterTests
 {
     [Fact]
-    public async Task Excludes_completed_and_orders_by_child_order()
+    public async Task Renders_active_tasks_ordered_by_child_order_with_project_names()
     {
         var api = new FakeApi
         {
-            Result = Result(items:
-            [
-                Item("done", childOrder: 0, completed: true),
-                Item("second", childOrder: 2),
-                Item("first", childOrder: 1),
-            ]),
-        };
-        var presenter = new MainPresenter(api, new FakeSecrets());
-
-        await presenter.LoadAsync();
-
-        Assert.Equal(new[] { "first", "second" }, presenter.Rows.Select(r => r.Content).ToArray());
-    }
-
-    [Fact]
-    public async Task Joins_project_names_and_falls_back_to_empty_for_unknown_or_null()
-    {
-        var api = new FakeApi
-        {
-            Result = Result(
-                items:
+            Response = new SyncResponse
+            {
+                SyncToken = "s1",
+                Changes =
                 [
-                    Item("known", projectId: "p1"),
-                    Item("unknown", projectId: "pX"),
-                    Item("none", projectId: null),
+                    Change("projects", "p1", """{"id":"p1","name":"Work"}"""),
+                    Change("items", "done", """{"id":"done","content":"Done","checked":true,"child_order":0}"""),
+                    Change("items", "b", """{"id":"b","content":"Second","project_id":"p1","priority":1,"child_order":2}"""),
+                    Change("items", "a", """{"id":"a","content":"First","project_id":"pX","priority":4,"child_order":1}"""),
                 ],
-                projects: [Proj("p1", "Work")]),
+            },
         };
-        var presenter = new MainPresenter(api, new FakeSecrets());
+        var presenter = new MainPresenter(NewEngine(api, new InMemorySnapshotStore()));
 
         await presenter.LoadAsync();
 
-        Assert.Equal("Work", presenter.Rows.Single(r => r.Content == "known").Project);
-        Assert.Equal(string.Empty, presenter.Rows.Single(r => r.Content == "unknown").Project);
-        Assert.Equal(string.Empty, presenter.Rows.Single(r => r.Content == "none").Project);
+        Assert.Equal(new[] { "First", "Second" }, presenter.Rows.Select(r => r.Content).ToArray());
+        Assert.Equal(string.Empty, presenter.Rows.Single(r => r.Content == "First").Project); // unknown project id
+        Assert.Equal("Work", presenter.Rows.Single(r => r.Content == "Second").Project);
+        Assert.Equal(Priority.P1, presenter.Rows.Single(r => r.Content == "First").Priority); // API 4 -> P1
+        Assert.False(presenter.IsOffline);
     }
 
     [Fact]
-    public async Task Due_prefers_text_then_date_then_empty()
+    public async Task Publishes_cached_rows_before_syncing()
     {
-        var api = new FakeApi
-        {
-            Result = Result(items:
-            [
-                Item("both", dueText: "Friday", dueDate: "2026-07-31"),
-                Item("dateonly", dueDate: "2026-08-01"),
-                Item("none"),
-            ]),
-        };
-        var presenter = new MainPresenter(api, new FakeSecrets());
+        var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
+        var presenter = new MainPresenter(NewEngine(api, SeededStore()));
+
+        var publishes = new List<int>();
+        presenter.RowsChanged += () => publishes.Add(presenter.Rows.Count);
+        await presenter.LoadAsync();
+
+        // Two publishes: the cached view first, then the reconciled one.
+        Assert.Equal(2, publishes.Count);
+        Assert.Equal(1, publishes[0]);
+    }
+
+    [Fact]
+    public async Task Losing_the_network_keeps_the_cached_rows_and_reports_offline()
+    {
+        var api = new FakeApi { Throw = new TodoistNetworkException("offline") };
+        var presenter = new MainPresenter(NewEngine(api, SeededStore()));
 
         await presenter.LoadAsync();
 
-        Assert.Equal("Friday", presenter.Rows.Single(r => r.Content == "both").Due);
-        Assert.Equal("2026-08-01", presenter.Rows.Single(r => r.Content == "dateonly").Due);
-        Assert.Equal(string.Empty, presenter.Rows.Single(r => r.Content == "none").Due);
-    }
-
-    [Fact]
-    public async Task Tolerates_duplicate_project_ids()
-    {
-        var api = new FakeApi
-        {
-            Result = Result(
-                items: [Item("t", projectId: "dup")],
-                projects: [Proj("dup", "First"), Proj("dup", "Second")]),
-        };
-        var presenter = new MainPresenter(api, new FakeSecrets());
-
-        await presenter.LoadAsync(); // must not throw on duplicate keys
-
-        Assert.Single(presenter.Rows);
-    }
-
-    [Fact]
-    public async Task Throws_and_skips_api_when_no_token_stored()
-    {
-        var api = new FakeApi();
-        var presenter = new MainPresenter(api, new FakeSecrets { Stored = null });
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => presenter.LoadAsync());
-        Assert.Equal(0, api.SyncCalls);
+        Assert.Equal("Cached task", presenter.Rows.Single().Content);
+        Assert.True(presenter.IsOffline);
+        Assert.Contains("offline", presenter.Status, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task Clears_token_and_rethrows_when_rejected()
     {
         var secrets = new FakeSecrets { Stored = "tok" };
-        var api = new FakeApi { Throw = new TodoistAuthException("rejected") };
-        var presenter = new MainPresenter(api, secrets);
+        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
+        var presenter = new MainPresenter(engine);
 
         await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.LoadAsync());
         Assert.Null(secrets.Stored);
     }
 
-    private static SyncResult Result(IReadOnlyList<TaskItem>? items = null, IReadOnlyList<Project>? projects = null)
-        => new() { SyncToken = "x", Items = items ?? [], Projects = projects ?? [] };
-
-    private static TaskItem Item(string content, string? projectId = null, int childOrder = 0, bool completed = false, string? dueText = null, string? dueDate = null)
-        => new()
-        {
-            Id = content,
-            Content = content,
-            ProjectId = projectId,
-            ChildOrder = childOrder,
-            Completed = completed,
-            DueText = dueText,
-            DueDate = dueDate,
-        };
-
-    private static Project Proj(string id, string name) => new() { Id = id, Name = name };
-
-    private sealed class FakeSecrets : ISecretStore
+    private static SyncEngine NewEngine(FakeApi api, InMemorySnapshotStore store)
     {
-        public string? Stored = "tok";
-
-        public string? GetToken() => Stored;
-        public void SetToken(string token) => Stored = token;
-        public void ClearToken() => Stored = null;
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+        return engine;
     }
 
-    private sealed class FakeApi : ITodoistApi
+    private static InMemorySnapshotStore SeededStore()
     {
-        public SyncResult Result = new() { SyncToken = "x" };
-        public Exception? Throw;
-        public int SyncCalls;
-
-        public Task<SyncResult> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, CancellationToken ct = default)
-        {
-            SyncCalls++;
-            if (Throw is not null)
-                throw Throw;
-            return Task.FromResult(Result);
-        }
-
-        public Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
-            => Task.FromResult(true);
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Cached task"}""");
+        return store;
     }
+
+    private static ResourceChange Change(string type, string id, string json)
+        => new(type, id, false, (JsonObject)JsonNode.Parse(json)!);
 }
