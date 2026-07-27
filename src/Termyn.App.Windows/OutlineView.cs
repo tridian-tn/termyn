@@ -20,6 +20,13 @@ internal sealed class OutlineView : ListView
 
     private IReadOnlyList<TaskRow> _rows = [];
 
+    /// <summary>
+    /// Virtual mode asks for the same row repeatedly — on every hover, focus change and repaint —
+    /// and expects the same instance back each time. Handing out a fresh one makes the control
+    /// re-evaluate item state and the selection follows the mouse.
+    /// </summary>
+    private ListViewItem?[] _cache = [];
+
     public OutlineView()
     {
         View = View.Details;
@@ -28,6 +35,8 @@ internal sealed class OutlineView : ListView
         FullRowSelect = true;
         MultiSelect = false;
         HideSelection = false;
+        HoverSelection = false;
+        HotTracking = false;
         LabelEdit = true;
         HeaderStyle = ColumnHeaderStyle.Nonclickable;
         DoubleBuffered = true;
@@ -49,8 +58,8 @@ internal sealed class OutlineView : ListView
             var selected = SelectedId;
 
             _rows = value;
+            _cache = new ListViewItem?[value.Count];
             VirtualListSize = value.Count;
-            // Virtual mode caches nothing across a resize, so force the visible rows to be re-asked.
             Invalidate();
 
             if (selected is not null)
@@ -95,8 +104,20 @@ internal sealed class OutlineView : ListView
 
     protected override void OnRetrieveVirtualItem(RetrieveVirtualItemEventArgs e)
     {
-        var row = _rows[e.ItemIndex];
-        e.Item = new ListViewItem([row.Content, string.Empty, row.Project, row.Due]) { Tag = row.Id };
+        if (e.ItemIndex >= _cache.Length)
+        {
+            e.Item = new ListViewItem();
+            return;
+        }
+
+        if (_cache[e.ItemIndex] is not { } cached)
+        {
+            var row = _rows[e.ItemIndex];
+            cached = new ListViewItem([row.Content, string.Empty, row.Project, row.Due]) { Tag = row.Id };
+            _cache[e.ItemIndex] = cached;
+        }
+
+        e.Item = cached;
     }
 
     protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
@@ -105,11 +126,13 @@ internal sealed class OutlineView : ListView
         TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), SystemColors.GrayText, Flags);
     }
 
+    /// <summary>
+    /// Nothing to do in Details view: painting the row here would wipe sub-items that this paint
+    /// pass isn't going to redraw, which is what blanked cells as the mouse moved over them.
+    /// Each sub-item fills its own background instead.
+    /// </summary>
     protected override void OnDrawItem(DrawListViewItemEventArgs e)
     {
-        var selected = (e.State & ListViewItemStates.Selected) != 0;
-        var background = selected ? SystemColors.Highlight : BackColor;
-        e.Graphics.FillRectangle(new SolidBrush(background), e.Bounds);
     }
 
     protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
@@ -121,6 +144,9 @@ internal sealed class OutlineView : ListView
         var selected = (e.ItemState & ListViewItemStates.Selected) != 0;
         var text = selected ? SystemColors.HighlightText : ForeColor;
         var muted = selected ? SystemColors.HighlightText : SystemColors.GrayText;
+
+        using (var background = new SolidBrush(selected ? SystemColors.Highlight : BackColor))
+            e.Graphics.FillRectangle(background, e.Bounds);
 
         switch (e.ColumnIndex)
         {
