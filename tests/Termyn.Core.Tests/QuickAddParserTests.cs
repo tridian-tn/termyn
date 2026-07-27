@@ -36,6 +36,8 @@ public class QuickAddParserTests
     [Theory]
     [InlineData("today", 2026, 7, 31)]
     [InlineData("tomorrow", 2026, 8, 1)]
+    [InlineData("tom", 2026, 8, 1)]
+    [InlineData("TOM", 2026, 8, 1)]
     [InlineData("2026-12-25", 2026, 12, 25)]
     [InlineData("friday", 2026, 7, 31)]   // today already matches
     [InlineData("monday", 2026, 8, 3)]    // the coming Monday

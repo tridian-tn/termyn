@@ -13,7 +13,7 @@ namespace Termyn.Core.Capture;
 /// </summary>
 /// <remarks>
 /// Recognised: <c>#project</c>, <c>/section</c>, <c>@label</c>, <c>p1</c>–<c>p4</c>, the dates
-/// <c>today</c>/<c>tomorrow</c>/<c>yyyy-MM-dd</c>/full weekday names, and a time of day
+/// <c>today</c>/<c>tomorrow</c>/<c>tom</c>/<c>yyyy-MM-dd</c>/full weekday names, and a time of day
 /// (<c>16:30</c>, <c>4pm</c>, <c>4:30pm</c>). Weekday abbreviations are not recognised: "sat" and
 /// "sun" are ordinary words, and silently turning them into a due date mangles the task text.
 /// </remarks>
@@ -137,7 +137,7 @@ public sealed partial class QuickAddParser
             case "today":
                 date = _clock.Today;
                 return true;
-            case "tomorrow":
+            case "tomorrow" or "tom":
                 date = _clock.Today.AddDays(1);
                 return true;
         }
