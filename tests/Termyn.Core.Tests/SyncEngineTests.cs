@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
+using Termyn.Core.Model;
 using Termyn.Core.Sync;
 
 namespace Termyn.Core.Tests;
@@ -119,6 +120,43 @@ public class SyncEngineTests
         var cmd = engine.Outbox.Single();
         Assert.Equal("item_delete", cmd.Type);
         Assert.Equal("i1", Args(cmd)["id"]!.ToString());
+    }
+
+    [Fact]
+    public async Task Quick_add_folds_the_server_created_task_into_the_model()
+    {
+        var api = new FakeApi
+        {
+            QuickAdd = text => new ResourceChange("items", "srv1", false,
+                (JsonObject)JsonNode.Parse($$"""{"id":"srv1","content":"{{text}}","priority":4}""")!),
+        };
+        var engine = NewEngine(api);
+
+        Assert.True(await engine.QuickAddOnlineAsync("Email report tomorrow"));
+
+        var item = engine.Model.Items().Single();
+        Assert.Equal("Email report tomorrow", item.Content);
+        Assert.Equal(Priority.P1, item.Priority); // the server resolved it, API 4 -> P1
+        Assert.Equal(0, engine.PendingCount);     // nothing queued: it already exists server-side
+    }
+
+    [Fact]
+    public async Task Quick_add_reports_failure_when_offline_so_the_caller_can_fall_back()
+    {
+        var engine = NewEngine(new FakeApi()); // QuickAdd unset = unreachable
+
+        Assert.False(await engine.QuickAddOnlineAsync("Buy milk"));
+        Assert.Empty(engine.Model.Items());
+    }
+
+    [Fact]
+    public async Task Quick_add_clears_the_token_when_rejected()
+    {
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.QuickAddOnlineAsync("Buy milk"));
+        Assert.Null(secrets.Stored);
     }
 
     [Fact]

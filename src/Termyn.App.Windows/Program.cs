@@ -36,7 +36,16 @@ internal static class Program
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
-        var parser = new QuickAddParser(new SystemClock());
-        Application.Run(new MainForm(new MainPresenter(engine, parser)));
+        var presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()));
+        var scheduler = new SyncScheduler(presenter.SyncAsync);
+
+        try
+        {
+            Application.Run(new MainForm(presenter, scheduler));
+        }
+        finally
+        {
+            scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 }
