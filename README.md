@@ -25,12 +25,14 @@ The solution is split so a future native Linux/macOS client can reuse everything
 | `src/Termyn.Presentation` | `net10.0` | UI-framework-agnostic presenters |
 | `src/Termyn.Platform.Windows` | `net10.0-windows` | Windows platform services (DPAPI token store, paths) |
 | `src/Termyn.App.Windows` | `net10.0-windows` | WinForms UI + composition root |
-| `tests/*` | `net10.0` | xUnit tests over Core and Presentation |
+| `tests/Termyn.TestSupport` | `net10.0` | Shared test doubles |
+| `tests/*.Tests` | `net10.0` | xUnit tests over Core and Presentation |
 
 `Core` and `Presentation` target `net10.0` (not `-windows`), so the compiler prevents any
 Windows-only API leaking into the portable core.
 
 ## Status
 
-**P0 — scaffold.** First-run token entry (DPAPI), a read-only full-sync task list. See the spec's
-roadmap (§17) for the phase plan.
+Task basics are in: capture with Todoist's quick-add syntax, edit, complete, reopen, delete, undo,
+reorder, priorities, due dates and local search, over an offline-first sync engine with a background
+sync loop. The list is still flat — projects, sections and the outline view come next.

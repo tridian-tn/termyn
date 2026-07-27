@@ -22,8 +22,8 @@ public sealed record ModelSnapshot(
 /// </summary>
 /// <remarks>
 /// All model and store access is serialised on a single gate, so UI-thread work and the background
-/// sync worker cannot race. Only the network call happens outside the gate. Readers must go through
-/// <see cref="Snapshot"/> rather than touching <see cref="Model"/> directly.
+/// sync worker cannot race. Only the network call happens outside the gate; readers go through
+/// <see cref="Snapshot"/> or one of the narrow lookups.
 /// </remarks>
 public sealed class SyncEngine
 {
@@ -66,7 +66,7 @@ public sealed class SyncEngine
     }
 
     /// <summary>The raw model. Only touch this while holding the gate — readers want <see cref="Snapshot"/>.</summary>
-    internal TodoistModel Model { get; } = new();
+    private TodoistModel Model { get; } = new();
 
     /// <summary>The token the next incremental sync will use.</summary>
     public string SyncToken
@@ -84,10 +84,12 @@ public sealed class SyncEngine
     /// Finds a project by name. A narrow lookup rather than a full <see cref="Snapshot"/>, because
     /// the capture preview runs this on every keystroke.
     /// </summary>
-    public Project? FindProjectByName(string name)
+    public IReadOnlyList<Project> FindProjectsByName(string name)
     {
         lock (_gate)
-            return Model.Projects().FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            return Model.Projects()
+                .Where(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
     }
 
     /// <summary>
@@ -162,8 +164,17 @@ public sealed class SyncEngine
 
             foreach (var c in snapshot.Outbox)
             {
-                if (TryParse(c.ArgsJson) is not null)
-                    _outbox.Add(c);
+                if (TryParse(c.ArgsJson) is null)
+                    continue;
+                _outbox.Add(c);
+
+                // A completion or deletion that hasn't flushed is still reversible after a restart.
+                if (c.State == OutboxState.Pending && c.PriorJson is not null
+                    && c.Type is "item_close" or "item_delete"
+                    && ParseArgs(c)["id"] is JsonValue id)
+                {
+                    RecordUndoable(c, id.ToString(), c.PriorJson);
+                }
             }
         }
     }
@@ -325,9 +336,9 @@ public sealed class SyncEngine
 
     /// <summary>Completes a task via <c>item_close</c>, which also advances a recurring task.</summary>
     /// <remarks>
-    /// The task is marked complete locally straight away. A recurring task should instead show a
-    /// transient "advancing" state until the server returns its next occurrence; that distinction
-    /// arrives with the task UI.
+    /// The task is marked complete locally straight away. A recurring one therefore disappears from
+    /// the list until the server's next occurrence arrives on the following sync, rather than
+    /// showing that it is advancing.
     /// </remarks>
     public void CompleteItem(string id)
     {
@@ -546,11 +557,12 @@ public sealed class SyncEngine
     /// Drops a queued command and restores the resource to the last state the server gave us, so
     /// the local copy returns to server truth rather than keeping a half-applied edit.
     /// </summary>
+    /// <remarks>Does nothing once the command is on the wire: the server is applying it regardless.</remarks>
     public void Revert(string uuid)
     {
         lock (_gate)
         {
-            if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { } cmd)
+            if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } cmd)
                 RevertLocked(cmd);
         }
     }
@@ -600,6 +612,7 @@ public sealed class SyncEngine
             {
                 var args = ParseArgs(cmd);
                 var changed = false;
+
                 foreach (var key in IdKeys)
                 {
                     if (args.TryGetPropertyValue(key, out var n) && n is JsonValue v && v.ToString() == temp)
@@ -608,6 +621,20 @@ public sealed class SyncEngine
                         changed = true;
                     }
                 }
+
+                // A reorder holds its ids in an array; missing these would send the server a temp id.
+                if (args["items"] is JsonArray items)
+                {
+                    foreach (var entry in items)
+                    {
+                        if (entry is JsonObject o && o["id"] is JsonValue entryId && entryId.ToString() == temp)
+                        {
+                            o["id"] = real;
+                            changed = true;
+                        }
+                    }
+                }
+
                 if (changed)
                 {
                     cmd.ArgsJson = args.ToJsonString();
@@ -672,18 +699,26 @@ public sealed class SyncEngine
     private void ApplyServerChanges(SyncResponse response)
     {
         var pendingIds = PendingResourceIds();
+        var reorderedIds = PendingReorderIds();
         var upserts = new List<StoredResource>();
         var deletes = new List<ResourceKey>();
 
         foreach (var change in response.Changes)
         {
-            if (pendingIds.Contains(change.Id))
+            var held = pendingIds.Contains(change.Id) || reorderedIds.Contains(change.Id);
+
+            // Hold the deletion until the local write that covers this resource resolves; a queued
+            // command must not be left naming a task the server has already removed.
+            if (change.IsDeleted && held)
             {
-                // Hold the deletion until the local write that protects this resource resolves.
-                if (change.IsDeleted && !_deferredDeletes.Contains(new ResourceKey(change.ResourceType, change.Id)))
+                if (!_deferredDeletes.Contains(new ResourceKey(change.ResourceType, change.Id)))
                     _deferredDeletes.Add(new ResourceKey(change.ResourceType, change.Id));
                 continue;
             }
+
+            // An un-acked edit of our own owns this resource until it lands.
+            if (pendingIds.Contains(change.Id))
+                continue;
 
             if (change.IsDeleted)
             {
@@ -693,6 +728,15 @@ public sealed class SyncEngine
             else
             {
                 var clone = change.Json.DeepClone().AsObject();
+
+                // A pending reorder only owns the position, so take everything else the server sends
+                // rather than dropping the change — the token advances past it either way.
+                if (reorderedIds.Contains(change.Id)
+                    && Model.Get(change.ResourceType, change.Id)?["child_order"] is { } localOrder)
+                {
+                    clone["child_order"] = localOrder.DeepClone();
+                }
+
                 Model.Upsert(change.ResourceType, change.Id, clone);
                 upserts.Add(new StoredResource(change.ResourceType, change.Id, clone.ToJsonString()));
             }
@@ -701,7 +745,7 @@ public sealed class SyncEngine
         for (var i = _deferredDeletes.Count - 1; i >= 0; i--)
         {
             var key = _deferredDeletes[i];
-            if (pendingIds.Contains(key.Id))
+            if (pendingIds.Contains(key.Id) || reorderedIds.Contains(key.Id))
                 continue;
             _deferredDeletes.RemoveAt(i);
             if (Model.Remove(key.Type, key.Id))
@@ -763,24 +807,37 @@ public sealed class SyncEngine
                 continue;
             }
 
-            var args = ParseArgs(c);
-
-            // A reorder carries its targets in an array rather than a single id.
-            if (args["items"] is JsonArray items)
-            {
-                foreach (var entry in items)
-                    if (entry?["id"] is JsonValue entryId)
-                        ids.Add(entryId.ToString());
-                continue;
-            }
-
             // Only a command that actually mutated a local copy has something to protect. A command
             // aimed at a resource we never held must not shadow the server's version of it, which
             // would be dropped for good once the sync token advances past that change.
-            if (c.PriorJson is not null && args["id"] is JsonValue v)
+            if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
                 ids.Add(v.ToString());
         }
         return ids;
+    }
+
+    /// <summary>
+    /// Tasks named by a queued reorder. Their position is ours until it lands, but nothing else
+    /// about them is, so they are tracked apart from resources with a genuine pending edit.
+    /// </summary>
+    private HashSet<string> PendingReorderIds()
+    {
+        var ids = new HashSet<string>();
+        foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
+            foreach (var id in NestedIds(ParseArgs(c)))
+                ids.Add(id);
+        return ids;
+    }
+
+    /// <summary>Ids carried in a command's <c>items</c> array, as a reorder does.</summary>
+    private static IEnumerable<string> NestedIds(JsonObject args)
+    {
+        if (args["items"] is not JsonArray items)
+            yield break;
+
+        foreach (var entry in items)
+            if (entry?["id"] is JsonValue id)
+                yield return id.ToString();
     }
 
     private void PurgeLocal()
@@ -855,7 +912,9 @@ public sealed class SyncEngine
         foreach (var key in IdKeys)
             if (args.TryGetPropertyValue(key, out var n) && n is JsonValue v && ids.Contains(v.ToString()))
                 return true;
-        return false;
+
+        // Including a reorder's nested ids, so a doomed create takes its reorder with it.
+        return NestedIds(args).Any(ids.Contains);
     }
 
     private static JsonObject ParseArgs(OutboxCommand cmd) => TryParse(cmd.ArgsJson) ?? new JsonObject();

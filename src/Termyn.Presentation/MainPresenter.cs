@@ -9,12 +9,11 @@ namespace Termyn.Presentation;
 /// <summary>A single row rendered in the task list.</summary>
 public sealed record TaskRow(string Id, string Content, Priority Priority, string Project, string Due, IReadOnlyList<string> Labels);
 
-/// <summary>What the local parser made of some capture text, and how its names resolved.</summary>
-public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved)
-{
-    /// <summary>The text the task would actually be created with.</summary>
-    public string Content { get; init; } = Parse.Content;
-}
+/// <summary>
+/// What the local parser made of some capture text, and how its names resolved.
+/// <paramref name="Parse"/> already carries the text the task would be created with.
+/// </summary>
+public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved);
 
 /// <summary>
 /// Drives the task list: exposes the engine's model as rows and turns user intents into engine
@@ -95,22 +94,13 @@ public sealed class MainPresenter
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        bool captured;
-        try
-        {
-            captured = await _engine.QuickAddOnlineAsync(text, ct);
-        }
-        catch (TodoistNetworkException)
-        {
-            captured = false;
-        }
-
+        var captured = await _engine.QuickAddOnlineAsync(text, ct);
         IsOffline = !captured;
 
         if (!captured)
         {
-            var (parse, content, projectId, sectionId) = Resolve(text);
-            _engine.AddItem(ItemFields.ForAdd(parse with { Content = content }, projectId, sectionId));
+            var (parse, projectId, sectionId) = Resolve(text);
+            _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
         }
 
         Publish();
@@ -119,14 +109,11 @@ public sealed class MainPresenter
     /// <summary>Shows what the local parser understood, for the capture preview.</summary>
     public CapturePreview Preview(string text)
     {
-        var (parse, content, projectId, sectionId) = Resolve(text);
+        var (parse, projectId, sectionId) = Resolve(text);
         return new CapturePreview(
             parse,
             parse.ProjectName is null || projectId is not null,
-            parse.SectionName is null || sectionId is not null)
-        {
-            Content = content,
-        };
+            parse.SectionName is null || sectionId is not null);
     }
 
     public void Search(string query)
@@ -189,35 +176,48 @@ public sealed class MainPresenter
     /// <c>/section</c> names resolve to. Shared by the preview and the capture itself so the two
     /// can never disagree.
     /// </summary>
-    private (QuickAddParse Parse, string Content, string? ProjectId, string? SectionId) Resolve(string text)
+    private (QuickAddParse Parse, string? ProjectId, string? SectionId) Resolve(string text)
     {
         var parse = _parser.Parse(text);
 
         // Every word was a token, so there is no task text left. Keep the raw input rather than
         // creating a blank task the server would reject and silently discard.
-        var content = string.IsNullOrWhiteSpace(parse.Content) ? text.Trim() : parse.Content;
+        if (string.IsNullOrWhiteSpace(parse.Content))
+            parse = parse with { Content = text.Trim() };
 
-        var projectId = parse.ProjectName is null ? null : _engine.FindProjectByName(parse.ProjectName)?.Id;
+        // An ambiguous name is treated as unresolved: filing the task under whichever project
+        // happened to be enumerated first would be a guess.
+        string? projectId = null;
+        if (parse.ProjectName is not null)
+        {
+            var projects = _engine.FindProjectsByName(parse.ProjectName);
+            if (projects.Count == 1)
+                projectId = projects[0].Id;
+        }
 
         string? sectionId = null;
-        if (parse.SectionName is not null)
+
+        // A named project that didn't resolve means we don't know where this task belongs, so a
+        // section matching by name alone would file it somewhere the user never asked for.
+        var projectKnown = parse.ProjectName is null || projectId is not null;
+        if (parse.SectionName is not null && projectKnown)
         {
-            // A named project that didn't resolve means we don't know where this task belongs, so a
-            // section matching by name alone would file it somewhere the user never asked for.
-            var projectKnown = parse.ProjectName is null || projectId is not null;
-            if (projectKnown)
+            var sections = _engine.FindSectionsByName(parse.SectionName, projectId);
+            if (sections.Count == 1)
             {
-                var matches = _engine.FindSectionsByName(parse.SectionName, projectId);
-                if (matches.Count == 1)
+                // A bare section implies its project; sending one without the other is invalid, so
+                // a section that doesn't name its own project is no use to us.
+                if (projectId is not null)
+                    sectionId = sections[0].Id;
+                else if (sections[0].ProjectId is { } owner)
                 {
-                    sectionId = matches[0].Id;
-                    // A bare section implies its project; sending one without the other is invalid.
-                    projectId ??= matches[0].ProjectId;
+                    sectionId = sections[0].Id;
+                    projectId = owner;
                 }
             }
         }
 
-        return (parse, content, projectId, sectionId);
+        return (parse, projectId, sectionId);
     }
 
     /// <summary>Re-reads the model and republishes. Call after anything that mutates the engine.</summary>

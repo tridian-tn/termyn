@@ -6,10 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Termyn.Core.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <!-- Override the vulnerable native SQLite (CVE-2025-6965, CVE-2025-70873) that Microsoft.Data.Sqlite
          still pulls transitively. This package's version tracks the bundled SQLite version; drop the

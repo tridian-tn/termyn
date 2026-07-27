@@ -25,7 +25,10 @@ public sealed class SyncScheduler : IAsyncDisposable
     private readonly Lock _state = new();
     private Task? _loop;
     private bool _disposed;
-    private DateTimeOffset _writePendingSince;
+
+    /// <summary>Monotonic: a wall-clock step backwards would otherwise stall the debounce forever.</summary>
+    private long _writePendingAt;
+
     private bool _writePending;
 
     /// <param name="sync">Performs one sync; returns true when work remains to be flushed.</param>
@@ -58,7 +61,7 @@ public sealed class SyncScheduler : IAsyncDisposable
     {
         lock (_state)
         {
-            _writePendingSince = DateTimeOffset.UtcNow;
+            _writePendingAt = Environment.TickCount64;
             _writePending = true;
         }
         Wake();
@@ -143,7 +146,7 @@ public sealed class SyncScheduler : IAsyncDisposable
             lock (_state)
             {
                 // Hold off while edits are still arriving, so a burst coalesces into one sync.
-                if (_writePending && DateTimeOffset.UtcNow - _writePendingSince < _cadence.WriteDebounce)
+                if (_writePending && Environment.TickCount64 - _writePendingAt < _cadence.WriteDebounce.TotalMilliseconds)
                     continue;
                 _writePending = false;
             }
@@ -161,7 +164,14 @@ public sealed class SyncScheduler : IAsyncDisposable
             {
                 // Including a cancellation that came from inside the sync rather than from shutdown:
                 // that must not silently stop the loop for the rest of the session.
-                SyncFailed?.Invoke(ex);
+                try
+                {
+                    SyncFailed?.Invoke(ex);
+                }
+                catch
+                {
+                    // A subscriber's failure must not take the loop down with it.
+                }
             }
         }
     }

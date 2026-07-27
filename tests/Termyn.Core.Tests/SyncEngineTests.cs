@@ -25,7 +25,7 @@ public class SyncEngineTests
 
         await engine.SyncAsync();
 
-        Assert.Equal("s1", engine.Model.SyncToken);
+        Assert.Equal("s1", engine.SyncToken);
         Assert.Equal("A", engine.Snapshot().Items.Single().Content);
         Assert.Equal("Work", engine.Snapshot().Projects.Single().Name);
     }
@@ -56,7 +56,7 @@ public class SyncEngineTests
         api.Next = _ => Resp(null);
         await engine.SyncAsync();
 
-        Assert.Equal("s1", engine.Model.SyncToken);
+        Assert.Equal("s1", engine.SyncToken);
     }
 
     [Fact]
@@ -371,6 +371,47 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public void Moving_down_steps_over_a_completed_sibling()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","child_order":1}""");
+        store.PutResource("items", "done", """{"id":"done","content":"Done","project_id":"p","checked":true,"child_order":2}""");
+        store.PutResource("items", "y", """{"id":"y","content":"Y","project_id":"p","child_order":3}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        Assert.True(engine.MoveItem("x", 1));
+
+        var active = engine.Snapshot().Items.Where(i => !i.Completed).OrderBy(i => i.ChildOrder).Select(i => i.Id);
+        Assert.Equal(new[] { "y", "x" }, active.ToArray());
+    }
+
+    [Fact]
+    public void A_task_with_only_completed_siblings_below_it_cannot_move_down()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","child_order":1}""");
+        store.PutResource("items", "y", """{"id":"y","content":"Y","project_id":"p","child_order":2}""");
+        store.PutResource("items", "d1", """{"id":"d1","content":"D1","project_id":"p","checked":true,"child_order":3}""");
+        store.PutResource("items", "d2", """{"id":"d2","content":"D2","project_id":"p","checked":true,"child_order":4}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        Assert.False(engine.MoveItem("y", 1));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void Reordering_into_the_order_they_are_already_in_queues_nothing()
+    {
+        var engine = OrderedEngine();
+
+        engine.ReorderItems(["a", "b"]);
+
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
     public void Moving_past_either_end_does_nothing()
     {
         var engine = OrderedEngine();
@@ -525,6 +566,40 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public async Task Undo_skips_a_delete_it_could_only_recreate_as_a_blank_task()
+    {
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","priority":2}"""); // no content
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.DeleteItem("i1");
+        api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
+        await engine.SyncAsync();
+
+        Assert.False(engine.Undo());
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void An_unflushed_delete_is_still_undoable_after_a_restart()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"A"}""");
+        var first = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        first.Load();
+        first.DeleteItem("i1");
+
+        var reloaded = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        reloaded.Load();
+
+        Assert.True(reloaded.CanUndo);
+        Assert.True(reloaded.Undo());
+        Assert.Equal("A", reloaded.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
     public void The_undo_history_is_bounded()
     {
         var store = new InMemorySnapshotStore();
@@ -617,7 +692,7 @@ public class SyncEngineTests
         await engine.SyncAsync();
 
         Assert.Equal(0, engine.PendingCount);
-        Assert.Null(engine.Model.Get("items", temp));
+        Assert.Null(engine.RawResource("items", temp));
         Assert.Equal("real1", engine.Snapshot().Items.Single().Id);
     }
 
@@ -674,12 +749,81 @@ public class SyncEngineTests
     {
         var api = new FakeApi();
         var engine = NewEngine(api);
-        engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" }); // nothing cached for i1
+
+        // Completing an id nothing is cached for still queues, with no prior state to protect.
+        engine.CompleteItem("i1");
 
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")]);
         await engine.SyncAsync();
 
+        // The token has advanced past this change, so dropping it would lose it permanently.
         Assert.Equal("SERVER", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
+    public async Task A_pending_reorder_does_not_swallow_a_sibling_edit_from_another_device()
+    {
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.MoveItem("b", -1); // queues a reorder naming both a and b
+
+        // Another device renames A while our reorder is still queued.
+        api.Next = _ => Resp("s1", changes: [Ch("items", "a", """{"id":"a","content":"RENAMED","project_id":"p","child_order":1}""")]);
+        await engine.SyncAsync();
+
+        // The reorder only owns the position, so the rename must land — the token moved past it.
+        var a = engine.Snapshot().Items.Single(i => i.Id == "a");
+        Assert.Equal("RENAMED", a.Content);
+        Assert.Equal(2, a.ChildOrder); // and our optimistic position survives
+    }
+
+    [Fact]
+    public async Task A_temp_id_inside_a_queued_reorder_is_remapped()
+    {
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "b", """{"id":"b","content":"B","child_order":2}""");
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New" });
+        engine.MoveItem(temp, 1);
+
+        api.Next = cmds =>
+        {
+            var add = cmds.First(c => c.Type == "item_add");
+            return Resp("s1", status: (add.Uuid, true), temp: (temp, "real1"));
+        };
+        await engine.SyncAsync();
+
+        var reorder = engine.Outbox.Single(c => c.Type == "item_reorder");
+        var ids = Args(reorder)["items"]!.AsArray().Select(e => e!["id"]!.ToString());
+        Assert.Contains("real1", ids);
+        Assert.DoesNotContain(temp, ids);
+    }
+
+    [Fact]
+    public async Task A_failed_create_cancels_a_reorder_that_named_it()
+    {
+        var api = new FakeApi();
+        var engine = NewEngine(api);
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New" });
+        engine.MoveItem(temp, 1);
+
+        api.Next = cmds =>
+        {
+            var add = cmds.First(c => c.Type == "item_add");
+            return Resp("s1", status: (add.Uuid, false));
+        };
+        await engine.SyncAsync();
+
+        // A reorder naming a task that was never created could only fail forever.
+        Assert.Equal(0, engine.PendingCount);
     }
 
     [Fact]
@@ -876,7 +1020,7 @@ public class SyncEngineTests
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "B" });
 
-        var obj = engine.Model.Get("items", "i1")!;
+        var obj = engine.RawResource("items", "i1")!;
         Assert.Equal("keep", obj["weird_field"]!.ToString());
         Assert.Equal("B", obj["content"]!.ToString());
         Assert.Equal("1", obj["priority"]!.ToString());

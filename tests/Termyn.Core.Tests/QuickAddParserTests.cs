@@ -134,6 +134,15 @@ public class QuickAddParserTests
     }
 
     [Fact]
+    public void A_priority_written_after_a_recurrence_phrase_is_still_read()
+    {
+        var parse = Parse("Water plants every friday p1");
+
+        Assert.Equal("Water plants every friday", parse.Content);
+        Assert.Equal(Priority.P1, parse.Priority);
+    }
+
+    [Fact]
     public void Reminders_are_kept_as_text_and_flagged()
     {
         var parse = Parse("Leave for airport !30m");

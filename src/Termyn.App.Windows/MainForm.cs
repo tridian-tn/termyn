@@ -18,7 +18,11 @@ internal sealed class MainForm : Form
     private readonly ListView _list;
     private readonly Label _status;
 
+    private const string ReconnectMessage = "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.";
+
     private string? _editingId;
+    private string? _editingText;
+    private bool _reconnectNeeded;
 
     public MainForm(MainPresenter presenter, SyncScheduler scheduler)
     {
@@ -134,9 +138,11 @@ internal sealed class MainForm : Form
         {
             if (IsDisposed)
                 return;
-            _status.Text = ex is TodoistAuthException
-                ? "Your Todoist token was rejected and cleared. Restart Termyn to reconnect."
-                : "Background sync failed: " + ex.Message;
+
+            if (ex is TodoistAuthException)
+                _reconnectNeeded = true;
+
+            _status.Text = _reconnectNeeded ? ReconnectMessage : "Background sync failed: " + ex.Message;
         });
     }
 
@@ -154,7 +160,16 @@ internal sealed class MainForm : Form
 
         _capture.Clear();
         UpdatePreview();
-        await GuardedAsync(() => _presenter.CaptureAsync(text, _cts.Token));
+
+        if (!await GuardedAsync(() => _presenter.CaptureAsync(text, _cts.Token)))
+        {
+            // Nothing was created anywhere, so give the user their typing back.
+            _capture.Text = text;
+            _capture.SelectionStart = text.Length;
+            UpdatePreview();
+            return;
+        }
+
         _scheduler.NotifyWrite();
     }
 
@@ -168,7 +183,7 @@ internal sealed class MainForm : Form
 
         var preview = _presenter.Preview(_capture.Text);
         var parse = preview.Parse;
-        var parts = new List<string> { $"\"{preview.Content}\"" };
+        var parts = new List<string> { $"\"{parse.Content}\"" };
 
         if (parse.ProjectName is { } project)
             parts.Add(preview.ProjectResolved ? "#" + project : $"#{project} (unknown — goes to Inbox)");
@@ -221,12 +236,14 @@ internal sealed class MainForm : Form
                 Guarded(() => _presenter.SetPriority(id!, (Priority)(e.KeyCode - Keys.D0)));
                 break;
             case Keys.Up when e.Alt && id is not null:
-                wrote = false;
-                Guarded(() => wrote = _presenter.Move(id!, -1));
-                break;
             case Keys.Down when e.Alt && id is not null:
                 wrote = false;
-                Guarded(() => wrote = _presenter.Move(id!, 1));
+                Guarded(() =>
+                {
+                    wrote = _presenter.Move(id!, e.KeyCode == Keys.Up ? -1 : 1);
+                    if (!wrote)
+                        _status.Text = "Already at the end of its list.";
+                });
                 break;
             case Keys.F5:
                 _scheduler.RequestNow();
@@ -258,33 +275,36 @@ internal sealed class MainForm : Form
     }
 
     private void OnBeforeLabelEdit(object? sender, LabelEditEventArgs e)
-        => _editingId = e.Item >= 0 && e.Item < _list.Items.Count ? _list.Items[e.Item].Tag as string : null;
+    {
+        var item = e.Item >= 0 && e.Item < _list.Items.Count ? _list.Items[e.Item] : null;
+        _editingId = item?.Tag as string;
+        _editingText = item?.Text;
+    }
 
     private void OnAfterLabelEdit(object? sender, LabelEditEventArgs e)
     {
+        // The list gets rebuilt from the presenter before this returns, and the control then indexes
+        // the edited row again — which throws if the rebuild dropped or moved it. Cancelling the
+        // control's own commit on every path leaves the repaint to us.
+        e.CancelEdit = true;
+
         // Capture the id up front: a sync landing mid-edit could otherwise shift what this index means.
         var id = _editingId;
+        var opened = _editingText;
         _editingId = null;
+        _editingText = null;
 
         var text = e.Label;
-        if (id is null || string.IsNullOrWhiteSpace(text))
-        {
-            e.CancelEdit = true;
-            OnRowsChanged(); // catch up on anything a sync published while the edit was open
-            return;
-        }
 
-        var current = _presenter.Rows.FirstOrDefault(r => r.Id == id)?.Content;
-        if (text == current)
+        // Compare against what the editor was opened with, not the latest published content: a sync
+        // may have renamed this task elsewhere while the box was open, and closing it unchanged
+        // must not push that remote rename back.
+        if (id is null || string.IsNullOrWhiteSpace(text) || text == opened)
         {
             OnRowsChanged(); // catch up on anything a sync published while the edit was open
             return;
         }
 
-        // The list is rebuilt from the presenter as soon as the rename publishes, and the control
-        // indexes the edited row again after this handler returns — which throws if the rebuild
-        // dropped or moved it. Cancelling the control's own commit leaves the repaint to us.
-        e.CancelEdit = true;
         Guarded(() => _presenter.Rename(id, text));
         _scheduler.NotifyWrite();
     }
@@ -351,15 +371,17 @@ internal sealed class MainForm : Form
         }
     }
 
-    private async Task GuardedAsync(Func<Task> action)
+    private async Task<bool> GuardedAsync(Func<Task> action)
     {
         try
         {
             await action();
+            return true;
         }
         catch (Exception ex)
         {
             Report(ex);
+            return false;
         }
     }
 
@@ -368,10 +390,20 @@ internal sealed class MainForm : Form
         if (IsDisposed)
             return;
 
+        if (ex is TodoistAuthException)
+            _reconnectNeeded = true;
+
+        // Once the token is gone every later sync fails the same way; keep the message that tells
+        // the user what to do rather than replacing it with the consequence.
+        if (_reconnectNeeded)
+        {
+            _status.Text = ReconnectMessage;
+            return;
+        }
+
         _status.Text = ex switch
         {
             OperationCanceledException => _status.Text, // window closed mid-flight
-            TodoistAuthException => "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.",
             _ => "Something went wrong: " + ex.Message,
         };
     }
