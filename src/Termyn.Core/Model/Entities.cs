@@ -6,6 +6,7 @@ public sealed class TaskItem
     public required string Id { get; init; }
     public required string Content { get; init; }
     public string? ProjectId { get; init; }
+    public string? SectionId { get; init; }
     public string? ParentId { get; init; }
     public int ChildOrder { get; init; }
     public Priority Priority { get; init; } = Priority.P4;

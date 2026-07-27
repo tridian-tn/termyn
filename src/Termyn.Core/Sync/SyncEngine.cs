@@ -12,8 +12,16 @@ public sealed record ModelSnapshot(
     IReadOnlyList<TaskItem> Items,
     IReadOnlyList<Project> Projects,
     IReadOnlyList<Section> Sections,
+    TimeZoneInfo TimeZone,
     int PendingCount,
-    int FailedCount);
+    int FailedCount)
+{
+    /// <summary>Today's date in the account's own timezone, which the smart views are defined against.</summary>
+    public DateOnly Today => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone).DateTime);
+
+    /// <summary>The Inbox, which tasks fall back to when they name no project.</summary>
+    public string? InboxProjectId => Projects.FirstOrDefault(p => p.IsInboxProject)?.Id;
+}
 
 /// <summary>
 /// Owns the offline-first sync loop: loads the snapshot, performs incremental sync, reconciles
@@ -114,6 +122,7 @@ public sealed class SyncEngine
                 Model.Items().ToList(),
                 Model.Projects().ToList(),
                 Model.Sections().ToList(),
+                Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User)),
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed));
         }
@@ -422,11 +431,7 @@ public sealed class SyncEngine
                 return false;
 
             var item = Projections.ToTaskItem(json);
-            var siblings = Model.Items()
-                .Where(i => i.ProjectId == item.ProjectId && i.ParentId == item.ParentId)
-                .OrderBy(i => i.ChildOrder)
-                .ThenBy(i => i.Id, StringComparer.Ordinal)
-                .ToList();
+            var siblings = SiblingsOf(item);
 
             var from = siblings.FindIndex(i => i.Id == id);
             if (from < 0)
@@ -453,6 +458,196 @@ public sealed class SyncEngine
             ids.Insert(to, id);
             ReorderLocked(ids);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Makes a task a child of the sibling above it, and queues an <c>item_move</c>. Todoist has no
+    /// notion of indent beyond parentage, so this is a re-parent.
+    /// </summary>
+    /// <returns>False when there is no sibling above to adopt it.</returns>
+    public bool IndentItem(string id)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Items, id) is not { } json)
+                return false;
+
+            var item = Projections.ToTaskItem(json);
+            var siblings = SiblingsOf(item);
+            var index = siblings.FindIndex(i => i.Id == id);
+            if (index <= 0)
+                return false;
+
+            return MoveUnder(id, siblings[index - 1].Id, item.ProjectId);
+        }
+    }
+
+    /// <summary>Promotes a sub-task to sit alongside its parent, and queues an <c>item_move</c>.</summary>
+    /// <returns>False when the task is already top level.</returns>
+    public bool OutdentItem(string id)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Items, id) is not { } json)
+                return false;
+
+            var item = Projections.ToTaskItem(json);
+            if (item.ParentId is not { } parentId)
+                return false;
+
+            var grandparent = Model.Get(ResourceType.Items, parentId) is { } parentJson
+                ? Projections.ToTaskItem(parentJson).ParentId
+                : null;
+
+            return MoveUnder(id, grandparent, item.ProjectId);
+        }
+    }
+
+    /// <summary>Moves a task to another project, keeping it top level there.</summary>
+    public bool MoveItemToProject(string id, string projectId)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Items, id) is null)
+                return false;
+            return MoveUnder(id, null, projectId);
+        }
+    }
+
+    /// <summary>
+    /// Re-parents a task. A null parent puts it at the top level of <paramref name="projectId"/>.
+    /// Todoist takes exactly one destination, so parent wins when both are given.
+    /// </summary>
+    private bool MoveUnder(string id, string? parentId, string? projectId)
+    {
+        if (Model.Get(ResourceType.Items, id) is not { } existing)
+            return false;
+
+        var prior = existing.ToJsonString();
+        var moved = existing.DeepClone().AsObject();
+        moved["parent_id"] = parentId;
+        if (parentId is null && projectId is not null)
+            moved["project_id"] = projectId;
+
+        var args = new JsonObject { ["id"] = id };
+        if (parentId is not null)
+            args["parent_id"] = parentId;
+        else if (projectId is not null)
+            args["project_id"] = projectId;
+        else
+            return false;
+
+        Persist("item_move", args, null, prior, [new StoredResource(ResourceType.Items, id, moved.ToJsonString())], []);
+        Model.Upsert(ResourceType.Items, id, moved);
+        return true;
+    }
+
+    private List<TaskItem> SiblingsOf(TaskItem item)
+        => Model.Items()
+            .Where(i => i.ProjectId == item.ProjectId && i.ParentId == item.ParentId)
+            .OrderBy(i => i.ChildOrder)
+            .ThenBy(i => i.Id, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>Creates a project optimistically and queues a <c>project_add</c>.</summary>
+    public string AddProject(string name, string? parentId = null)
+    {
+        lock (_gate)
+        {
+            var tempId = "t-" + Guid.NewGuid().ToString("N");
+            var args = new JsonObject { ["name"] = name };
+            if (parentId is not null)
+                args["parent_id"] = parentId;
+
+            var obj = args.DeepClone().AsObject();
+            obj["id"] = tempId;
+
+            Persist("project_add", args, tempId, null, [new StoredResource(ResourceType.Projects, tempId, obj.ToJsonString())], []);
+            Model.Upsert(ResourceType.Projects, tempId, obj);
+            return tempId;
+        }
+    }
+
+    public void RenameProject(string id, string name)
+        => UpdateResource(ResourceType.Projects, "project_update", id, new JsonObject { ["name"] = name });
+
+    public void SetProjectFavorite(string id, bool favorite)
+        => UpdateResource(ResourceType.Projects, "project_update", id, new JsonObject { ["is_favorite"] = favorite });
+
+    /// <summary>Deletes a project and everything filed under it, and queues a <c>project_delete</c>.</summary>
+    public void DeleteProject(string id)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Projects, id) is not { } existing)
+                return;
+
+            var deletes = new List<ResourceKey> { new(ResourceType.Projects, id) };
+            deletes.AddRange(Model.Items().Where(i => i.ProjectId == id).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
+            deletes.AddRange(Model.Sections().Where(s => s.ProjectId == id).Select(s => new ResourceKey(ResourceType.Sections, s.Id)));
+
+            Persist("project_delete", new JsonObject { ["id"] = id }, null, existing.ToJsonString(), [], deletes);
+            foreach (var key in deletes)
+                Model.Remove(key.Type, key.Id);
+        }
+    }
+
+    /// <summary>Creates a section within a project and queues a <c>section_add</c>.</summary>
+    public string AddSection(string name, string projectId)
+    {
+        lock (_gate)
+        {
+            var tempId = "t-" + Guid.NewGuid().ToString("N");
+            var args = new JsonObject { ["name"] = name, ["project_id"] = projectId };
+
+            var obj = args.DeepClone().AsObject();
+            obj["id"] = tempId;
+
+            Persist("section_add", args, tempId, null, [new StoredResource(ResourceType.Sections, tempId, obj.ToJsonString())], []);
+            Model.Upsert(ResourceType.Sections, tempId, obj);
+            return tempId;
+        }
+    }
+
+    public void RenameSection(string id, string name)
+        => UpdateResource(ResourceType.Sections, "section_update", id, new JsonObject { ["name"] = name });
+
+    /// <summary>Deletes a section and the tasks in it, and queues a <c>section_delete</c>.</summary>
+    public void DeleteSection(string id)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Sections, id) is not { } existing)
+                return;
+
+            var deletes = new List<ResourceKey> { new(ResourceType.Sections, id) };
+            deletes.AddRange(Model.Items().Where(i => i.SectionId == id).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
+
+            Persist("section_delete", new JsonObject { ["id"] = id }, null, existing.ToJsonString(), [], deletes);
+            foreach (var key in deletes)
+                Model.Remove(key.Type, key.Id);
+        }
+    }
+
+    /// <summary>Applies changed fields to a non-task resource and queues its update command.</summary>
+    private void UpdateResource(string type, string commandType, string id, JsonObject changes)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(type, id) is not { } existing)
+                return;
+
+            var prior = existing.ToJsonString();
+            var updated = existing.DeepClone().AsObject();
+            foreach (var kv in changes)
+                updated[kv.Key] = kv.Value?.DeepClone();
+
+            var args = changes.DeepClone().AsObject();
+            args["id"] = id;
+
+            Persist(commandType, args, null, prior, [new StoredResource(type, id, updated.ToJsonString())], []);
+            Model.Upsert(type, id, updated);
         }
     }
 
