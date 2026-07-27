@@ -1,4 +1,5 @@
 using Termyn.Core.Api;
+using Termyn.Core.Capture;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
 using Termyn.Platform.Windows;
@@ -35,6 +36,7 @@ internal static class Program
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
-        Application.Run(new MainForm(new MainPresenter(engine)));
+        var parser = new QuickAddParser(new SystemClock());
+        Application.Run(new MainForm(new MainPresenter(engine, parser)));
     }
 }

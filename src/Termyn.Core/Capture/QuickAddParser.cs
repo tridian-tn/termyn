@@ -70,12 +70,13 @@ public sealed partial class QuickAddParser
                 continue;
             }
 
-            // Recurrence is resolved by the server, never guessed at here.
+            // Recurrence is resolved by the server, never guessed at here. Keep scanning so that
+            // tokens after the phrase — "#project", "@label" — are still picked up.
             if (token.Equals("every", StringComparison.OrdinalIgnoreCase))
             {
-                unsupported.Add(string.Join(' ', tokens[i..]));
-                content.AddRange(tokens[i..]);
-                break;
+                unsupported.Add(string.Join(' ', tokens[i..].TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+'))));
+                content.Add(token);
+                continue;
             }
 
             if (date is null && TryParseDate(token, out var parsedDate))

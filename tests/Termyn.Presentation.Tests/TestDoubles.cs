@@ -27,4 +27,19 @@ internal sealed class FakeApi : ITodoistApi
         ValidateCalls++;
         return Throw is not null ? throw Throw : Task.FromResult(AcceptToken);
     }
+
+    /// <summary>What the server returns for a quick add; unset means it is unreachable.</summary>
+    public Func<string, ResourceChange>? QuickAdd;
+
+    public int QuickAddCalls;
+
+    public Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)
+    {
+        QuickAddCalls++;
+        if (Throw is not null)
+            throw Throw;
+        return QuickAdd is not null
+            ? Task.FromResult(QuickAdd(text))
+            : throw new TodoistNetworkException("offline");
+    }
 }
