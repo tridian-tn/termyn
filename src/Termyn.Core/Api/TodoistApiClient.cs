@@ -36,17 +36,19 @@ public sealed class TodoistApiClient : ITodoistApi
             throw new TodoistAuthException("Todoist rejected the API token.");
         EnsureReachable(resp);
 
-        var body = await resp.Content.ReadAsStringAsync(ct);
+        // Parse straight off the response stream: buffering the whole body as a string first would
+        // roughly double peak memory on a large sync.
         try
         {
-            if (JsonNode.Parse(body) is not JsonObject root)
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            if (JsonNode.Parse(stream) is not JsonObject root)
                 throw new TodoistNetworkException("Todoist returned an unexpected sync response.");
             return Parse(root, resourceTypes);
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
         {
-            // A reachable server that answered with unusable content: treat like any other transient
-            // failure so the caller retries and keeps its last good state.
+            // A reachable server that answered with unusable content, or a body that failed midway:
+            // treat like any other transient failure so the caller retries and keeps its last good state.
             throw new TodoistNetworkException("Todoist returned an unreadable sync response.", ex);
         }
     }

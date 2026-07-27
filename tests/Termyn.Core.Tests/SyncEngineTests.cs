@@ -408,6 +408,23 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public void A_write_the_store_cannot_persist_leaves_no_trace_in_the_model()
+    {
+        var store = new FailingWriteStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"A"}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        Assert.Throws<IOException>(() => engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" }));
+        Assert.Throws<IOException>(() => engine.AddItem(new JsonObject { ["content"] = "New" }));
+        Assert.Throws<IOException>(() => engine.DeleteItem("i1"));
+
+        // Nothing was shown that wasn't also durably queued.
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Equal("A", engine.Model.Items().Single().Content);
+    }
+
+    [Fact]
     public void Optimistic_edit_survives_a_reload_from_the_store()
     {
         var store = new InMemorySnapshotStore();

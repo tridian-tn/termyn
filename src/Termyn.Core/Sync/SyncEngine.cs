@@ -144,9 +144,9 @@ public sealed class SyncEngine
 
             var obj = args.DeepClone().AsObject();
             obj["id"] = tempId;
-            Model.Upsert(ResourceType.Items, tempId, obj);
 
-            Append("item_add", args, tempId, null, new StoredResource(ResourceType.Items, tempId, obj.ToJsonString()), null);
+            Persist("item_add", args, tempId, null, new StoredResource(ResourceType.Items, tempId, obj.ToJsonString()), null);
+            Model.Upsert(ResourceType.Items, tempId, obj);
             return tempId;
         }
     }
@@ -156,21 +156,26 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            var obj = Model.Get(ResourceType.Items, id);
+            var existing = Model.Get(ResourceType.Items, id);
+            JsonObject? updated = null;
             string? prior = null;
             StoredResource? upsert = null;
 
-            if (obj is not null)
+            if (existing is not null)
             {
-                prior = obj.ToJsonString();
+                prior = existing.ToJsonString();
+                updated = existing.DeepClone().AsObject();
                 foreach (var kv in changes)
-                    obj[kv.Key] = kv.Value?.DeepClone();
-                upsert = new StoredResource(ResourceType.Items, id, obj.ToJsonString());
+                    updated[kv.Key] = kv.Value?.DeepClone();
+                upsert = new StoredResource(ResourceType.Items, id, updated.ToJsonString());
             }
 
             var args = changes.DeepClone().AsObject();
             args["id"] = id;
-            Append("item_update", args, null, prior, upsert, null);
+
+            Persist("item_update", args, null, prior, upsert, null);
+            if (updated is not null)
+                Model.Upsert(ResourceType.Items, id, updated);
         }
     }
 
@@ -184,18 +189,22 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            var obj = Model.Get(ResourceType.Items, id);
+            var existing = Model.Get(ResourceType.Items, id);
+            JsonObject? completed = null;
             string? prior = null;
             StoredResource? upsert = null;
 
-            if (obj is not null)
+            if (existing is not null)
             {
-                prior = obj.ToJsonString();
-                obj["checked"] = true;
-                upsert = new StoredResource(ResourceType.Items, id, obj.ToJsonString());
+                prior = existing.ToJsonString();
+                completed = existing.DeepClone().AsObject();
+                completed["checked"] = true;
+                upsert = new StoredResource(ResourceType.Items, id, completed.ToJsonString());
             }
 
-            Append("item_close", new JsonObject { ["id"] = id }, null, prior, upsert, null);
+            Persist("item_close", new JsonObject { ["id"] = id }, null, prior, upsert, null);
+            if (completed is not null)
+                Model.Upsert(ResourceType.Items, id, completed);
         }
     }
 
@@ -204,12 +213,13 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            var prior = Model.Get(ResourceType.Items, id)?.ToJsonString();
-            ResourceKey? delete = null;
-            if (Model.Remove(ResourceType.Items, id))
-                delete = new ResourceKey(ResourceType.Items, id);
+            var existing = Model.Get(ResourceType.Items, id);
+            var prior = existing?.ToJsonString();
+            ResourceKey? delete = existing is not null ? new ResourceKey(ResourceType.Items, id) : null;
 
-            Append("item_delete", new JsonObject { ["id"] = id }, null, prior, null, delete);
+            Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, null, delete);
+            if (existing is not null)
+                Model.Remove(ResourceType.Items, id);
         }
     }
 
@@ -236,8 +246,8 @@ public sealed class SyncEngine
                 if (restored["id"] is JsonValue idValue)
                 {
                     var id = idValue.ToString();
-                    Model.Upsert(type, id, restored);
                     _store.PutResource(type, id, prior);
+                    Model.Upsert(type, id, restored);
                 }
             }
 
@@ -441,8 +451,8 @@ public sealed class SyncEngine
     {
         if (Model.Find(id) is { } found)
         {
-            Model.Remove(found.Type, id);
             _store.DeleteResource(found.Type, id);
+            Model.Remove(found.Type, id);
         }
     }
 
@@ -452,7 +462,12 @@ public sealed class SyncEngine
         _store.DeleteCommands([cmd.Uuid]);
     }
 
-    private void Append(string type, JsonObject args, string? tempId, string? prior, StoredResource? upsert, ResourceKey? delete)
+    /// <summary>
+    /// Commits an optimistic write to the durable store and queues its command. Callers mutate the
+    /// in-memory model only after this returns, so a store failure can't leave a change on screen
+    /// that was never persisted or queued.
+    /// </summary>
+    private void Persist(string type, JsonObject args, string? tempId, string? prior, StoredResource? upsert, ResourceKey? delete)
     {
         var cmd = new OutboxCommand
         {
