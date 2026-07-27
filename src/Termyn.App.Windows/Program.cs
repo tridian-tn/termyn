@@ -1,4 +1,5 @@
 using Termyn.Core.Api;
+using Termyn.Core.Capture;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
 using Termyn.Platform.Windows;
@@ -35,6 +36,16 @@ internal static class Program
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
-        Application.Run(new MainForm(new MainPresenter(engine)));
+        var presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()));
+        var scheduler = new SyncScheduler(presenter.SyncAsync);
+
+        try
+        {
+            Application.Run(new MainForm(presenter, scheduler));
+        }
+        finally
+        {
+            scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 }

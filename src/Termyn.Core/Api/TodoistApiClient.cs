@@ -13,6 +13,7 @@ namespace Termyn.Core.Api;
 public sealed class TodoistApiClient : ITodoistApi
 {
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
+    private const string QuickAddUrl = "https://api.todoist.com/api/v1/tasks/quick_add";
 
     private readonly HttpClient _http;
 
@@ -50,6 +51,49 @@ public sealed class TodoistApiClient : ITodoistApi
             // A reachable server that answered with unusable content, or a body that failed midway:
             // treat like any other transient failure so the caller retries and keeps its last good state.
             throw new TodoistNetworkException("Todoist returned an unreadable sync response.", ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, QuickAddUrl)
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["text"] = text }),
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+        }
+
+        using (resp)
+        {
+            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                throw new TodoistAuthException("Todoist rejected the API token.");
+            EnsureReachable(resp);
+
+            try
+            {
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                if (JsonNode.Parse(stream) is not JsonObject created || created["id"] is not { } id)
+                    throw new TodoistNetworkException("Todoist returned an unexpected quick-add response.");
+                return new ResourceChange(Model.ResourceType.Items, id.ToString(), false, created);
+            }
+            catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
+            {
+                throw new TodoistNetworkException("Todoist returned an unreadable quick-add response.", ex);
+            }
         }
     }
 

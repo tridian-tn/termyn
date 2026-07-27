@@ -133,13 +133,13 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         tx.Commit();
     }
 
-    public long ApplyLocalWrite(OutboxCommand command, StoredResource? upsert, ResourceKey? delete)
+    public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
     {
         using var tx = _conn.BeginTransaction();
 
-        if (upsert is { } u)
+        foreach (var u in upserts)
             UpsertResource(u.Type, u.Id, u.Json, tx);
-        if (delete is { } d)
+        foreach (var d in deletes)
             DeleteResource(d.Type, d.Id, tx);
 
         using (var cmd = _conn.CreateCommand())

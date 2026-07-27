@@ -19,6 +19,7 @@ public static class Projections
             ParentId = JsonRead.String(o, "parent_id"),
             ChildOrder = JsonRead.Int(o, "child_order"),
             Priority = PriorityMap.FromApi(JsonRead.Int(o, "priority")),
+            Labels = ReadLabels(o),
             Completed = JsonRead.Bool(o, "checked"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
             DueText = due is null ? null : JsonRead.String(due, "string"),
@@ -33,4 +34,23 @@ public static class Projections
         IsInboxProject = JsonRead.Bool(o, "is_inbox_project") || JsonRead.Bool(o, "inbox_project"),
         ChildOrder = JsonRead.Int(o, "child_order"),
     };
+
+    public static Section ToSection(JsonObject o) => new()
+    {
+        Id = JsonRead.String(o, "id") ?? string.Empty,
+        Name = JsonRead.String(o, "name") ?? string.Empty,
+        ProjectId = JsonRead.String(o, "project_id"),
+    };
+
+    private static IReadOnlyList<string> ReadLabels(JsonObject o)
+    {
+        if (o["labels"] is not JsonArray array || array.Count == 0)
+            return [];
+
+        var labels = new List<string>(array.Count);
+        foreach (var node in array)
+            if (node is JsonValue v)
+                labels.Add(v.ToString());
+        return labels;
+    }
 }

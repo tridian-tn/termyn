@@ -183,6 +183,86 @@ public class TodoistApiClientTests
         Assert.Contains("\"content\":\"Hi\"", decoded);
     }
 
+    // ---- Quick add -----------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Quick_add_posts_the_raw_text_with_a_bearer_token()
+    {
+        var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"id":"srv1","content":"A"}"""));
+        var client = new TodoistApiClient(new HttpClient(handler));
+
+        await client.QuickAddAsync("secret-token", "Email report #Work p1");
+
+        Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
+        Assert.Equal("https://api.todoist.com/api/v1/tasks/quick_add", handler.LastRequest.RequestUri!.ToString());
+        Assert.Equal("secret-token", handler.LastRequest.Headers.Authorization!.Parameter);
+        Assert.Equal("text=Email report #Work p1", Uri.UnescapeDataString(handler.LastBody!.Replace("+", " ")));
+    }
+
+    [Fact]
+    public async Task Quick_add_returns_the_created_task()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"id":"srv1","content":"A","priority":4}""");
+
+        var created = await client.QuickAddAsync("tok", "A");
+
+        Assert.Equal("items", created.ResourceType);
+        Assert.Equal("srv1", created.Id);
+        Assert.False(created.IsDeleted);
+        Assert.Equal("A", created.Json["content"]!.ToString());
+    }
+
+    [Fact]
+    public async Task Quick_add_coerces_a_numeric_id()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"id":123,"content":"A"}""");
+
+        Assert.Equal("123", (await client.QuickAddAsync("tok", "A")).Id);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Quick_add_throws_auth_when_rejected(HttpStatusCode status)
+    {
+        var client = ClientReturning(status, "{}");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => client.QuickAddAsync("tok", "A"));
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task Quick_add_throws_network_on_server_error(HttpStatusCode status)
+    {
+        var client = ClientReturning(status, "{}");
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
+    }
+
+    [Theory]
+    [InlineData("{ this is not json")]
+    [InlineData("""{"content":"A"}""")] // no id
+    public async Task Quick_add_reports_an_unusable_body_as_a_network_failure(string body)
+    {
+        var client = ClientReturning(HttpStatusCode.OK, body);
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
+    }
+
+    [Fact]
+    public async Task Quick_add_wraps_transport_failure_as_network()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
+    }
+
+    [Fact]
+    public async Task Quick_add_propagates_caller_cancellation()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new TaskCanceledException())));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.QuickAddAsync("tok", "A", cts.Token));
+    }
+
     private static TodoistApiClient ClientReturning(HttpStatusCode status, string json)
         => new(new HttpClient(new StubHandler(_ => Resp(status, json))));
 

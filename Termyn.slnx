@@ -6,6 +6,7 @@
     <Project Path="src/Termyn.App.Windows/Termyn.App.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Termyn.TestSupport/Termyn.TestSupport.csproj" />
     <Project Path="tests/Termyn.Core.Tests/Termyn.Core.Tests.csproj" />
     <Project Path="tests/Termyn.Presentation.Tests/Termyn.Presentation.Tests.csproj" />
   </Folder>

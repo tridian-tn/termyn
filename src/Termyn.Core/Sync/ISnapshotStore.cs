@@ -32,7 +32,7 @@ public interface ISnapshotStore : IDisposable
     /// Commits an optimistic local mutation and its queued command together, so a crash can never
     /// leave a mutated resource without the command that would sync it. Returns the command's seq.
     /// </summary>
-    long ApplyLocalWrite(OutboxCommand command, StoredResource? upsert, ResourceKey? delete);
+    long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes);
 
     void PutResource(string type, string id, string json);
     void DeleteResource(string type, string id);

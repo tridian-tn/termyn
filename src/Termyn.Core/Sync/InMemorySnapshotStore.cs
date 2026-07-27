@@ -29,11 +29,11 @@ public sealed class InMemorySnapshotStore : ISnapshotStore
         SyncToken = syncToken;
     }
 
-    public long ApplyLocalWrite(OutboxCommand command, StoredResource? upsert, ResourceKey? delete)
+    public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
     {
-        if (upsert is { } u)
+        foreach (var u in upserts)
             _resources[(u.Type, u.Id)] = u.Json;
-        if (delete is { } d)
+        foreach (var d in deletes)
             _resources.Remove((d.Type, d.Id));
 
         command.Seq = ++_seq;
