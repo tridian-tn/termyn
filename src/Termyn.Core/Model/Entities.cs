@@ -35,4 +35,5 @@ public sealed class Section
     public required string Name { get; init; }
     public string? ProjectId { get; init; }
     public bool IsArchived { get; init; }
+    public int SectionOrder { get; init; }
 }

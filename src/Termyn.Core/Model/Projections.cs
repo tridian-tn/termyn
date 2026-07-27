@@ -65,6 +65,7 @@ public static class Projections
         Name = JsonRead.String(o, "name") ?? string.Empty,
         ProjectId = JsonRead.String(o, "project_id"),
         IsArchived = JsonRead.Bool(o, "is_archived"),
+        SectionOrder = JsonRead.Int(o, "section_order"),
     };
 
     private static IReadOnlyList<string> ReadLabels(JsonObject o)

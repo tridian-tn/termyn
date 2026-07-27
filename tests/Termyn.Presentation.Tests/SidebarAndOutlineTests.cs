@@ -279,6 +279,109 @@ public class SidebarAndOutlineTests
         Assert.Contains(presenter.Rows, r => r.Content == "Written while looking at Work");
     }
 
+    [Fact]
+    public async Task Capturing_with_a_project_named_ignores_the_selected_section()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "pa", """{"id":"pa","name":"Alpha"}""");
+        store.PutResource("projects", "pb", """{"id":"pb","name":"Beta"}""");
+        store.PutResource("sections", "sa", """{"id":"sa","name":"Notes","project_id":"pa"}""");
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfSection("sa"));
+
+        await presenter.CaptureAsync("Task #Beta");
+
+        // Beta's task must not be filed into Alpha's section — that pair isn't a real place, and
+        // the server would reject it.
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        Assert.Equal("Beta", presenter.Rows.Single(r => r.Content == "Task").Project);
+    }
+
+    [Fact]
+    public void Search_covers_every_loaded_task_not_just_the_current_view()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"needle today","due":{"date":"2026-07-31"}}""");
+        store.PutResource("items", "i2", """{"id":"i2","content":"needle someday"}""");
+        var presenter = NewPresenter(store); // lands on Today, so only i1 is in view
+
+        Assert.Single(presenter.Rows);
+
+        presenter.Search("needle");
+
+        Assert.Equal(2, presenter.Rows.Count);
+    }
+
+    [Fact]
+    public void Deleting_a_project_while_one_of_its_sections_is_selected_falls_back_to_Today()
+    {
+        var presenter = NewPresenter(Seeded());
+        presenter.Select(ViewSelection.OfSection("s1"));
+
+        presenter.DeleteProject("p1"); // s1 belongs to p1 and goes with it
+
+        Assert.Equal(SmartView.Today, presenter.Selection.View);
+    }
+
+    [Fact]
+    public void Deleting_a_parent_project_while_a_sub_project_is_selected_falls_back_to_Today()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Parent"}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Child","parent_id":"p1"}""");
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfProject("p2"));
+
+        presenter.DeleteProject("p1");
+
+        Assert.Equal(SmartView.Today, presenter.Selection.View);
+        Assert.DoesNotContain(presenter.Sidebar, n => n.Label == "Child");
+    }
+
+    [Fact]
+    public void Sections_are_listed_in_the_order_the_server_gives_them()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Zebra","project_id":"p1","section_order":1}""");
+        store.PutResource("sections", "s2", """{"id":"s2","name":"Alpha","project_id":"p1","section_order":2}""");
+        var presenter = NewPresenter(store);
+
+        var sections = presenter.Sidebar.Where(n => n.Kind == SidebarKind.Section).Select(n => n.Label);
+
+        // Not alphabetical: the user's own arrangement.
+        Assert.Equal(new[] { "Zebra", "Alpha" }, sections.ToArray());
+    }
+
+    [Fact]
+    public void A_parent_cycle_in_the_data_does_not_hang_the_outline()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","parent_id":"b"}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","parent_id":"a"}""");
+        store.PutResource("projects", "p1", """{"id":"p1","name":"One","parent_id":"p2"}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Two","parent_id":"p1"}""");
+
+        // Would otherwise recurse until the stack goes — and a stack overflow can't be caught.
+        var presenter = All(store);
+
+        Assert.NotNull(presenter.Rows);
+        Assert.NotNull(presenter.Sidebar);
+    }
+
+    [Fact]
+    public void A_resource_with_no_id_is_ignored_rather_than_recursing_forever()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "noid", """{"content":"No id at all","project_id":"p"}""");
+        store.PutResource("projects", "noid", """{"name":"No id either"}""");
+        store.PutResource("items", "ok", """{"id":"ok","content":"Fine","project_id":"p"}""");
+
+        var presenter = All(store);
+
+        Assert.Equal(new[] { "Fine" }, presenter.Rows.Select(r => r.Content).ToArray());
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
 
     /// <summary>Work (with an Admin section) holding two tasks, one due today; plus a loose task.</summary>

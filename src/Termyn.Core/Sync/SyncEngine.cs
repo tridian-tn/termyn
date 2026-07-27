@@ -13,6 +13,7 @@ public sealed record ModelSnapshot(
     IReadOnlyList<Project> Projects,
     IReadOnlyList<Section> Sections,
     DateOnly Today,
+    TimeZoneInfo TimeZone,
     int PendingCount,
     int FailedCount)
 {
@@ -34,6 +35,9 @@ public sealed class SyncEngine
 {
     private const int MaxCommandsPerSync = 100;
     private const int MaxUndoDepth = 50;
+
+    /// <summary>Marker for a destructive write that cannot be reversed.</summary>
+    private const string UndoBarrier = "__barrier";
 
     /// <summary>Command argument fields that carry a resource id.</summary>
     private static readonly string[] IdKeys = ["id", "parent_id", "section_id", "project_id"];
@@ -117,24 +121,16 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
             return new ModelSnapshot(
                 Model.Items().ToList(),
                 Model.Projects().ToList(),
                 Model.Sections().ToList(),
-                TodayInAccountZone(),
+                DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime),
+                zone,
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed));
         }
-    }
-
-    /// <summary>
-    /// Today's date where the account lives, which is what the smart views are defined against —
-    /// the machine's own date can be a day out.
-    /// </summary>
-    private DateOnly TodayInAccountZone()
-    {
-        var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
-        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime);
     }
 
     public int PendingCount
@@ -488,7 +484,10 @@ public sealed class SyncEngine
             if (index <= 0)
                 return false;
 
-            return MoveUnder(id, siblings[index - 1].Id, item.ProjectId);
+            // Adopting a completed task would be invisible: it isn't in the outline, so the row
+            // wouldn't appear to move at all.
+            var adopter = siblings.Take(index).LastOrDefault(i => !i.Completed);
+            return adopter is not null && MoveTo(id, parentId: adopter.Id);
         }
     }
 
@@ -505,11 +504,18 @@ public sealed class SyncEngine
             if (item.ParentId is not { } parentId)
                 return false;
 
-            var grandparent = Model.Get(ResourceType.Items, parentId) is { } parentJson
-                ? Projections.ToTaskItem(parentJson).ParentId
+            var parent = Model.Get(ResourceType.Items, parentId) is { } parentJson
+                ? Projections.ToTaskItem(parentJson)
                 : null;
 
-            return MoveUnder(id, grandparent, item.ProjectId);
+            // Alongside the parent means the parent's own place: under its parent if it has one,
+            // otherwise its section — moving to the project would evict the task from that section.
+            if (parent?.ParentId is { } grandparent)
+                return MoveTo(id, parentId: grandparent);
+            if (parent?.SectionId is { } section)
+                return MoveTo(id, sectionId: section);
+
+            return (parent?.ProjectId ?? item.ProjectId) is { } project && MoveTo(id, projectId: project);
         }
     }
 
@@ -517,39 +523,69 @@ public sealed class SyncEngine
     public bool MoveItemToProject(string id, string projectId)
     {
         lock (_gate)
-        {
-            if (Model.Get(ResourceType.Items, id) is null)
-                return false;
-            return MoveUnder(id, null, projectId);
-        }
+            return MoveTo(id, projectId: projectId);
     }
 
     /// <summary>
-    /// Re-parents a task. A null parent puts it at the top level of <paramref name="projectId"/>.
-    /// Todoist takes exactly one destination, so parent wins when both are given.
+    /// Re-homes a task and queues an <c>item_move</c>. Todoist takes exactly one destination, and
+    /// in each case puts the task last where it lands — the local copy is updated to match, so the
+    /// row doesn't sit somewhere it won't stay.
     /// </summary>
-    private bool MoveUnder(string id, string? parentId, string? projectId)
+    private bool MoveTo(string id, string? parentId = null, string? sectionId = null, string? projectId = null)
     {
         if (Model.Get(ResourceType.Items, id) is not { } existing)
             return false;
 
         var prior = existing.ToJsonString();
         var moved = existing.DeepClone().AsObject();
-        moved["parent_id"] = parentId;
-        if (parentId is null && projectId is not null)
-            moved["project_id"] = projectId;
-
         var args = new JsonObject { ["id"] = id };
+
         if (parentId is not null)
+        {
+            if (Model.Get(ResourceType.Items, parentId) is not { } parentJson)
+                return false;
+
+            // A sub-task lives wherever its parent lives.
+            var parent = Projections.ToTaskItem(parentJson);
             args["parent_id"] = parentId;
+            moved["parent_id"] = parentId;
+            moved["project_id"] = parent.ProjectId;
+            moved["section_id"] = parent.SectionId;
+        }
+        else if (sectionId is not null)
+        {
+            args["section_id"] = sectionId;
+            moved["parent_id"] = null;
+            moved["section_id"] = sectionId;
+            moved["project_id"] = Model.Sections().FirstOrDefault(s => s.Id == sectionId)?.ProjectId;
+        }
         else if (projectId is not null)
+        {
             args["project_id"] = projectId;
+            moved["parent_id"] = null;
+            moved["section_id"] = null; // the server drops the section when moving to a project
+            moved["project_id"] = projectId;
+        }
         else
+        {
             return false;
+        }
+
+        moved["child_order"] = NextOrderAt(Projections.ToTaskItem(moved), id);
 
         Persist("item_move", args, null, prior, [new StoredResource(ResourceType.Items, id, moved.ToJsonString())], []);
         Model.Upsert(ResourceType.Items, id, moved);
         return true;
+    }
+
+    /// <summary>The position a task takes when the server files it last among its new siblings.</summary>
+    private int NextOrderAt(TaskItem destination, string movingId)
+    {
+        var siblings = Model.Items()
+            .Where(i => i.Id != movingId && i.ProjectId == destination.ProjectId && i.ParentId == destination.ParentId)
+            .ToList();
+
+        return siblings.Count == 0 ? 1 : siblings.Max(i => i.ChildOrder) + 1;
     }
 
     private List<TaskItem> SiblingsOf(TaskItem item)
@@ -584,21 +620,36 @@ public sealed class SyncEngine
     public void SetProjectFavorite(string id, bool favorite)
         => UpdateResource(ResourceType.Projects, "project_update", id, new JsonObject { ["is_favorite"] = favorite });
 
-    /// <summary>Deletes a project and everything filed under it, and queues a <c>project_delete</c>.</summary>
+    /// <summary>
+    /// Deletes a project and everything filed under it — sub-projects included, as the server does —
+    /// and queues a <c>project_delete</c>.
+    /// </summary>
     public void DeleteProject(string id)
     {
         lock (_gate)
         {
-            if (Model.Get(ResourceType.Projects, id) is not { } existing)
+            if (Model.Get(ResourceType.Projects, id) is null)
                 return;
 
-            var deletes = new List<ResourceKey> { new(ResourceType.Projects, id) };
-            deletes.AddRange(Model.Items().Where(i => i.ProjectId == id).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
-            deletes.AddRange(Model.Sections().Where(s => s.ProjectId == id).Select(s => new ResourceKey(ResourceType.Sections, s.Id)));
+            // Descendants, or the children survive locally as projects nothing can reach.
+            var doomed = new HashSet<string> { id };
+            bool grew;
+            do
+            {
+                grew = false;
+                foreach (var project in Model.Projects())
+                    if (project.ParentId is { } parent && doomed.Contains(parent) && doomed.Add(project.Id))
+                        grew = true;
+            }
+            while (grew);
 
-            Persist("project_delete", new JsonObject { ["id"] = id }, null, existing.ToJsonString(), [], deletes);
-            foreach (var key in deletes)
-                Model.Remove(key.Type, key.Id);
+            var deletes = new List<ResourceKey>();
+            foreach (var project in doomed)
+                deletes.Add(new ResourceKey(ResourceType.Projects, project));
+            deletes.AddRange(Model.Sections().Where(s => s.ProjectId is { } p && doomed.Contains(p)).Select(s => new ResourceKey(ResourceType.Sections, s.Id)));
+            deletes.AddRange(Model.Items().Where(i => i.ProjectId is { } p && doomed.Contains(p)).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
+
+            RemoveAll("project_delete", id, deletes);
         }
     }
 
@@ -627,16 +678,36 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (Model.Get(ResourceType.Sections, id) is not { } existing)
+            if (Model.Get(ResourceType.Sections, id) is null)
                 return;
 
             var deletes = new List<ResourceKey> { new(ResourceType.Sections, id) };
             deletes.AddRange(Model.Items().Where(i => i.SectionId == id).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
 
-            Persist("section_delete", new JsonObject { ["id"] = id }, null, existing.ToJsonString(), [], deletes);
-            foreach (var key in deletes)
-                Model.Remove(key.Type, key.Id);
+            RemoveAll("section_delete", id, deletes);
         }
+    }
+
+    /// <summary>
+    /// Queues a delete that removes several resources at once, keeping every one of them as the
+    /// command's prior state so reverting restores the contents and not just the container.
+    /// </summary>
+    private void RemoveAll(string commandType, string id, IReadOnlyList<ResourceKey> deletes)
+    {
+        var priors = new JsonArray();
+        foreach (var key in deletes)
+        {
+            if (Model.Get(key.Type, key.Id) is { } resource)
+                priors.Add(new JsonObject { ["type"] = key.Type, ["resource"] = resource.DeepClone() });
+        }
+
+        var cmd = Persist(commandType, new JsonObject { ["id"] = id }, null, priors.ToJsonString(), [], deletes);
+        foreach (var key in deletes)
+            Model.Remove(key.Type, key.Id);
+
+        // Destructive, but not something Undo can reverse: Todoist has no undelete for a project or
+        // section. Mark the point so Ctrl+Z reports that rather than reaching past it.
+        RecordUndoBarrier(cmd);
     }
 
     /// <summary>Applies changed fields to a non-task resource and queues its update command.</summary>
@@ -733,6 +804,11 @@ public sealed class SyncEngine
                 if (record is null)
                     continue;
 
+                // A destructive write we can't reverse. Consume it and stop, rather than reaching
+                // past it and silently undoing something the user wasn't thinking about.
+                if (record.Type == UndoBarrier)
+                    return false;
+
                 if (record.Type == "item_close")
                 {
                     // Already applied server-side; only meaningful if the task is still there.
@@ -778,15 +854,24 @@ public sealed class SyncEngine
             if (cmd.TempId is { } temp)
                 RemoveObject(temp);
         }
-        else if (cmd.PriorJson is { } prior && JsonNode.Parse(prior) is { } node)
+        else if (cmd.PriorJson is { } prior && TryParseNode(prior) is { } node)
         {
-            var type = ResourceTypeFor(cmd);
             foreach (var restored in node is JsonArray array ? array.OfType<JsonNode>() : [node])
             {
-                if (restored is not JsonObject obj || obj["id"] is not JsonValue idValue)
+                if (restored is not JsonObject entry)
                     continue;
+
+                // A cascading delete records what type each removed resource was, since one command
+                // can span projects, sections and tasks.
+                var (type, resource) = entry["resource"] is JsonObject inner
+                    ? (entry["type"]?.ToString() ?? ResourceTypeFor(cmd), inner)
+                    : (ResourceTypeFor(cmd), entry);
+
+                if (resource["id"] is not JsonValue idValue)
+                    continue;
+
                 var id = idValue.ToString();
-                var copy = obj.DeepClone().AsObject();
+                var copy = resource.DeepClone().AsObject();
                 _store.PutResource(type, id, copy.ToJsonString());
                 Model.Upsert(type, id, copy);
             }
@@ -1119,6 +1204,13 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>Marks a destructive write that <see cref="Undo"/> cannot reverse.</summary>
+    private void RecordUndoBarrier(OutboxCommand cmd)
+    {
+        _undoStack.Add(cmd.Uuid);
+        _undoable[cmd.Uuid] = new UndoableWrite(UndoBarrier, cmd.Uuid, null);
+    }
+
     private void ForgetUndoable(string uuid)
     {
         _undoStack.Remove(uuid);
@@ -1158,11 +1250,13 @@ public sealed class SyncEngine
 
     private static JsonObject ParseArgs(OutboxCommand cmd) => TryParse(cmd.ArgsJson) ?? new JsonObject();
 
-    private static JsonObject? TryParse(string json)
+    private static JsonObject? TryParse(string json) => TryParseNode(json) as JsonObject;
+
+    private static JsonNode? TryParseNode(string json)
     {
         try
         {
-            return JsonNode.Parse(json) as JsonObject;
+            return JsonNode.Parse(json);
         }
         catch (JsonException)
         {

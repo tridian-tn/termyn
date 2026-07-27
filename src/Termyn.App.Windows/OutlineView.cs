@@ -27,6 +27,9 @@ internal sealed class OutlineView : ListView
     /// </summary>
     private ListViewItem?[] _cache = [];
 
+    /// <summary>Cached so painting doesn't ask the native control once per cell.</summary>
+    private int _selectedIndex = -1;
+
     public OutlineView()
     {
         View = View.Details;
@@ -64,15 +67,27 @@ internal sealed class OutlineView : ListView
             // Put the selection back on the same task, if it's still here. Deliberately no
             // scrolling and no fallback selection: a background sync refreshes these rows every
             // 45 seconds, and it must not move the selection or the viewport under the user.
-            if (selected is not null && IndexOf(selected) is var index and >= 0)
+            var index = selected is null ? -1 : IndexOf(selected);
+            if (index >= 0)
             {
                 if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
                 {
                     SelectedIndices.Clear();
                     SelectedIndices.Add(index);
                 }
+
+                // Keyboard navigation moves from the focused row, not the selected one, so they
+                // must not drift apart. Setting focus here does not scroll the viewport.
+                Items[index].Focused = true;
+            }
+            else
+            {
+                // The selected task is gone. Leaving the native selection on its old index would
+                // silently hand the selection to whichever task now occupies that row.
+                SelectedIndices.Clear();
             }
 
+            _selectedIndex = index;
             Invalidate();
         }
     }
@@ -94,8 +109,13 @@ internal sealed class OutlineView : ListView
         }
     }
 
-    private bool IsSelected(int index)
-        => SelectedIndices.Count > 0 && SelectedIndices[0] == index;
+    protected override void OnSelectedIndexChanged(EventArgs e)
+    {
+        _selectedIndex = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;
+        base.OnSelectedIndexChanged(e);
+    }
+
+    private bool IsSelected(int index) => _selectedIndex == index;
 
     private int IndexOf(string id)
     {
@@ -105,15 +125,23 @@ internal sealed class OutlineView : ListView
         return -1;
     }
 
-    // Tab and Shift+Tab indent and outdent here rather than moving focus out of the list.
+    /// <summary>
+    /// Tab and Shift+Tab indent and outdent here rather than moving focus out of the list — but only
+    /// with a row to act on, and never with Ctrl held, so there is always a way to tab out.
+    /// </summary>
     protected override bool IsInputKey(Keys keyData)
-        => (keyData & Keys.KeyCode) == Keys.Tab || base.IsInputKey(keyData);
+        => ((keyData & Keys.KeyCode) == Keys.Tab
+            && (keyData & Keys.Control) == 0
+            && SelectedIndices.Count > 0)
+           || base.IsInputKey(keyData);
 
     protected override void OnRetrieveVirtualItem(RetrieveVirtualItemEventArgs e)
     {
         if (e.ItemIndex >= _cache.Length)
         {
-            e.Item = new ListViewItem();
+            // Virtual mode requires a sub-item per column, or the control throws from its own
+            // window procedure — which a guard against a stale index must not do.
+            e.Item = new ListViewItem(new string[Columns.Count]);
             return;
         }
 
@@ -130,7 +158,15 @@ internal sealed class OutlineView : ListView
     protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
     {
         e.DrawBackground();
-        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), SystemColors.GrayText, Flags);
+
+        var alignment = e.Header?.TextAlign switch
+        {
+            HorizontalAlignment.Center => TextFormatFlags.HorizontalCenter,
+            HorizontalAlignment.Right => TextFormatFlags.Right,
+            _ => TextFormatFlags.Left,
+        };
+
+        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), SystemColors.GrayText, Flags | alignment);
     }
 
     /// <summary>

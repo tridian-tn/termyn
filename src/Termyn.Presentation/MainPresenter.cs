@@ -40,6 +40,7 @@ public sealed class MainPresenter
     private readonly Lock _publishing = new();
 
     private IReadOnlyList<TaskRow> _allRows = [];
+    private IReadOnlyList<TaskRow> _searchableRows = [];
 
     public MainPresenter(SyncEngine engine, QuickAddParser parser)
     {
@@ -113,9 +114,13 @@ public sealed class MainPresenter
         {
             var (parse, projectId, sectionId) = Resolve(text);
 
-            // With no project named, a capture belongs to whatever the user is looking at.
-            projectId ??= Selection.ProjectId ?? SectionProjectId();
-            sectionId ??= Selection.SectionId;
+            // With nothing named at all, a capture belongs wherever the user is looking. Applied
+            // together: a section from one view with a project named in the text is not a real place.
+            if (projectId is null && sectionId is null)
+            {
+                projectId = Selection.ProjectId ?? SectionProjectId();
+                sectionId = Selection.SectionId;
+            }
 
             _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
         }
@@ -242,13 +247,40 @@ public sealed class MainPresenter
 
     public void DeleteProject(string id)
     {
+        // Captured first: the delete cascades to descendants, so afterwards there's no way to tell
+        // whether the selected section or project belonged to what just went.
+        var doomed = DescendantProjects(id);
+        var doomedSections = _engine.Snapshot().Sections
+            .Where(s => s.ProjectId is { } p && doomed.Contains(p))
+            .Select(s => s.Id)
+            .ToHashSet();
+
         _engine.DeleteProject(id);
 
         // Don't leave the outline pointed at something that no longer exists.
-        if (Selection.ProjectId == id)
+        if ((Selection.ProjectId is { } selected && doomed.Contains(selected))
+            || (Selection.SectionId is { } section && doomedSections.Contains(section)))
+        {
             Selection = ViewSelection.Default;
+        }
 
         Publish();
+    }
+
+    private HashSet<string> DescendantProjects(string id)
+    {
+        var projects = _engine.Snapshot().Projects;
+        var doomed = new HashSet<string> { id };
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var project in projects)
+                if (project.ParentId is { } parent && doomed.Contains(parent) && doomed.Add(project.Id))
+                    grew = true;
+        }
+        while (grew);
+        return doomed;
     }
 
     public void AddSection(string name, string projectId)
@@ -331,7 +363,12 @@ public sealed class MainPresenter
         {
             var snapshot = _engine.Snapshot();
             Sidebar = BuildSidebar(snapshot);
-            _allRows = BuildOutline(snapshot);
+            _allRows = BuildOutline(snapshot, scoped: true);
+
+            // Search runs over everything loaded, not just the view in front of you — otherwise
+            // Ctrl+F from Today silently misses most of the account.
+            _searchableRows = BuildOutline(snapshot, scoped: false);
+
             ApplyFilter(snapshot.PendingCount, snapshot.FailedCount);
         }
 
@@ -354,19 +391,20 @@ public sealed class MainPresenter
         var active = VisibleItems(snapshot);
 
         // Archived projects and sections are still returned by sync; they don't belong in the sidebar.
-        var projects = snapshot.Projects.Where(p => !p.IsArchived).ToList();
-        var sections = snapshot.Sections.Where(s => !s.IsArchived).ToList();
+        var projects = snapshot.Projects.Where(p => !p.IsArchived && p.Id.Length > 0).ToList();
+        var sections = snapshot.Sections.Where(s => !s.IsArchived && s.Id.Length > 0).ToList();
 
         var nodes = new List<SidebarNode>
         {
-            View(SmartView.Today, "Today", active.Count(i => SmartViews.IsToday(i, today))),
-            View(SmartView.Upcoming, "Upcoming", active.Count(i => SmartViews.IsUpcoming(i, today))),
+            View(SmartView.Today, "Today", active.Count(i => SmartViews.IsToday(i, today, snapshot.TimeZone))),
+            View(SmartView.Upcoming, "Upcoming", active.Count(i => SmartViews.IsUpcoming(i, today, snapshot.TimeZone))),
             View(SmartView.Inbox, "Inbox", active.Count(i => SmartViews.IsInbox(i, inbox))),
         };
 
         var favorites = projects
             .Where(p => p.IsFavorite)
-            .OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(p => p.ChildOrder)
+            .ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
         if (favorites.Count > 0)
@@ -387,6 +425,7 @@ public sealed class MainPresenter
             .GroupBy(p => p.ParentId ?? string.Empty)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.ChildOrder).ThenBy(p => p.Id, StringComparer.Ordinal).ToList());
 
+        var listed = new HashSet<string>();
         AddProjects(string.Empty, 1);
         return nodes;
 
@@ -397,10 +436,19 @@ public sealed class MainPresenter
 
             foreach (var project in children)
             {
+                // A parent cycle in the data would otherwise recurse until the stack goes.
+                if (!listed.Add(project.Id))
+                    continue;
+
                 nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
                     Key: project.Id, IsFavorite: project.IsFavorite, Count: active.Count(i => i.ProjectId == project.Id)));
 
-                foreach (var section in sections.Where(s => s.ProjectId == project.Id).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase))
+                var owned = sections
+                    .Where(s => s.ProjectId == project.Id)
+                    .OrderBy(s => s.SectionOrder)
+                    .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase);
+
+                foreach (var section in owned)
                     nodes.Add(new SidebarNode(SidebarKind.Section, section.Id, section.Name, depth + 1,
                         Key: section.Id, Count: active.Count(i => i.SectionId == section.Id)));
 
@@ -428,10 +476,12 @@ public sealed class MainPresenter
     /// Flattens the tasks in the current selection into an outline, depth-first, so a sub-task
     /// appears under its parent. A task whose parent isn't in view becomes a root of its own.
     /// </summary>
-    private List<TaskRow> BuildOutline(ModelSnapshot snapshot)
+    private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
     {
         var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
-        var visible = VisibleItems(snapshot).Where(i => InSelection(i, snapshot)).ToList();
+        var visible = VisibleItems(snapshot)
+            .Where(i => i.Id.Length > 0 && (!scoped || InSelection(i, snapshot)))
+            .ToList();
         var present = visible.Select(i => i.Id).ToHashSet();
 
         var byParent = visible
@@ -444,6 +494,7 @@ public sealed class MainPresenter
                       .ToList());
 
         var rows = new List<TaskRow>(visible.Count);
+        var emitted = new HashSet<string>();
         Emit(string.Empty, 0);
         return rows;
 
@@ -454,6 +505,10 @@ public sealed class MainPresenter
 
             foreach (var item in children)
             {
+                // A parent cycle in the data would otherwise recurse until the stack goes.
+                if (!emitted.Add(item.Id))
+                    continue;
+
                 rows.Add(Row(item, depth));
                 Emit(item.Id, depth + 1);
             }
@@ -475,7 +530,8 @@ public sealed class MainPresenter
             return item.SectionId == sectionId;
         if (Selection.ProjectId is { } projectId)
             return item.ProjectId == projectId;
-        return Selection.View is not { } view || SmartViews.Matches(item, view, snapshot.Today, snapshot.InboxProjectId);
+        return Selection.View is not { } view
+               || SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId);
     }
 
     private void ApplyFilter(int pending, int failed)
@@ -489,7 +545,7 @@ public sealed class MainPresenter
             // Matches rarely share a parent, so a filtered result is a flat list rather than a
             // tree with most of its structure missing.
             var q = SearchQuery.Trim();
-            Rows = _allRows
+            Rows = _searchableRows
                 .Where(r =>
                     r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||

@@ -29,6 +29,11 @@ internal sealed class MainForm : Form
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
     private string _sidebarKey = SmartView.Today.ToString();
 
+    /// <summary>The sidebar last rendered, so an unchanged one isn't rebuilt.</summary>
+    private IReadOnlyList<SidebarNode>? _renderedSidebar;
+
+    private Font? _headerFont;
+
     public MainForm(MainPresenter presenter, SyncScheduler scheduler)
     {
         _presenter = presenter;
@@ -69,7 +74,6 @@ internal sealed class MainForm : Form
         var split = new SplitContainer
         {
             Dock = DockStyle.Fill,
-            SplitterDistance = 220,
             FixedPanel = FixedPanel.Panel1,
         };
         split.Panel1.Controls.Add(_sidebar);
@@ -90,6 +94,12 @@ internal sealed class MainForm : Form
         Controls.Add(_preview);
         Controls.Add(_capture);
 
+        // Only once it's parented: before that the splitter is clamped against the container's
+        // default 150px width and silently sticks there.
+        split.SplitterDistance = 220;
+
+        _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
+
         _presenter.RowsChanged += OnRowsChanged;
         _scheduler.SyncFailed += OnSyncFailed;
         Load += async (_, _) => await LoadAsync();
@@ -98,6 +108,7 @@ internal sealed class MainForm : Form
         {
             _presenter.RowsChanged -= OnRowsChanged;
             _scheduler.SyncFailed -= OnSyncFailed;
+            _headerFont?.Dispose();
             _cts.Dispose();
         };
     }
@@ -129,9 +140,18 @@ internal sealed class MainForm : Form
 
     private void RenderSidebar()
     {
+        // Nothing structural changed — a search keystroke, say — so leave the tree alone rather
+        // than rebuilding it and losing what the user has collapsed.
+        if (ReferenceEquals(_renderedSidebar, _presenter.Sidebar))
+            return;
+
+        _renderedSidebar = _presenter.Sidebar;
         _syncingSidebar = true;
         try
         {
+            // Remember which branches are closed; the rebuild would otherwise reopen them.
+            var collapsed = CollapsedKeys();
+
             _sidebar.BeginUpdate();
             _sidebar.Nodes.Clear();
 
@@ -144,7 +164,7 @@ internal sealed class MainForm : Form
 
                 if (node.Kind == SidebarKind.Header)
                 {
-                    tree.NodeFont = new Font(_sidebar.Font, FontStyle.Bold);
+                    tree.NodeFont = _headerFont;
                     tree.ForeColor = SystemColors.GrayText;
                 }
 
@@ -161,12 +181,60 @@ internal sealed class MainForm : Form
             }
 
             _sidebar.ExpandAll();
-            _sidebar.EndUpdate();
+            Recollapse(_sidebar.Nodes, collapsed);
+
+            // The selected row may have gone — deleted here, or removed by a sync. Fall back to
+            // whatever the presenter is actually showing rather than highlighting nothing.
+            if (_sidebar.SelectedNode is null)
+            {
+                _sidebarKey = _presenter.Selection.Key;
+                _sidebar.SelectedNode = FindByKey(_sidebar.Nodes, _sidebarKey);
+            }
         }
         finally
         {
+            _sidebar.EndUpdate();
             _syncingSidebar = false;
         }
+    }
+
+    private HashSet<string> CollapsedKeys()
+    {
+        var collapsed = new HashSet<string>();
+        Walk(_sidebar.Nodes);
+        return collapsed;
+
+        void Walk(TreeNodeCollection nodes)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node is { IsExpanded: false, Nodes.Count: > 0 } && node.Tag is SidebarNode tagged)
+                    collapsed.Add(tagged.Key);
+                Walk(node.Nodes);
+            }
+        }
+    }
+
+    private static void Recollapse(TreeNodeCollection nodes, HashSet<string> collapsed)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            Recollapse(node.Nodes, collapsed);
+            if (node.Tag is SidebarNode tagged && collapsed.Contains(tagged.Key))
+                node.Collapse();
+        }
+    }
+
+    private static TreeNode? FindByKey(TreeNodeCollection nodes, string key)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            if (node.Tag is SidebarNode tagged && tagged.Key == key)
+                return node;
+            if (FindByKey(node.Nodes, key) is { } found)
+                return found;
+        }
+        return null;
     }
 
 
@@ -219,8 +287,12 @@ internal sealed class MainForm : Form
             case Keys.Delete when node.Kind is SidebarKind.Project or SidebarKind.Section:
                 DeleteStructure(node);
                 break;
-            case Keys.F when e.Control is false && node.Kind == SidebarKind.Project:
+            // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
+            case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Project:
                 Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
+                break;
+            case Keys.N when e.Control && e.Shift is false && node.Kind == SidebarKind.Project:
+                AddSection(node.Id);
                 break;
             default:
                 return;
@@ -416,6 +488,16 @@ internal sealed class MainForm : Form
             return;
 
         Guarded(() => _presenter.AddProject(name));
+        _scheduler.NotifyWrite();
+    }
+
+    private void AddSection(string projectId)
+    {
+        var name = InputDialog.Ask(this, "New section", "Section name:");
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        Guarded(() => _presenter.AddSection(name, projectId));
         _scheduler.NotifyWrite();
     }
 
