@@ -86,7 +86,9 @@ public sealed class SyncScheduler : IAsyncDisposable
             loop = _loop;
         }
 
-        await _stopping.CancelAsync();
+        // Never resume on the caller's context: shutdown blocks on this from the UI thread, and by
+        // then the message loop that would have to run the continuation has stopped.
+        await _stopping.CancelAsync().ConfigureAwait(false);
         Wake();
 
         if (loop is not null)
@@ -94,7 +96,7 @@ public sealed class SyncScheduler : IAsyncDisposable
             try
             {
                 // Bounded: a sync that ignores its token must not hold up shutting down.
-                await loop.WaitAsync(TimeSpan.FromSeconds(5));
+                await loop.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
             {
@@ -133,7 +135,7 @@ public sealed class SyncScheduler : IAsyncDisposable
 
             try
             {
-                await _wake.WaitAsync(writePending ? _cadence.WriteDebounce : _cadence.Interval, ct);
+                await _wake.WaitAsync(writePending ? _cadence.WriteDebounce : _cadence.Interval, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -153,7 +155,7 @@ public sealed class SyncScheduler : IAsyncDisposable
 
             try
             {
-                if (await _sync(ct))
+                if (await _sync(ct).ConfigureAwait(false))
                     Wake(); // more queued than one round could flush; come straight back
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

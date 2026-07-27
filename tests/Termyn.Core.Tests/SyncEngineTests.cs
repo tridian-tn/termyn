@@ -808,6 +808,34 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public async Task A_cancelled_reorder_puts_its_other_tasks_back_where_they_were()
+    {
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New", ["project_id"] = "p" });
+        engine.MoveItem(temp, 1); // renumbers a and b around the new task
+
+        api.Next = cmds =>
+        {
+            var add = cmds.First(c => c.Type == "item_add");
+            return Resp("s1", status: (add.Uuid, false));
+        };
+        await engine.SyncAsync();
+
+        // The reorder went with the failed create, so the server never hears about it: the local
+        // positions must go back rather than silently diverging.
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.Equal(1, items["a"].ChildOrder);
+        Assert.Equal(2, items["b"].ChildOrder);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
     public async Task A_failed_create_cancels_a_reorder_that_named_it()
     {
         var api = new FakeApi();

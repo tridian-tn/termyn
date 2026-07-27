@@ -788,12 +788,47 @@ public sealed class SyncEngine
 
         foreach (var d in doomed)
         {
+            // A cancelled reorder's other tasks keep a position the server will never be told about,
+            // so put them back — except the ones being rolled back here anyway.
+            if (d.Type == "item_reorder" && d.PriorJson is { } priors)
+                RestorePositions(priors, doomedIds);
+
             if (IsCreate(d) && d.TempId is { } temp)
                 RemoveObject(temp);
             _outbox.Remove(d);
             ForgetUndoable(d.Uuid);
         }
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());
+    }
+
+    private void RestorePositions(string priorJson, HashSet<string> skip)
+    {
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(priorJson);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (node is not JsonArray priors)
+            return;
+
+        foreach (var entry in priors)
+        {
+            if (entry is not JsonObject obj || obj["id"] is not JsonValue idValue)
+                continue;
+
+            var id = idValue.ToString();
+            if (skip.Contains(id) || Model.Get(ResourceType.Items, id) is null)
+                continue;
+
+            var copy = obj.DeepClone().AsObject();
+            _store.PutResource(ResourceType.Items, id, copy.ToJsonString());
+            Model.Upsert(ResourceType.Items, id, copy);
+        }
     }
 
     private HashSet<string> PendingResourceIds()
@@ -836,7 +871,7 @@ public sealed class SyncEngine
             yield break;
 
         foreach (var entry in items)
-            if (entry?["id"] is JsonValue id)
+            if (entry is JsonObject o && o["id"] is JsonValue id)
                 yield return id.ToString();
     }
 
