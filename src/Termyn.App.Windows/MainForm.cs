@@ -204,12 +204,16 @@ internal sealed class MainForm : Form
                 _list.SelectedItems[0].BeginEdit();
                 return;
             case Keys.D when e.Control && id is not null:
-                Guarded(() => PromptForDue(id!));
+                // A cancelled or unreadable date changes nothing, so it shouldn't trigger a sync.
+                wrote = false;
+                Guarded(() => wrote = PromptForDue(id!));
                 break;
             case Keys.Z when e.Control:
+                wrote = false;
                 Guarded(() =>
                 {
-                    if (!_presenter.Undo())
+                    wrote = _presenter.Undo();
+                    if (!wrote)
                         _status.Text = "Nothing to undo.";
                 });
                 break;
@@ -276,26 +280,28 @@ internal sealed class MainForm : Form
         _scheduler.NotifyWrite();
     }
 
-    private void PromptForDue(string id)
+    /// <summary>Asks for a due date and applies it. Returns false when nothing was changed.</summary>
+    private bool PromptForDue(string id)
     {
         var answer = InputDialog.Ask(this, "Due date", "When is it due?  (today, tomorrow, friday, 2026-12-25, 4pm — blank clears)");
         if (answer is null)
-            return;
+            return false;
 
         if (string.IsNullOrWhiteSpace(answer))
         {
             _presenter.SetDue(id, null);
-            return;
+            return true;
         }
 
         var parse = _presenter.Preview(answer).Parse;
         if (parse.DueDate is null)
         {
             _status.Text = $"Couldn't read \"{answer}\" as a date.";
-            return;
+            return false;
         }
 
         _presenter.SetDue(id, parse.DueDate, parse.DueTime);
+        return true;
     }
 
     // ---- Plumbing ------------------------------------------------------------------------------

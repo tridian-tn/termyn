@@ -102,7 +102,8 @@ public sealed class MainPresenter
             var content = string.IsNullOrWhiteSpace(parse.Content) ? text.Trim() : parse.Content;
             var resolved = parse with { Content = content };
 
-            _engine.AddItem(ItemFields.ForAdd(resolved, ResolveProjectId(parse.ProjectName), ResolveSectionId(parse.SectionName)));
+            var projectId = ResolveProjectId(parse.ProjectName);
+            _engine.AddItem(ItemFields.ForAdd(resolved, projectId, ResolveSectionId(parse.SectionName, projectId)));
         }
 
         Publish();
@@ -112,10 +113,11 @@ public sealed class MainPresenter
     public CapturePreview Preview(string text)
     {
         var parse = _parser.Parse(text);
+        var projectId = ResolveProjectId(parse.ProjectName);
         return new CapturePreview(
             parse,
-            parse.ProjectName is null || ResolveProjectId(parse.ProjectName) is not null,
-            parse.SectionName is null || ResolveSectionId(parse.SectionName) is not null);
+            parse.ProjectName is null || projectId is not null,
+            parse.SectionName is null || ResolveSectionId(parse.SectionName, projectId) is not null);
     }
 
     public void Search(string query)
@@ -182,11 +184,23 @@ public sealed class MainPresenter
             : _engine.Snapshot().Projects
                 .FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
 
-    private string? ResolveSectionId(string? name)
-        => name is null
-            ? null
-            : _engine.Snapshot().Sections
-                .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
+    /// <summary>
+    /// Resolves a section name within its project. Section names are only unique inside a project,
+    /// so without one an ambiguous name resolves to nothing rather than filing the task under an
+    /// unrelated project's section.
+    /// </summary>
+    private string? ResolveSectionId(string? name, string? projectId)
+    {
+        if (name is null)
+            return null;
+
+        var matches = _engine.Snapshot().Sections
+            .Where(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Where(s => projectId is null || s.ProjectId == projectId)
+            .ToList();
+
+        return matches.Count == 1 ? matches[0].Id : null;
+    }
 
     /// <summary>Re-reads the model and republishes. Call after anything that mutates the engine.</summary>
     private void Publish()

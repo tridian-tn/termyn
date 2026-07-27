@@ -175,6 +175,23 @@ public class MainPresenterTests
     }
 
     [Fact]
+    public void A_section_name_shared_by_two_projects_needs_the_project_to_disambiguate()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Home"}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p1"}""");
+        store.PutResource("sections", "s2", """{"id":"s2","name":"Admin","project_id":"p2"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+
+        // Ambiguous on its own: filing it under either project's section would be a guess.
+        Assert.False(presenter.Preview("Task /Admin").SectionResolved);
+
+        // Unambiguous once the project is named.
+        Assert.True(presenter.Preview("Task #Home /Admin").SectionResolved);
+    }
+
+    [Fact]
     public void Preview_flags_what_the_local_parser_cannot_handle()
     {
         var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
