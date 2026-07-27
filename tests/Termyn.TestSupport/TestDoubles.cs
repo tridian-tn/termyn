@@ -11,6 +11,9 @@ public sealed class FixedClock : IClock
     public FixedClock(DateOnly today) => Today = today;
 
     public DateOnly Today { get; }
+
+    /// <summary>Midday, so converting into any timezone still lands on the same date.</summary>
+    public DateTimeOffset UtcNow => new(Today.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero);
 }
 
 public sealed class FakeSecrets : ISecretStore

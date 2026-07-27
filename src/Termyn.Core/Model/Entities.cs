@@ -21,7 +21,9 @@ public sealed class Project
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
+    public string? ParentId { get; init; }
     public bool IsInboxProject { get; init; }
+    public bool IsFavorite { get; init; }
     public int ChildOrder { get; init; }
 }
 

@@ -357,6 +357,7 @@ public class MainPresenterTests
         store.PutResource("items", "d", """{"id":"d","content":"delta match","project_id":"p","child_order":4}""");
         var engine = NewEngine(new FakeApi(), store);
         var presenter = new MainPresenter(engine, Parser());
+        presenter.Select(ViewSelection.Of(SmartView.All));
 
         presenter.Search("match");
         presenter.Move("d", -1);
@@ -396,10 +397,12 @@ public class MainPresenterTests
         store.PutResource("items", "c2", """{"id":"c2","content":"C2","project_id":"p","parent_id":"t1","child_order":2}""");
         var presenter = NewPresenter(new FakeApi(), store);
 
-        Assert.Equal(new[] { "t1", "t2", "c1", "c2" }, presenter.Rows.Select(r => r.Id).ToArray());
+        // Children sit under their parent, indented.
+        Assert.Equal(new[] { "t1", "c1", "c2", "t2" }, presenter.Rows.Select(r => r.Id).ToArray());
+        Assert.Equal(new[] { 0, 1, 1, 0 }, presenter.Rows.Select(r => r.Depth).ToArray());
 
         Assert.True(presenter.Move("c2", -1));
-        Assert.Equal(new[] { "t1", "t2", "c2", "c1" }, presenter.Rows.Select(r => r.Id).ToArray());
+        Assert.Equal(new[] { "t1", "c2", "c1", "t2" }, presenter.Rows.Select(r => r.Id).ToArray());
     }
 
     [Fact]
@@ -469,12 +472,20 @@ public class MainPresenterTests
 
     // ---- Helpers -------------------------------------------------------------------------------
 
+    /// <summary>
+    /// A presenter showing every task. The app lands on Today, but these tests are about the rows
+    /// and intents rather than the smart views, which have their own tests.
+    /// </summary>
     private static MainPresenter NewPresenter(FakeApi api, InMemorySnapshotStore store)
-        => new(NewEngine(api, store), Parser());
+    {
+        var presenter = new MainPresenter(NewEngine(api, store), Parser());
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        return presenter;
+    }
 
     private static SyncEngine NewEngine(FakeApi api, InMemorySnapshotStore store)
     {
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();
         return engine;
     }

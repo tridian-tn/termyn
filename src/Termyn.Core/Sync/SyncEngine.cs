@@ -12,13 +12,10 @@ public sealed record ModelSnapshot(
     IReadOnlyList<TaskItem> Items,
     IReadOnlyList<Project> Projects,
     IReadOnlyList<Section> Sections,
-    TimeZoneInfo TimeZone,
+    DateOnly Today,
     int PendingCount,
     int FailedCount)
 {
-    /// <summary>Today's date in the account's own timezone, which the smart views are defined against.</summary>
-    public DateOnly Today => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone).DateTime);
-
     /// <summary>The Inbox, which tasks fall back to when they name no project.</summary>
     public string? InboxProjectId => Projects.FirstOrDefault(p => p.IsInboxProject)?.Id;
 }
@@ -45,6 +42,7 @@ public sealed class SyncEngine
     private readonly ITodoistApi _api;
     private readonly ISnapshotStore _store;
     private readonly ISecretStore _secrets;
+    private readonly IClock _clock;
     private readonly int _attemptCeiling;
     private readonly List<OutboxCommand> _outbox = [];
 
@@ -65,11 +63,12 @@ public sealed class SyncEngine
 
     private sealed record UndoableWrite(string Type, string Id, string? PriorJson);
 
-    public SyncEngine(ITodoistApi api, ISnapshotStore store, ISecretStore secrets, int attemptCeiling = 5)
+    public SyncEngine(ITodoistApi api, ISnapshotStore store, ISecretStore secrets, IClock? clock = null, int attemptCeiling = 5)
     {
         _api = api;
         _store = store;
         _secrets = secrets;
+        _clock = clock ?? new SystemClock();
         _attemptCeiling = attemptCeiling;
     }
 
@@ -122,10 +121,20 @@ public sealed class SyncEngine
                 Model.Items().ToList(),
                 Model.Projects().ToList(),
                 Model.Sections().ToList(),
-                Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User)),
+                TodayInAccountZone(),
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed));
         }
+    }
+
+    /// <summary>
+    /// Today's date where the account lives, which is what the smart views are defined against —
+    /// the machine's own date can be a day out.
+    /// </summary>
+    private DateOnly TodayInAccountZone()
+    {
+        var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime);
     }
 
     public int PendingCount
