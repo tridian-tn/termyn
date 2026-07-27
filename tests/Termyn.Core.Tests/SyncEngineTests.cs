@@ -122,6 +122,91 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public void Reopen_clears_the_check_and_queues_item_uncomplete()
+    {
+        var engine = SeededEngine(out _);
+        engine.CompleteItem("i1");
+
+        engine.ReopenItem("i1");
+
+        Assert.False(engine.Model.Items().Single().Completed);
+        Assert.Equal("item_uncomplete", engine.Outbox.Last().Type);
+    }
+
+    [Fact]
+    public void Reorder_renumbers_the_items_and_queues_item_reorder()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","child_order":2}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.ReorderItems(["b", "a"]);
+
+        Assert.Equal(new[] { "B", "A" }, engine.Model.Items().OrderBy(i => i.ChildOrder).Select(i => i.Content).ToArray());
+        var cmd = engine.Outbox.Single();
+        Assert.Equal("item_reorder", cmd.Type);
+        Assert.Equal(2, Args(cmd)["items"]!.AsArray().Count);
+    }
+
+    [Fact]
+    public void Undo_of_an_unflushed_completion_restores_the_task()
+    {
+        var engine = SeededEngine(out _);
+        engine.CompleteItem("i1");
+        Assert.True(engine.CanUndo);
+
+        Assert.True(engine.Undo());
+
+        Assert.False(engine.Model.Items().Single().Completed);
+        Assert.Equal(0, engine.PendingCount); // the queued command went with it
+    }
+
+    [Fact]
+    public void Undo_of_an_unflushed_delete_restores_the_task()
+    {
+        var engine = SeededEngine(out _);
+        engine.DeleteItem("i1");
+
+        Assert.True(engine.Undo());
+
+        Assert.Equal("A", engine.Model.Items().Single().Content);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task Undo_of_an_acked_completion_issues_the_opposite_command()
+    {
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"A","checked":false}""");
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.CompleteItem("i1");
+
+        // Flush the completion so it is no longer revertible, then undo it.
+        api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
+        await engine.SyncAsync();
+        Assert.Equal(0, engine.PendingCount);
+
+        Assert.True(engine.Undo());
+
+        Assert.Equal("item_uncomplete", engine.Outbox.Single().Type);
+        Assert.False(engine.Model.Items().Single().Completed);
+    }
+
+    [Fact]
+    public void Undo_reports_when_there_is_nothing_left_to_reverse()
+    {
+        var engine = SeededEngine(out _);
+
+        Assert.False(engine.CanUndo);
+        Assert.False(engine.Undo());
+    }
+
+    [Fact]
     public void Update_of_an_unknown_item_still_queues_a_command_without_throwing()
     {
         var engine = NewEngine(new FakeApi());

@@ -35,6 +35,14 @@ public sealed class SyncEngine
     /// </summary>
     private readonly List<ResourceKey> _deferredDeletes = [];
 
+    /// <summary>Uuids of destructive writes, most recent last, that <see cref="Undo"/> can reverse.</summary>
+    private readonly List<string> _undoStack = [];
+
+    /// <summary>What each undoable write did, so it can still be reversed after the server acks it.</summary>
+    private readonly Dictionary<string, UndoableWrite> _undoable = [];
+
+    private sealed record UndoableWrite(string Type, string Id, string? PriorJson);
+
     public SyncEngine(ITodoistApi api, ISnapshotStore store, ISecretStore secrets, int attemptCeiling = 5)
     {
         _api = api;
@@ -202,9 +210,34 @@ public sealed class SyncEngine
                 upsert = new StoredResource(ResourceType.Items, id, completed.ToJsonString());
             }
 
-            Persist("item_close", new JsonObject { ["id"] = id }, null, prior, upsert, null);
+            var cmd = Persist("item_close", new JsonObject { ["id"] = id }, null, prior, upsert, null);
             if (completed is not null)
                 Model.Upsert(ResourceType.Items, id, completed);
+            RecordUndoable(cmd, id, prior);
+        }
+    }
+
+    /// <summary>Reopens a completed task and queues an <c>item_uncomplete</c>.</summary>
+    public void ReopenItem(string id)
+    {
+        lock (_gate)
+        {
+            var existing = Model.Get(ResourceType.Items, id);
+            JsonObject? reopened = null;
+            string? prior = null;
+            StoredResource? upsert = null;
+
+            if (existing is not null)
+            {
+                prior = existing.ToJsonString();
+                reopened = existing.DeepClone().AsObject();
+                reopened["checked"] = false;
+                upsert = new StoredResource(ResourceType.Items, id, reopened.ToJsonString());
+            }
+
+            Persist("item_uncomplete", new JsonObject { ["id"] = id }, null, prior, upsert, null);
+            if (reopened is not null)
+                Model.Upsert(ResourceType.Items, id, reopened);
         }
     }
 
@@ -217,9 +250,93 @@ public sealed class SyncEngine
             var prior = existing?.ToJsonString();
             ResourceKey? delete = existing is not null ? new ResourceKey(ResourceType.Items, id) : null;
 
-            Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, null, delete);
+            var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, null, delete);
             if (existing is not null)
                 Model.Remove(ResourceType.Items, id);
+            RecordUndoable(cmd, id, prior);
+        }
+    }
+
+    /// <summary>
+    /// Applies a new sibling order and queues an <c>item_reorder</c>. Ids are listed in their new
+    /// order and given consecutive positions.
+    /// </summary>
+    public void ReorderItems(IReadOnlyList<string> orderedIds)
+    {
+        lock (_gate)
+        {
+            var entries = new JsonArray();
+            var updated = new List<(string Id, JsonObject Json)>();
+
+            for (var i = 0; i < orderedIds.Count; i++)
+            {
+                var id = orderedIds[i];
+                entries.Add(new JsonObject { ["id"] = id, ["child_order"] = i + 1 });
+
+                if (Model.Get(ResourceType.Items, id) is { } existing)
+                {
+                    var clone = existing.DeepClone().AsObject();
+                    clone["child_order"] = i + 1;
+                    updated.Add((id, clone));
+                }
+            }
+
+            // Ordering spans several resources, so it is persisted as a plain batch of writes rather
+            // than through the single-resource optimistic path.
+            Persist("item_reorder", new JsonObject { ["items"] = entries }, null, null, null, null);
+            foreach (var (id, json) in updated)
+            {
+                _store.PutResource(ResourceType.Items, id, json.ToJsonString());
+                Model.Upsert(ResourceType.Items, id, json);
+            }
+        }
+    }
+
+    public bool CanUndo
+    {
+        get { lock (_gate) return _undoStack.Count > 0; }
+    }
+
+    /// <summary>
+    /// Reverses the most recent completion or deletion. If its command hasn't reached the server it
+    /// is simply dropped and the resource restored; if it has, the opposite command is issued.
+    /// </summary>
+    /// <returns><c>false</c> when there is nothing left to undo.</returns>
+    public bool Undo()
+    {
+        lock (_gate)
+        {
+            if (_undoStack.Count == 0)
+                return false;
+
+            var uuid = _undoStack[^1];
+            _undoStack.RemoveAt(_undoStack.Count - 1);
+
+            if (_outbox.Any(c => c.Uuid == uuid))
+            {
+                Revert(uuid);
+                return true;
+            }
+
+            // Already acknowledged by the server, so it has to be undone with its opposite.
+            if (!_undoable.TryGetValue(uuid, out var record))
+                return false;
+
+            if (record.Type == "item_close")
+            {
+                ReopenItem(record.Id);
+                return true;
+            }
+
+            // Todoist cannot undelete, so the task is recreated from the state we last held.
+            if (record.PriorJson is { } json && TryParse(json) is { } fields)
+            {
+                fields.Remove("id");
+                AddItem(fields);
+                return true;
+            }
+
+            return false;
         }
     }
 
@@ -467,7 +584,13 @@ public sealed class SyncEngine
     /// in-memory model only after this returns, so a store failure can't leave a change on screen
     /// that was never persisted or queued.
     /// </summary>
-    private void Persist(string type, JsonObject args, string? tempId, string? prior, StoredResource? upsert, ResourceKey? delete)
+    private void RecordUndoable(OutboxCommand cmd, string id, string? prior)
+    {
+        _undoStack.Add(cmd.Uuid);
+        _undoable[cmd.Uuid] = new UndoableWrite(cmd.Type, id, prior);
+    }
+
+    private OutboxCommand Persist(string type, JsonObject args, string? tempId, string? prior, StoredResource? upsert, ResourceKey? delete)
     {
         var cmd = new OutboxCommand
         {
@@ -479,6 +602,7 @@ public sealed class SyncEngine
         };
         _store.ApplyLocalWrite(cmd, upsert, delete);
         _outbox.Add(cmd);
+        return cmd;
     }
 
     private static bool ReferencesAny(OutboxCommand cmd, HashSet<string> ids)
