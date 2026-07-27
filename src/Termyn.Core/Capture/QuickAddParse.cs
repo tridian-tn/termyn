@@ -20,6 +20,4 @@ public sealed record QuickAddParse
     /// assignees. The capture UI surfaces these so the user knows what was left out.
     /// </summary>
     public IReadOnlyList<string> Unsupported { get; init; } = [];
-
-    public bool HasDue => DueDate is not null;
 }

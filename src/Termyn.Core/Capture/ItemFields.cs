@@ -8,16 +8,19 @@ namespace Termyn.Core.Capture;
 public static class ItemFields
 {
     /// <summary>
-    /// Turns a locally parsed capture into <c>item_add</c> fields. Project and section names are
-    /// resolved through <paramref name="resolveProjectId"/>; an unknown name is left unset so the
-    /// task lands in the Inbox rather than being attached to the wrong project.
+    /// Turns a locally parsed capture into <c>item_add</c> fields. The caller resolves the project
+    /// and section ids first, so it can tell an unmatched name from an absent one and flag it;
+    /// leaving them null puts the task in the Inbox.
     /// </summary>
-    public static JsonObject ForAdd(QuickAddParse parse, Func<string, string?>? resolveProjectId = null)
+    public static JsonObject ForAdd(QuickAddParse parse, string? projectId = null, string? sectionId = null)
     {
         var fields = new JsonObject { ["content"] = parse.Content };
 
-        if (parse.ProjectName is { } projectName && resolveProjectId?.Invoke(projectName) is { } projectId)
+        if (projectId is not null)
             fields["project_id"] = projectId;
+
+        if (sectionId is not null)
+            fields["section_id"] = sectionId;
 
         if (parse.Labels.Count > 0)
         {
@@ -50,5 +53,21 @@ public static class ItemFields
             : d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         return new JsonObject { ["date"] = value };
+    }
+
+    /// <summary>
+    /// The fields that may be sent when recreating a task, so replaying a deleted one never echoes
+    /// back server-owned values like <c>user_id</c> or <c>added_at</c>.
+    /// </summary>
+    public static JsonObject ForRecreate(JsonObject prior)
+    {
+        string[] writable =
+            ["content", "description", "project_id", "section_id", "parent_id", "child_order", "priority", "due", "deadline", "labels", "duration"];
+
+        var fields = new JsonObject();
+        foreach (var key in writable)
+            if (prior.TryGetPropertyValue(key, out var value) && value is not null)
+                fields[key] = value.DeepClone();
+        return fields;
     }
 }

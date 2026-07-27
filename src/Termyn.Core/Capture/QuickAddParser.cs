@@ -13,8 +13,9 @@ namespace Termyn.Core.Capture;
 /// </summary>
 /// <remarks>
 /// Recognised: <c>#project</c>, <c>/section</c>, <c>@label</c>, <c>p1</c>–<c>p4</c>, the dates
-/// <c>today</c>/<c>tomorrow</c>/<c>yyyy-MM-dd</c>/weekday names, and a time of day
-/// (<c>16:30</c>, <c>4pm</c>, <c>4:30pm</c>).
+/// <c>today</c>/<c>tomorrow</c>/<c>yyyy-MM-dd</c>/full weekday names, and a time of day
+/// (<c>16:30</c>, <c>4pm</c>, <c>4:30pm</c>). Weekday abbreviations are not recognised: "sat" and
+/// "sun" are ordinary words, and silently turning them into a due date mangles the task text.
 /// </remarks>
 public sealed partial class QuickAddParser
 {
@@ -36,7 +37,7 @@ public sealed partial class QuickAddParser
         DateOnly? date = null;
         TimeOnly? time = null;
 
-        var tokens = (text ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tokens = (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
         for (var i = 0; i < tokens.Length; i++)
         {
@@ -45,13 +46,14 @@ public sealed partial class QuickAddParser
             switch (token[0])
             {
                 case '#' when token.Length > 1:
-                    project = token[1..];
+                    project ??= token[1..];
                     continue;
                 case '/' when token.Length > 1:
-                    section = token[1..];
+                    section ??= token[1..];
                     continue;
                 case '@' when token.Length > 1:
-                    labels.Add(token[1..]);
+                    if (!labels.Contains(token[1..], StringComparer.OrdinalIgnoreCase))
+                        labels.Add(token[1..]);
                     continue;
                 case '+' when token.Length > 1:
                     // Assignees are out of scope; drop the token but tell the user it was ignored.
@@ -70,12 +72,14 @@ public sealed partial class QuickAddParser
                 continue;
             }
 
-            // Recurrence is resolved by the server, never guessed at here. Keep scanning so that
-            // tokens after the phrase — "#project", "@label" — are still picked up.
+            // Recurrence is resolved by the server, never guessed at here. The whole phrase stays in
+            // the content and is skipped, so a weekday or time inside it can't become a due date.
             if (token.Equals("every", StringComparison.OrdinalIgnoreCase))
             {
-                unsupported.Add(string.Join(' ', tokens[i..].TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+'))));
-                content.Add(token);
+                var run = tokens[i..].TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+')).ToArray();
+                unsupported.Add(string.Join(' ', run));
+                content.AddRange(run);
+                i += run.Length - 1;
                 continue;
             }
 
@@ -139,7 +143,7 @@ public sealed partial class QuickAddParser
         if (DateOnly.TryParseExact(token, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
             return true;
 
-        var weekday = Array.FindIndex(WeekdayNames, n => n == lower || (lower.Length == 3 && n.StartsWith(lower, StringComparison.Ordinal)));
+        var weekday = Array.IndexOf(WeekdayNames, lower);
         if (weekday >= 0)
         {
             // The coming occurrence, counting today when it already matches.

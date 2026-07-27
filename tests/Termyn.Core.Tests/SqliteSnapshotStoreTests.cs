@@ -15,7 +15,7 @@ public class SqliteSnapshotStoreTests
             {
                 store.PutResource("items", "i1", """{"id":"i1","content":"A","weird_field":"keep"}""");
                 store.SaveSync([], [], "token-1");
-                store.ApplyLocalWrite(Cmd("u1", "item_update", args: """{"id":"i1","content":"B"}"""), null, null);
+                store.ApplyLocalWrite(Cmd("u1", "item_update", args: """{"id":"i1","content":"B"}"""), [], []);
             }
 
             using (var store = new SqliteSnapshotStore(path))
@@ -46,8 +46,8 @@ public class SqliteSnapshotStoreTests
             {
                 store.ApplyLocalWrite(
                     Cmd("u1", "item_add", tempId: "t-1", args: """{"content":"New"}"""),
-                    new StoredResource("items", "t-1", """{"id":"t-1","content":"New"}"""),
-                    null);
+                    [new StoredResource("items", "t-1", """{"id":"t-1","content":"New"}""")],
+                    []);
             }
 
             using (var store = new SqliteSnapshotStore(path))
@@ -72,7 +72,7 @@ public class SqliteSnapshotStoreTests
             using var store = new SqliteSnapshotStore(path);
             store.PutResource("items", "i1", """{"id":"i1"}""");
 
-            store.ApplyLocalWrite(Cmd("u1", "item_delete", args: """{"id":"i1"}"""), null, new ResourceKey("items", "i1"));
+            store.ApplyLocalWrite(Cmd("u1", "item_delete", args: """{"id":"i1"}"""), [], [new ResourceKey("items", "i1")]);
 
             Assert.Empty(store.Load().Resources);
             Assert.Single(store.Load().Outbox);
@@ -92,7 +92,7 @@ public class SqliteSnapshotStoreTests
             using (var store = new SqliteSnapshotStore(path))
             {
                 var cmd = Cmd("u1", "item_update", args: """{"id":"i1"}""", prior: """{"id":"i1","content":"A"}""");
-                store.ApplyLocalWrite(cmd, null, null);
+                store.ApplyLocalWrite(cmd, [], []);
 
                 cmd.Attempts = 3;
                 cmd.NoVerdictRounds = 2;
@@ -193,8 +193,8 @@ public class SqliteSnapshotStoreTests
         {
             using (var store = new SqliteSnapshotStore(path))
             {
-                store.ApplyLocalWrite(Cmd("keep", "item_close"), null, null);
-                store.ApplyLocalWrite(Cmd("drop", "item_delete"), null, null);
+                store.ApplyLocalWrite(Cmd("keep", "item_close"), [], []);
+                store.ApplyLocalWrite(Cmd("drop", "item_delete"), [], []);
                 store.DeleteCommands(["drop"]);
             }
 
@@ -216,7 +216,7 @@ public class SqliteSnapshotStoreTests
             using (var store = new SqliteSnapshotStore(path))
             {
                 store.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
-                store.ApplyLocalWrite(Cmd("u1", "item_update", args: """{"id":"i1"}"""), null, null);
+                store.ApplyLocalWrite(Cmd("u1", "item_update", args: """{"id":"i1"}"""), [], []);
                 store.SaveSync([], [], "token-1");
 
                 store.Purge();

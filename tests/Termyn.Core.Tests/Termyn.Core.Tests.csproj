@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Termyn.Core\Termyn.Core.csproj" />
+    <ProjectReference Include="..\Termyn.TestSupport\Termyn.TestSupport.csproj" />
   </ItemGroup>
 
 </Project>

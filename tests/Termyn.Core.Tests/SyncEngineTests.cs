@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
+using Termyn.TestSupport;
 
 namespace Termyn.Core.Tests;
 
@@ -25,8 +26,8 @@ public class SyncEngineTests
         await engine.SyncAsync();
 
         Assert.Equal("s1", engine.Model.SyncToken);
-        Assert.Equal("A", engine.Model.Items().Single().Content);
-        Assert.Equal("Work", engine.Model.Projects().Single().Name);
+        Assert.Equal("A", engine.Snapshot().Items.Single().Content);
+        Assert.Equal("Work", engine.Snapshot().Projects.Single().Name);
     }
 
     [Fact]
@@ -37,11 +38,11 @@ public class SyncEngineTests
 
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"A"}""")]);
         await engine.SyncAsync();
-        Assert.Single(engine.Model.Items());
+        Assert.Single(engine.Snapshot().Items);
 
-        api.Next = _ => Resp("s2", changes: [ChDeleted("items", "i1")]);
+        api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i1")]);
         await engine.SyncAsync();
-        Assert.Empty(engine.Model.Items());
+        Assert.Empty(engine.Snapshot().Items);
     }
 
     [Fact]
@@ -68,7 +69,45 @@ public class SyncEngineTests
 
         engine.Load();
 
-        Assert.Equal("A", engine.Model.Items().Single().Content);
+        Assert.Equal("A", engine.Snapshot().Items.Single().Content);
+    }
+
+    // ---- Capture -------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Quick_add_folds_the_server_created_task_into_the_model()
+    {
+        var api = new FakeApi
+        {
+            QuickAdd = text => Json.Change("items", "srv1", $$"""{"id":"srv1","content":"{{text}}","priority":4}"""),
+        };
+        var engine = NewEngine(api);
+
+        Assert.True(await engine.QuickAddOnlineAsync("Email report tomorrow"));
+
+        var item = engine.Snapshot().Items.Single();
+        Assert.Equal("Email report tomorrow", item.Content);
+        Assert.Equal(Priority.P1, item.Priority); // the server resolved it, API 4 -> P1
+        Assert.Equal(0, engine.PendingCount);     // nothing queued: it already exists server-side
+    }
+
+    [Fact]
+    public async Task Quick_add_reports_failure_when_offline_so_the_caller_can_fall_back()
+    {
+        var engine = NewEngine(new FakeApi()); // QuickAdd unset = unreachable
+
+        Assert.False(await engine.QuickAddOnlineAsync("Buy milk"));
+        Assert.Empty(engine.Snapshot().Items);
+    }
+
+    [Fact]
+    public async Task Quick_add_clears_the_token_when_rejected()
+    {
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.QuickAddOnlineAsync("Buy milk"));
+        Assert.Null(secrets.Stored);
     }
 
     // ---- Optimistic writes ---------------------------------------------------------------------
@@ -81,7 +120,7 @@ public class SyncEngineTests
         var temp = engine.AddItem(new JsonObject { ["content"] = "New" });
 
         Assert.Equal(1, engine.PendingCount);
-        Assert.Equal("New", engine.Model.Items().Single().Content);
+        Assert.Equal("New", engine.Snapshot().Items.Single().Content);
         Assert.Equal("item_add", engine.Outbox.Single().Type);
         Assert.Equal(temp, engine.Outbox.Single().TempId);
     }
@@ -99,149 +138,39 @@ public class SyncEngineTests
     [Fact]
     public void Complete_marks_checked_optimistically_and_queues_item_close()
     {
-        var engine = SeededEngine(out _);
+        var engine = SeededEngine();
 
         engine.CompleteItem("i1");
 
-        Assert.True(engine.Model.Items().Single().Completed);
+        Assert.True(engine.Snapshot().Items.Single().Completed);
         var cmd = engine.Outbox.Single();
         Assert.Equal("item_close", cmd.Type);
         Assert.Equal("i1", Args(cmd)["id"]!.ToString());
     }
 
     [Fact]
-    public void Delete_removes_the_item_optimistically_and_queues_item_delete()
-    {
-        var engine = SeededEngine(out _);
-
-        engine.DeleteItem("i1");
-
-        Assert.Empty(engine.Model.Items());
-        var cmd = engine.Outbox.Single();
-        Assert.Equal("item_delete", cmd.Type);
-        Assert.Equal("i1", Args(cmd)["id"]!.ToString());
-    }
-
-    [Fact]
-    public async Task Quick_add_folds_the_server_created_task_into_the_model()
-    {
-        var api = new FakeApi
-        {
-            QuickAdd = text => new ResourceChange("items", "srv1", false,
-                (JsonObject)JsonNode.Parse($$"""{"id":"srv1","content":"{{text}}","priority":4}""")!),
-        };
-        var engine = NewEngine(api);
-
-        Assert.True(await engine.QuickAddOnlineAsync("Email report tomorrow"));
-
-        var item = engine.Model.Items().Single();
-        Assert.Equal("Email report tomorrow", item.Content);
-        Assert.Equal(Priority.P1, item.Priority); // the server resolved it, API 4 -> P1
-        Assert.Equal(0, engine.PendingCount);     // nothing queued: it already exists server-side
-    }
-
-    [Fact]
-    public async Task Quick_add_reports_failure_when_offline_so_the_caller_can_fall_back()
-    {
-        var engine = NewEngine(new FakeApi()); // QuickAdd unset = unreachable
-
-        Assert.False(await engine.QuickAddOnlineAsync("Buy milk"));
-        Assert.Empty(engine.Model.Items());
-    }
-
-    [Fact]
-    public async Task Quick_add_clears_the_token_when_rejected()
-    {
-        var secrets = new FakeSecrets { Stored = "tok" };
-        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
-
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.QuickAddOnlineAsync("Buy milk"));
-        Assert.Null(secrets.Stored);
-    }
-
-    [Fact]
     public void Reopen_clears_the_check_and_queues_item_uncomplete()
     {
-        var engine = SeededEngine(out _);
+        var engine = SeededEngine();
         engine.CompleteItem("i1");
 
         engine.ReopenItem("i1");
 
-        Assert.False(engine.Model.Items().Single().Completed);
+        Assert.False(engine.Snapshot().Items.Single().Completed);
         Assert.Equal("item_uncomplete", engine.Outbox.Last().Type);
     }
 
     [Fact]
-    public void Reorder_renumbers_the_items_and_queues_item_reorder()
+    public void Delete_removes_the_item_optimistically_and_queues_item_delete()
     {
-        var store = new InMemorySnapshotStore();
-        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
-        store.PutResource("items", "b", """{"id":"b","content":"B","child_order":2}""");
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
-        engine.Load();
+        var engine = SeededEngine();
 
-        engine.ReorderItems(["b", "a"]);
-
-        Assert.Equal(new[] { "B", "A" }, engine.Model.Items().OrderBy(i => i.ChildOrder).Select(i => i.Content).ToArray());
-        var cmd = engine.Outbox.Single();
-        Assert.Equal("item_reorder", cmd.Type);
-        Assert.Equal(2, Args(cmd)["items"]!.AsArray().Count);
-    }
-
-    [Fact]
-    public void Undo_of_an_unflushed_completion_restores_the_task()
-    {
-        var engine = SeededEngine(out _);
-        engine.CompleteItem("i1");
-        Assert.True(engine.CanUndo);
-
-        Assert.True(engine.Undo());
-
-        Assert.False(engine.Model.Items().Single().Completed);
-        Assert.Equal(0, engine.PendingCount); // the queued command went with it
-    }
-
-    [Fact]
-    public void Undo_of_an_unflushed_delete_restores_the_task()
-    {
-        var engine = SeededEngine(out _);
         engine.DeleteItem("i1");
 
-        Assert.True(engine.Undo());
-
-        Assert.Equal("A", engine.Model.Items().Single().Content);
-        Assert.Equal(0, engine.PendingCount);
-    }
-
-    [Fact]
-    public async Task Undo_of_an_acked_completion_issues_the_opposite_command()
-    {
-        var api = new FakeApi();
-        var store = new InMemorySnapshotStore();
-        store.PutResource("items", "i1", """{"id":"i1","content":"A","checked":false}""");
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
-        engine.Load();
-
-        engine.CompleteItem("i1");
-
-        // Flush the completion so it is no longer revertible, then undo it.
-        api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
-        Assert.Equal(0, engine.PendingCount);
-
-        Assert.True(engine.Undo());
-
-        Assert.Equal("item_uncomplete", engine.Outbox.Single().Type);
-        Assert.False(engine.Model.Items().Single().Completed);
-    }
-
-    [Fact]
-    public void Undo_reports_when_there_is_nothing_left_to_reverse()
-    {
-        var engine = SeededEngine(out _);
-
-        Assert.False(engine.CanUndo);
-        Assert.False(engine.Undo());
+        Assert.Empty(engine.Snapshot().Items);
+        var cmd = engine.Outbox.Single();
+        Assert.Equal("item_delete", cmd.Type);
+        Assert.Equal("i1", Args(cmd)["id"]!.ToString());
     }
 
     [Fact]
@@ -255,6 +184,17 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public void Acting_on_an_unknown_id_offers_no_meaningless_undo()
+    {
+        var engine = NewEngine(new FakeApi());
+
+        engine.DeleteItem("ghost");
+        engine.CompleteItem("ghost");
+
+        Assert.False(engine.CanUndo);
+    }
+
+    [Fact]
     public async Task Sync_without_a_stored_token_throws_before_calling_the_api()
     {
         var api = new FakeApi();
@@ -264,41 +204,233 @@ public class SyncEngineTests
         Assert.Empty(api.LastCommands);
     }
 
-    // ---- Revert --------------------------------------------------------------------------------
+    // ---- Reorder -------------------------------------------------------------------------------
 
     [Fact]
-    public void Revert_of_a_create_drops_the_command_and_the_optimistic_object()
+    public void Reorder_renumbers_consecutively_in_the_new_order()
     {
-        var engine = NewEngine(new FakeApi());
-        engine.AddItem(new JsonObject { ["content"] = "Draft" });
+        var engine = OrderedEngine();
 
-        engine.Revert(engine.Outbox.Single().Uuid);
+        engine.ReorderItems(["b", "a"]);
 
-        Assert.Equal(0, engine.PendingCount);
-        Assert.Empty(engine.Model.Items());
+        var cmd = engine.Outbox.Single();
+        Assert.Equal("item_reorder", cmd.Type);
+        var entries = Args(cmd)["items"]!.AsArray();
+        Assert.Equal("b", entries[0]!["id"]!.ToString());
+        Assert.Equal("1", entries[0]!["child_order"]!.ToString());
+        Assert.Equal("a", entries[1]!["id"]!.ToString());
+        Assert.Equal("2", entries[1]!["child_order"]!.ToString());
     }
 
     [Fact]
-    public void Revert_of_an_update_restores_the_last_server_state()
+    public void Reorder_ignores_ids_it_no_longer_holds()
     {
-        var engine = SeededEngine(out _);
-        engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
+        var engine = OrderedEngine();
 
-        engine.Revert(engine.Outbox.Single().Uuid);
+        engine.ReorderItems(["b", "ghost", "a"]);
 
-        Assert.Equal(0, engine.PendingCount);
-        Assert.Equal("A", engine.Model.Items().Single().Content);
+        var entries = Args(engine.Outbox.Single())["items"]!.AsArray();
+        Assert.Equal(new[] { "b", "a" }, entries.Select(e => e!["id"]!.ToString()).ToArray());
+        Assert.Equal(new[] { "1", "2" }, entries.Select(e => e!["child_order"]!.ToString()).ToArray());
     }
 
     [Fact]
-    public void Revert_of_a_delete_restores_the_item()
+    public void Reordering_nothing_queues_nothing()
     {
-        var engine = SeededEngine(out _);
+        var engine = OrderedEngine();
+
+        engine.ReorderItems([]);
+        engine.ReorderItems(["ghost"]);
+
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void Moving_a_task_only_renumbers_its_own_siblings()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a1", """{"id":"a1","content":"A1","project_id":"pA","child_order":1}""");
+        store.PutResource("items", "a2", """{"id":"a2","content":"A2","project_id":"pA","child_order":2}""");
+        store.PutResource("items", "b1", """{"id":"b1","content":"B1","project_id":"pB","child_order":1}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.MoveItem("a2", -1);
+
+        var entries = Args(engine.Outbox.Single())["items"]!.AsArray();
+        Assert.Equal(new[] { "a2", "a1" }, entries.Select(e => e!["id"]!.ToString()).ToArray());
+
+        // The other project is untouched.
+        Assert.Equal(1, engine.Snapshot().Items.Single(i => i.Id == "b1").ChildOrder);
+    }
+
+    [Fact]
+    public void Moving_past_either_end_does_nothing()
+    {
+        var engine = OrderedEngine();
+
+        engine.MoveItem("a", -1);
+        engine.MoveItem("b", 1);
+
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    // ---- Undo ----------------------------------------------------------------------------------
+
+    [Fact]
+    public void Undo_of_an_unflushed_completion_restores_the_task()
+    {
+        var engine = SeededEngine();
+        engine.CompleteItem("i1");
+        Assert.True(engine.CanUndo);
+
+        Assert.True(engine.Undo());
+
+        Assert.False(engine.Snapshot().Items.Single().Completed);
+        Assert.Equal(0, engine.PendingCount); // the queued command went with it
+    }
+
+    [Fact]
+    public void Undo_of_an_unflushed_delete_restores_the_task()
+    {
+        var engine = SeededEngine();
         engine.DeleteItem("i1");
 
-        engine.Revert(engine.Outbox.Single().Uuid);
+        Assert.True(engine.Undo());
 
-        Assert.Equal("A", engine.Model.Items().Single().Content);
+        Assert.Equal("A", engine.Snapshot().Items.Single().Content);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task Undo_of_an_acked_completion_issues_the_opposite_command()
+    {
+        var api = new FakeApi();
+        var engine = SeededEngine(api);
+        engine.CompleteItem("i1");
+
+        api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
+        await engine.SyncAsync();
+        Assert.Equal(0, engine.PendingCount);
+
+        Assert.True(engine.Undo());
+
+        Assert.Equal("item_uncomplete", engine.Outbox.Single().Type);
+        Assert.False(engine.Snapshot().Items.Single().Completed);
+    }
+
+    [Fact]
+    public async Task Undo_of_an_acked_delete_recreates_the_task_without_server_owned_fields()
+    {
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"A","priority":3,"user_id":"u1","added_at":"2026-01-01T00:00:00Z"}""");
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.DeleteItem("i1");
+        api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
+        await engine.SyncAsync();
+
+        Assert.True(engine.Undo());
+
+        var add = engine.Outbox.Single(c => c.Type == "item_add");
+        var args = Args(add);
+        Assert.Equal("A", args["content"]!.ToString());
+        Assert.Equal("3", args["priority"]!.ToString());
+        Assert.DoesNotContain("user_id", args.Select(kv => kv.Key));
+        Assert.DoesNotContain("added_at", args.Select(kv => kv.Key));
+        Assert.DoesNotContain("id", args.Select(kv => kv.Key));
+    }
+
+    [Fact]
+    public async Task Undo_after_a_temp_id_is_promoted_targets_the_real_id()
+    {
+        var api = new FakeApi();
+        var engine = NewEngine(api);
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New" });
+        engine.CompleteItem(temp);
+
+        api.Next = cmds => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real1" },
+        };
+        await engine.SyncAsync();
+
+        Assert.True(engine.Undo());
+
+        var cmd = engine.Outbox.Single(c => c.Type == "item_uncomplete");
+        Assert.Equal("real1", Args(cmd)["id"]!.ToString());
+    }
+
+    [Fact]
+    public async Task Undo_will_not_drop_a_command_that_is_already_on_the_wire()
+    {
+        var gate = new TaskCompletionSource();
+        var api = new FakeApi();
+        var engine = SeededEngine(api);
+        engine.CompleteItem("i1");
+
+        // Hold the response open so the command is genuinely in flight while we undo.
+        api.Next = cmds =>
+        {
+            gate.TrySetResult();
+            Thread.Sleep(50);
+            return Resp("s1", status: (cmds.Single().Uuid, true));
+        };
+        var syncing = Task.Run(() => engine.SyncAsync());
+        await gate.Task;
+
+        var undone = engine.Undo();
+        await syncing;
+
+        // Undo must compensate rather than silently dropping a command the server is applying.
+        Assert.True(undone);
+        Assert.Equal("item_uncomplete", engine.Outbox.Single().Type);
+    }
+
+    [Fact]
+    public void Undo_reverses_in_reverse_order_and_then_reports_nothing_left()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"One"}""");
+        store.PutResource("items", "i2", """{"id":"i2","content":"Two"}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.CompleteItem("i1");
+        engine.DeleteItem("i2");
+
+        Assert.True(engine.Undo());
+        Assert.Contains(engine.Snapshot().Items, i => i.Id == "i2");
+        Assert.True(engine.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+
+        Assert.True(engine.Undo());
+        Assert.False(engine.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+
+        Assert.False(engine.CanUndo);
+        Assert.False(engine.Undo());
+    }
+
+    [Fact]
+    public async Task A_cascade_cancelled_write_leaves_nothing_to_undo()
+    {
+        var api = new FakeApi();
+        var engine = NewEngine(api);
+        var temp = engine.AddItem(new JsonObject { ["content"] = "P" });
+        engine.CompleteItem(temp);
+
+        api.Next = cmds =>
+        {
+            var add = cmds.First(c => c.Type == "item_add");
+            return Resp("s1", status: (add.Uuid, false));
+        };
+        await engine.SyncAsync();
+
+        Assert.False(engine.CanUndo);
+        Assert.Equal(0, engine.PendingCount);
     }
 
     // ---- Reconciling writes --------------------------------------------------------------------
@@ -322,7 +454,7 @@ public class SyncEngineTests
 
         Assert.Equal(0, engine.PendingCount);
         Assert.Null(engine.Model.Get("items", temp));
-        Assert.Equal("real1", engine.Model.Items().Single().Id);
+        Assert.Equal("real1", engine.Snapshot().Items.Single().Id);
     }
 
     [Fact]
@@ -342,15 +474,14 @@ public class SyncEngineTests
 
         var child = engine.Outbox.Single(c => Args(c)["content"]?.ToString() == "C");
         Assert.Equal("realP", Args(child)["parent_id"]!.ToString());
-        Assert.Equal("realP", engine.Model.Items().Single(i => i.Content == "C").ParentId);
+        Assert.Equal("realP", engine.Snapshot().Items.Single(i => i.Content == "C").ParentId);
     }
 
     [Fact]
     public async Task An_acked_local_edit_yields_to_the_server_value()
     {
         var api = new FakeApi();
-        var engine = SeededEngineAsync(api, out _);
-        await engine.SyncAsync();
+        var engine = SeededEngine(api);
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
         api.Next = cmds => Resp("s2",
@@ -358,21 +489,20 @@ public class SyncEngineTests
             status: (cmds.Single().Uuid, true));
         await engine.SyncAsync();
 
-        Assert.Equal("SERVER", engine.Model.Items().Single().Content);
+        Assert.Equal("SERVER", engine.Snapshot().Items.Single().Content);
     }
 
     [Fact]
     public async Task An_incoming_change_does_not_clobber_an_unacked_local_edit()
     {
         var api = new FakeApi();
-        var engine = SeededEngineAsync(api, out _);
-        await engine.SyncAsync();
+        var engine = SeededEngine(api);
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
         api.Next = _ => Resp("s2", changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")]);
         await engine.SyncAsync();
 
-        Assert.Equal("LOCAL", engine.Model.Items().Single().Content);
+        Assert.Equal("LOCAL", engine.Snapshot().Items.Single().Content);
     }
 
     [Fact]
@@ -385,28 +515,7 @@ public class SyncEngineTests
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")]);
         await engine.SyncAsync();
 
-        // The token has advanced past this change, so dropping it would lose it permanently.
-        Assert.Equal("SERVER", engine.Model.Items().Single().Content);
-    }
-
-    [Fact]
-    public async Task A_tombstone_withheld_by_a_pending_write_is_applied_once_that_write_resolves()
-    {
-        var api = new FakeApi();
-        var engine = SeededEngineAsync(api, out _);
-        await engine.SyncAsync();
-
-        engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
-
-        // The server deletes the item while our edit is still un-acked: the tombstone must be held.
-        api.Next = _ => Resp("s2", changes: [ChDeleted("items", "i1")]);
-        await engine.SyncAsync();
-        Assert.Single(engine.Model.Items());
-
-        api.Next = cmds => Resp("s3", status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
-
-        Assert.Empty(engine.Model.Items());
+        Assert.Equal("SERVER", engine.Snapshot().Items.Single().Content);
     }
 
     [Fact]
@@ -420,9 +529,9 @@ public class SyncEngineTests
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"A"}""")]);
         await first.SyncAsync();
         first.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
-        api.Next = _ => Resp("s2", changes: [ChDeleted("items", "i1")]);
+        api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i1")]);
         await first.SyncAsync();
-        Assert.Single(first.Model.Items());
+        Assert.Single(first.Snapshot().Items);
 
         // Restart before the pending write resolved: the held deletion must still be waiting.
         var reloaded = new SyncEngine(api, store, secrets);
@@ -430,7 +539,25 @@ public class SyncEngineTests
         api.Next = cmds => Resp("s3", status: (cmds.Single().Uuid, true));
         await reloaded.SyncAsync();
 
-        Assert.Empty(reloaded.Model.Items());
+        Assert.Empty(reloaded.Snapshot().Items);
+    }
+
+    [Fact]
+    public async Task A_tombstone_withheld_by_a_pending_write_is_applied_once_that_write_resolves()
+    {
+        var api = new FakeApi();
+        var engine = SeededEngine(api);
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
+
+        api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i1")]);
+        await engine.SyncAsync();
+        Assert.Single(engine.Snapshot().Items);
+
+        api.Next = cmds => Resp("s3", status: (cmds.Single().Uuid, true));
+        await engine.SyncAsync();
+
+        Assert.Empty(engine.Snapshot().Items);
     }
 
     [Fact]
@@ -451,7 +578,7 @@ public class SyncEngineTests
         await engine.SyncAsync();
 
         Assert.Equal(0, engine.PendingCount);
-        Assert.Empty(engine.Model.Items());
+        Assert.Empty(engine.Snapshot().Items);
     }
 
     [Fact]
@@ -531,23 +658,6 @@ public class SyncEngineTests
     }
 
     [Fact]
-    public void A_write_the_store_cannot_persist_leaves_no_trace_in_the_model()
-    {
-        var store = new FailingWriteStore();
-        store.PutResource("items", "i1", """{"id":"i1","content":"A"}""");
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
-        engine.Load();
-
-        Assert.Throws<IOException>(() => engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" }));
-        Assert.Throws<IOException>(() => engine.AddItem(new JsonObject { ["content"] = "New" }));
-        Assert.Throws<IOException>(() => engine.DeleteItem("i1"));
-
-        // Nothing was shown that wasn't also durably queued.
-        Assert.Equal(0, engine.PendingCount);
-        Assert.Equal("A", engine.Model.Items().Single().Content);
-    }
-
-    [Fact]
     public void Optimistic_edit_survives_a_reload_from_the_store()
     {
         var store = new InMemorySnapshotStore();
@@ -558,7 +668,26 @@ public class SyncEngineTests
         reloaded.Load();
 
         Assert.Equal(1, reloaded.PendingCount);
-        Assert.Equal("Draft", reloaded.Model.Items().Single().Content);
+        Assert.Equal("Draft", reloaded.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
+    public void A_write_the_store_cannot_persist_leaves_no_trace_in_the_model()
+    {
+        var store = new FailingWriteStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"A","child_order":1}""");
+        store.PutResource("items", "i2", """{"id":"i2","content":"B","child_order":2}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        Assert.Throws<IOException>(() => engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" }));
+        Assert.Throws<IOException>(() => engine.AddItem(new JsonObject { ["content"] = "New" }));
+        Assert.Throws<IOException>(() => engine.DeleteItem("i1"));
+        Assert.Throws<IOException>(() => engine.MoveItem("i2", -1));
+
+        // Nothing was shown that wasn't also durably queued.
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Equal(new[] { "A", "B" }, engine.Snapshot().Items.OrderBy(i => i.ChildOrder).Select(i => i.Content).ToArray());
     }
 
     [Fact]
@@ -573,7 +702,7 @@ public class SyncEngineTests
         await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
 
         Assert.Null(secrets.Stored);
-        Assert.Empty(engine.Model.Items());
+        Assert.Empty(engine.Snapshot().Items);
         Assert.Empty(store.Load().Resources);
     }
 
@@ -583,30 +712,29 @@ public class SyncEngineTests
         => new(api, new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
 
     /// <summary>An engine holding one cached item "i1" with content "A", and no pending commands.</summary>
-    private static SyncEngine SeededEngine(out InMemorySnapshotStore store)
+    private static SyncEngine SeededEngine(FakeApi? api = null)
     {
-        store = new InMemorySnapshotStore();
+        var store = new InMemorySnapshotStore();
         store.PutResource("items", "i1", """{"id":"i1","content":"A","checked":false}""");
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+        return engine;
+    }
+
+    /// <summary>An engine holding two same-project items "a" then "b".</summary>
+    private static SyncEngine OrderedEngine()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","child_order":2}""");
         var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
         engine.Load();
         return engine;
     }
 
-    /// <summary>An engine whose first sync will deliver item "i1" with content "A".</summary>
-    private static SyncEngine SeededEngineAsync(FakeApi api, out InMemorySnapshotStore store)
-    {
-        store = new InMemorySnapshotStore();
-        api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"A"}""")]);
-        return new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
-    }
-
     private static JsonObject Args(OutboxCommand cmd) => (JsonObject)JsonNode.Parse(cmd.ArgsJson)!;
 
-    private static ResourceChange Ch(string type, string id, string json)
-        => new(type, id, false, (JsonObject)JsonNode.Parse(json)!);
-
-    private static ResourceChange ChDeleted(string type, string id)
-        => new(type, id, true, new JsonObject { ["id"] = id });
+    private static ResourceChange Ch(string type, string id, string json) => Json.Change(type, id, json);
 
     private static SyncResponse Resp(
         string? token,

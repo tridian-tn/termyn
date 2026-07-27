@@ -1,15 +1,13 @@
 namespace Termyn.Core.Platform;
 
-/// <summary>Supplies the current time, so date-sensitive logic can be tested deterministically.</summary>
+/// <summary>Supplies today's date, so date-sensitive logic can be tested deterministically.</summary>
 public interface IClock
 {
-    DateTimeOffset Now { get; }
-
-    DateOnly Today => DateOnly.FromDateTime(Now.LocalDateTime);
+    DateOnly Today { get; }
 }
 
-/// <summary>The real clock.</summary>
+/// <summary>The real clock, reading the machine's local date.</summary>
 public sealed class SystemClock : IClock
 {
-    public DateTimeOffset Now => DateTimeOffset.Now;
+    public DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
 }

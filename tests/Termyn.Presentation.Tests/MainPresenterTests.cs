@@ -2,9 +2,9 @@ using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
-using Termyn.Core.Platform;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.Presentation.Tests;
 
@@ -22,10 +22,10 @@ public class MainPresenterTests
                 SyncToken = "s1",
                 Changes =
                 [
-                    Change("projects", "p1", """{"id":"p1","name":"Work"}"""),
-                    Change("items", "done", """{"id":"done","content":"Done","checked":true,"child_order":0}"""),
-                    Change("items", "b", """{"id":"b","content":"Second","project_id":"p1","priority":1,"child_order":2}"""),
-                    Change("items", "a", """{"id":"a","content":"First","project_id":"pX","priority":4,"child_order":1}"""),
+                    Json.Change("projects", "p1", """{"id":"p1","name":"Work"}"""),
+                    Json.Change("items", "done", """{"id":"done","content":"Done","checked":true,"child_order":0}"""),
+                    Json.Change("items", "b", """{"id":"b","content":"Second","project_id":"p1","priority":1,"child_order":2}"""),
+                    Json.Change("items", "a", """{"id":"a","content":"First","project_id":"pX","priority":4,"child_order":1}"""),
                 ],
             },
         };
@@ -67,6 +67,22 @@ public class MainPresenterTests
     }
 
     [Fact]
+    public async Task Recovering_the_network_clears_the_offline_status()
+    {
+        var api = new FakeApi { Throw = new TodoistNetworkException("offline") };
+        var presenter = NewPresenter(api, SeededStore());
+        await presenter.LoadAsync();
+        Assert.True(presenter.IsOffline);
+
+        api.Throw = null;
+        api.Response = new SyncResponse { SyncToken = "s1" };
+        await presenter.SyncAsync();
+
+        Assert.False(presenter.IsOffline);
+        Assert.DoesNotContain("offline", presenter.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Clears_token_and_rethrows_when_rejected()
     {
         var secrets = new FakeSecrets { Stored = "tok" };
@@ -77,6 +93,16 @@ public class MainPresenterTests
         Assert.Null(secrets.Stored);
     }
 
+    [Fact]
+    public void Status_reports_the_pending_count()
+    {
+        var presenter = NewPresenter(new FakeApi(), SeededStore());
+
+        presenter.Rename("i1", "Renamed");
+
+        Assert.Equal("1 task · 1 pending", presenter.Status);
+    }
+
     // ---- Capture -------------------------------------------------------------------------------
 
     [Fact]
@@ -84,7 +110,7 @@ public class MainPresenterTests
     {
         var api = new FakeApi
         {
-            QuickAdd = text => Change("items", "new", $$"""{"id":"new","content":"{{text}}"}"""),
+            QuickAdd = text => Json.Change("items", "new", $$"""{"id":"new","content":"{{text}}"}"""),
         };
         var presenter = NewPresenter(api, new InMemorySnapshotStore());
 
@@ -110,6 +136,16 @@ public class MainPresenterTests
     }
 
     [Fact]
+    public async Task Capture_of_only_tokens_keeps_the_raw_text_rather_than_creating_a_blank_task()
+    {
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+
+        await presenter.CaptureAsync("#Work p1");
+
+        Assert.Equal("#Work p1", presenter.Rows.Single().Content);
+    }
+
+    [Fact]
     public async Task Capture_ignores_blank_text()
     {
         var api = new FakeApi();
@@ -122,14 +158,43 @@ public class MainPresenterTests
     }
 
     [Fact]
-    public void Preview_reports_what_the_local_parser_understood()
+    public void Preview_reports_unresolved_project_and_section_names()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Reports","project_id":"p1"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+
+        var known = presenter.Preview("Task #Work /Reports");
+        Assert.True(known.ProjectResolved);
+        Assert.True(known.SectionResolved);
+
+        var unknown = presenter.Preview("Task #Nope /Missing");
+        Assert.False(unknown.ProjectResolved);
+        Assert.False(unknown.SectionResolved);
+    }
+
+    [Fact]
+    public void Preview_flags_what_the_local_parser_cannot_handle()
     {
         var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
 
         var preview = presenter.Preview("Water plants every day #Home");
 
-        Assert.Equal("Home", preview.ProjectName);
-        Assert.NotEmpty(preview.Unsupported); // recurrence is not handled offline
+        Assert.Equal("Home", preview.Parse.ProjectName);
+        Assert.NotEmpty(preview.Parse.Unsupported); // recurrence is not handled offline
+    }
+
+    [Fact]
+    public async Task An_offline_capture_resolves_the_project_by_name()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+
+        await presenter.CaptureAsync("Email report #Work");
+
+        Assert.Equal("Work", presenter.Rows.Single().Project);
     }
 
     // ---- Intents -------------------------------------------------------------------------------
@@ -186,12 +251,12 @@ public class MainPresenterTests
     }
 
     [Fact]
-    public void Search_filters_by_content_and_project()
+    public void Search_filters_by_content_project_and_label()
     {
         var store = new InMemorySnapshotStore();
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
         store.PutResource("items", "a", """{"id":"a","content":"Email report","project_id":"p1","child_order":1}""");
-        store.PutResource("items", "b", """{"id":"b","content":"Buy milk","child_order":2}""");
+        store.PutResource("items", "b", """{"id":"b","content":"Buy milk","labels":["errand"],"child_order":2}""");
         var presenter = NewPresenter(new FakeApi(), store);
 
         presenter.Search("milk");
@@ -200,6 +265,9 @@ public class MainPresenterTests
         presenter.Search("work");
         Assert.Equal("Email report", presenter.Rows.Single().Content);
 
+        presenter.Search("errand");
+        Assert.Equal("Buy milk", presenter.Rows.Single().Content);
+
         presenter.Search("");
         Assert.Equal(2, presenter.Rows.Count);
     }
@@ -207,14 +275,31 @@ public class MainPresenterTests
     [Fact]
     public void Moving_a_task_reorders_the_list()
     {
-        var store = new InMemorySnapshotStore();
-        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
-        store.PutResource("items", "b", """{"id":"b","content":"B","child_order":2}""");
-        var presenter = NewPresenter(new FakeApi(), store);
+        var presenter = NewPresenter(new FakeApi(), OrderedStore());
 
         presenter.Move("b", -1);
 
         Assert.Equal(new[] { "B", "A" }, presenter.Rows.Select(r => r.Content).ToArray());
+    }
+
+    [Fact]
+    public void Moving_while_a_search_filter_is_active_does_not_scramble_hidden_rows()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"alpha","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"beta match","child_order":2}""");
+        store.PutResource("items", "c", """{"id":"c","content":"gamma","child_order":3}""");
+        store.PutResource("items", "d", """{"id":"d","content":"delta match","child_order":4}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+
+        presenter.Search("match");
+        presenter.Move("d", -1);
+        presenter.Search("");
+
+        // Every task still has a distinct position, and the hidden ones kept their relative order.
+        var orders = presenter.Rows.Select(r => r.Id).ToArray();
+        Assert.Equal(4, orders.Distinct().Count());
+        Assert.True(Array.IndexOf(orders, "a") < Array.IndexOf(orders, "c"));
     }
 
     [Fact]
@@ -246,15 +331,11 @@ public class MainPresenterTests
         return store;
     }
 
-    private static ResourceChange Change(string type, string id, string json)
-        => new(type, id, false, (JsonObject)JsonNode.Parse(json)!);
-
-    private sealed class FixedClock : IClock
+    private static InMemorySnapshotStore OrderedStore()
     {
-        private readonly DateOnly _today;
-
-        public FixedClock(DateOnly today) => _today = today;
-
-        public DateTimeOffset Now => new(_today.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","child_order":2}""");
+        return store;
     }
 }

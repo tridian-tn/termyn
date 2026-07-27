@@ -7,7 +7,10 @@ using Termyn.Core.Sync;
 namespace Termyn.Presentation;
 
 /// <summary>A single row rendered in the task list.</summary>
-public sealed record TaskRow(string Id, string Content, Priority Priority, string Project, string Due);
+public sealed record TaskRow(string Id, string Content, Priority Priority, string Project, string Due, IReadOnlyList<string> Labels);
+
+/// <summary>What the local parser made of some capture text, and whether its names resolved.</summary>
+public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved);
 
 /// <summary>
 /// Drives the task list: exposes the engine's model as rows and turns user intents into engine
@@ -17,6 +20,7 @@ public sealed class MainPresenter
 {
     private readonly SyncEngine _engine;
     private readonly QuickAddParser _parser;
+    private IReadOnlyList<TaskRow> _allRows = [];
 
     public MainPresenter(SyncEngine engine, QuickAddParser parser)
     {
@@ -30,7 +34,7 @@ public sealed class MainPresenter
 
     public IReadOnlyList<TaskRow> Rows { get; private set; } = [];
 
-    public string Status { get; private set; } = "Loading…";
+    public string Status { get; private set; } = string.Empty;
 
     public bool IsOffline { get; private set; }
 
@@ -47,21 +51,12 @@ public sealed class MainPresenter
     {
         IsOffline = false;
         Publish();
-
-        try
-        {
-            await _engine.SyncAsync(ct);
-        }
-        catch (TodoistNetworkException)
-        {
-            IsOffline = true;
-        }
-
-        Publish();
+        await SyncAsync(ct);
     }
 
     /// <summary>Reconciles with the server and republishes, keeping the current view if offline.</summary>
-    public async Task SyncAsync(CancellationToken ct = default)
+    /// <returns>True when writes are still queued, so the caller can come back sooner.</returns>
+    public async Task<bool> SyncAsync(CancellationToken ct = default)
     {
         try
         {
@@ -74,6 +69,7 @@ public sealed class MainPresenter
         }
 
         Publish();
+        return _engine.PendingCount > 0 && !IsOffline;
     }
 
     /// <summary>
@@ -85,7 +81,7 @@ public sealed class MainPresenter
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var captured = false;
+        bool captured;
         try
         {
             captured = await _engine.QuickAddOnlineAsync(text, ct);
@@ -95,22 +91,37 @@ public sealed class MainPresenter
             captured = false;
         }
 
+        IsOffline = !captured;
+
         if (!captured)
         {
-            IsOffline = true;
-            _engine.AddItem(ItemFields.ForAdd(_parser.Parse(text), ResolveProjectId));
+            var parse = _parser.Parse(text);
+
+            // Every word was a token, so there is no task text left. Keep the raw input rather than
+            // creating a blank task the server would reject and silently discard.
+            var content = string.IsNullOrWhiteSpace(parse.Content) ? text.Trim() : parse.Content;
+            var resolved = parse with { Content = content };
+
+            _engine.AddItem(ItemFields.ForAdd(resolved, ResolveProjectId(parse.ProjectName), ResolveSectionId(parse.SectionName)));
         }
 
         Publish();
     }
 
-    /// <summary>Shows what the local parser makes of the text, for the capture preview.</summary>
-    public QuickAddParse Preview(string text) => _parser.Parse(text);
+    /// <summary>Shows what the local parser understood, for the capture preview.</summary>
+    public CapturePreview Preview(string text)
+    {
+        var parse = _parser.Parse(text);
+        return new CapturePreview(
+            parse,
+            parse.ProjectName is null || ResolveProjectId(parse.ProjectName) is not null,
+            parse.SectionName is null || ResolveSectionId(parse.SectionName) is not null);
+    }
 
     public void Search(string query)
     {
         SearchQuery = query ?? string.Empty;
-        Publish();
+        Republish();
     }
 
     public void Rename(string id, string content)
@@ -158,32 +169,34 @@ public sealed class MainPresenter
         return undone;
     }
 
-    /// <summary>Moves a task one place up or down among the currently visible rows.</summary>
+    /// <summary>Moves a task one place up or down among its siblings.</summary>
     public void Move(string id, int offset)
     {
-        var ids = Rows.Select(r => r.Id).ToList();
-        var from = ids.IndexOf(id);
-        var to = from + offset;
-        if (from < 0 || to < 0 || to >= ids.Count)
-            return;
-
-        ids.RemoveAt(from);
-        ids.Insert(to, id);
-        _engine.ReorderItems(ids);
+        _engine.MoveItem(id, offset);
         Publish();
     }
 
-    private string? ResolveProjectId(string name)
-        => _engine.Model.Projects()
-            .FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
+    private string? ResolveProjectId(string? name)
+        => name is null
+            ? null
+            : _engine.Snapshot().Projects
+                .FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
 
+    private string? ResolveSectionId(string? name)
+        => name is null
+            ? null
+            : _engine.Snapshot().Sections
+                .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
+
+    /// <summary>Re-reads the model and republishes. Call after anything that mutates the engine.</summary>
     private void Publish()
     {
-        var projects = _engine.Model.Projects()
+        var snapshot = _engine.Snapshot();
+        var projects = snapshot.Projects
             .DistinctBy(p => p.Id)
             .ToDictionary(p => p.Id, p => p.Name);
 
-        var rows = _engine.Model.Items()
+        _allRows = snapshot.Items
             .Where(i => !i.Completed)
             .OrderBy(i => i.ChildOrder)
             .Select(i => new TaskRow(
@@ -191,26 +204,38 @@ public sealed class MainPresenter
                 i.Content,
                 i.Priority,
                 i.ProjectId is not null && projects.TryGetValue(i.ProjectId, out var name) ? name : string.Empty,
-                i.DueText ?? i.DueDate ?? string.Empty));
+                i.DueText ?? i.DueDate ?? string.Empty,
+                i.Labels))
+            .ToList();
+
+        Republish(snapshot);
+    }
+
+    /// <summary>Re-applies the search filter to the rows already projected.</summary>
+    private void Republish(ModelSnapshot? snapshot = null)
+    {
+        var rows = _allRows.AsEnumerable();
 
         if (!string.IsNullOrWhiteSpace(SearchQuery))
         {
             var q = SearchQuery.Trim();
             rows = rows.Where(r =>
                 r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                r.Project.Contains(q, StringComparison.OrdinalIgnoreCase));
+                r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                r.Labels.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase)));
         }
 
         Rows = rows.ToList();
 
-        var pending = _engine.PendingCount;
+        var pending = snapshot?.PendingCount ?? _engine.PendingCount;
+        var failed = snapshot?.FailedCount ?? _engine.FailedCount;
         Status = string.Join(" · ",
             new[]
             {
-                $"{Rows.Count} tasks",
+                Rows.Count == 1 ? "1 task" : $"{Rows.Count} tasks",
                 IsOffline ? "offline (showing cached)" : null,
                 pending > 0 ? $"{pending} pending" : null,
-                _engine.FailedCount > 0 ? $"{_engine.FailedCount} failed" : null,
+                failed > 0 ? $"{failed} failed" : null,
             }.Where(s => s is not null));
 
         RowsChanged?.Invoke();

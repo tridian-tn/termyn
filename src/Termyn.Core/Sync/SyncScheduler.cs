@@ -14,54 +14,89 @@ public sealed record SyncCadence(TimeSpan Interval, TimeSpan WriteDebounce)
 /// Runs the background sync loop. A write nudges it rather than syncing immediately, so a burst of
 /// edits produces one round trip instead of many, keeping well inside Todoist's request limits.
 /// </summary>
+/// <remarks>
+/// <see cref="Start"/> and <see cref="DisposeAsync"/> are expected from one thread;
+/// <see cref="NotifyWrite"/> and <see cref="RequestNow"/> may be called from any.
+/// <see cref="SyncFailed"/> is raised on the worker thread, so a UI subscriber must marshal.
+/// </remarks>
 public sealed class SyncScheduler : IAsyncDisposable
 {
-    private readonly Func<CancellationToken, Task> _sync;
+    private readonly Func<CancellationToken, Task<bool>> _sync;
     private readonly SyncCadence _cadence;
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
+    private readonly Lock _state = new();
     private Task? _loop;
+    private bool _disposed;
     private DateTimeOffset _writePendingSince;
     private bool _writePending;
 
-    public SyncScheduler(Func<CancellationToken, Task> sync, SyncCadence? cadence = null)
+    /// <param name="sync">Performs one sync; returns true when work remains to be flushed.</param>
+    public SyncScheduler(Func<CancellationToken, Task<bool>> sync, SyncCadence? cadence = null)
     {
         _sync = sync;
         _cadence = cadence ?? SyncCadence.Default;
     }
 
-    /// <summary>Raised when a background sync throws, so the shell can surface it.</summary>
+    public SyncScheduler(Func<CancellationToken, Task> sync, SyncCadence? cadence = null)
+        : this(async ct => { await sync(ct); return false; }, cadence)
+    {
+    }
+
+    /// <summary>Raised on the worker thread when a background sync throws.</summary>
     public event Action<Exception>? SyncFailed;
 
-    public void Start() => _loop ??= Task.Run(() => RunAsync(_stopping.Token));
+    public void Start()
+    {
+        lock (_state)
+        {
+            if (_disposed)
+                return;
+            _loop ??= Task.Run(() => RunAsync(_stopping.Token));
+        }
+    }
 
     /// <summary>Notes that something was written; the loop flushes once the debounce elapses.</summary>
     public void NotifyWrite()
     {
-        _writePendingSince = DateTimeOffset.UtcNow;
-        _writePending = true;
+        lock (_state)
+        {
+            _writePendingSince = DateTimeOffset.UtcNow;
+            _writePending = true;
+        }
         Wake();
     }
 
     /// <summary>Asks for a sync as soon as possible, bypassing the debounce.</summary>
     public void RequestNow()
     {
-        _writePending = false;
+        lock (_state)
+            _writePending = false;
         Wake();
     }
 
     public async ValueTask DisposeAsync()
     {
+        Task? loop;
+        lock (_state)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            loop = _loop;
+        }
+
         await _stopping.CancelAsync();
         Wake();
 
-        if (_loop is not null)
+        if (loop is not null)
         {
             try
             {
-                await _loop;
+                // Bounded: a sync that ignores its token must not hold up shutting down.
+                await loop.WaitAsync(TimeSpan.FromSeconds(5));
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
             {
                 // Expected on shutdown.
             }
@@ -73,18 +108,32 @@ public sealed class SyncScheduler : IAsyncDisposable
 
     private void Wake()
     {
-        if (_wake.CurrentCount == 0)
-            _wake.Release();
+        try
+        {
+            if (_wake.CurrentCount == 0)
+                _wake.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // Another caller released first; the loop is already awake.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Shutting down.
+        }
     }
 
     private async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            var wait = _writePending ? _cadence.WriteDebounce : _cadence.Interval;
+            bool writePending;
+            lock (_state)
+                writePending = _writePending;
+
             try
             {
-                await _wake.WaitAsync(wait, ct);
+                await _wake.WaitAsync(writePending ? _cadence.WriteDebounce : _cadence.Interval, ct);
             }
             catch (OperationCanceledException)
             {
@@ -94,21 +143,27 @@ public sealed class SyncScheduler : IAsyncDisposable
             if (ct.IsCancellationRequested)
                 return;
 
-            // Hold off while edits are still arriving, so a burst coalesces into one sync.
-            if (_writePending && DateTimeOffset.UtcNow - _writePendingSince < _cadence.WriteDebounce)
-                continue;
+            lock (_state)
+            {
+                // Hold off while edits are still arriving, so a burst coalesces into one sync.
+                if (_writePending && DateTimeOffset.UtcNow - _writePendingSince < _cadence.WriteDebounce)
+                    continue;
+                _writePending = false;
+            }
 
-            _writePending = false;
             try
             {
-                await _sync(ct);
+                if (await _sync(ct))
+                    Wake(); // more queued than one round could flush; come straight back
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return;
             }
             catch (Exception ex)
             {
+                // Including a cancellation that came from inside the sync rather than from shutdown:
+                // that must not silently stop the loop for the rest of the session.
                 SyncFailed?.Invoke(ex);
             }
         }

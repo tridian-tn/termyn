@@ -18,6 +18,8 @@ internal sealed class MainForm : Form
     private readonly ListView _list;
     private readonly Label _status;
 
+    private string? _editingId;
+
     public MainForm(MainPresenter presenter, SyncScheduler scheduler)
     {
         _presenter = presenter;
@@ -36,7 +38,7 @@ internal sealed class MainForm : Form
         _preview = new Label { Dock = DockStyle.Top, Height = 20, ForeColor = SystemColors.GrayText, Padding = new Padding(4, 2, 0, 0) };
 
         _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
-        _search.TextChanged += (_, _) => _presenter.Search(_search.Text);
+        _search.TextChanged += (_, _) => Guarded(() => _presenter.Search(_search.Text));
 
         _list = new ListView
         {
@@ -44,6 +46,7 @@ internal sealed class MainForm : Form
             View = View.Details,
             FullRowSelect = true,
             LabelEdit = true,
+            MultiSelect = false,
             HideSelection = false,
             HeaderStyle = ColumnHeaderStyle.Nonclickable,
         };
@@ -52,6 +55,7 @@ internal sealed class MainForm : Form
         _list.Columns.Add("Project", 150);
         _list.Columns.Add("Due", 140);
         _list.KeyDown += OnListKeyDown;
+        _list.BeforeLabelEdit += OnBeforeLabelEdit;
         _list.AfterLabelEdit += OnAfterLabelEdit;
 
         _status = new Label
@@ -70,11 +74,13 @@ internal sealed class MainForm : Form
         Controls.Add(_capture);
 
         _presenter.RowsChanged += OnRowsChanged;
+        _scheduler.SyncFailed += OnSyncFailed;
         Load += async (_, _) => await LoadAsync();
         FormClosing += (_, _) => _cts.Cancel();
         FormClosed += (_, _) =>
         {
             _presenter.RowsChanged -= OnRowsChanged;
+            _scheduler.SyncFailed -= OnSyncFailed;
             _cts.Dispose();
         };
     }
@@ -95,7 +101,8 @@ internal sealed class MainForm : Form
 
     private void Render()
     {
-        if (IsDisposed)
+        // A background sync must not wipe the row the user is currently renaming.
+        if (IsDisposed || _editingId is not null)
             return;
 
         var selectedId = SelectedId();
@@ -104,11 +111,10 @@ internal sealed class MainForm : Form
         _list.Items.Clear();
         foreach (var row in _presenter.Rows)
         {
-            var item = new ListViewItem(new[] { row.Content, PriorityLabel(row.Priority), row.Project, row.Due })
+            _list.Items.Add(new ListViewItem(new[] { row.Content, PriorityLabel(row.Priority), row.Project, row.Due })
             {
                 Tag = row.Id,
-            };
-            _list.Items.Add(item);
+            });
         }
         _list.EndUpdate();
 
@@ -119,6 +125,20 @@ internal sealed class MainForm : Form
     }
 
     private static string PriorityLabel(Priority priority) => priority == Priority.P4 ? string.Empty : priority.ToString();
+
+    private void OnSyncFailed(Exception ex)
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        BeginInvoke(() =>
+        {
+            if (IsDisposed)
+                return;
+            _status.Text = ex is TodoistAuthException
+                ? "Your Todoist token was rejected and cleared. Restart Termyn to reconnect."
+                : "Background sync failed: " + ex.Message;
+        });
+    }
 
     // ---- Input ---------------------------------------------------------------------------------
 
@@ -134,7 +154,7 @@ internal sealed class MainForm : Form
 
         _capture.Clear();
         UpdatePreview();
-        await Guarded(() => _presenter.CaptureAsync(text, _cts.Token));
+        await GuardedAsync(() => _presenter.CaptureAsync(text, _cts.Token));
         _scheduler.NotifyWrite();
     }
 
@@ -146,10 +166,14 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var parse = _presenter.Preview(_capture.Text);
+        var preview = _presenter.Preview(_capture.Text);
+        var parse = preview.Parse;
         var parts = new List<string> { $"\"{parse.Content}\"" };
-        if (parse.ProjectName is not null)
-            parts.Add("#" + parse.ProjectName);
+
+        if (parse.ProjectName is { } project)
+            parts.Add(preview.ProjectResolved ? "#" + project : $"#{project} (unknown — goes to Inbox)");
+        if (parse.SectionName is { } section)
+            parts.Add(preview.SectionResolved ? "/" + section : $"/{section} (unknown)");
         foreach (var label in parse.Labels)
             parts.Add("@" + label);
         if (parse.Priority != Priority.P4)
@@ -162,36 +186,41 @@ internal sealed class MainForm : Form
         _preview.Text = string.Join("  ·  ", parts);
     }
 
-    private async void OnListKeyDown(object? sender, KeyEventArgs e)
+    private void OnListKeyDown(object? sender, KeyEventArgs e)
     {
         var id = SelectedId();
+        var wrote = true;
 
         switch (e.KeyCode)
         {
             case Keys.Space when id is not null:
             case Keys.Enter when e.Control && id is not null:
-                _presenter.Complete(id!);
+                Guarded(() => _presenter.Complete(id!));
                 break;
             case Keys.Delete when id is not null:
-                _presenter.Delete(id!);
+                Guarded(() => _presenter.Delete(id!));
                 break;
             case Keys.F2 when id is not null:
                 _list.SelectedItems[0].BeginEdit();
                 return;
             case Keys.D when e.Control && id is not null:
-                PromptForDue(id!);
+                Guarded(() => PromptForDue(id!));
                 break;
             case Keys.Z when e.Control:
-                _presenter.Undo();
+                Guarded(() =>
+                {
+                    if (!_presenter.Undo())
+                        _status.Text = "Nothing to undo.";
+                });
                 break;
             case Keys.D1 or Keys.D2 or Keys.D3 or Keys.D4 when e.Control && id is not null:
-                _presenter.SetPriority(id!, (Priority)(e.KeyCode - Keys.D0));
+                Guarded(() => _presenter.SetPriority(id!, (Priority)(e.KeyCode - Keys.D0)));
                 break;
             case Keys.Up when e.Alt && id is not null:
-                _presenter.Move(id!, -1);
+                Guarded(() => _presenter.Move(id!, -1));
                 break;
             case Keys.Down when e.Alt && id is not null:
-                _presenter.Move(id!, 1);
+                Guarded(() => _presenter.Move(id!, 1));
                 break;
             case Keys.F5:
                 _scheduler.RequestNow();
@@ -202,8 +231,8 @@ internal sealed class MainForm : Form
 
         e.Handled = true;
         e.SuppressKeyPress = true;
-        _scheduler.NotifyWrite();
-        await Task.CompletedTask;
+        if (wrote)
+            _scheduler.NotifyWrite();
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -222,20 +251,29 @@ internal sealed class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    private void OnBeforeLabelEdit(object? sender, LabelEditEventArgs e)
+        => _editingId = e.Item >= 0 && e.Item < _list.Items.Count ? _list.Items[e.Item].Tag as string : null;
+
     private void OnAfterLabelEdit(object? sender, LabelEditEventArgs e)
     {
+        // Capture the id up front: a sync landing mid-edit could otherwise shift what this index means.
+        var id = _editingId;
+        _editingId = null;
+
         var text = e.Label;
-        if (string.IsNullOrWhiteSpace(text))
+        if (id is null || string.IsNullOrWhiteSpace(text))
         {
             e.CancelEdit = true;
+            OnRowsChanged(); // catch up on anything a sync published while the edit was open
             return;
         }
 
-        if (_list.Items[e.Item].Tag is string id)
-        {
-            _presenter.Rename(id, text);
-            _scheduler.NotifyWrite();
-        }
+        var current = _presenter.Rows.FirstOrDefault(r => r.Id == id)?.Content;
+        if (text == current)
+            return;
+
+        Guarded(() => _presenter.Rename(id, text));
+        _scheduler.NotifyWrite();
     }
 
     private void PromptForDue(string id)
@@ -250,7 +288,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var parse = _presenter.Preview(answer);
+        var parse = _presenter.Preview(answer).Parse;
         if (parse.DueDate is null)
         {
             _status.Text = $"Couldn't read \"{answer}\" as a date.";
@@ -272,6 +310,7 @@ internal sealed class MainForm : Form
             if ((item.Tag as string) == id)
             {
                 item.Selected = true;
+                item.Focused = true;
                 item.EnsureVisible();
                 return;
             }
@@ -280,29 +319,44 @@ internal sealed class MainForm : Form
 
     private async Task LoadAsync()
     {
-        await Guarded(() => _presenter.LoadAsync(_cts.Token));
+        await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
         _scheduler.Start();
     }
 
-    private async Task Guarded(Func<Task> action)
+    private void Guarded(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+        }
+    }
+
+    private async Task GuardedAsync(Func<Task> action)
     {
         try
         {
             await action();
         }
-        catch (OperationCanceledException)
-        {
-            // Window closed mid-flight.
-        }
-        catch (TodoistAuthException)
-        {
-            if (!IsDisposed)
-                _status.Text = "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.";
-        }
         catch (Exception ex)
         {
-            if (!IsDisposed)
-                _status.Text = "Something went wrong: " + ex.Message;
+            Report(ex);
         }
+    }
+
+    private void Report(Exception ex)
+    {
+        if (IsDisposed)
+            return;
+
+        _status.Text = ex switch
+        {
+            OperationCanceledException => _status.Text, // window closed mid-flight
+            TodoistAuthException => "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.",
+            _ => "Something went wrong: " + ex.Message,
+        };
     }
 }

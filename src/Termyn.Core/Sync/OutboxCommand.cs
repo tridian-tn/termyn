@@ -21,6 +21,12 @@ public sealed class OutboxCommand
     /// </summary>
     public string? PriorJson { get; init; }
 
+    /// <summary>
+    /// True while this command is on the wire. Undo can't simply drop it then — the server is
+    /// applying it regardless — so the reversal has to be an opposite command instead.
+    /// </summary>
+    public bool InFlight { get; set; }
+
     public int Attempts { get; set; }
 
     /// <summary>Consecutive syncs in which the server returned no verdict for this command.</summary>
