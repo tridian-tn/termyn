@@ -1,19 +1,18 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using Termyn.Core.Model;
+using System.Text.Json.Nodes;
 
 namespace Termyn.Core.Api;
 
 /// <summary>
-/// Thin client over the Todoist unified API v1 sync endpoint. The bearer token is supplied per
+/// Thin client over the Todoist unified API v1 sync endpoint. Resources are returned as raw
+/// <see cref="JsonObject"/>s so nothing is dropped on the way in. The bearer token is supplied per
 /// call so first-run validation can check a token before it is persisted.
 /// </summary>
 public sealed class TodoistApiClient : ITodoistApi
 {
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly HttpClient _http;
 
@@ -22,7 +21,7 @@ public sealed class TodoistApiClient : ITodoistApi
     /// <inheritdoc />
     public async Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
     {
-        using var resp = await SendAsync(token, "*", ["user"], ct);
+        using var resp = await SendAsync(token, "*", ["user"], [], ct);
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return false;
         EnsureReachable(resp);
@@ -30,28 +29,39 @@ public sealed class TodoistApiClient : ITodoistApi
     }
 
     /// <inheritdoc />
-    public async Task<SyncResult> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, CancellationToken ct = default)
+    public async Task<SyncResponse> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct = default)
     {
-        using var resp = await SendAsync(token, syncToken, resourceTypes, ct);
+        using var resp = await SendAsync(token, syncToken, resourceTypes, commands, ct);
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new TodoistAuthException("Todoist rejected the API token.");
         EnsureReachable(resp);
 
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        var dto = await JsonSerializer.DeserializeAsync<SyncResponseDto>(stream, JsonOptions, ct)
-                  ?? throw new InvalidOperationException("Empty sync response from Todoist.");
-        return Materialise(dto);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        try
+        {
+            if (JsonNode.Parse(body) is not JsonObject root)
+                throw new TodoistNetworkException("Todoist returned an unexpected sync response.");
+            return Parse(root, resourceTypes);
+        }
+        catch (JsonException ex)
+        {
+            // A reachable server that answered with unusable content: treat like any other transient
+            // failure so the caller retries and keeps its last good state.
+            throw new TodoistNetworkException("Todoist returned an unreadable sync response.", ex);
+        }
     }
 
-    private async Task<HttpResponseMessage> SendAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, CancellationToken ct)
+    private async Task<HttpResponseMessage> SendAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct)
     {
-        var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var fields = new Dictionary<string, string>
         {
             ["sync_token"] = syncToken,
             ["resource_types"] = JsonSerializer.Serialize(resourceTypes),
-        });
+        };
+        if (commands.Count > 0)
+            fields["commands"] = SerializeCommands(commands);
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, SyncUrl) { Content = content };
+        using var req = new HttpRequestMessage(HttpMethod.Post, SyncUrl) { Content = new FormUrlEncodedContent(fields) };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         try
@@ -68,85 +78,83 @@ public sealed class TodoistApiClient : ITodoistApi
         }
     }
 
-    // A reachable server that answered with a non-success status (rate limit, 5xx, …). Surfaced as a
-    // network-class failure so callers show a retry path rather than crashing.
+    private static string SerializeCommands(IReadOnlyList<Command> commands)
+    {
+        var array = new JsonArray();
+        foreach (var c in commands)
+        {
+            var o = new JsonObject
+            {
+                ["type"] = c.Type,
+                ["uuid"] = c.Uuid,
+                ["args"] = c.Args.DeepClone(),
+            };
+            if (c.TempId is not null)
+                o["temp_id"] = c.TempId;
+            array.Add(o);
+        }
+        return array.ToJsonString();
+    }
+
     private static void EnsureReachable(HttpResponseMessage resp)
     {
         if (!resp.IsSuccessStatusCode)
             throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.");
     }
 
-    private static SyncResult Materialise(SyncResponseDto dto)
+    private static SyncResponse Parse(JsonObject root, IReadOnlyList<string> resourceTypes)
     {
-        var items = (dto.Items ?? [])
-            .Where(i => i.Id is not null)
-            .Select(i => new TaskItem
-            {
-                Id = i.Id!,
-                Content = i.Content ?? string.Empty,
-                ProjectId = i.ProjectId,
-                ParentId = i.ParentId,
-                ChildOrder = i.ChildOrder,
-                Priority = PriorityMap.FromApi(i.Priority),
-                Completed = i.Checked,
-                DueDate = i.Due?.Date,
-                DueText = i.Due?.String,
-            })
-            .ToList();
-
-        var projects = (dto.Projects ?? [])
-            .Where(p => p.Id is not null)
-            .Select(p => new Project
-            {
-                Id = p.Id!,
-                Name = p.Name ?? string.Empty,
-                IsInboxProject = p.IsInboxProject || p.InboxProjectLegacy,
-                ChildOrder = p.ChildOrder,
-            })
-            .ToList();
-
-        return new SyncResult
+        var changes = new List<ResourceChange>();
+        foreach (var type in resourceTypes)
         {
-            SyncToken = dto.SyncToken ?? "*",
-            FullSync = dto.FullSync,
-            Items = items,
-            Projects = projects,
+            if (root[type] is not JsonArray array)
+                continue;
+            foreach (var node in array)
+            {
+                if (node is not JsonObject obj || obj["id"] is not { } idNode)
+                    continue;
+                changes.Add(new ResourceChange(type, idNode.ToString(), ReadFlag(obj, "is_deleted"), obj.DeepClone().AsObject()));
+            }
+        }
+
+        var status = new Dictionary<string, CommandResult>();
+        if (root["sync_status"] is JsonObject ss)
+        {
+            foreach (var kv in ss)
+            {
+                status[kv.Key] = kv.Value switch
+                {
+                    JsonValue v when v.ToString() == "ok" => new CommandResult(true, null, null),
+                    JsonObject err => new CommandResult(false, err["error_code"]?.ToString(), err["error"]?.ToString()),
+                    _ => new CommandResult(false, null, kv.Value?.ToString()),
+                };
+            }
+        }
+
+        var tempMap = new Dictionary<string, string>();
+        if (root["temp_id_mapping"] is JsonObject tm)
+            foreach (var kv in tm)
+                if (kv.Value is { } value)
+                    tempMap[kv.Key] = value.ToString();
+
+        var token = root["sync_token"]?.ToString();
+        return new SyncResponse
+        {
+            SyncToken = string.IsNullOrEmpty(token) ? null : token,
+            FullSync = ReadFlag(root, "full_sync"),
+            Changes = changes,
+            SyncStatus = status,
+            TempIdMapping = tempMap,
         };
     }
 
-    private sealed class SyncResponseDto
+    // Flags have been represented as both JSON booleans and 0/1 integers; accept either.
+    private static bool ReadFlag(JsonObject o, string key)
     {
-        [JsonPropertyName("sync_token")] public string? SyncToken { get; set; }
-        [JsonPropertyName("full_sync")] public bool FullSync { get; set; }
-        [JsonPropertyName("items")] public List<ItemDto>? Items { get; set; }
-        [JsonPropertyName("projects")] public List<ProjectDto>? Projects { get; set; }
-    }
-
-    private sealed class ItemDto
-    {
-        [JsonPropertyName("id")] public string? Id { get; set; }
-        [JsonPropertyName("content")] public string? Content { get; set; }
-        [JsonPropertyName("project_id")] public string? ProjectId { get; set; }
-        [JsonPropertyName("parent_id")] public string? ParentId { get; set; }
-        [JsonPropertyName("child_order")] public int ChildOrder { get; set; }
-        [JsonPropertyName("priority")] public int Priority { get; set; }
-        [JsonPropertyName("checked")] public bool Checked { get; set; }
-        [JsonPropertyName("due")] public DueDto? Due { get; set; }
-    }
-
-    private sealed class DueDto
-    {
-        [JsonPropertyName("date")] public string? Date { get; set; }
-        [JsonPropertyName("string")] public string? String { get; set; }
-    }
-
-    // Todoist has used both "is_inbox_project" and "inbox_project" across API versions; accept either.
-    private sealed class ProjectDto
-    {
-        [JsonPropertyName("id")] public string? Id { get; set; }
-        [JsonPropertyName("name")] public string? Name { get; set; }
-        [JsonPropertyName("is_inbox_project")] public bool IsInboxProject { get; set; }
-        [JsonPropertyName("inbox_project")] public bool InboxProjectLegacy { get; set; }
-        [JsonPropertyName("child_order")] public int ChildOrder { get; set; }
+        if (o[key] is not JsonValue v)
+            return false;
+        if (v.TryGetValue(out bool b))
+            return b;
+        return v.TryGetValue(out int i) && i != 0;
     }
 }
