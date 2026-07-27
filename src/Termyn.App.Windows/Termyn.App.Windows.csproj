@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>Termyn</AssemblyName>
+    <RootNamespace>Termyn.App.Windows</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Termyn.Core\Termyn.Core.csproj" />
+    <ProjectReference Include="..\Termyn.Presentation\Termyn.Presentation.csproj" />
+    <ProjectReference Include="..\Termyn.Platform.Windows\Termyn.Platform.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

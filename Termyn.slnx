@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Termyn.Core/Termyn.Core.csproj" />
+    <Project Path="src/Termyn.Presentation/Termyn.Presentation.csproj" />
+    <Project Path="src/Termyn.Platform.Windows/Termyn.Platform.Windows.csproj" />
+    <Project Path="src/Termyn.App.Windows/Termyn.App.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Termyn.Core.Tests/Termyn.Core.Tests.csproj" />
+    <Project Path="tests/Termyn.Presentation.Tests/Termyn.Presentation.Tests.csproj" />
+  </Folder>
+</Solution>

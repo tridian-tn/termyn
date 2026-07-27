@@ -1,0 +1,24 @@
+namespace Termyn.Core.Model;
+
+/// <summary>A Todoist task, reduced to the fields the read-only list needs today.</summary>
+public sealed class TaskItem
+{
+    public required string Id { get; init; }
+    public required string Content { get; init; }
+    public string? ProjectId { get; init; }
+    public string? ParentId { get; init; }
+    public int ChildOrder { get; init; }
+    public Priority Priority { get; init; } = Priority.P4;
+    public bool Completed { get; init; }
+    public string? DueDate { get; init; }
+    public string? DueText { get; init; }
+}
+
+/// <summary>A Todoist project.</summary>
+public sealed class Project
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public bool IsInboxProject { get; init; }
+    public int ChildOrder { get; init; }
+}
