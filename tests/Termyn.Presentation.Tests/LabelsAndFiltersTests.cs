@@ -222,6 +222,114 @@ public class LabelsAndFiltersTests
     }
 
     [Fact]
+    public void Two_favourite_labels_of_the_same_name_are_listed_once()
+    {
+        // Nothing stops two labels sharing a name — renaming one onto another is enough. They are
+        // one view, and two rows with one key are two rows the tree can't tell apart.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1,"is_favorite":true}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","item_order":2,"is_favorite":true}""");
+        var presenter = NewPresenter(store);
+
+        var keys = presenter.Sidebar.Select(n => n.Key).ToList();
+        Assert.Equal(keys.Count, keys.Distinct().Count());
+        Assert.Single(presenter.Sidebar, n => n.Key == SidebarKeys.Favourite(SidebarKind.Label, "home"));
+    }
+
+    [Fact]
+    public void A_blank_label_name_is_not_added()
+    {
+        // The server rejects it, and a rejected command retries to its ceiling and then sits in the
+        // outbox as a failure the user can't act on.
+        var presenter = NewPresenter(Seeded());
+        var before = presenter.Labels.Count;
+
+        Assert.Null(presenter.AddLabel("   "));
+        Assert.Equal(before, presenter.Labels.Count);
+        Assert.DoesNotContain("pending", presenter.Status);
+    }
+
+    [Fact]
+    public void Renaming_the_label_being_viewed_follows_it_to_the_new_name()
+    {
+        // The selection holds a label by name, so a rename moves the view with it — otherwise the
+        // sidebar highlights nothing and the outline empties on the next sync.
+        var presenter = NewPresenter(Seeded());
+        presenter.Select(ViewSelection.OfLabel("home"));
+
+        presenter.RenameLabel("l1", "household");
+
+        Assert.Equal("household", presenter.Selection.LabelName);
+        Assert.Contains(presenter.Sidebar, n => n.Key == presenter.Selection.Key);
+    }
+
+    [Fact]
+    public void Renaming_a_label_leaves_a_different_view_alone()
+    {
+        var presenter = NewPresenter(Seeded());
+        presenter.Select(ViewSelection.OfLabel("errand"));
+
+        presenter.RenameLabel("l1", "household");
+
+        Assert.Equal("errand", presenter.Selection.LabelName);
+    }
+
+    [Fact]
+    public void An_unreadable_filter_is_reported_in_something_a_single_line_can_hold()
+    {
+        // The query comes off the account, so it can be any length and carry newlines that would
+        // break the line it is shown on.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("filters", "f1", $$"""{"id":"f1","name":"Big","query":"{{new string('x', 5000)}}"}""");
+        store.PutResource("filters", "f2", """{"id":"f2","name":"Blank","query":""}""");
+        var presenter = NewPresenter(store);
+
+        presenter.Select(ViewSelection.OfFilter("f1"));
+        Assert.True(presenter.UnsupportedFilter!.Length <= 201);
+
+        presenter.Select(ViewSelection.OfFilter("f2"));
+        Assert.NotEmpty(presenter.UnsupportedFilter!);
+    }
+
+    [Fact]
+    public void Selecting_a_readable_filter_clears_a_previous_warning()
+    {
+        var presenter = NewPresenter(Seeded());
+        presenter.Select(ViewSelection.OfFilter("f2")); // unreadable
+
+        presenter.Select(ViewSelection.OfFilter("f1")); // readable
+
+        Assert.Null(presenter.UnsupportedFilter);
+    }
+
+    [Fact]
+    public void Filters_are_listed_in_their_own_order()
+    {
+        var presenter = NewPresenter(Seeded());
+
+        var filters = presenter.Sidebar
+            .SkipWhile(n => n.Label != "Filters")
+            .Skip(1)
+            .TakeWhile(n => n.Kind != SidebarKind.Header)
+            .Select(n => n.Label);
+
+        Assert.Equal(["Hot", "Mine", "Job"], filters); // item_order, not alphabetical
+    }
+
+    [Fact]
+    public void A_label_row_counts_tasks_however_they_spell_the_label()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1}""");
+        store.PutResource("items", "i1", """{"id":"i1","content":"One","child_order":1,"labels":["Home"]}""");
+        store.PutResource("items", "i2", """{"id":"i2","content":"Two","child_order":2,"labels":["home"]}""");
+        var presenter = NewPresenter(store);
+
+        var row = presenter.Sidebar.Single(n => n.Key == SidebarKeys.For(SidebarKind.Label, "home"));
+        Assert.Equal(2, row.Count);
+    }
+
+    [Fact]
     public void Deleting_the_label_being_viewed_falls_back_to_the_default_view()
     {
         var presenter = NewPresenter(Seeded());

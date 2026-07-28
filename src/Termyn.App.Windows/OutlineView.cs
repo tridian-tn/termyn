@@ -6,8 +6,8 @@ namespace Termyn.App.Windows;
 
 /// <summary>
 /// The task outline: a virtual, owner-drawn list. Rows are drawn rather than composed from controls
-/// so that indentation, the priority flag and the label chips cost nothing per row, and only the
-/// visible rows are ever realised.
+/// so that indentation, the priority flag and the labels cost nothing per row, and only the visible
+/// rows are ever realised.
 /// </summary>
 internal sealed class OutlineView : ListView
 {

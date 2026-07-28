@@ -1,7 +1,3 @@
-using Termyn.Presentation;
-
-using Label = System.Windows.Forms.Label;
-
 namespace Termyn.App.Windows;
 
 /// <summary>
@@ -55,6 +51,10 @@ internal sealed class LabelPickerForm : Form
 
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(166, 352), Size = new Size(88, 30) };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(258, 352), Size = new Size(88, 30) };
+
+        // A name still sitting in the box is one the user meant to apply. Click runs before the
+        // dialog closes, so taking it here is the difference between adding the label and losing it.
+        ok.Click += (_, _) => AddFresh();
 
         AcceptButton = ok;
         CancelButton = cancel;

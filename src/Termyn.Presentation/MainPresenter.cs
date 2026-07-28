@@ -74,7 +74,10 @@ public sealed class MainPresenter
     /// </summary>
     public string? UnsupportedFilter { get; private set; }
 
-    /// <summary>Every label in the account, in the order the sidebar lists them.</summary>
+    /// <summary>
+    /// Every label in the account, in sidebar order. Duplicates by name are kept, unlike the
+    /// sidebar's own list — the picker needs to show what is actually there.
+    /// </summary>
     public IReadOnlyList<Label> Labels { get; private set; } = [];
 
     /// <summary>
@@ -244,10 +247,16 @@ public sealed class MainPresenter
         Publish();
     }
 
-    /// <summary>Adds a label to the account if it isn't there already, and returns its name.</summary>
-    public string AddLabel(string name)
+    /// <summary>Adds a label to the account if it isn't there already.</summary>
+    /// <returns>The label's name, or <c>null</c> when the name was blank and nothing was added.</returns>
+    public string? AddLabel(string name)
     {
+        // A nameless label is one the server will reject, and a rejected command retries to its
+        // ceiling and then sits in the outbox as a failure the user can do nothing about.
         var trimmed = name.Trim();
+        if (trimmed.Length == 0)
+            return null;
+
         var existing = _engine.Snapshot().Labels
             .FirstOrDefault(l => string.Equals(l.Name, trimmed, StringComparison.OrdinalIgnoreCase));
 
@@ -261,7 +270,16 @@ public sealed class MainPresenter
 
     public void RenameLabel(string id, string name)
     {
+        var old = _engine.Snapshot().Labels.FirstOrDefault(l => l.Id == id)?.Name;
+
         _engine.RenameLabel(id, name);
+
+        // A label view is held by name, so a rename moves it. Without this the selection names a
+        // label the account no longer has: nothing highlighted, and an outline that empties itself
+        // the moment the server carries the rename across to the tasks.
+        if (old is not null && string.Equals(Selection.LabelName, old, StringComparison.OrdinalIgnoreCase))
+            Selection = ViewSelection.OfLabel(name);
+
         Publish();
     }
 
@@ -334,20 +352,7 @@ public sealed class MainPresenter
     }
 
     private HashSet<string> DescendantProjects(string id)
-    {
-        var projects = _engine.Snapshot().Projects;
-        var doomed = new HashSet<string> { id };
-        bool grew;
-        do
-        {
-            grew = false;
-            foreach (var project in projects)
-                if (project.ParentId is { } parent && doomed.Contains(parent) && doomed.Add(project.Id))
-                    grew = true;
-        }
-        while (grew);
-        return doomed;
-    }
+        => ProjectTree.WithDescendants(_engine.Snapshot().Projects, [id]);
 
     public void AddSection(string name, string projectId)
     {
@@ -496,11 +501,8 @@ public sealed class MainPresenter
             View(SmartView.Inbox, "Inbox", inboxCount),
         };
 
-        var labels = snapshot.Labels
-            .Where(l => l.Id.Length > 0)
-            .OrderBy(l => l.ItemOrder)
-            .ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase)
-            .ToList();
+        // Already sorted by Publish; the sidebar only drops the ones it can't address.
+        var labels = Labels.Where(l => l.Id.Length > 0).ToList();
 
         var filters = snapshot.Filters
             .Where(f => f.Id.Length > 0)
@@ -515,7 +517,9 @@ public sealed class MainPresenter
             .OrderBy(p => p.ChildOrder)
             .ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
-        var favouriteLabels = labels.Where(l => l.IsFavorite).ToList();
+        // Deduped for the same reason the Labels group below is: two labels of one name are one
+        // view, and two rows sharing a key are two rows the tree can't tell apart.
+        var favouriteLabels = labels.Where(l => l.IsFavorite).DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var favouriteFilters = filters.Where(f => f.IsFavorite).ToList();
 
         if (favouriteProjects.Count + favouriteLabels.Count + favouriteFilters.Count > 0)
@@ -702,12 +706,28 @@ public sealed class MainPresenter
         {
             // Nothing, not everything. A full task list looks like a filter that ran and matched
             // broadly, which is the mistake this whole path exists to avoid.
-            UnsupportedFilter = filter.Query;
+            UnsupportedFilter = ForDisplay(filter.Query);
             return _ => false;
         }
 
         var context = new FilterContext(snapshot.Projects, snapshot.Today, snapshot.TimeZone);
         return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
+    }
+
+    /// <summary>
+    /// A filter query cut down to something a one-line notice can hold. The query comes off the
+    /// account, so it can be any length and can carry newlines that would break the line it sits on.
+    /// </summary>
+    private static string ForDisplay(string query)
+    {
+        var flat = query.ReplaceLineEndings(" ").Trim();
+
+        // A saved filter with no query at all still has to say something, or the notice trails off
+        // after the colon with nothing behind it.
+        if (flat.Length == 0)
+            return "(no query)";
+
+        return flat.Length > 200 ? flat[..200] + "…" : flat;
     }
 
     private void ApplyFilter(int pending, int failed)

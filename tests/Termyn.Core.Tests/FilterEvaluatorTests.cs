@@ -107,6 +107,15 @@ public class FilterEvaluatorTests
     }
 
     [Fact]
+    public void The_largest_window_the_grammar_allows_evaluates_without_throwing()
+    {
+        // The parser caps the window precisely so this can't walk off the end of the calendar.
+        // 3650 days from 2026-07-31 reaches 2036-07-27.
+        Assert.True(Matches("next 3650 days", Item(due: "2036-07-27")));
+        Assert.False(Matches("next 3650 days", Item(due: "2036-07-28")));
+    }
+
+    [Fact]
     public void Search_is_a_substring_of_the_content()
     {
         Assert.True(Matches("search: milk", Item(content: "Buy milk today")));

@@ -32,23 +32,13 @@ public sealed class FilterContext
         if (_resolved.TryGetValue((name, includeSubProjects), out var cached))
             return cached;
 
-        var ids = _projects
+        var named = _projects
             .Where(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
-            .Select(p => p.Id)
-            .ToHashSet(StringComparer.Ordinal);
+            .Select(p => p.Id);
 
-        if (includeSubProjects)
-        {
-            bool grew;
-            do
-            {
-                grew = false;
-                foreach (var project in _projects)
-                    if (project.ParentId is { } parent && ids.Contains(parent) && ids.Add(project.Id))
-                        grew = true;
-            }
-            while (grew); // a project's children can be enumerated before the project itself
-        }
+        var ids = includeSubProjects
+            ? ProjectTree.WithDescendants(_projects, named)
+            : named.ToHashSet(StringComparer.Ordinal);
 
         _resolved[(name, includeSubProjects)] = ids;
         return ids;
@@ -91,6 +81,8 @@ public static class FilterEvaluator
 
         FilterExpression.Or e => Matches(e.Left, item, context) || Matches(e.Right, item, context),
 
-        _ => true,
+        // Unreachable while every case is handled, and false rather than true so that it stays
+        // harmless if one ever isn't: a term nobody evaluates should match nothing, not everything.
+        _ => false,
     };
 }

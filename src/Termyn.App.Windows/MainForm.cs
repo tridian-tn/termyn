@@ -34,7 +34,7 @@ internal sealed class MainForm : Form
     private bool _syncingSidebar;
 
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
-    private string _sidebarKey = SmartView.Today.ToString();
+    private string _sidebarKey = ViewSelection.Default.Key;
 
     /// <summary>The sidebar last rendered, so an unchanged one isn't rebuilt.</summary>
     private IReadOnlyList<SidebarNode>? _renderedSidebar;
@@ -653,9 +653,20 @@ internal sealed class MainForm : Form
         if (picked is null)
             return false;
 
-        // A name that isn't a label yet has to become one first, so the item_update that follows
-        // refers to something the account actually has.
-        foreach (var name in picked.Where(p => !known.Contains(p, StringComparer.OrdinalIgnoreCase)))
+        // Opening the picker and pressing OK unchanged is not an edit. Writing anyway would queue a
+        // command that owns this task until it lands, and a web-side edit arriving in the meantime
+        // would be dropped for nothing.
+        if (picked.Count == row.Labels.Count && !picked.Except(row.Labels, StringComparer.OrdinalIgnoreCase).Any())
+            return false;
+
+        // A name the user typed has to become a label first, so the item_update that follows refers
+        // to something the account has. Names the task already wore are left alone: the picker
+        // carries those so they aren't stripped, not so they're adopted into the account.
+        var fresh = picked
+            .Where(p => !known.Contains(p, StringComparer.OrdinalIgnoreCase))
+            .Where(p => !row.Labels.Contains(p, StringComparer.OrdinalIgnoreCase));
+
+        foreach (var name in fresh)
             _presenter.AddLabel(name);
 
         _presenter.SetLabels(id, picked);

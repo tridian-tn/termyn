@@ -156,6 +156,91 @@ public class SyncEngineLabelTests
         Assert.Single(engine.Snapshot().Labels);
     }
 
+    // ---- Sync ----------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_pending_label_edit_does_not_shadow_a_task_of_the_same_id()
+    {
+        // Todoist ids are only unique within a resource type. Holding them without the type meant a
+        // queued label edit swallowed the server's change to the task numbered the same — and the
+        // sync token moves on regardless, so that change never came again.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "7", """{"id":"7","name":"home"}""");
+        store.PutResource("items", "7", """{"id":"7","content":"Task seven","project_id":"p"}""");
+
+        var api = new FakeApi();
+        var engine = Engine(store, api);
+        engine.RenameLabel("7", "household");
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [new ResourceChange("items", "7", false, Json.Object("""{"id":"7","content":"Renamed on another device","project_id":"p"}"""))],
+        };
+
+        await engine.SyncAsync();
+
+        Assert.Equal("Renamed on another device", engine.Snapshot().Items.Single().Content);
+        Assert.Equal("household", engine.Snapshot().Labels.Single().Name); // our own edit is untouched
+    }
+
+    [Fact]
+    public async Task A_label_created_offline_keeps_its_place_on_the_task_after_the_reconnect()
+    {
+        // What Ctrl+L queues: the label first, then the task that names it.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Task","project_id":"p"}""");
+
+        var api = new FakeApi();
+        var engine = Engine(store, api);
+
+        var temp = engine.AddLabel("urgent");
+        engine.SetItemLabels("i1", ["urgent"]);
+
+        Assert.Equal(["label_add", "item_update"], engine.Outbox.Select(c => c.Type));
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            TempIdMapping = new Dictionary<string, string> { [temp] = "L9" },
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+        };
+
+        await engine.SyncAsync();
+
+        Assert.Equal("L9", engine.Snapshot().Labels.Single().Id);
+        Assert.Equal(["urgent"], engine.Snapshot().Items.Single().Labels);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task A_server_side_label_rename_lands_once_our_own_edit_is_acked()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home"}""");
+
+        var api = new FakeApi();
+        var engine = Engine(store, api);
+        engine.RenameLabel("l1", "household");
+
+        // The server reports a different name while our command is still un-acked.
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [new ResourceChange("labels", "l1", false, Json.Object("""{"id":"l1","name":"chores"}"""))],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal("household", engine.Snapshot().Labels.Single().Name);
+    }
+
+    private static SyncEngine Engine(InMemorySnapshotStore store, FakeApi api)
+    {
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)));
+        engine.Load();
+        return engine;
+    }
+
     private static SyncEngine Seeded()
     {
         var store = new InMemorySnapshotStore();

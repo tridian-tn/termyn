@@ -176,6 +176,79 @@ public class FilterParserTests
         Assert.NotNull(parsed.Unsupported);
     }
 
+    [Theory]
+    [InlineData("(")]
+    [InlineData("!")]
+    [InlineData("today")]
+    public void A_query_too_long_to_parse_safely_is_refused(string token)
+    {
+        // Nested brackets, stacked negations and a long flat run of terms all build something the
+        // parser or the evaluator walks recursively. Deep enough and the stack goes — which can't
+        // be caught, so the size has to be refused before anything walks it.
+        var parsed = Parse(string.Join(' ', Enumerable.Repeat(token, 20_000)));
+
+        Assert.False(parsed.IsSupported);
+        Assert.NotNull(parsed.Unsupported);
+        Assert.True(parsed.Unsupported.Length < 200, "the reported fragment is bounded too");
+    }
+
+    [Fact]
+    public void A_query_at_the_size_limit_still_parses()
+    {
+        // The ceiling has to leave room for any filter a person would actually write.
+        Assert.True(Parse(string.Join(" & ", Enumerable.Repeat("today", 100))).IsSupported);
+    }
+
+    [Theory]
+    [InlineData("next 3651 days")]
+    [InlineData("next 999999999 days")]
+    [InlineData("next 2147483647 days")]
+    public void A_window_beyond_the_calendar_is_refused_not_evaluated(string query)
+    {
+        // Evaluating one of these walks the date past the end of the calendar and throws, from
+        // inside the publish that renders the outline.
+        Assert.False(Parse(query).IsSupported);
+    }
+
+    [Theory]
+    [InlineData("No date")]
+    [InlineData("NO DATE")]
+    [InlineData("no DUE date")]
+    public void The_date_keywords_are_read_however_they_are_capitalised(string query)
+        => Assert.IsType<FilterExpression.NoDate>(Parse(query).Expression);
+
+    [Theory]
+    [InlineData("today &")]
+    [InlineData("today !")]
+    [InlineData("!")]
+    [InlineData("(today")]
+    public void A_refusal_names_something_rather_than_nothing(string query)
+    {
+        // "Termyn can't read this filter:" followed by a blank is no help at all.
+        Assert.NotEmpty(Parse(query).Unsupported!);
+    }
+
+    [Fact]
+    public void An_implicit_and_parses_the_same_as_an_explicit_one()
+    {
+        // Records compare structurally, so this catches an operand order or association change that
+        // asserting on the node type alone would miss.
+        Assert.Equal(Parse("today & p1").Expression, Parse("today p1").Expression);
+        Assert.Equal(Parse("today | @home").Expression, Parse("today, @home").Expression);
+        Assert.Equal(Parse("today").Expression, Parse("(today)").Expression);
+    }
+
+    [Fact]
+    public void A_multi_word_name_the_account_does_not_have_refuses_the_query()
+    {
+        // The trailing word becomes a term of its own and fails, which is the honest outcome: with
+        // no such project, guessing which words were meant to be the name would be a fiction.
+        Assert.False(Parse("#Unknown Project").IsSupported);
+
+        // A single unknown word is still a valid query — it just matches nothing.
+        Assert.True(Parse("#Ghost").IsSupported);
+    }
+
     [Fact]
     public void One_unreadable_term_refuses_the_whole_query()
     {

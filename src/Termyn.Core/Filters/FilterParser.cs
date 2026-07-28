@@ -6,8 +6,6 @@ namespace Termyn.Core.Filters;
 /// <summary>The project and label names in the account, which a query's terms are read against.</summary>
 public sealed class FilterVocabulary
 {
-    public static readonly FilterVocabulary Empty = new([], []);
-
     public FilterVocabulary(IEnumerable<string> projects, IEnumerable<string> labels)
     {
         Projects = projects.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -50,11 +48,27 @@ public static class FilterParser
 {
     private const string SearchPrefix = "search:";
 
+    /// <summary>
+    /// The most tokens a query may carry. Parsing recurses on parentheses and negation, and the
+    /// expression the evaluator later walks is recursive too — a long flat run of terms builds a
+    /// chain just as deep as nested brackets do. Past some size that overflows the stack, and a
+    /// stack overflow can't be caught: the process goes, taking anything unflushed with it. Every
+    /// one of those depths is bounded by the number of tokens, so one ceiling covers them all.
+    /// </summary>
+    private const int MaxTokens = 256;
+
+    /// <summary>Longest window <c>next N days</c> may ask for, in days.</summary>
+    /// <remarks>Beyond this the window runs off the end of the calendar and the date maths throws.</remarks>
+    private const int MaxDays = 3650;
+
     public static FilterParse Parse(string? query, FilterVocabulary vocabulary)
     {
         var tokens = Tokenize(query ?? string.Empty);
         if (tokens.Count == 0)
             return FilterParse.No(string.Empty);
+
+        if (tokens.Count > MaxTokens)
+            return FilterParse.No(string.Join(' ', tokens.Take(8)) + " …");
 
         var at = 0;
         var expression = ParseOr(tokens, vocabulary, ref at, out var failed);
@@ -148,9 +162,17 @@ public static class FilterParser
     {
         failed = null;
 
-        if (at >= tokens.Count || IsOperator(tokens[at]))
+        // Off the end of the query: an operator at the back is still waiting for a term, and naming
+        // it beats reporting nothing at all.
+        if (at >= tokens.Count)
         {
-            failed = at < tokens.Count ? tokens[at] : string.Empty;
+            failed = tokens.Count > 0 ? tokens[^1] : string.Empty;
+            return null;
+        }
+
+        if (IsOperator(tokens[at]))
+        {
+            failed = tokens[at];
             return null;
         }
 
@@ -266,14 +288,13 @@ public static class FilterParser
             return false;
 
         // Todoist writes this both ways, and "no due date" reads more naturally.
-        var rest = tokens.Skip(at + 1).TakeWhile(t => !IsOperator(t)).ToList();
-        if (rest is ["date", ..])
+        if (Word(tokens, at + 1, "date"))
         {
             at += 2;
             return true;
         }
 
-        if (rest is ["due", "date", ..])
+        if (Word(tokens, at + 1, "due") && Word(tokens, at + 2, "date"))
         {
             at += 3;
             return true;
@@ -281,6 +302,10 @@ public static class FilterParser
 
         return false;
     }
+
+    /// <summary>Whether the token at this position is the given keyword, however it is capitalised.</summary>
+    private static bool Word(List<string> tokens, int at, string keyword)
+        => at < tokens.Count && tokens[at].Equals(keyword, StringComparison.OrdinalIgnoreCase);
 
     private static bool TryReadNextDays(List<string> tokens, ref int at, out int days)
     {
@@ -291,14 +316,11 @@ public static class FilterParser
         if (at + 2 >= tokens.Count)
             return false;
 
-        if (!int.TryParse(tokens[at + 1], out days) || days <= 0)
+        if (!int.TryParse(tokens[at + 1], out days) || days is <= 0 or > MaxDays)
             return false;
 
-        if (!tokens[at + 2].Equals("days", StringComparison.OrdinalIgnoreCase)
-            && !tokens[at + 2].Equals("day", StringComparison.OrdinalIgnoreCase))
-        {
+        if (!Word(tokens, at + 2, "days") && !Word(tokens, at + 2, "day"))
             return false;
-        }
 
         at += 3;
         return true;

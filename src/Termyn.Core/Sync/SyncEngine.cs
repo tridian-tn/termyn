@@ -644,17 +644,8 @@ public sealed class SyncEngine
             if (Model.Get(ResourceType.Projects, id) is null)
                 return;
 
-            // Descendants, or the children survive locally as projects nothing can reach.
-            var doomed = new HashSet<string> { id };
-            bool grew;
-            do
-            {
-                grew = false;
-                foreach (var project in Model.Projects())
-                    if (project.ParentId is { } parent && doomed.Contains(parent) && doomed.Add(project.Id))
-                        grew = true;
-            }
-            while (grew);
+            // Descendants too, or the children survive locally as projects nothing can reach.
+            var doomed = ProjectTree.WithDescendants(Model.Projects(), [id]);
 
             var deletes = new List<ResourceKey>();
             foreach (var project in doomed)
@@ -713,7 +704,7 @@ public sealed class SyncEngine
         foreach (var label in labels.Distinct(StringComparer.OrdinalIgnoreCase))
             array.Add(label);
 
-        UpdateResource(ResourceType.Items, "item_update", id, new JsonObject { ["labels"] = array });
+        UpdateItem(id, new JsonObject { ["labels"] = array });
     }
 
     /// <summary>Creates a label optimistically and queues a <c>label_add</c>.</summary>
@@ -1096,26 +1087,27 @@ public sealed class SyncEngine
 
     private void ApplyServerChanges(SyncResponse response)
     {
-        var pendingIds = PendingResourceIds();
-        var reorderedIds = PendingReorderIds();
+        var pendingKeys = PendingResourceKeys();
+        var reorderedKeys = PendingReorderKeys();
         var upserts = new List<StoredResource>();
         var deletes = new List<ResourceKey>();
 
         foreach (var change in response.Changes)
         {
-            var held = pendingIds.Contains(change.Id) || reorderedIds.Contains(change.Id);
+            var key = new ResourceKey(change.ResourceType, change.Id);
+            var held = pendingKeys.Contains(key) || reorderedKeys.Contains(key);
 
             // Hold the deletion until the local write that covers this resource resolves; a queued
             // command must not be left naming a task the server has already removed.
             if (change.IsDeleted && held)
             {
-                if (!_deferredDeletes.Contains(new ResourceKey(change.ResourceType, change.Id)))
-                    _deferredDeletes.Add(new ResourceKey(change.ResourceType, change.Id));
+                if (!_deferredDeletes.Contains(key))
+                    _deferredDeletes.Add(key);
                 continue;
             }
 
             // An un-acked edit of our own owns this resource until it lands.
-            if (pendingIds.Contains(change.Id))
+            if (pendingKeys.Contains(key))
                 continue;
 
             if (change.IsDeleted)
@@ -1129,7 +1121,7 @@ public sealed class SyncEngine
 
                 // A pending reorder only owns the position, so take everything else the server sends
                 // rather than dropping the change — the token advances past it either way.
-                if (reorderedIds.Contains(change.Id)
+                if (reorderedKeys.Contains(key)
                     && Model.Get(change.ResourceType, change.Id)?["child_order"] is { } localOrder)
                 {
                     clone["child_order"] = localOrder.DeepClone();
@@ -1142,12 +1134,12 @@ public sealed class SyncEngine
 
         for (var i = _deferredDeletes.Count - 1; i >= 0; i--)
         {
-            var key = _deferredDeletes[i];
-            if (pendingIds.Contains(key.Id) || reorderedIds.Contains(key.Id))
+            var deferred = _deferredDeletes[i];
+            if (pendingKeys.Contains(deferred) || reorderedKeys.Contains(deferred))
                 continue;
             _deferredDeletes.RemoveAt(i);
-            if (Model.Remove(key.Type, key.Id))
-                deletes.Add(key);
+            if (Model.Remove(deferred.Type, deferred.Id))
+                deletes.Add(deferred);
         }
 
         var token = response.SyncToken ?? Model.SyncToken;
@@ -1229,14 +1221,20 @@ public sealed class SyncEngine
         }
     }
 
-    private HashSet<string> PendingResourceIds()
+    /// <summary>
+    /// Resources a queued command owns until it resolves. Keyed by type as well as id: Todoist ids
+    /// are only unique within a resource type, so a pending label edit would otherwise shadow the
+    /// server's change to a task of the same id — and that change is gone for good, because the
+    /// sync token advances past it either way.
+    /// </summary>
+    private HashSet<ResourceKey> PendingResourceKeys()
     {
-        var ids = new HashSet<string>();
+        var keys = new HashSet<ResourceKey>();
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
         {
             if (c.TempId is not null)
             {
-                ids.Add(c.TempId);
+                keys.Add(new ResourceKey(ResourceTypeFor(c), c.TempId));
                 continue;
             }
 
@@ -1244,22 +1242,22 @@ public sealed class SyncEngine
             // aimed at a resource we never held must not shadow the server's version of it, which
             // would be dropped for good once the sync token advances past that change.
             if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
-                ids.Add(v.ToString());
+                keys.Add(new ResourceKey(ResourceTypeFor(c), v.ToString()));
         }
-        return ids;
+        return keys;
     }
 
     /// <summary>
     /// Tasks named by a queued reorder. Their position is ours until it lands, but nothing else
     /// about them is, so they are tracked apart from resources with a genuine pending edit.
     /// </summary>
-    private HashSet<string> PendingReorderIds()
+    private HashSet<ResourceKey> PendingReorderKeys()
     {
-        var ids = new HashSet<string>();
+        var keys = new HashSet<ResourceKey>();
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
             foreach (var id in NestedIds(ParseArgs(c)))
-                ids.Add(id);
-        return ids;
+                keys.Add(new ResourceKey(ResourceTypeFor(c), id));
+        return keys;
     }
 
     /// <summary>Ids carried in a command's <c>items</c> array, as a reorder does.</summary>
