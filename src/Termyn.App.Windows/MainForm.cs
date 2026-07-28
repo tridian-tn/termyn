@@ -3,6 +3,9 @@ using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
 
+// Both namespaces have a Label, and in a form file the control is what "Label" should mean.
+using Label = System.Windows.Forms.Label;
+
 namespace Termyn.App.Windows;
 
 /// <summary>Main window: sidebar, capture box, task outline, and the keyboard map.</summary>

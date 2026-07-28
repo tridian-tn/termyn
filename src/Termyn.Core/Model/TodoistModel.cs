@@ -84,4 +84,8 @@ public sealed class TodoistModel
     public IEnumerable<Project> Projects() => All(ResourceType.Projects).Select(Projections.ToProject);
 
     public IEnumerable<Section> Sections() => All(ResourceType.Sections).Select(Projections.ToSection);
+
+    public IEnumerable<Label> Labels() => All(ResourceType.Labels).Select(Projections.ToLabel);
+
+    public IEnumerable<Filter> Filters() => All(ResourceType.Filters).Select(Projections.ToFilter);
 }
