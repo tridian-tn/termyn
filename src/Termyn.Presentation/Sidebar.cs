@@ -7,6 +7,8 @@ public enum SidebarKind
     SmartView,
     Project,
     Section,
+    Label,
+    Filter,
 
     /// <summary>A group label such as "Favourites". Not selectable.</summary>
     Header,
@@ -27,8 +29,16 @@ public sealed record SidebarNode(
     SmartView? View = null,
     int Count = 0);
 
-/// <summary>What the outline is currently showing.</summary>
-public sealed record ViewSelection(SmartView? View = SmartView.Today, string? ProjectId = null, string? SectionId = null)
+/// <summary>
+/// What the outline is currently showing. A label is held by name rather than id, because that is
+/// how tasks refer to labels.
+/// </summary>
+public sealed record ViewSelection(
+    SmartView? View = SmartView.Today,
+    string? ProjectId = null,
+    string? SectionId = null,
+    string? LabelName = null,
+    string? FilterId = null)
 {
     public static readonly ViewSelection Default = new();
 
@@ -38,6 +48,11 @@ public sealed record ViewSelection(SmartView? View = SmartView.Today, string? Pr
 
     public static ViewSelection OfSection(string sectionId) => new(null, null, sectionId);
 
+    public static ViewSelection OfLabel(string labelName) => new(null, null, null, labelName);
+
+    public static ViewSelection OfFilter(string filterId) => new(null, null, null, null, filterId);
+
     /// <summary>The sidebar row this selection corresponds to.</summary>
-    public string Key => View?.ToString() ?? ProjectId ?? SectionId ?? string.Empty;
+    public string Key
+        => View?.ToString() ?? ProjectId ?? SectionId ?? (LabelName is { } l ? "label:" + l : null) ?? FilterId ?? string.Empty;
 }

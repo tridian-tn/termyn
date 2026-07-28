@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
+using Termyn.Core.Filters;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 
@@ -66,6 +67,15 @@ public sealed class MainPresenter
 
     /// <summary>Free-text filter applied to the rendered rows.</summary>
     public string SearchQuery { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// The query of the selected saved filter when Termyn can't evaluate it, so the view can offer
+    /// to open it in Todoist. Null whenever the current view is showing a real answer.
+    /// </summary>
+    public string? UnsupportedFilter { get; private set; }
+
+    /// <summary>Every label in the account, in the order the sidebar lists them.</summary>
+    public IReadOnlyList<Label> Labels { get; private set; } = [];
 
     /// <summary>
     /// Publishes the cached model immediately, then reconciles with the server and publishes again.
@@ -221,6 +231,58 @@ public sealed class MainPresenter
         return outdented;
     }
 
+    // ---- Label intents -------------------------------------------------------------------------
+
+    /// <summary>Replaces the labels on a task with the given set.</summary>
+    public void SetLabels(string id, IReadOnlyList<string> labels)
+    {
+        _engine.SetItemLabels(id, labels);
+        Publish();
+    }
+
+    /// <summary>Adds a label to the account if it isn't there already, and returns its name.</summary>
+    public string AddLabel(string name)
+    {
+        var trimmed = name.Trim();
+        var existing = _engine.Snapshot().Labels
+            .FirstOrDefault(l => string.Equals(l.Name, trimmed, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is not null)
+            return existing.Name;
+
+        _engine.AddLabel(trimmed);
+        Publish();
+        return trimmed;
+    }
+
+    public void RenameLabel(string id, string name)
+    {
+        _engine.RenameLabel(id, name);
+        Publish();
+    }
+
+    public void ToggleLabelFavorite(string id)
+    {
+        if (_engine.Snapshot().Labels.FirstOrDefault(l => l.Id == id) is not { } label)
+            return;
+
+        _engine.SetLabelFavorite(id, !label.IsFavorite);
+        Publish();
+    }
+
+    public void DeleteLabel(string id)
+    {
+        var name = _engine.Snapshot().Labels.FirstOrDefault(l => l.Id == id)?.Name;
+
+        _engine.DeleteLabel(id);
+
+        // Don't leave the outline showing a label that no longer exists.
+        if (name is not null && string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
+            Selection = ViewSelection.Default;
+
+        Publish();
+    }
+
     // ---- Structure intents ---------------------------------------------------------------------
 
     public void AddProject(string name)
@@ -362,6 +424,11 @@ public sealed class MainPresenter
         lock (_publishing)
         {
             var snapshot = _engine.Snapshot();
+
+            // Cleared before the outline is built, which is what decides whether it gets set again.
+            UnsupportedFilter = null;
+
+            Labels = snapshot.Labels.OrderBy(l => l.ItemOrder).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
             Sidebar = BuildSidebar(snapshot);
             _allRows = BuildOutline(snapshot, scoped: true);
 
@@ -401,6 +468,7 @@ public sealed class MainPresenter
         var inboxCount = 0;
         var byProject = new Dictionary<string, int>(StringComparer.Ordinal);
         var bySection = new Dictionary<string, int>(StringComparer.Ordinal);
+        var byLabel = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in active)
         {
@@ -412,6 +480,9 @@ public sealed class MainPresenter
                 byProject[itemProject] = byProject.GetValueOrDefault(itemProject) + 1;
             if (item.SectionId is { } itemSection)
                 bySection[itemSection] = bySection.GetValueOrDefault(itemSection) + 1;
+
+            foreach (var label in item.Labels)
+                byLabel[label] = byLabel.GetValueOrDefault(label) + 1;
         }
 
         var nodes = new List<SidebarNode>
@@ -421,21 +492,44 @@ public sealed class MainPresenter
             View(SmartView.Inbox, "Inbox", inboxCount),
         };
 
-        var favorites = projects
+        var labels = snapshot.Labels
+            .Where(l => l.Id.Length > 0)
+            .OrderBy(l => l.ItemOrder)
+            .ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        var filters = snapshot.Filters
+            .Where(f => f.Id.Length > 0)
+            .OrderBy(f => f.ItemOrder)
+            .ThenBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // Favourites are grouped by kind — projects, then labels, then filters — each in its own
+        // order. Interleaving them would put three unrelated order fields in one sequence.
+        var favouriteProjects = projects
             .Where(p => p.IsFavorite)
             .OrderBy(p => p.ChildOrder)
             .ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
+        var favouriteLabels = labels.Where(l => l.IsFavorite).ToList();
+        var favouriteFilters = filters.Where(f => f.IsFavorite).ToList();
 
-        if (favorites.Count > 0)
+        if (favouriteProjects.Count + favouriteLabels.Count + favouriteFilters.Count > 0)
         {
             nodes.Add(Header("Favourites"));
-            foreach (var favorite in favorites)
-            {
-                // Keyed apart from its copy in the tree, so clicking one doesn't select the other.
+
+            // Keyed apart from their copies further down, so clicking one doesn't select the other.
+            foreach (var favorite in favouriteProjects)
                 nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
                     Key: "favourite:" + favorite.Id, IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
-            }
+
+            foreach (var favorite in favouriteLabels)
+                nodes.Add(new SidebarNode(SidebarKind.Label, favorite.Name, favorite.Name, 1,
+                    Key: "favourite:label:" + favorite.Name, IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name)));
+
+            foreach (var favorite in favouriteFilters)
+                nodes.Add(new SidebarNode(SidebarKind.Filter, favorite.Id, favorite.Name, 1,
+                    Key: "favourite:" + favorite.Id, IsFavorite: true));
         }
 
         nodes.Add(Header("Projects"));
@@ -447,6 +541,29 @@ public sealed class MainPresenter
 
         var listed = new HashSet<string>();
         AddProjects(string.Empty, 1);
+
+        if (labels.Count > 0)
+        {
+            nodes.Add(Header("Labels"));
+
+            // Selected by name, since that is how a task refers to a label. Two labels sharing a
+            // name would be the same view, so they are listed once.
+            foreach (var label in labels.DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase))
+                nodes.Add(new SidebarNode(SidebarKind.Label, label.Name, label.Name, 1,
+                    Key: "label:" + label.Name, IsFavorite: label.IsFavorite, Count: byLabel.GetValueOrDefault(label.Name)));
+        }
+
+        if (filters.Count > 0)
+        {
+            nodes.Add(Header("Filters"));
+
+            // No count: unlike the others it can't be had from the single pass above, and running
+            // every saved query over every task on each publish is not worth a number in brackets.
+            foreach (var filter in filters)
+                nodes.Add(new SidebarNode(SidebarKind.Filter, filter.Id, filter.Name, 1,
+                    Key: filter.Id, IsFavorite: filter.IsFavorite));
+        }
+
         return nodes;
 
         void AddProjects(string parentKey, int depth)
@@ -499,8 +616,9 @@ public sealed class MainPresenter
     private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
     {
         var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
+        var selected = scoped ? InSelection(snapshot) : _ => true;
         var visible = VisibleItems(snapshot)
-            .Where(i => i.Id.Length > 0 && (!scoped || InSelection(i, snapshot)))
+            .Where(i => i.Id.Length > 0 && selected(i))
             .ToList();
         var present = visible.Select(i => i.Id).ToHashSet();
 
@@ -544,14 +662,48 @@ public sealed class MainPresenter
             depth);
     }
 
-    private bool InSelection(TaskItem item, ModelSnapshot snapshot)
+    /// <summary>
+    /// The test for "is this task in the current view", resolved once per publish. A filter has to
+    /// be parsed and its projects indexed, which is far too much work to repeat per task.
+    /// </summary>
+    private Func<TaskItem, bool> InSelection(ModelSnapshot snapshot)
     {
         if (Selection.SectionId is { } sectionId)
-            return item.SectionId == sectionId;
+            return item => item.SectionId == sectionId;
+
         if (Selection.ProjectId is { } projectId)
-            return item.ProjectId == projectId;
+            return item => item.ProjectId == projectId;
+
+        if (Selection.LabelName is { } label)
+            return item => item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase);
+
+        if (Selection.FilterId is { } filterId)
+            return FilterPredicate(snapshot, filterId);
+
         return Selection.View is not { } view
-               || SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId);
+            ? _ => true
+            : item => SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId);
+    }
+
+    private Func<TaskItem, bool> FilterPredicate(ModelSnapshot snapshot, string filterId)
+    {
+        var filter = snapshot.Filters.FirstOrDefault(f => f.Id == filterId);
+        if (filter is null)
+            return _ => false;
+
+        var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels);
+        var parsed = FilterParser.Parse(filter.Query, vocabulary);
+
+        if (!parsed.IsSupported)
+        {
+            // Nothing, not everything. A full task list looks like a filter that ran and matched
+            // broadly, which is the mistake this whole path exists to avoid.
+            UnsupportedFilter = filter.Query;
+            return _ => false;
+        }
+
+        var context = new FilterContext(snapshot.Projects, snapshot.Today, snapshot.TimeZone);
+        return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
 
     private void ApplyFilter(int pending, int failed)
