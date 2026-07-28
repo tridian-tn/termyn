@@ -525,15 +525,15 @@ public sealed class MainPresenter
             // Keyed apart from their copies further down, so clicking one doesn't select the other.
             foreach (var favorite in favouriteProjects)
                 nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
-                    Key: "favourite:" + favorite.Id, IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
+                    Key: SidebarKeys.Favourite(SidebarKind.Project, favorite.Id), IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
 
             foreach (var favorite in favouriteLabels)
                 nodes.Add(new SidebarNode(SidebarKind.Label, favorite.Name, favorite.Name, 1,
-                    Key: "favourite:label:" + favorite.Name, IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name)));
+                    Key: SidebarKeys.Favourite(SidebarKind.Label, favorite.Name), IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name)));
 
             foreach (var favorite in favouriteFilters)
                 nodes.Add(new SidebarNode(SidebarKind.Filter, favorite.Id, favorite.Name, 1,
-                    Key: "favourite:" + favorite.Id, IsFavorite: true));
+                    Key: SidebarKeys.Favourite(SidebarKind.Filter, favorite.Id), IsFavorite: true));
         }
 
         nodes.Add(Header("Projects"));
@@ -554,7 +554,7 @@ public sealed class MainPresenter
             // name would be the same view, so they are listed once.
             foreach (var label in labels.DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase))
                 nodes.Add(new SidebarNode(SidebarKind.Label, label.Name, label.Name, 1,
-                    Key: "label:" + label.Name, IsFavorite: label.IsFavorite, Count: byLabel.GetValueOrDefault(label.Name)));
+                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: label.IsFavorite, Count: byLabel.GetValueOrDefault(label.Name)));
         }
 
         if (filters.Count > 0)
@@ -565,7 +565,7 @@ public sealed class MainPresenter
             // every saved query over every task on each publish is not worth a number in brackets.
             foreach (var filter in filters)
                 nodes.Add(new SidebarNode(SidebarKind.Filter, filter.Id, filter.Name, 1,
-                    Key: filter.Id, IsFavorite: filter.IsFavorite));
+                    Key: SidebarKeys.For(SidebarKind.Filter, filter.Id), IsFavorite: filter.IsFavorite));
         }
 
         return nodes;
@@ -582,7 +582,7 @@ public sealed class MainPresenter
                     continue;
 
                 nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
-                    Key: project.Id, IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id)));
+                    Key: SidebarKeys.For(SidebarKind.Project, project.Id), IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id)));
 
                 var owned = sections
                     .Where(s => s.ProjectId == project.Id)
@@ -591,17 +591,17 @@ public sealed class MainPresenter
 
                 foreach (var section in owned)
                     nodes.Add(new SidebarNode(SidebarKind.Section, section.Id, section.Name, depth + 1,
-                        Key: section.Id, Count: bySection.GetValueOrDefault(section.Id)));
+                        Key: SidebarKeys.For(SidebarKind.Section, section.Id), Count: bySection.GetValueOrDefault(section.Id)));
 
                 AddProjects(project.Id, depth + 1);
             }
         }
 
         SidebarNode View(SmartView view, string label, int count)
-            => new(SidebarKind.SmartView, view.ToString(), label, 0, Key: view.ToString(), View: view, Count: count);
+            => new(SidebarKind.SmartView, view.ToString(), label, 0, Key: SidebarKeys.For(SidebarKind.SmartView, view.ToString()), View: view, Count: count);
 
         SidebarNode Header(string label)
-            => new(SidebarKind.Header, label, label, 0, Key: "header:" + label);
+            => new(SidebarKind.Header, label, label, 0, Key: SidebarKeys.For(SidebarKind.Header, label));
     }
 
     /// <summary>Active tasks that aren't filed under an archived project.</summary>

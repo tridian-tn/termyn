@@ -74,6 +74,35 @@ public class LabelsAndFiltersTests
     }
 
     [Fact]
+    public void Rows_of_different_kinds_sharing_an_id_are_still_separate_rows()
+    {
+        // Todoist ids are only unique within a resource type, so a project and a filter can both
+        // be "7". Without the kind in the key they would be the same row to the tree.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "7", """{"id":"7","name":"Work","is_favorite":true}""");
+        store.PutResource("sections", "7", """{"id":"7","name":"Admin","project_id":"7"}""");
+        store.PutResource("filters", "7", """{"id":"7","name":"Hot","query":"today","is_favorite":true}""");
+        var presenter = NewPresenter(store);
+
+        var keys = presenter.Sidebar.Select(n => n.Key).ToList();
+        Assert.Equal(keys.Count, keys.Distinct().Count());
+    }
+
+    [Fact]
+    public void Selecting_a_filter_finds_its_own_row_not_a_project_with_the_same_id()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "7", """{"id":"7","name":"Work"}""");
+        store.PutResource("filters", "7", """{"id":"7","name":"Hot","query":"today"}""");
+        var presenter = NewPresenter(store);
+
+        presenter.Select(ViewSelection.OfFilter("7"));
+
+        var row = presenter.Sidebar.Single(n => n.Key == presenter.Selection.Key);
+        Assert.Equal(SidebarKind.Filter, row.Kind);
+    }
+
+    [Fact]
     public void A_label_carries_its_name_as_its_id()
     {
         // Tasks refer to labels by name, so that is what a selection has to hold.
