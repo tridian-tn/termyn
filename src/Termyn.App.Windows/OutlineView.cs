@@ -170,12 +170,40 @@ internal sealed class OutlineView : ListView
     }
 
     /// <summary>
-    /// Nothing to do in Details view: painting the row here would wipe sub-items that this paint
-    /// pass isn't going to redraw, which is what blanked cells as the mouse moved over them.
-    /// Each sub-item fills its own background instead.
+    /// Each sub-item fills its own cell — painting the whole row here would wipe sub-items that
+    /// this paint pass isn't going to redraw. Only the strip past the last column is left, and it
+    /// does have to be painted, because the background erase is suppressed (see <see cref="WndProc"/>).
     /// </summary>
     protected override void OnDrawItem(DrawListViewItemEventArgs e)
     {
+        var columns = 0;
+        foreach (ColumnHeader column in Columns)
+            columns += column.Width;
+
+        var left = e.Bounds.X + columns;
+        if (left >= e.Bounds.Right)
+            return;
+
+        using var background = new SolidBrush(BackColor);
+        e.Graphics.FillRectangle(background, left, e.Bounds.Y, e.Bounds.Right - left, e.Bounds.Height);
+    }
+
+    /// <summary>
+    /// Swallows the background erase. The control repaints a row as the pointer crosses it, and
+    /// erasing first leaves it blank for a frame — the flicker under the mouse. Everything is
+    /// painted by the draw handlers, so there is nothing the erase needs to do.
+    /// </summary>
+    protected override void WndProc(ref Message m)
+    {
+        const int WmEraseBackground = 0x0014;
+
+        if (m.Msg == WmEraseBackground)
+        {
+            m.Result = 1;
+            return;
+        }
+
+        base.WndProc(ref m);
     }
 
     protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
