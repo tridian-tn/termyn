@@ -1,7 +1,11 @@
+using System.Diagnostics;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
+
+// Both namespaces have a Label, and in a form file the control is what "Label" should mean.
+using Label = System.Windows.Forms.Label;
 
 namespace Termyn.App.Windows;
 
@@ -21,13 +25,16 @@ internal sealed class MainForm : Form
     private readonly OutlineView _outline;
     private readonly Label _status;
 
+    /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
+    private readonly LinkLabel _unsupported;
+
     private string? _editingId;
     private string? _editingText;
     private bool _reconnectNeeded;
     private bool _syncingSidebar;
 
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
-    private string _sidebarKey = SmartView.Today.ToString();
+    private string _sidebarKey = ViewSelection.Default.Key;
 
     /// <summary>The sidebar last rendered, so an unchanged one isn't rebuilt.</summary>
     private IReadOnlyList<SidebarNode>? _renderedSidebar;
@@ -71,6 +78,15 @@ internal sealed class MainForm : Form
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
 
+        _unsupported = new LinkLabel
+        {
+            Dock = DockStyle.Top,
+            Height = 40,
+            Padding = new Padding(8, 4, 8, 4),
+            Visible = false,
+        };
+        _unsupported.LinkClicked += (_, _) => OpenTodoist();
+
         var split = new SplitContainer
         {
             Dock = DockStyle.Fill,
@@ -78,6 +94,9 @@ internal sealed class MainForm : Form
         };
         split.Panel1.Controls.Add(_sidebar);
         split.Panel2.Controls.Add(_outline);
+
+        // Above the outline, so it reads as an explanation of the empty list below it.
+        split.Panel2.Controls.Add(_unsupported);
 
         _status = new Label
         {
@@ -136,6 +155,27 @@ internal sealed class MainForm : Form
         RenderSidebar();
         _outline.Rows = _presenter.Rows;
         _status.Text = _presenter.Status;
+        RenderUnsupported();
+    }
+
+    private void RenderUnsupported()
+    {
+        if (_presenter.UnsupportedFilter is not { } query)
+        {
+            _unsupported.Visible = false;
+            return;
+        }
+
+        const string link = "Open in Todoist";
+        _unsupported.Text = $"Termyn can't read this filter: {query}\r\n{link}";
+        _unsupported.LinkArea = new LinkArea(_unsupported.Text.Length - link.Length, link.Length);
+        _unsupported.Visible = true;
+    }
+
+    private void OpenTodoist()
+    {
+        // The saved filter lives in the account, so the app's own filter page is where to land.
+        Guarded(() => Process.Start(new ProcessStartInfo("https://app.todoist.com/app/filters") { UseShellExecute = true }));
     }
 
     private void RenderSidebar()
@@ -270,6 +310,8 @@ internal sealed class MainForm : Form
         {
             SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
             SidebarKind.Section => ViewSelection.OfSection(node.Id),
+            SidebarKind.Label => ViewSelection.OfLabel(node.Id),
+            SidebarKind.Filter => ViewSelection.OfFilter(node.Id),
             _ => ViewSelection.OfProject(node.Id),
         }));
     }
@@ -281,15 +323,18 @@ internal sealed class MainForm : Form
 
         switch (e.KeyCode)
         {
-            case Keys.F2 when node.Kind is SidebarKind.Project or SidebarKind.Section:
+            case Keys.F2 when node.Kind is SidebarKind.Project or SidebarKind.Section or SidebarKind.Label:
                 RenameStructure(node);
                 break;
-            case Keys.Delete when node.Kind is SidebarKind.Project or SidebarKind.Section:
+            case Keys.Delete when node.Kind is SidebarKind.Project or SidebarKind.Section or SidebarKind.Label:
                 DeleteStructure(node);
                 break;
             // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
             case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Project:
                 Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
+                break;
+            case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Label:
+                Guarded(() => _presenter.ToggleLabelFavorite(node.Id));
                 break;
             default:
                 return;
@@ -308,32 +353,46 @@ internal sealed class MainForm : Form
 
         Guarded(() =>
         {
-            if (node.Kind == SidebarKind.Project)
-                _presenter.RenameProject(node.Id, name);
-            else
-                _presenter.RenameSection(node.Id, name);
+            switch (node.Kind)
+            {
+                case SidebarKind.Project:
+                    _presenter.RenameProject(node.Id, name);
+                    break;
+                case SidebarKind.Section:
+                    _presenter.RenameSection(node.Id, name);
+                    break;
+                case SidebarKind.Label:
+                    _presenter.RenameLabel(node.Id, name);
+                    break;
+            }
         });
     }
 
     private void DeleteStructure(SidebarNode node)
     {
-        var what = node.Kind == SidebarKind.Project ? "project" : "section";
-        var answer = MessageBox.Show(
-            this,
-            $"Delete the {what} \"{node.Label}\" and everything in it?",
-            "Termyn",
-            MessageBoxButtons.OKCancel,
-            MessageBoxIcon.Warning);
+        // A label delete takes the label off its tasks; the other two take the tasks with them.
+        var question = node.Kind == SidebarKind.Label
+            ? $"Delete the label \"{node.Label}\" and remove it from every task?"
+            : $"Delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
 
+        var answer = MessageBox.Show(this, question, "Termyn", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
         if (answer != DialogResult.OK)
             return;
 
         Guarded(() =>
         {
-            if (node.Kind == SidebarKind.Project)
-                _presenter.DeleteProject(node.Id);
-            else
-                _presenter.DeleteSection(node.Id);
+            switch (node.Kind)
+            {
+                case SidebarKind.Project:
+                    _presenter.DeleteProject(node.Id);
+                    break;
+                case SidebarKind.Section:
+                    _presenter.DeleteSection(node.Id);
+                    break;
+                case SidebarKind.Label:
+                    _presenter.DeleteLabel(node.Id);
+                    break;
+            }
         });
     }
 
@@ -423,6 +482,10 @@ internal sealed class MainForm : Form
             case Keys.D when e.Control && id is not null:
                 wrote = false;
                 Guarded(() => wrote = PromptForDue(id!));
+                break;
+            case Keys.L when e.Control && id is not null:
+                wrote = false;
+                Guarded(() => wrote = PickLabels(id!));
                 break;
             case Keys.Z when e.Control:
                 wrote = false;
@@ -572,6 +635,37 @@ internal sealed class MainForm : Form
         }
 
         _presenter.SetDue(id, parse.DueDate, parse.DueTime);
+        return true;
+    }
+
+    /// <summary>Ticks the labels on a task, creating any the account doesn't have yet.</summary>
+    private bool PickLabels(string id)
+    {
+        if (_outline.SelectedRow is not { } row)
+            return false;
+
+        var known = _presenter.Labels.Select(l => l.Name).ToList();
+        var picked = LabelPickerForm.Pick(this, row.Content, known, row.Labels);
+        if (picked is null)
+            return false;
+
+        // Opening the picker and pressing OK unchanged is not an edit. Writing anyway would queue a
+        // command that owns this task until it lands, and a web-side edit arriving in the meantime
+        // would be dropped for nothing.
+        if (picked.Count == row.Labels.Count && !picked.Except(row.Labels, StringComparer.OrdinalIgnoreCase).Any())
+            return false;
+
+        // A name the user typed has to become a label first, so the item_update that follows refers
+        // to something the account has. Names the task already wore are left alone: the picker
+        // carries those so they aren't stripped, not so they're adopted into the account.
+        var fresh = picked
+            .Where(p => !known.Contains(p, StringComparer.OrdinalIgnoreCase))
+            .Where(p => !row.Labels.Contains(p, StringComparer.OrdinalIgnoreCase));
+
+        foreach (var name in fresh)
+            _presenter.AddLabel(name);
+
+        _presenter.SetLabels(id, picked);
         return true;
     }
 

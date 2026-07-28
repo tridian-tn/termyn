@@ -68,6 +68,23 @@ public static class Projections
         SectionOrder = JsonRead.Int(o, "section_order"),
     };
 
+    public static Label ToLabel(JsonObject o) => new()
+    {
+        Id = JsonRead.String(o, "id") ?? string.Empty,
+        Name = JsonRead.String(o, "name") ?? string.Empty,
+        IsFavorite = JsonRead.Bool(o, "is_favorite"),
+        ItemOrder = JsonRead.Int(o, "item_order"),
+    };
+
+    public static Filter ToFilter(JsonObject o) => new()
+    {
+        Id = JsonRead.String(o, "id") ?? string.Empty,
+        Name = JsonRead.String(o, "name") ?? string.Empty,
+        Query = JsonRead.String(o, "query") ?? string.Empty,
+        IsFavorite = JsonRead.Bool(o, "is_favorite"),
+        ItemOrder = JsonRead.Int(o, "item_order"),
+    };
+
     private static IReadOnlyList<string> ReadLabels(JsonObject o)
     {
         if (o["labels"] is not JsonArray array || array.Count == 0)

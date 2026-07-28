@@ -12,6 +12,8 @@ public sealed record ModelSnapshot(
     IReadOnlyList<TaskItem> Items,
     IReadOnlyList<Project> Projects,
     IReadOnlyList<Section> Sections,
+    IReadOnlyList<Label> Labels,
+    IReadOnlyList<Filter> Filters,
     DateOnly Today,
     TimeZoneInfo TimeZone,
     int PendingCount,
@@ -126,6 +128,8 @@ public sealed class SyncEngine
                 Model.Items().ToList(),
                 Model.Projects().ToList(),
                 Model.Sections().ToList(),
+                Model.Labels().ToList(),
+                Model.Filters().ToList(),
                 DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime),
                 zone,
                 _outbox.Count(c => c.State == OutboxState.Pending),
@@ -640,17 +644,8 @@ public sealed class SyncEngine
             if (Model.Get(ResourceType.Projects, id) is null)
                 return;
 
-            // Descendants, or the children survive locally as projects nothing can reach.
-            var doomed = new HashSet<string> { id };
-            bool grew;
-            do
-            {
-                grew = false;
-                foreach (var project in Model.Projects())
-                    if (project.ParentId is { } parent && doomed.Contains(parent) && doomed.Add(project.Id))
-                        grew = true;
-            }
-            while (grew);
+            // Descendants too, or the children survive locally as projects nothing can reach.
+            var doomed = ProjectTree.WithDescendants(Model.Projects(), [id]);
 
             var deletes = new List<ResourceKey>();
             foreach (var project in doomed)
@@ -694,6 +689,102 @@ public sealed class SyncEngine
             deletes.AddRange(Model.Items().Where(i => i.SectionId == id).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
 
             RemoveAll("section_delete", id, deletes);
+        }
+    }
+
+    // ---- Labels ------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Replaces the labels on a task and queues an <c>item_update</c>. Tasks carry labels by name,
+    /// so this is the whole set rather than a delta — Todoist has no add-one-label command.
+    /// </summary>
+    public void SetItemLabels(string id, IReadOnlyList<string> labels)
+    {
+        var array = new JsonArray();
+        foreach (var label in labels.Distinct(StringComparer.OrdinalIgnoreCase))
+            array.Add(label);
+
+        UpdateItem(id, new JsonObject { ["labels"] = array });
+    }
+
+    /// <summary>Creates a label optimistically and queues a <c>label_add</c>.</summary>
+    public string AddLabel(string name)
+    {
+        lock (_gate)
+        {
+            var tempId = "t-" + Guid.NewGuid().ToString("N");
+            var args = new JsonObject { ["name"] = name };
+
+            var obj = args.DeepClone().AsObject();
+            obj["id"] = tempId;
+
+            Persist("label_add", args, tempId, null, [new StoredResource(ResourceType.Labels, tempId, obj.ToJsonString())], []);
+            Model.Upsert(ResourceType.Labels, tempId, obj);
+            return tempId;
+        }
+    }
+
+    /// <summary>
+    /// Renames a label and queues a <c>label_update</c>. The tasks wearing it are left alone here:
+    /// they hold the label by name, and only the server knows whether the rename carried across to
+    /// them. Whatever it reports on the next sync is the truth, and inventing it locally would risk
+    /// showing labels that don't exist on the account.
+    /// </summary>
+    public void RenameLabel(string id, string name)
+        => UpdateResource(ResourceType.Labels, "label_update", id, new JsonObject { ["name"] = name });
+
+    public void SetLabelFavorite(string id, bool favorite)
+        => UpdateResource(ResourceType.Labels, "label_update", id, new JsonObject { ["is_favorite"] = favorite });
+
+    /// <summary>
+    /// Deletes a label and queues a <c>label_delete</c>. Todoist takes the label off every task as
+    /// well, so the tasks that wore it are updated locally to match — otherwise they would keep
+    /// showing a label the account no longer has.
+    /// </summary>
+    public void DeleteLabel(string id)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Labels, id) is not { } label)
+                return;
+
+            var name = Projections.ToLabel(label).Name;
+            var priors = new JsonArray
+            {
+                new JsonObject { ["type"] = ResourceType.Labels, ["resource"] = label.DeepClone() },
+            };
+
+            // The tasks change too, so their prior state belongs on the command: reverting has to
+            // put the label back on them, not just recreate the label itself.
+            var upserts = new List<StoredResource>();
+            foreach (var raw in Model.All(ResourceType.Items).ToList())
+            {
+                var item = Projections.ToTaskItem(raw);
+                if (!item.Labels.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    continue;
+
+                priors.Add(new JsonObject { ["type"] = ResourceType.Items, ["resource"] = raw.DeepClone() });
+
+                var stripped = raw.DeepClone().AsObject();
+                var kept = new JsonArray();
+                foreach (var remaining in item.Labels.Where(l => !string.Equals(l, name, StringComparison.OrdinalIgnoreCase)))
+                    kept.Add(remaining);
+                stripped["labels"] = kept;
+
+                upserts.Add(new StoredResource(ResourceType.Items, item.Id, stripped.ToJsonString()));
+            }
+
+            // cascade "all" is Todoist's default; sending it makes the intent explicit in the outbox.
+            var args = new JsonObject { ["id"] = id, ["cascade"] = "all" };
+            var cmd = Persist("label_delete", args, null, priors.ToJsonString(), upserts, [new ResourceKey(ResourceType.Labels, id)]);
+
+            foreach (var upsert in upserts)
+                Model.Upsert(upsert.Type, upsert.Id, JsonNode.Parse(upsert.Json)!.AsObject());
+            Model.Remove(ResourceType.Labels, id);
+
+            // Reversible only while it's still queued. Once the server has it there is no undelete,
+            // so Ctrl+Z stops here rather than reaching past to something else.
+            RecordUndoBarrier(cmd);
         }
     }
 
@@ -996,26 +1087,27 @@ public sealed class SyncEngine
 
     private void ApplyServerChanges(SyncResponse response)
     {
-        var pendingIds = PendingResourceIds();
-        var reorderedIds = PendingReorderIds();
+        var pendingKeys = PendingResourceKeys();
+        var reorderedKeys = PendingReorderKeys();
         var upserts = new List<StoredResource>();
         var deletes = new List<ResourceKey>();
 
         foreach (var change in response.Changes)
         {
-            var held = pendingIds.Contains(change.Id) || reorderedIds.Contains(change.Id);
+            var key = new ResourceKey(change.ResourceType, change.Id);
+            var held = pendingKeys.Contains(key) || reorderedKeys.Contains(key);
 
             // Hold the deletion until the local write that covers this resource resolves; a queued
             // command must not be left naming a task the server has already removed.
             if (change.IsDeleted && held)
             {
-                if (!_deferredDeletes.Contains(new ResourceKey(change.ResourceType, change.Id)))
-                    _deferredDeletes.Add(new ResourceKey(change.ResourceType, change.Id));
+                if (!_deferredDeletes.Contains(key))
+                    _deferredDeletes.Add(key);
                 continue;
             }
 
             // An un-acked edit of our own owns this resource until it lands.
-            if (pendingIds.Contains(change.Id))
+            if (pendingKeys.Contains(key))
                 continue;
 
             if (change.IsDeleted)
@@ -1029,7 +1121,7 @@ public sealed class SyncEngine
 
                 // A pending reorder only owns the position, so take everything else the server sends
                 // rather than dropping the change — the token advances past it either way.
-                if (reorderedIds.Contains(change.Id)
+                if (reorderedKeys.Contains(key)
                     && Model.Get(change.ResourceType, change.Id)?["child_order"] is { } localOrder)
                 {
                     clone["child_order"] = localOrder.DeepClone();
@@ -1042,12 +1134,12 @@ public sealed class SyncEngine
 
         for (var i = _deferredDeletes.Count - 1; i >= 0; i--)
         {
-            var key = _deferredDeletes[i];
-            if (pendingIds.Contains(key.Id) || reorderedIds.Contains(key.Id))
+            var deferred = _deferredDeletes[i];
+            if (pendingKeys.Contains(deferred) || reorderedKeys.Contains(deferred))
                 continue;
             _deferredDeletes.RemoveAt(i);
-            if (Model.Remove(key.Type, key.Id))
-                deletes.Add(key);
+            if (Model.Remove(deferred.Type, deferred.Id))
+                deletes.Add(deferred);
         }
 
         var token = response.SyncToken ?? Model.SyncToken;
@@ -1129,14 +1221,20 @@ public sealed class SyncEngine
         }
     }
 
-    private HashSet<string> PendingResourceIds()
+    /// <summary>
+    /// Resources a queued command owns until it resolves. Keyed by type as well as id: Todoist ids
+    /// are only unique within a resource type, so a pending label edit would otherwise shadow the
+    /// server's change to a task of the same id — and that change is gone for good, because the
+    /// sync token advances past it either way.
+    /// </summary>
+    private HashSet<ResourceKey> PendingResourceKeys()
     {
-        var ids = new HashSet<string>();
+        var keys = new HashSet<ResourceKey>();
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
         {
             if (c.TempId is not null)
             {
-                ids.Add(c.TempId);
+                keys.Add(new ResourceKey(ResourceTypeFor(c), c.TempId));
                 continue;
             }
 
@@ -1144,22 +1242,22 @@ public sealed class SyncEngine
             // aimed at a resource we never held must not shadow the server's version of it, which
             // would be dropped for good once the sync token advances past that change.
             if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
-                ids.Add(v.ToString());
+                keys.Add(new ResourceKey(ResourceTypeFor(c), v.ToString()));
         }
-        return ids;
+        return keys;
     }
 
     /// <summary>
     /// Tasks named by a queued reorder. Their position is ours until it lands, but nothing else
     /// about them is, so they are tracked apart from resources with a genuine pending edit.
     /// </summary>
-    private HashSet<string> PendingReorderIds()
+    private HashSet<ResourceKey> PendingReorderKeys()
     {
-        var ids = new HashSet<string>();
+        var keys = new HashSet<ResourceKey>();
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
             foreach (var id in NestedIds(ParseArgs(c)))
-                ids.Add(id);
-        return ids;
+                keys.Add(new ResourceKey(ResourceTypeFor(c), id));
+        return keys;
     }
 
     /// <summary>Ids carried in a command's <c>items</c> array, as a reorder does.</summary>
