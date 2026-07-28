@@ -67,10 +67,10 @@ public static class FilterParser
         if (tokens.Count == 0)
             return FilterParse.No(string.Empty);
 
-        // Bounded by characters, not tokens: eight tokens is no limit at all when one of them is
-        // the whole query.
+        // The raw query rather than the tokens rejoined: this one is already too big, and building
+        // a second copy of it to throw away is the work we are refusing it to avoid.
         if (tokens.Count > MaxTokens)
-            return FilterParse.No(Shortened(string.Join(' ', tokens)));
+            return FilterParse.No(Shortened(query!));
 
         var at = 0;
         var expression = ParseOr(tokens, vocabulary, ref at, out var failed);
@@ -340,14 +340,22 @@ public static class FilterParser
 
     // ---- Lexing ------------------------------------------------------------------------------------
 
-    /// <summary>Cuts a refused fragment down to something a message can carry.</summary>
+    /// <summary>Cuts a refused fragment down to something a message can carry, on one line.</summary>
     private static string Shortened(string fragment)
-        => fragment.Length > 80 ? fragment[..80] + " …" : fragment;
+    {
+        var flat = fragment.ReplaceLineEndings(" ");
+        return flat.Length > 80 ? flat[..80] + " …" : flat;
+    }
 
     private static bool IsOperator(string token) => token is "&" or "|" or "," or "(" or ")" or "!";
 
     private static bool StartsTerm(string token) => token is "(" or "!" || !IsOperator(token);
 
+    /// <summary>
+    /// Splits a query into words and operators, stopping once there are already more than the
+    /// parser will accept. Reading the rest can only confirm what is known by then, and the query
+    /// comes off the account: however long it is, refusing it costs the same.
+    /// </summary>
     private static List<string> Tokenize(string query)
     {
         var tokens = new List<string>();
@@ -355,6 +363,9 @@ public static class FilterParser
 
         foreach (var c in query)
         {
+            if (tokens.Count > MaxTokens)
+                break;
+
             if (char.IsWhiteSpace(c))
             {
                 Flush();

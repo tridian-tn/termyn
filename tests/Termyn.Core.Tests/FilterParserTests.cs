@@ -193,6 +193,17 @@ public class FilterParserTests
     }
 
     [Fact]
+    public void A_refused_fragment_is_reported_on_one_line()
+    {
+        // A saved filter can carry newlines, and the notice showing this is a single line.
+        var parsed = Parse("today &\r\nassigned to:\nme");
+
+        Assert.False(parsed.IsSupported);
+        Assert.DoesNotContain('\n', parsed.Unsupported!);
+        Assert.DoesNotContain('\r', parsed.Unsupported!);
+    }
+
+    [Fact]
     public void A_refused_fragment_is_bounded_by_its_length_not_its_word_count()
     {
         // One enormous word is no fewer characters to render than a thousand small ones.
