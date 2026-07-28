@@ -291,9 +291,6 @@ internal sealed class MainForm : Form
             case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Project:
                 Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
                 break;
-            case Keys.N when e.Control && e.Shift is false && node.Kind == SidebarKind.Project:
-                AddSection(node.Id);
-                break;
             default:
                 return;
         }
@@ -470,6 +467,11 @@ internal sealed class MainForm : Form
                 _search.Focus();
                 _search.SelectAll();
                 return true;
+            // This runs ahead of every control's own key handling, so the sidebar can't claim
+            // Ctrl+N for itself — the choice between a section and a task has to be made here.
+            case Keys.Control | Keys.N when FocusedProject() is { } project:
+                AddSection(project.Id);
+                return true;
             case Keys.Insert:
             case Keys.Control | Keys.N:
                 _capture.Focus();
@@ -480,6 +482,12 @@ internal sealed class MainForm : Form
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }
+
+    /// <summary>The project the sidebar is sitting on, when the sidebar is the one with focus.</summary>
+    private SidebarNode? FocusedProject()
+        => _sidebar.Focused && _sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } node
+            ? node
+            : null;
 
     private void AddProject()
     {

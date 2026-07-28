@@ -512,7 +512,10 @@ public sealed class SyncEngine
             // otherwise its section — moving to the project would evict the task from that section.
             if (parent?.ParentId is { } grandparent)
                 return MoveTo(id, parentId: grandparent);
-            if (parent?.SectionId is { } section)
+
+            // A section the model hasn't seen can't be moved into, and there is no longer anything
+            // to be evicted from, so the project below is the right place to land.
+            if (parent?.SectionId is { } section && Model.Sections().Any(s => s.Id == section))
                 return MoveTo(id, sectionId: section);
 
             return (parent?.ProjectId ?? item.ProjectId) is { } project && MoveTo(id, projectId: project);
@@ -554,10 +557,16 @@ public sealed class SyncEngine
         }
         else if (sectionId is not null)
         {
+            // The destination project is read off the section, so an unknown section would file the
+            // task under no project at all — out of every view, and counted against the wrong
+            // siblings when ordering it.
+            if (Model.Sections().FirstOrDefault(s => s.Id == sectionId) is not { } section)
+                return false;
+
             args["section_id"] = sectionId;
             moved["parent_id"] = null;
             moved["section_id"] = sectionId;
-            moved["project_id"] = Model.Sections().FirstOrDefault(s => s.Id == sectionId)?.ProjectId;
+            moved["project_id"] = section.ProjectId;
         }
         else if (projectId is not null)
         {

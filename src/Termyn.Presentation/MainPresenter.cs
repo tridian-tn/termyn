@@ -394,11 +394,31 @@ public sealed class MainPresenter
         var projects = snapshot.Projects.Where(p => !p.IsArchived && p.Id.Length > 0).ToList();
         var sections = snapshot.Sections.Where(s => !s.IsArchived && s.Id.Length > 0).ToList();
 
+        // Every count in the sidebar comes off one pass. Counting per node instead would be a scan
+        // of the whole account per project and per section, on every publish — and a sync publishes.
+        var todayCount = 0;
+        var upcomingCount = 0;
+        var inboxCount = 0;
+        var byProject = new Dictionary<string, int>(StringComparer.Ordinal);
+        var bySection = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var item in active)
+        {
+            if (SmartViews.IsToday(item, today, snapshot.TimeZone)) todayCount++;
+            if (SmartViews.IsUpcoming(item, today, snapshot.TimeZone)) upcomingCount++;
+            if (SmartViews.IsInbox(item, inbox)) inboxCount++;
+
+            if (item.ProjectId is { } itemProject)
+                byProject[itemProject] = byProject.GetValueOrDefault(itemProject) + 1;
+            if (item.SectionId is { } itemSection)
+                bySection[itemSection] = bySection.GetValueOrDefault(itemSection) + 1;
+        }
+
         var nodes = new List<SidebarNode>
         {
-            View(SmartView.Today, "Today", active.Count(i => SmartViews.IsToday(i, today, snapshot.TimeZone))),
-            View(SmartView.Upcoming, "Upcoming", active.Count(i => SmartViews.IsUpcoming(i, today, snapshot.TimeZone))),
-            View(SmartView.Inbox, "Inbox", active.Count(i => SmartViews.IsInbox(i, inbox))),
+            View(SmartView.Today, "Today", todayCount),
+            View(SmartView.Upcoming, "Upcoming", upcomingCount),
+            View(SmartView.Inbox, "Inbox", inboxCount),
         };
 
         var favorites = projects
@@ -414,7 +434,7 @@ public sealed class MainPresenter
             {
                 // Keyed apart from its copy in the tree, so clicking one doesn't select the other.
                 nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
-                    Key: "favourite:" + favorite.Id, IsFavorite: true, Count: active.Count(i => i.ProjectId == favorite.Id)));
+                    Key: "favourite:" + favorite.Id, IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
             }
         }
 
@@ -441,7 +461,7 @@ public sealed class MainPresenter
                     continue;
 
                 nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
-                    Key: project.Id, IsFavorite: project.IsFavorite, Count: active.Count(i => i.ProjectId == project.Id)));
+                    Key: project.Id, IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id)));
 
                 var owned = sections
                     .Where(s => s.ProjectId == project.Id)
@@ -450,7 +470,7 @@ public sealed class MainPresenter
 
                 foreach (var section in owned)
                     nodes.Add(new SidebarNode(SidebarKind.Section, section.Id, section.Name, depth + 1,
-                        Key: section.Id, Count: active.Count(i => i.SectionId == section.Id)));
+                        Key: section.Id, Count: bySection.GetValueOrDefault(section.Id)));
 
                 AddProjects(project.Id, depth + 1);
             }

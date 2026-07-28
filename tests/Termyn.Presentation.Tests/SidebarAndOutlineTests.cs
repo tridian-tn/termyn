@@ -106,10 +106,14 @@ public class SidebarAndOutlineTests
         var presenter = NewPresenter(Seeded());
 
         var work = presenter.Sidebar.First(n => n.Label == "Work");
+        var admin = presenter.Sidebar.First(n => n.Label == "Admin");
         var today = presenter.Sidebar.First(n => n.Label == "Today");
+        var inbox = presenter.Sidebar.First(n => n.Label == "Inbox");
 
         Assert.Equal(3, work.Count);   // every active task in Work
+        Assert.Equal(1, admin.Count);  // only the one filed in the section
         Assert.Equal(1, today.Count);  // only the one due today
+        Assert.Equal(1, inbox.Count);  // the task with no project of its own
     }
 
     // ---- Selection -----------------------------------------------------------------------------

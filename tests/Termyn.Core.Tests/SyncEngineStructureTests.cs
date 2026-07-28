@@ -140,6 +140,7 @@ public class SyncEngineStructureTests
     public void Outdenting_inside_a_section_keeps_the_task_in_that_section()
     {
         var store = new InMemorySnapshotStore();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p"}""");
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""");
         var engine = NewEngine(store);
@@ -149,7 +150,28 @@ public class SyncEngineStructureTests
         // Moving to the project would have evicted it from the section server-side.
         var cmd = engine.Outbox.Single();
         Assert.Equal("s1", Args(cmd)["section_id"]!.ToString());
-        Assert.Equal("s1", engine.Snapshot().Items.Single(i => i.Id == "c").SectionId);
+
+        var moved = engine.Snapshot().Items.Single(i => i.Id == "c");
+        Assert.Equal("s1", moved.SectionId);
+        Assert.Equal("p", moved.ProjectId); // the project is read off the section, and must survive
+    }
+
+    [Fact]
+    public void Outdenting_into_a_section_the_model_lacks_falls_back_to_the_project()
+    {
+        // The parent claims a section that isn't here — deleted upstream, or simply not synced yet.
+        // Reading the destination project off it would file the task under no project at all.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"gone","child_order":1}""");
+        store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","section_id":"gone","parent_id":"a","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.True(engine.OutdentItem("c"));
+
+        var moved = engine.Snapshot().Items.Single(i => i.Id == "c");
+        Assert.Equal("p", moved.ProjectId);
+        Assert.Null(moved.ParentId);
+        Assert.Equal("p", Args(engine.Outbox.Single())["project_id"]!.ToString());
     }
 
     [Fact]
