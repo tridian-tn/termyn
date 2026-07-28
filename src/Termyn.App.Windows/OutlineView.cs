@@ -44,10 +44,11 @@ internal sealed class OutlineView : ListView
         HeaderStyle = ColumnHeaderStyle.Nonclickable;
         DoubleBuffered = true;
 
-        Columns.Add("Task", 420);
+        Columns.Add("Task", 360);
         Columns.Add("!", 34, HorizontalAlignment.Center);
-        Columns.Add("Project", 150);
-        Columns.Add("Due", 130);
+        Columns.Add("Project", 140);
+        Columns.Add("Due", 120);
+        Columns.Add("Labels", 140);
     }
 
     /// <summary>The rows to show. Selection is preserved by id where the task is still present.</summary>
@@ -148,7 +149,7 @@ internal sealed class OutlineView : ListView
         if (_cache[e.ItemIndex] is not { } cached)
         {
             var row = _rows[e.ItemIndex];
-            cached = new ListViewItem([row.Content, string.Empty, row.Project, row.Due]) { Tag = row.Id };
+            cached = new ListViewItem([row.Content, string.Empty, row.Project, row.Due, LabelsOf(row)]) { Tag = row.Id };
             _cache[e.ItemIndex] = cached;
         }
 
@@ -243,8 +244,16 @@ internal sealed class OutlineView : ListView
             case 3:
                 TextRenderer.DrawText(e.Graphics, row.Due, Font, Inset(e.Bounds), muted, Flags);
                 break;
+
+            case 4:
+                TextRenderer.DrawText(e.Graphics, LabelsOf(row), Font, Inset(e.Bounds), muted, Flags);
+                break;
         }
     }
+
+    /// <summary>Labels as they are written in quick-add, so the row reads the way it was typed.</summary>
+    private static string LabelsOf(TaskRow row)
+        => row.Labels.Count == 0 ? string.Empty : "@" + string.Join(" @", row.Labels);
 
     /// <summary>Faint vertical rules showing how deep a sub-task sits.</summary>
     private static void DrawGuides(Graphics g, Rectangle bounds, int depth, bool selected)

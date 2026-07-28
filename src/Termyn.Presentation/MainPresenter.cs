@@ -233,6 +233,10 @@ public sealed class MainPresenter
 
     // ---- Label intents -------------------------------------------------------------------------
 
+    /// <summary>The label of this name, if the account has one. Sidebar rows carry names, not ids.</summary>
+    public Label? LabelNamed(string name)
+        => Labels.FirstOrDefault(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Replaces the labels on a task with the given set.</summary>
     public void SetLabels(string id, IReadOnlyList<string> labels)
     {
