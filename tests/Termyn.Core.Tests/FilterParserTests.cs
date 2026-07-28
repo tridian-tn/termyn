@@ -193,6 +193,16 @@ public class FilterParserTests
     }
 
     [Fact]
+    public void A_refused_fragment_is_bounded_by_its_length_not_its_word_count()
+    {
+        // One enormous word is no fewer characters to render than a thousand small ones.
+        var parsed = Parse(new string('x', 100_000) + " " + new string('y', 100_000));
+
+        Assert.False(parsed.IsSupported);
+        Assert.True(parsed.Unsupported!.Length < 200, $"fragment was {parsed.Unsupported.Length} characters");
+    }
+
+    [Fact]
     public void A_query_at_the_size_limit_still_parses()
     {
         // The ceiling has to leave room for any filter a person would actually write.

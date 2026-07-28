@@ -236,9 +236,15 @@ public sealed class MainPresenter
 
     // ---- Label intents -------------------------------------------------------------------------
 
-    /// <summary>The label of this name, if the account has one. Sidebar rows carry names, not ids.</summary>
-    public Label? LabelNamed(string name)
-        => Labels.FirstOrDefault(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Every label of this name. Nothing stops an account holding two — offline creates racing, or
+    /// a rename onto an existing name — and to a task they are indistinguishable, since a task
+    /// names its labels rather than pointing at them. So the sidebar shows one row and operations
+    /// on it apply to all of them; acting on whichever happened to be enumerated first would leave
+    /// the other behind, still carrying the name.
+    /// </summary>
+    private List<Label> LabelsNamed(string name)
+        => Labels.Where(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
 
     /// <summary>Replaces the labels on a task with the given set.</summary>
     public void SetLabels(string id, IReadOnlyList<string> labels)
@@ -268,38 +274,51 @@ public sealed class MainPresenter
         return trimmed;
     }
 
-    public void RenameLabel(string id, string name)
+    /// <summary>Renames every label of <paramref name="name"/>, and follows it if it is in view.</summary>
+    public void RenameLabel(string name, string newName)
     {
-        var old = _engine.Snapshot().Labels.FirstOrDefault(l => l.Id == id)?.Name;
+        var labels = LabelsNamed(name);
+        if (labels.Count == 0)
+            return;
 
-        _engine.RenameLabel(id, name);
+        foreach (var label in labels)
+            _engine.RenameLabel(label.Id, newName);
 
         // A label view is held by name, so a rename moves it. Without this the selection names a
         // label the account no longer has: nothing highlighted, and an outline that empties itself
         // the moment the server carries the rename across to the tasks.
-        if (old is not null && string.Equals(Selection.LabelName, old, StringComparison.OrdinalIgnoreCase))
-            Selection = ViewSelection.OfLabel(name);
+        if (string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
+            Selection = ViewSelection.OfLabel(newName);
 
         Publish();
     }
 
-    public void ToggleLabelFavorite(string id)
+    /// <summary>Favourites or unfavourites every label of this name, so the sidebar row is coherent.</summary>
+    public void ToggleLabelFavorite(string name)
     {
-        if (_engine.Snapshot().Labels.FirstOrDefault(l => l.Id == id) is not { } label)
+        var labels = LabelsNamed(name);
+        if (labels.Count == 0)
             return;
 
-        _engine.SetLabelFavorite(id, !label.IsFavorite);
+        // The row shows a star when any of them is favourited, so that is what it toggles off.
+        var favourite = !labels.Any(l => l.IsFavorite);
+        foreach (var label in labels)
+            _engine.SetLabelFavorite(label.Id, favourite);
+
         Publish();
     }
 
-    public void DeleteLabel(string id)
+    public void DeleteLabel(string name)
     {
-        var name = _engine.Snapshot().Labels.FirstOrDefault(l => l.Id == id)?.Name;
+        var labels = LabelsNamed(name);
+        if (labels.Count == 0)
+            return;
 
-        _engine.DeleteLabel(id);
+        foreach (var label in labels)
+            _engine.DeleteLabel(label.Id);
 
         // Don't leave the outline showing a label that no longer exists.
-        if (name is not null && string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
             Selection = ViewSelection.Default;
 
         Publish();
@@ -555,10 +574,13 @@ public sealed class MainPresenter
             nodes.Add(Header("Labels"));
 
             // Selected by name, since that is how a task refers to a label. Two labels sharing a
-            // name would be the same view, so they are listed once.
+            // name are the same view, so they are listed once — starred if either of them is, or
+            // the row would contradict the copy of itself under Favourites.
+            var starred = labels.Where(l => l.IsFavorite).Select(l => l.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             foreach (var label in labels.DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase))
                 nodes.Add(new SidebarNode(SidebarKind.Label, label.Name, label.Name, 1,
-                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: label.IsFavorite, Count: byLabel.GetValueOrDefault(label.Name)));
+                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: starred.Contains(label.Name), Count: byLabel.GetValueOrDefault(label.Name)));
         }
 
         if (filters.Count > 0)

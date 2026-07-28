@@ -237,6 +237,76 @@ public class LabelsAndFiltersTests
     }
 
     [Fact]
+    public void A_label_row_is_starred_when_any_label_of_that_name_is()
+    {
+        // The row stands for the name, so a star that depended on which duplicate happened to be
+        // enumerated first would contradict the row's own copy under Favourites.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","item_order":2,"is_favorite":true}""");
+        var presenter = NewPresenter(store);
+
+        Assert.True(presenter.Sidebar.Single(n => n.Key == SidebarKeys.For(SidebarKind.Label, "home")).IsFavorite);
+        Assert.Single(presenter.Sidebar, n => n.Key == SidebarKeys.Favourite(SidebarKind.Label, "home"));
+    }
+
+    [Fact]
+    public void An_operation_on_a_label_row_reaches_every_label_of_that_name()
+    {
+        // Renaming one of them would leave the other still carrying the old name, so the row the
+        // user thought they had just renamed would still be there.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","item_order":2}""");
+        var presenter = NewPresenter(store);
+
+        presenter.RenameLabel("home", "household");
+
+        Assert.Equal(["household", "household"], presenter.Labels.Select(l => l.Name));
+        Assert.DoesNotContain(presenter.Sidebar, n => n.Label == "home");
+    }
+
+    [Fact]
+    public void Unfavouriting_a_label_row_clears_the_star_on_all_of_them()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","item_order":2,"is_favorite":true}""");
+        var presenter = NewPresenter(store);
+
+        // The row shows a star, so the first toggle has to be the one that takes it away.
+        presenter.ToggleLabelFavorite("home");
+
+        Assert.All(presenter.Labels, l => Assert.False(l.IsFavorite));
+        Assert.DoesNotContain(presenter.Sidebar, n => n.Label == "Favourites");
+    }
+
+    [Fact]
+    public void Deleting_a_label_row_removes_every_label_of_that_name()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","item_order":2}""");
+        var presenter = NewPresenter(store);
+
+        presenter.DeleteLabel("home");
+
+        Assert.Empty(presenter.Labels);
+    }
+
+    [Fact]
+    public void An_operation_on_a_label_that_is_not_there_does_nothing()
+    {
+        var presenter = NewPresenter(Seeded());
+
+        presenter.RenameLabel("ghost", "x");
+        presenter.ToggleLabelFavorite("ghost");
+        presenter.DeleteLabel("ghost");
+
+        Assert.DoesNotContain("pending", presenter.Status);
+    }
+
+    [Fact]
     public void A_blank_label_name_is_not_added()
     {
         // The server rejects it, and a rejected command retries to its ceiling and then sits in the
@@ -257,7 +327,7 @@ public class LabelsAndFiltersTests
         var presenter = NewPresenter(Seeded());
         presenter.Select(ViewSelection.OfLabel("home"));
 
-        presenter.RenameLabel("l1", "household");
+        presenter.RenameLabel("home", "household");
 
         Assert.Equal("household", presenter.Selection.LabelName);
         Assert.Contains(presenter.Sidebar, n => n.Key == presenter.Selection.Key);
@@ -269,7 +339,7 @@ public class LabelsAndFiltersTests
         var presenter = NewPresenter(Seeded());
         presenter.Select(ViewSelection.OfLabel("errand"));
 
-        presenter.RenameLabel("l1", "household");
+        presenter.RenameLabel("home", "household");
 
         Assert.Equal("errand", presenter.Selection.LabelName);
     }
@@ -335,7 +405,7 @@ public class LabelsAndFiltersTests
         var presenter = NewPresenter(Seeded());
         presenter.Select(ViewSelection.OfLabel("home"));
 
-        presenter.DeleteLabel("l1");
+        presenter.DeleteLabel("home");
 
         Assert.Equal(SmartView.Today, presenter.Selection.View);
     }

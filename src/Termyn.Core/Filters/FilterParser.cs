@@ -67,19 +67,21 @@ public static class FilterParser
         if (tokens.Count == 0)
             return FilterParse.No(string.Empty);
 
+        // Bounded by characters, not tokens: eight tokens is no limit at all when one of them is
+        // the whole query.
         if (tokens.Count > MaxTokens)
-            return FilterParse.No(string.Join(' ', tokens.Take(8)) + " …");
+            return FilterParse.No(Shortened(string.Join(' ', tokens)));
 
         var at = 0;
         var expression = ParseOr(tokens, vocabulary, ref at, out var failed);
 
         if (expression is null)
-            return FilterParse.No(failed ?? string.Join(' ', tokens));
+            return FilterParse.No(Shortened(failed ?? string.Join(' ', tokens)));
 
         // Trailing tokens mean the query didn't parse as a whole — most likely an unbalanced ')'.
         return at == tokens.Count
             ? FilterParse.Ok(expression)
-            : FilterParse.No(string.Join(' ', tokens[at..]));
+            : FilterParse.No(Shortened(string.Join(' ', tokens[at..])));
     }
 
     // ---- Grammar -----------------------------------------------------------------------------------
@@ -337,6 +339,10 @@ public static class FilterParser
     }
 
     // ---- Lexing ------------------------------------------------------------------------------------
+
+    /// <summary>Cuts a refused fragment down to something a message can carry.</summary>
+    private static string Shortened(string fragment)
+        => fragment.Length > 80 ? fragment[..80] + " …" : fragment;
 
     private static bool IsOperator(string token) => token is "&" or "|" or "," or "(" or ")" or "!";
 

@@ -334,11 +334,7 @@ internal sealed class MainForm : Form
                 Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
                 break;
             case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Label:
-                Guarded(() =>
-                {
-                    if (_presenter.LabelNamed(node.Id) is { } label)
-                        _presenter.ToggleLabelFavorite(label.Id);
-                });
+                Guarded(() => _presenter.ToggleLabelFavorite(node.Id));
                 break;
             default:
                 return;
@@ -365,8 +361,8 @@ internal sealed class MainForm : Form
                 case SidebarKind.Section:
                     _presenter.RenameSection(node.Id, name);
                     break;
-                case SidebarKind.Label when _presenter.LabelNamed(node.Id) is { } label:
-                    _presenter.RenameLabel(label.Id, name);
+                case SidebarKind.Label:
+                    _presenter.RenameLabel(node.Id, name);
                     break;
             }
         });
@@ -393,8 +389,8 @@ internal sealed class MainForm : Form
                 case SidebarKind.Section:
                     _presenter.DeleteSection(node.Id);
                     break;
-                case SidebarKind.Label when _presenter.LabelNamed(node.Id) is { } label:
-                    _presenter.DeleteLabel(label.Id);
+                case SidebarKind.Label:
+                    _presenter.DeleteLabel(node.Id);
                     break;
             }
         });
