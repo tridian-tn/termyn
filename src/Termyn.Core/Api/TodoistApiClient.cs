@@ -153,13 +153,22 @@ public sealed class TodoistApiClient : ITodoistApi
         var changes = new List<ResourceChange>();
         foreach (var type in resourceTypes)
         {
-            if (root[type] is not JsonArray array)
-                continue;
-            foreach (var node in array)
+            switch (root[type])
             {
-                if (node is not JsonObject obj || obj["id"] is not { } idNode)
-                    continue;
-                changes.Add(new ResourceChange(type, idNode.ToString(), ReadFlag(obj, "is_deleted"), obj.DeepClone().AsObject()));
+                case JsonArray array:
+                    foreach (var node in array)
+                    {
+                        if (node is not JsonObject obj || obj["id"] is not { } idNode)
+                            continue;
+                        changes.Add(new ResourceChange(type, idNode.ToString(), ReadFlag(obj, "is_deleted"), obj.DeepClone().AsObject()));
+                    }
+                    break;
+
+                // Singletons such as "user" arrive as one object rather than a collection; key them
+                // by the resource type so there is always exactly one.
+                case JsonObject single:
+                    changes.Add(new ResourceChange(type, type, false, single.DeepClone().AsObject()));
+                    break;
             }
         }
 

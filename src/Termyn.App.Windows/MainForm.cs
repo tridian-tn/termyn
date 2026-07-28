@@ -5,9 +5,11 @@ using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
 
-/// <summary>Main window: capture box, task list, and the keyboard map.</summary>
+/// <summary>Main window: sidebar, capture box, task outline, and the keyboard map.</summary>
 internal sealed class MainForm : Form
 {
+    private const string ReconnectMessage = "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.";
+
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
     private readonly CancellationTokenSource _cts = new();
@@ -15,14 +17,22 @@ internal sealed class MainForm : Form
     private readonly TextBox _capture;
     private readonly Label _preview;
     private readonly TextBox _search;
-    private readonly ListView _list;
+    private readonly TreeView _sidebar;
+    private readonly OutlineView _outline;
     private readonly Label _status;
-
-    private const string ReconnectMessage = "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.";
 
     private string? _editingId;
     private string? _editingText;
     private bool _reconnectNeeded;
+    private bool _syncingSidebar;
+
+    /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
+    private string _sidebarKey = SmartView.Today.ToString();
+
+    /// <summary>The sidebar last rendered, so an unchanged one isn't rebuilt.</summary>
+    private IReadOnlyList<SidebarNode>? _renderedSidebar;
+
+    private Font? _headerFont;
 
     public MainForm(MainPresenter presenter, SyncScheduler scheduler)
     {
@@ -31,11 +41,11 @@ internal sealed class MainForm : Form
 
         Text = "Termyn";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(760, 520);
-        MinimumSize = new Size(520, 360);
+        ClientSize = new Size(940, 580);
+        MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
-        _capture = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Add a task…  #project @label p1 tomorrow 4pm" };
+        _capture = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Add a task…  #project /section @label p1 tomorrow 4pm" };
         _capture.KeyDown += OnCaptureKeyDown;
         _capture.TextChanged += (_, _) => UpdatePreview();
 
@@ -44,23 +54,30 @@ internal sealed class MainForm : Form
         _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
         _search.TextChanged += (_, _) => Guarded(() => _presenter.Search(_search.Text));
 
-        _list = new ListView
+        _sidebar = new TreeView
         {
             Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true,
-            LabelEdit = true,
-            MultiSelect = false,
             HideSelection = false,
-            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+            ShowLines = false,
+            ShowRootLines = false,
+            FullRowSelect = true,
+            Indent = 14,
         };
-        _list.Columns.Add("Task", 380);
-        _list.Columns.Add("!", 44);
-        _list.Columns.Add("Project", 150);
-        _list.Columns.Add("Due", 140);
-        _list.KeyDown += OnListKeyDown;
-        _list.BeforeLabelEdit += OnBeforeLabelEdit;
-        _list.AfterLabelEdit += OnAfterLabelEdit;
+        _sidebar.AfterSelect += OnSidebarSelect;
+        _sidebar.KeyDown += OnSidebarKeyDown;
+
+        _outline = new OutlineView { Dock = DockStyle.Fill };
+        _outline.KeyDown += OnOutlineKeyDown;
+        _outline.BeforeLabelEdit += OnBeforeLabelEdit;
+        _outline.AfterLabelEdit += OnAfterLabelEdit;
+
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            FixedPanel = FixedPanel.Panel1,
+        };
+        split.Panel1.Controls.Add(_sidebar);
+        split.Panel2.Controls.Add(_outline);
 
         _status = new Label
         {
@@ -71,11 +88,17 @@ internal sealed class MainForm : Form
             Text = "Loading…",
         };
 
-        Controls.Add(_list);
+        Controls.Add(split);
         Controls.Add(_status);
         Controls.Add(_search);
         Controls.Add(_preview);
         Controls.Add(_capture);
+
+        // Only once it's parented: before that the splitter is clamped against the container's
+        // default 150px width and silently sticks there.
+        split.SplitterDistance = 220;
+
+        _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
 
         _presenter.RowsChanged += OnRowsChanged;
         _scheduler.SyncFailed += OnSyncFailed;
@@ -85,6 +108,7 @@ internal sealed class MainForm : Form
         {
             _presenter.RowsChanged -= OnRowsChanged;
             _scheduler.SyncFailed -= OnSyncFailed;
+            _headerFont?.Dispose();
             _cts.Dispose();
         };
     }
@@ -109,26 +133,110 @@ internal sealed class MainForm : Form
         if (IsDisposed || _editingId is not null)
             return;
 
-        var selectedId = SelectedId();
-
-        _list.BeginUpdate();
-        _list.Items.Clear();
-        foreach (var row in _presenter.Rows)
-        {
-            _list.Items.Add(new ListViewItem(new[] { row.Content, PriorityLabel(row.Priority), row.Project, row.Due })
-            {
-                Tag = row.Id,
-            });
-        }
-        _list.EndUpdate();
-
-        if (selectedId is not null)
-            Select(selectedId);
-
+        RenderSidebar();
+        _outline.Rows = _presenter.Rows;
         _status.Text = _presenter.Status;
     }
 
-    private static string PriorityLabel(Priority priority) => priority == Priority.P4 ? string.Empty : priority.ToString();
+    private void RenderSidebar()
+    {
+        // Nothing structural changed — a search keystroke, say — so leave the tree alone rather
+        // than rebuilding it and losing what the user has collapsed.
+        if (ReferenceEquals(_renderedSidebar, _presenter.Sidebar))
+            return;
+
+        _renderedSidebar = _presenter.Sidebar;
+        _syncingSidebar = true;
+        try
+        {
+            // Remember which branches are closed; the rebuild would otherwise reopen them.
+            var collapsed = CollapsedKeys();
+
+            _sidebar.BeginUpdate();
+            _sidebar.Nodes.Clear();
+
+            // The presenter hands back a flattened tree; rebuild the nesting from each row's depth.
+            var parents = new Dictionary<int, TreeNode>();
+            foreach (var node in _presenter.Sidebar)
+            {
+                var label = node.Count > 0 ? $"{node.Label}  ({node.Count})" : node.Label;
+                var tree = new TreeNode(label) { Tag = node };
+
+                if (node.Kind == SidebarKind.Header)
+                {
+                    tree.NodeFont = _headerFont;
+                    tree.ForeColor = SystemColors.GrayText;
+                }
+
+                if (node.Depth > 0 && parents.TryGetValue(node.Depth - 1, out var parent))
+                    parent.Nodes.Add(tree);
+                else
+                    _sidebar.Nodes.Add(tree);
+
+                parents[node.Depth] = tree;
+
+                // Match the exact row that was clicked: a favourited project appears twice.
+                if (node.Key == _sidebarKey)
+                    _sidebar.SelectedNode = tree;
+            }
+
+            _sidebar.ExpandAll();
+            Recollapse(_sidebar.Nodes, collapsed);
+
+            // The selected row may have gone — deleted here, or removed by a sync. Fall back to
+            // whatever the presenter is actually showing rather than highlighting nothing.
+            if (_sidebar.SelectedNode is null)
+            {
+                _sidebarKey = _presenter.Selection.Key;
+                _sidebar.SelectedNode = FindByKey(_sidebar.Nodes, _sidebarKey);
+            }
+        }
+        finally
+        {
+            _sidebar.EndUpdate();
+            _syncingSidebar = false;
+        }
+    }
+
+    private HashSet<string> CollapsedKeys()
+    {
+        var collapsed = new HashSet<string>();
+        Walk(_sidebar.Nodes);
+        return collapsed;
+
+        void Walk(TreeNodeCollection nodes)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node is { IsExpanded: false, Nodes.Count: > 0 } && node.Tag is SidebarNode tagged)
+                    collapsed.Add(tagged.Key);
+                Walk(node.Nodes);
+            }
+        }
+    }
+
+    private static void Recollapse(TreeNodeCollection nodes, HashSet<string> collapsed)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            Recollapse(node.Nodes, collapsed);
+            if (node.Tag is SidebarNode tagged && collapsed.Contains(tagged.Key))
+                node.Collapse();
+        }
+    }
+
+    private static TreeNode? FindByKey(TreeNodeCollection nodes, string key)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            if (node.Tag is SidebarNode tagged && tagged.Key == key)
+                return node;
+            if (FindByKey(node.Nodes, key) is { } found)
+                return found;
+        }
+        return null;
+    }
+
 
     private void OnSyncFailed(Exception ex)
     {
@@ -146,7 +254,90 @@ internal sealed class MainForm : Form
         });
     }
 
-    // ---- Input ---------------------------------------------------------------------------------
+    // ---- Navigation ----------------------------------------------------------------------------
+
+    private void OnSidebarSelect(object? sender, TreeViewEventArgs e)
+    {
+        if (_syncingSidebar || e.Node?.Tag is not SidebarNode node)
+            return;
+
+        // A group label isn't a view; leave the outline where it was.
+        if (node.Kind == SidebarKind.Header)
+            return;
+
+        _sidebarKey = node.Key;
+        Guarded(() => _presenter.Select(node.Kind switch
+        {
+            SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
+            SidebarKind.Section => ViewSelection.OfSection(node.Id),
+            _ => ViewSelection.OfProject(node.Id),
+        }));
+    }
+
+    private void OnSidebarKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_sidebar.SelectedNode?.Tag is not SidebarNode node)
+            return;
+
+        switch (e.KeyCode)
+        {
+            case Keys.F2 when node.Kind is SidebarKind.Project or SidebarKind.Section:
+                RenameStructure(node);
+                break;
+            case Keys.Delete when node.Kind is SidebarKind.Project or SidebarKind.Section:
+                DeleteStructure(node);
+                break;
+            // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
+            case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Project:
+                Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
+                break;
+            default:
+                return;
+        }
+
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+        _scheduler.NotifyWrite();
+    }
+
+    private void RenameStructure(SidebarNode node)
+    {
+        var name = InputDialog.Ask(this, "Rename", "New name:", node.Label);
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        Guarded(() =>
+        {
+            if (node.Kind == SidebarKind.Project)
+                _presenter.RenameProject(node.Id, name);
+            else
+                _presenter.RenameSection(node.Id, name);
+        });
+    }
+
+    private void DeleteStructure(SidebarNode node)
+    {
+        var what = node.Kind == SidebarKind.Project ? "project" : "section";
+        var answer = MessageBox.Show(
+            this,
+            $"Delete the {what} \"{node.Label}\" and everything in it?",
+            "Termyn",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Warning);
+
+        if (answer != DialogResult.OK)
+            return;
+
+        Guarded(() =>
+        {
+            if (node.Kind == SidebarKind.Project)
+                _presenter.DeleteProject(node.Id);
+            else
+                _presenter.DeleteSection(node.Id);
+        });
+    }
+
+    // ---- Capture -------------------------------------------------------------------------------
 
     private async void OnCaptureKeyDown(object? sender, KeyEventArgs e)
     {
@@ -201,9 +392,11 @@ internal sealed class MainForm : Form
         _preview.Text = string.Join("  ·  ", parts);
     }
 
-    private void OnListKeyDown(object? sender, KeyEventArgs e)
+    // ---- Outline keys --------------------------------------------------------------------------
+
+    private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
-        var id = SelectedId();
+        var id = _outline.SelectedId;
         var wrote = true;
 
         switch (e.KeyCode)
@@ -216,10 +409,18 @@ internal sealed class MainForm : Form
                 Guarded(() => _presenter.Delete(id!));
                 break;
             case Keys.F2 when id is not null:
-                _list.SelectedItems[0].BeginEdit();
+                BeginRename();
                 return;
+            case Keys.Tab when id is not null:
+                wrote = false;
+                Guarded(() =>
+                {
+                    wrote = e.Shift ? _presenter.Outdent(id!) : _presenter.Indent(id!);
+                    if (!wrote)
+                        _status.Text = e.Shift ? "Already at the top level." : "Nothing above it to indent under.";
+                });
+                break;
             case Keys.D when e.Control && id is not null:
-                // A cancelled or unreadable date changes nothing, so it shouldn't trigger a sync.
                 wrote = false;
                 Guarded(() => wrote = PromptForDue(id!));
                 break;
@@ -266,29 +467,70 @@ internal sealed class MainForm : Form
                 _search.Focus();
                 _search.SelectAll();
                 return true;
+            // This runs ahead of every control's own key handling, so the sidebar can't claim
+            // Ctrl+N for itself — the choice between a section and a task has to be made here.
+            case Keys.Control | Keys.N when FocusedProject() is { } project:
+                AddSection(project.Id);
+                return true;
             case Keys.Insert:
             case Keys.Control | Keys.N:
                 _capture.Focus();
+                return true;
+            case Keys.Control | Keys.Shift | Keys.N:
+                AddProject();
                 return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    /// <summary>The project the sidebar is sitting on, when the sidebar is the one with focus.</summary>
+    private SidebarNode? FocusedProject()
+        => _sidebar.Focused && _sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } node
+            ? node
+            : null;
+
+    private void AddProject()
+    {
+        var name = InputDialog.Ask(this, "New project", "Project name:");
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        Guarded(() => _presenter.AddProject(name));
+        _scheduler.NotifyWrite();
+    }
+
+    private void AddSection(string projectId)
+    {
+        var name = InputDialog.Ask(this, "New section", "Section name:");
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        Guarded(() => _presenter.AddSection(name, projectId));
+        _scheduler.NotifyWrite();
+    }
+
+    // ---- Inline rename -------------------------------------------------------------------------
+
+    private void BeginRename()
+    {
+        if (_outline.SelectedIndices.Count > 0)
+            _outline.Items[_outline.SelectedIndices[0]].BeginEdit();
+    }
+
     private void OnBeforeLabelEdit(object? sender, LabelEditEventArgs e)
     {
-        var item = e.Item >= 0 && e.Item < _list.Items.Count ? _list.Items[e.Item] : null;
-        _editingId = item?.Tag as string;
-        _editingText = item?.Text;
+        var row = _outline.SelectedRow;
+        _editingId = row?.Id;
+        _editingText = row?.Content;
     }
 
     private void OnAfterLabelEdit(object? sender, LabelEditEventArgs e)
     {
-        // The list gets rebuilt from the presenter before this returns, and the control then indexes
+        // The list is rebuilt from the presenter before this returns, and the control then indexes
         // the edited row again — which throws if the rebuild dropped or moved it. Cancelling the
         // control's own commit on every path leaves the repaint to us.
         e.CancelEdit = true;
 
-        // Capture the id up front: a sync landing mid-edit could otherwise shift what this index means.
         var id = _editingId;
         var opened = _editingText;
         _editingId = null;
@@ -323,7 +565,6 @@ internal sealed class MainForm : Form
         }
 
         var parse = _presenter.Preview(answer).Parse;
-
         if (parse.DueDate is null)
         {
             _status.Text = $"Couldn't read \"{answer}\" as a date.";
@@ -335,23 +576,6 @@ internal sealed class MainForm : Form
     }
 
     // ---- Plumbing ------------------------------------------------------------------------------
-
-    private string? SelectedId()
-        => _list.SelectedItems.Count > 0 ? _list.SelectedItems[0].Tag as string : null;
-
-    private void Select(string id)
-    {
-        foreach (ListViewItem item in _list.Items)
-        {
-            if ((item.Tag as string) == id)
-            {
-                item.Selected = true;
-                item.Focused = true;
-                item.EnsureVisible();
-                return;
-            }
-        }
-    }
 
     private async Task LoadAsync()
     {

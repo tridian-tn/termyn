@@ -3,6 +3,8 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- ICU is required: the account's timezone arrives as an IANA name, which cannot be resolved
+         without it, and the smart views are defined against the account's date. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 </Project>

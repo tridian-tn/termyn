@@ -6,8 +6,15 @@ using Termyn.Core.Sync;
 
 namespace Termyn.Presentation;
 
-/// <summary>A single row rendered in the task list.</summary>
-public sealed record TaskRow(string Id, string Content, Priority Priority, string Project, string Due, IReadOnlyList<string> Labels);
+/// <summary>A single row rendered in the outline. <paramref name="Depth"/> is its indent level.</summary>
+public sealed record TaskRow(
+    string Id,
+    string Content,
+    Priority Priority,
+    string Project,
+    string Due,
+    IReadOnlyList<string> Labels,
+    int Depth = 0);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -16,8 +23,9 @@ public sealed record TaskRow(string Id, string Content, Priority Priority, strin
 public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved);
 
 /// <summary>
-/// Drives the task list: exposes the engine's model as rows and turns user intents into engine
-/// operations. UI-framework agnostic, so another platform's view can bind to the same presenter.
+/// Drives the sidebar and the outline: exposes the engine's model as rows and turns user intents
+/// into engine operations. UI-framework agnostic, so another platform's view can bind to the same
+/// presenter.
 /// </summary>
 public sealed class MainPresenter
 {
@@ -32,6 +40,7 @@ public sealed class MainPresenter
     private readonly Lock _publishing = new();
 
     private IReadOnlyList<TaskRow> _allRows = [];
+    private IReadOnlyList<TaskRow> _searchableRows = [];
 
     public MainPresenter(SyncEngine engine, QuickAddParser parser)
     {
@@ -40,10 +49,14 @@ public sealed class MainPresenter
         Publish(); // reflect whatever the engine already has loaded
     }
 
-    /// <summary>Raised whenever <see cref="Rows"/> and <see cref="Status"/> have been refreshed.</summary>
+    /// <summary>Raised whenever the sidebar, rows or status have been refreshed.</summary>
     public event Action? RowsChanged;
 
     public IReadOnlyList<TaskRow> Rows { get; private set; } = [];
+
+    public IReadOnlyList<SidebarNode> Sidebar { get; private set; } = [];
+
+    public ViewSelection Selection { get; private set; } = ViewSelection.Default;
 
     public string Status { get; private set; } = string.Empty;
 
@@ -100,6 +113,15 @@ public sealed class MainPresenter
         if (!captured)
         {
             var (parse, projectId, sectionId) = Resolve(text);
+
+            // With nothing named at all, a capture belongs wherever the user is looking. Applied
+            // together: a section from one view with a project named in the text is not a real place.
+            if (projectId is null && sectionId is null)
+            {
+                projectId = Selection.ProjectId ?? SectionProjectId();
+                sectionId = Selection.SectionId;
+            }
+
             _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
         }
 
@@ -116,11 +138,21 @@ public sealed class MainPresenter
             parse.SectionName is null || sectionId is not null);
     }
 
+    // ---- Navigation ----------------------------------------------------------------------------
+
+    public void Select(ViewSelection selection)
+    {
+        Selection = selection;
+        Publish();
+    }
+
     public void Search(string query)
     {
         SearchQuery = query ?? string.Empty;
         Republish();
     }
+
+    // ---- Task intents --------------------------------------------------------------------------
 
     public void Rename(string id, string content)
     {
@@ -171,11 +203,115 @@ public sealed class MainPresenter
         return moved;
     }
 
-    /// <summary>
-    /// Works out what a capture would actually create: the text, and the ids its <c>#project</c> and
-    /// <c>/section</c> names resolve to. Shared by the preview and the capture itself so the two
-    /// can never disagree.
-    /// </summary>
+    /// <summary>Makes a task a child of the one above it.</summary>
+    public bool Indent(string id)
+    {
+        var indented = _engine.IndentItem(id);
+        if (indented)
+            Publish();
+        return indented;
+    }
+
+    /// <summary>Promotes a sub-task alongside its parent.</summary>
+    public bool Outdent(string id)
+    {
+        var outdented = _engine.OutdentItem(id);
+        if (outdented)
+            Publish();
+        return outdented;
+    }
+
+    // ---- Structure intents ---------------------------------------------------------------------
+
+    public void AddProject(string name)
+    {
+        _engine.AddProject(name);
+        Publish();
+    }
+
+    public void RenameProject(string id, string name)
+    {
+        _engine.RenameProject(id, name);
+        Publish();
+    }
+
+    public void ToggleProjectFavorite(string id)
+    {
+        var current = _engine.Snapshot().Projects.FirstOrDefault(p => p.Id == id);
+        if (current is null)
+            return;
+
+        _engine.SetProjectFavorite(id, !current.IsFavorite);
+        Publish();
+    }
+
+    public void DeleteProject(string id)
+    {
+        // Captured first: the delete cascades to descendants, so afterwards there's no way to tell
+        // whether the selected section or project belonged to what just went.
+        var doomed = DescendantProjects(id);
+        var doomedSections = _engine.Snapshot().Sections
+            .Where(s => s.ProjectId is { } p && doomed.Contains(p))
+            .Select(s => s.Id)
+            .ToHashSet();
+
+        _engine.DeleteProject(id);
+
+        // Don't leave the outline pointed at something that no longer exists.
+        if ((Selection.ProjectId is { } selected && doomed.Contains(selected))
+            || (Selection.SectionId is { } section && doomedSections.Contains(section)))
+        {
+            Selection = ViewSelection.Default;
+        }
+
+        Publish();
+    }
+
+    private HashSet<string> DescendantProjects(string id)
+    {
+        var projects = _engine.Snapshot().Projects;
+        var doomed = new HashSet<string> { id };
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var project in projects)
+                if (project.ParentId is { } parent && doomed.Contains(parent) && doomed.Add(project.Id))
+                    grew = true;
+        }
+        while (grew);
+        return doomed;
+    }
+
+    public void AddSection(string name, string projectId)
+    {
+        _engine.AddSection(name, projectId);
+        Publish();
+    }
+
+    public void RenameSection(string id, string name)
+    {
+        _engine.RenameSection(id, name);
+        Publish();
+    }
+
+    public void DeleteSection(string id)
+    {
+        _engine.DeleteSection(id);
+
+        if (Selection.SectionId == id)
+            Selection = ViewSelection.Default;
+
+        Publish();
+    }
+
+    // ---- Building the view ---------------------------------------------------------------------
+
+    private string? SectionProjectId()
+        => Selection.SectionId is { } id
+            ? _engine.Snapshot().Sections.FirstOrDefault(s => s.Id == id)?.ProjectId
+            : null;
+
     private (QuickAddParse Parse, string? ProjectId, string? SectionId) Resolve(string text)
     {
         var parse = _parser.Parse(text);
@@ -226,26 +362,12 @@ public sealed class MainPresenter
         lock (_publishing)
         {
             var snapshot = _engine.Snapshot();
-            var projects = snapshot.Projects
-                .DistinctBy(p => p.Id)
-                .ToDictionary(p => p.Id, p => p.Name);
+            Sidebar = BuildSidebar(snapshot);
+            _allRows = BuildOutline(snapshot, scoped: true);
 
-            // Ordered the way the engine groups siblings, so moving a task one place on screen is
-            // the same move it makes in the model.
-            _allRows = snapshot.Items
-                .Where(i => !i.Completed)
-                .OrderBy(i => i.ProjectId ?? string.Empty, StringComparer.Ordinal)
-                .ThenBy(i => i.ParentId ?? string.Empty, StringComparer.Ordinal)
-                .ThenBy(i => i.ChildOrder)
-                .ThenBy(i => i.Id, StringComparer.Ordinal)
-                .Select(i => new TaskRow(
-                    i.Id,
-                    i.Content,
-                    i.Priority,
-                    i.ProjectId is not null && projects.TryGetValue(i.ProjectId, out var name) ? name : string.Empty,
-                    i.DueText ?? i.DueDate ?? string.Empty,
-                    i.Labels))
-                .ToList();
+            // Search runs over everything loaded, not just the view in front of you — otherwise
+            // Ctrl+F from Today silently misses most of the account.
+            _searchableRows = BuildOutline(snapshot, scoped: false);
 
             ApplyFilter(snapshot.PendingCount, snapshot.FailedCount);
         }
@@ -262,20 +384,195 @@ public sealed class MainPresenter
         RowsChanged?.Invoke();
     }
 
-    private void ApplyFilter(int pending, int failed)
+    private List<SidebarNode> BuildSidebar(ModelSnapshot snapshot)
     {
-        var rows = _allRows.AsEnumerable();
+        var today = snapshot.Today;
+        var inbox = snapshot.InboxProjectId;
+        var active = VisibleItems(snapshot);
 
-        if (!string.IsNullOrWhiteSpace(SearchQuery))
+        // Archived projects and sections are still returned by sync; they don't belong in the sidebar.
+        var projects = snapshot.Projects.Where(p => !p.IsArchived && p.Id.Length > 0).ToList();
+        var sections = snapshot.Sections.Where(s => !s.IsArchived && s.Id.Length > 0).ToList();
+
+        // Every count in the sidebar comes off one pass. Counting per node instead would be a scan
+        // of the whole account per project and per section, on every publish — and a sync publishes.
+        var todayCount = 0;
+        var upcomingCount = 0;
+        var inboxCount = 0;
+        var byProject = new Dictionary<string, int>(StringComparer.Ordinal);
+        var bySection = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var item in active)
         {
-            var q = SearchQuery.Trim();
-            rows = rows.Where(r =>
-                r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                r.Labels.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase)));
+            if (SmartViews.IsToday(item, today, snapshot.TimeZone)) todayCount++;
+            if (SmartViews.IsUpcoming(item, today, snapshot.TimeZone)) upcomingCount++;
+            if (SmartViews.IsInbox(item, inbox)) inboxCount++;
+
+            if (item.ProjectId is { } itemProject)
+                byProject[itemProject] = byProject.GetValueOrDefault(itemProject) + 1;
+            if (item.SectionId is { } itemSection)
+                bySection[itemSection] = bySection.GetValueOrDefault(itemSection) + 1;
         }
 
-        Rows = rows.ToList();
+        var nodes = new List<SidebarNode>
+        {
+            View(SmartView.Today, "Today", todayCount),
+            View(SmartView.Upcoming, "Upcoming", upcomingCount),
+            View(SmartView.Inbox, "Inbox", inboxCount),
+        };
+
+        var favorites = projects
+            .Where(p => p.IsFavorite)
+            .OrderBy(p => p.ChildOrder)
+            .ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        if (favorites.Count > 0)
+        {
+            nodes.Add(Header("Favourites"));
+            foreach (var favorite in favorites)
+            {
+                // Keyed apart from its copy in the tree, so clicking one doesn't select the other.
+                nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
+                    Key: "favourite:" + favorite.Id, IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
+            }
+        }
+
+        nodes.Add(Header("Projects"));
+
+        // Projects nest, and each carries its sections beneath it.
+        var byParent = projects
+            .GroupBy(p => p.ParentId ?? string.Empty)
+            .ToDictionary(g => g.Key, g => g.OrderBy(p => p.ChildOrder).ThenBy(p => p.Id, StringComparer.Ordinal).ToList());
+
+        var listed = new HashSet<string>();
+        AddProjects(string.Empty, 1);
+        return nodes;
+
+        void AddProjects(string parentKey, int depth)
+        {
+            if (!byParent.TryGetValue(parentKey, out var children))
+                return;
+
+            foreach (var project in children)
+            {
+                // A parent cycle in the data would otherwise recurse until the stack goes.
+                if (!listed.Add(project.Id))
+                    continue;
+
+                nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
+                    Key: project.Id, IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id)));
+
+                var owned = sections
+                    .Where(s => s.ProjectId == project.Id)
+                    .OrderBy(s => s.SectionOrder)
+                    .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase);
+
+                foreach (var section in owned)
+                    nodes.Add(new SidebarNode(SidebarKind.Section, section.Id, section.Name, depth + 1,
+                        Key: section.Id, Count: bySection.GetValueOrDefault(section.Id)));
+
+                AddProjects(project.Id, depth + 1);
+            }
+        }
+
+        SidebarNode View(SmartView view, string label, int count)
+            => new(SidebarKind.SmartView, view.ToString(), label, 0, Key: view.ToString(), View: view, Count: count);
+
+        SidebarNode Header(string label)
+            => new(SidebarKind.Header, label, label, 0, Key: "header:" + label);
+    }
+
+    /// <summary>Active tasks that aren't filed under an archived project.</summary>
+    private static List<TaskItem> VisibleItems(ModelSnapshot snapshot)
+    {
+        var archived = snapshot.Projects.Where(p => p.IsArchived).Select(p => p.Id).ToHashSet();
+        return snapshot.Items
+            .Where(i => !i.Completed && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Flattens the tasks in the current selection into an outline, depth-first, so a sub-task
+    /// appears under its parent. A task whose parent isn't in view becomes a root of its own.
+    /// </summary>
+    private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
+    {
+        var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
+        var visible = VisibleItems(snapshot)
+            .Where(i => i.Id.Length > 0 && (!scoped || InSelection(i, snapshot)))
+            .ToList();
+        var present = visible.Select(i => i.Id).ToHashSet();
+
+        var byParent = visible
+            .GroupBy(i => i.ParentId is { } p && present.Contains(p) ? p : string.Empty)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(i => i.ProjectId ?? string.Empty, StringComparer.Ordinal)
+                      .ThenBy(i => i.ChildOrder)
+                      .ThenBy(i => i.Id, StringComparer.Ordinal)
+                      .ToList());
+
+        var rows = new List<TaskRow>(visible.Count);
+        var emitted = new HashSet<string>();
+        Emit(string.Empty, 0);
+        return rows;
+
+        void Emit(string parentKey, int depth)
+        {
+            if (!byParent.TryGetValue(parentKey, out var children))
+                return;
+
+            foreach (var item in children)
+            {
+                // A parent cycle in the data would otherwise recurse until the stack goes.
+                if (!emitted.Add(item.Id))
+                    continue;
+
+                rows.Add(Row(item, depth));
+                Emit(item.Id, depth + 1);
+            }
+        }
+
+        TaskRow Row(TaskItem item, int depth) => new(
+            item.Id,
+            item.Content,
+            item.Priority,
+            item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var name) ? name : string.Empty,
+            item.DueText ?? item.DueDate ?? string.Empty,
+            item.Labels,
+            depth);
+    }
+
+    private bool InSelection(TaskItem item, ModelSnapshot snapshot)
+    {
+        if (Selection.SectionId is { } sectionId)
+            return item.SectionId == sectionId;
+        if (Selection.ProjectId is { } projectId)
+            return item.ProjectId == projectId;
+        return Selection.View is not { } view
+               || SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId);
+    }
+
+    private void ApplyFilter(int pending, int failed)
+    {
+        if (string.IsNullOrWhiteSpace(SearchQuery))
+        {
+            Rows = _allRows;
+        }
+        else
+        {
+            // Matches rarely share a parent, so a filtered result is a flat list rather than a
+            // tree with most of its structure missing.
+            var q = SearchQuery.Trim();
+            Rows = _searchableRows
+                .Where(r =>
+                    r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    r.Labels.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                .Select(r => r with { Depth = 0 })
+                .ToList();
+        }
 
         Status = string.Join(" · ",
             new[]
