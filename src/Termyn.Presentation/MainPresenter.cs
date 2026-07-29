@@ -241,8 +241,8 @@ public sealed class MainPresenter
     /// </remarks>
     private static bool StartsARepeat(string text)
     {
-        var first = text.TrimStart().Split(' ', 2)[0];
-        return RepeatStarters.Contains(first, StringComparer.OrdinalIgnoreCase);
+        var first = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return first is not null && RepeatStarters.Contains(first, StringComparer.OrdinalIgnoreCase);
     }
 
     public void Complete(string id)
@@ -303,6 +303,9 @@ public sealed class MainPresenter
 
     /// <summary>The plan the account is on, or empty until a sync has said. Not the upgrade target.</summary>
     public string PlanName { get; private set; } = string.Empty;
+
+    /// <summary>Whether the account still holds this task, whatever the current view happens to show.</summary>
+    public bool HasTask(string id) => _engine.Snapshot().Items.Any(i => i.Id == id);
 
     /// <summary>
     /// The reminders on a task: the ones tied to its due date first, longest warning to shortest,

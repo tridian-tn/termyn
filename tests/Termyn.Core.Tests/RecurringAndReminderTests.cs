@@ -220,7 +220,7 @@ public class RecurringAndReminderTests
         // is_recurring and left the very next close free to tick the task off.
         var engine = Seeded();
 
-        engine.SetItemDueString("r1", "every Monday");
+        engine.SetItemDueString("r1", "every Monday", recurring: true);
 
         var task = engine.Snapshot().Items.Single(i => i.Id == "r1");
         Assert.Equal("every Monday", task.DueText);
@@ -236,7 +236,7 @@ public class RecurringAndReminderTests
     {
         var engine = Seeded();
 
-        engine.SetItemDueString("i1", "every Monday");
+        engine.SetItemDueString("i1", "every Monday", recurring: true);
 
         var due = Args(engine.Outbox.Single())["due"]!.AsObject();
         Assert.Equal("every Monday", due["string"]!.ToString());
@@ -512,11 +512,26 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
+    public void Taking_a_task_off_a_repeat_makes_the_next_close_finish_it()
+    {
+        // The other direction. Preserving the old flag whenever the new words weren't a repeat left
+        // a task the user had just given a plain schedule still looking like it recurred, so the
+        // close after it advanced a task the server was about to finish.
+        var engine = Seeded();
+
+        engine.SetItemDueString("r1", "in three weeks", recurring: false);
+        Assert.False(engine.Snapshot().Items.Single(i => i.Id == "r1").IsRecurring);
+
+        engine.CompleteItem("r1");
+        Assert.True(engine.Snapshot().Items.Single(i => i.Id == "r1").Completed);
+    }
+
+    [Fact]
     public void A_schedule_shows_the_same_words_that_were_sent()
     {
         var engine = Seeded();
 
-        engine.SetItemDueString("i1", "  every Monday  ");
+        engine.SetItemDueString("i1", "  every Monday  ", recurring: true);
 
         Assert.Equal("every Monday", engine.Snapshot().Items.Single(i => i.Id == "i1").DueText);
         Assert.Equal("every Monday", Args(engine.Outbox.Single())["due"]!["string"]!.ToString());

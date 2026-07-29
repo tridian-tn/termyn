@@ -191,7 +191,9 @@ internal sealed class ReminderForm : Form
         if (!_presenter.RemindersAvailable)
             return _presenter.PlanName.Length == 0 ? "Your plan hasn't synced yet." : UpgradeMessage;
 
-        return _presenter.Rows.Any(r => r.Id == _itemId)
+        // Asked of the account rather than the rows on screen: the outline only shows the current
+        // view, so a task that is merely filtered out is still very much there.
+        return _presenter.HasTask(_itemId)
             ? "This plan is at its limit for reminders."
             : "That task is no longer here.";
     }

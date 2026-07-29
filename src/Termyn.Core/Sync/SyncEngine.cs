@@ -461,11 +461,11 @@ public sealed class SyncEngine
     /// close.
     /// </summary>
     /// <param name="recurring">
-    /// Whether the words describe a repeat. The server has the final say, but until it answers a
-    /// task the user has just made repeating has to look repeating — otherwise the next close ticks
-    /// it off as an ordinary one.
+    /// Whether the words describe a repeat, as best the caller can tell. The server has the final
+    /// say, but until it answers this is what the next close goes on — a task just made repeating
+    /// would otherwise be ticked off, and one just taken off a repeat would be advanced.
     /// </param>
-    public void SetItemDueString(string id, string text, bool recurring = false)
+    public void SetItemDueString(string id, string text, bool recurring)
     {
         lock (_gate)
         {
@@ -476,10 +476,12 @@ public sealed class SyncEngine
             var prior = existing.ToJsonString();
             var updated = existing.DeepClone().AsObject();
 
+            // Set either way rather than only when true: a task moved off a repeat and onto a plain
+            // schedule has stopped repeating, and leaving the old flag standing would have the next
+            // close advance a task the server is about to finish.
             var due = existing["due"] is JsonObject held ? held.DeepClone().AsObject() : [];
             due["string"] = trimmed;
-            if (recurring)
-                due["is_recurring"] = true;
+            due["is_recurring"] = recurring;
             updated["due"] = due;
 
             var args = new JsonObject { ["id"] = id, ["due"] = ItemFields.DueString(trimmed) };
