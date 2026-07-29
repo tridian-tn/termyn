@@ -15,7 +15,9 @@ public sealed record TaskRow(
     string Project,
     string Due,
     IReadOnlyList<string> Labels,
-    int Depth = 0);
+    int Depth = 0,
+    bool IsRecurring = false,
+    int Reminders = 0);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -186,6 +188,20 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// Sets the due date from text, which is the only way to author a recurrence. The server reads
+    /// the words and sends back the schedule it settled on, so the row shows what was written until
+    /// the next sync resolves it.
+    /// </summary>
+    public void SetDueString(string id, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.DueString(text) });
+        Publish();
+    }
+
     public void Complete(string id)
     {
         _engine.CompleteItem(id);
@@ -232,6 +248,54 @@ public sealed class MainPresenter
         if (outdented)
             Publish();
         return outdented;
+    }
+
+    // ---- Reminder intents ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether the account's plan allows reminders. False until the first sync has said otherwise,
+    /// so the UI offers nothing it would then have to take back.
+    /// </summary>
+    public bool RemindersAvailable { get; private set; }
+
+    /// <summary>The plan's name, for telling the user what they'd need to upgrade to.</summary>
+    public string PlanName { get; private set; } = string.Empty;
+
+    /// <summary>The reminders on a task, soonest relative offset first.</summary>
+    public IReadOnlyList<Reminder> RemindersFor(string itemId)
+        => _engine.Snapshot().Reminders
+            .Where(r => r.ItemId == itemId)
+            .OrderBy(r => r.Kind)
+            .ThenBy(r => r.MinuteOffset)
+            .ToList();
+
+    /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
+    /// <returns>False when the plan doesn't allow reminders, so the caller can say why.</returns>
+    public bool AddRelativeReminder(string itemId, int minutesBefore)
+    {
+        if (!RemindersAvailable)
+            return false;
+
+        _engine.AddRelativeReminder(itemId, minutesBefore);
+        Publish();
+        return true;
+    }
+
+    /// <summary>Adds a reminder for a fixed moment, whatever the task's own due date is.</summary>
+    public bool AddAbsoluteReminder(string itemId, DateOnly date, TimeOnly time)
+    {
+        if (!RemindersAvailable)
+            return false;
+
+        _engine.AddAbsoluteReminder(itemId, date, time);
+        Publish();
+        return true;
+    }
+
+    public void DeleteReminder(string id)
+    {
+        _engine.DeleteReminder(id);
+        Publish();
     }
 
     // ---- Label intents -------------------------------------------------------------------------
@@ -457,6 +521,8 @@ public sealed class MainPresenter
             UnsupportedFilter = null;
 
             Labels = snapshot.Labels.OrderBy(l => l.ItemOrder).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            RemindersAvailable = snapshot.RemindersAvailable;
+            PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
             _allRows = BuildOutline(snapshot, scoped: true);
 
@@ -646,6 +712,13 @@ public sealed class MainPresenter
     private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
     {
         var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
+
+        // Counted once for the whole outline rather than looked up per row.
+        var reminderCounts = snapshot.Reminders
+            .Where(r => r.ItemId is not null)
+            .GroupBy(r => r.ItemId!)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
         var selected = scoped ? InSelection(snapshot) : _ => true;
         var visible = VisibleItems(snapshot)
             .Where(i => i.Id.Length > 0 && selected(i))
@@ -689,7 +762,9 @@ public sealed class MainPresenter
             item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var name) ? name : string.Empty,
             item.DueText ?? item.DueDate ?? string.Empty,
             item.Labels,
-            depth);
+            depth,
+            item.IsRecurring,
+            reminderCounts.GetValueOrDefault(item.Id));
     }
 
     /// <summary>

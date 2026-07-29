@@ -13,7 +13,60 @@ public sealed class TaskItem
     public IReadOnlyList<string> Labels { get; init; } = [];
     public bool Completed { get; init; }
     public string? DueDate { get; init; }
+
+    /// <summary>The schedule as it was written — "every Monday" — which is what a recurrence is.</summary>
     public string? DueText { get; init; }
+
+    /// <summary>
+    /// Whether closing this task advances it rather than finishing it. The server decides this from
+    /// the due string; Termyn only reports what it is told.
+    /// </summary>
+    public bool IsRecurring { get; init; }
+}
+
+/// <summary>How a reminder is triggered.</summary>
+public enum ReminderKind
+{
+    /// <summary>A number of minutes before the task falls due.</summary>
+    Relative,
+
+    /// <summary>A moment of its own, independent of the task's due date.</summary>
+    Absolute,
+
+    /// <summary>Arriving at or leaving a place. Shown but not edited — there is no map here.</summary>
+    Location,
+}
+
+/// <summary>A reminder on a task.</summary>
+public sealed class Reminder
+{
+    public required string Id { get; init; }
+    public string? ItemId { get; init; }
+    public ReminderKind Kind { get; init; } = ReminderKind.Relative;
+
+    /// <summary>Minutes before the due date, for a relative reminder.</summary>
+    public int MinuteOffset { get; init; }
+
+    /// <summary>When an absolute reminder fires, as the server wrote it.</summary>
+    public string? DueDate { get; init; }
+
+    /// <summary>The place a location reminder watches, for display.</summary>
+    public string? LocationName { get; init; }
+}
+
+/// <summary>
+/// What the account's plan allows. Only the parts Termyn gates on are read; the resource carries a
+/// great deal more.
+/// </summary>
+public sealed class PlanLimits
+{
+    public string PlanName { get; init; } = string.Empty;
+
+    /// <summary>Whether the account may set reminders at all. False on the free plan.</summary>
+    public bool Reminders { get; init; }
+
+    /// <summary>How many time-based reminders the plan allows.</summary>
+    public int MaxTimeReminders { get; init; }
 }
 
 /// <summary>A Todoist project.</summary>

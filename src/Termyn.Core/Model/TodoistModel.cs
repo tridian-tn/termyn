@@ -88,4 +88,16 @@ public sealed class TodoistModel
     public IEnumerable<Label> Labels() => All(ResourceType.Labels).Select(Projections.ToLabel);
 
     public IEnumerable<Filter> Filters() => All(ResourceType.Filters).Select(Projections.ToFilter);
+
+    public IEnumerable<Reminder> Reminders() => All(ResourceType.Reminders).Select(Projections.ToReminder);
+
+    /// <summary>
+    /// The account's plan limits, or null before the first sync has brought them. Null is not
+    /// "unlimited": a caller gating on a plan feature has to treat not-knowing as not-allowed, or
+    /// it will offer something the server then refuses.
+    /// </summary>
+    public PlanLimits? PlanLimits()
+        => Get(ResourceType.UserPlanLimits, ResourceType.UserPlanLimits) is { } o
+            ? Projections.ToPlanLimits(o)
+            : null;
 }

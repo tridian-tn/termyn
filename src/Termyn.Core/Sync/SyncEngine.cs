@@ -14,6 +14,8 @@ public sealed record ModelSnapshot(
     IReadOnlyList<Section> Sections,
     IReadOnlyList<Label> Labels,
     IReadOnlyList<Filter> Filters,
+    IReadOnlyList<Reminder> Reminders,
+    PlanLimits? PlanLimits,
     DateOnly Today,
     TimeZoneInfo TimeZone,
     int PendingCount,
@@ -21,6 +23,12 @@ public sealed record ModelSnapshot(
 {
     /// <summary>The Inbox, which tasks fall back to when they name no project.</summary>
     public string? InboxProjectId => Projects.FirstOrDefault(p => p.IsInboxProject)?.Id;
+
+    /// <summary>
+    /// Whether the account may set reminders. Not knowing counts as not allowed — offering it and
+    /// having the server refuse the save is the one thing the reminder UI must not do.
+    /// </summary>
+    public bool RemindersAvailable => PlanLimits?.Reminders == true;
 }
 
 /// <summary>
@@ -130,6 +138,8 @@ public sealed class SyncEngine
                 Model.Sections().ToList(),
                 Model.Labels().ToList(),
                 Model.Filters().ToList(),
+                Model.Reminders().ToList(),
+                Model.PlanLimits(),
                 DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime),
                 zone,
                 _outbox.Count(c => c.State == OutboxState.Pending),
@@ -375,20 +385,31 @@ public sealed class SyncEngine
             string? prior = null;
             StoredResource[] upserts = [];
 
-            if (existing is not null)
+            // A recurring task isn't finished by closing it — the server moves it to its next
+            // occurrence and it stays open. Ticking it off locally would take it out of the list
+            // until the sync put it back, and working out the next date here is exactly the
+            // recurrence guessing that belongs on the server.
+            var recurring = existing is not null && Projections.ToTaskItem(existing).IsRecurring;
+
+            if (existing is not null && !recurring)
             {
                 prior = existing.ToJsonString();
                 completed = existing.DeepClone().AsObject();
                 completed["checked"] = true;
                 upserts = [new StoredResource(ResourceType.Items, id, completed.ToJsonString())];
             }
+            else if (existing is not null)
+            {
+                prior = existing.ToJsonString();
+            }
 
             var cmd = Persist("item_close", new JsonObject { ["id"] = id }, null, prior, upserts, []);
+
             if (completed is not null)
-            {
                 Model.Upsert(ResourceType.Items, id, completed);
+
+            if (existing is not null)
                 RecordUndoable(cmd, id, prior);
-            }
         }
     }
 
@@ -697,6 +718,56 @@ public sealed class SyncEngine
             deletes.AddRange(Model.Items().Where(i => i.SectionId == id).Select(i => new ResourceKey(ResourceType.Items, i.Id)));
 
             RemoveAll("section_delete", id, deletes);
+        }
+    }
+
+    // ---- Reminders ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Adds a reminder a set number of minutes before the task falls due, and queues a
+    /// <c>reminder_add</c>.
+    /// </summary>
+    public string AddRelativeReminder(string itemId, int minutesBefore)
+        => AddReminder(new JsonObject
+        {
+            ["item_id"] = itemId,
+            ["type"] = "relative",
+            ["minute_offset"] = minutesBefore,
+        });
+
+    /// <summary>Adds a reminder for a moment of its own, and queues a <c>reminder_add</c>.</summary>
+    public string AddAbsoluteReminder(string itemId, DateOnly date, TimeOnly time)
+        => AddReminder(new JsonObject
+        {
+            ["item_id"] = itemId,
+            ["type"] = "absolute",
+            ["due"] = ItemFields.Due(date, time),
+        });
+
+    private string AddReminder(JsonObject args)
+    {
+        lock (_gate)
+        {
+            var tempId = "t-" + Guid.NewGuid().ToString("N");
+            var obj = args.DeepClone().AsObject();
+            obj["id"] = tempId;
+
+            Persist("reminder_add", args, tempId, null, [new StoredResource(ResourceType.Reminders, tempId, obj.ToJsonString())], []);
+            Model.Upsert(ResourceType.Reminders, tempId, obj);
+            return tempId;
+        }
+    }
+
+    public void DeleteReminder(string id)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Reminders, id) is not { } existing)
+                return;
+
+            var prior = existing.ToJsonString();
+            Persist("reminder_delete", new JsonObject { ["id"] = id }, null, prior, [], [new ResourceKey(ResourceType.Reminders, id)]);
+            Model.Remove(ResourceType.Reminders, id);
         }
     }
 

@@ -56,6 +56,13 @@ public static class ItemFields
     }
 
     /// <summary>
+    /// A due date written out rather than picked — "every Monday", "in 3 days". The server reads it
+    /// and sends back the schedule it settled on, which is the only way a recurrence can be set:
+    /// there is no field that says "repeat weekly", just the words.
+    /// </summary>
+    public static JsonObject DueString(string text) => new() { ["string"] = text.Trim() };
+
+    /// <summary>
     /// The fields that may be sent when recreating a task, so replaying a deleted one never echoes
     /// back server-owned values like <c>user_id</c> or <c>added_at</c>.
     /// </summary>
