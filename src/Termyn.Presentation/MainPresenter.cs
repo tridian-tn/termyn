@@ -222,8 +222,27 @@ public sealed class MainPresenter
             return;
         }
 
-        _engine.SetItemDueString(id, text, parse.IsRecurrence);
+        _engine.SetItemDueString(id, text, parse.IsRecurrence || StartsARepeat(text));
         Publish();
+    }
+
+    /// <summary>The words a repeating schedule tends to open with, beyond the <c>every</c> the parser knows.</summary>
+    private static readonly string[] RepeatStarters = ["daily", "weekly", "monthly", "yearly", "annually", "each"];
+
+    /// <summary>
+    /// Whether typed text looks like a repeat. Only a hint, and only worth having until the server
+    /// answers: without it a task set to "daily 9am" looks ordinary to the close that follows, and
+    /// gets ticked off instead of advanced.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not in the parser, which also reads captured task text — "Write daily report"
+    /// is a title, not a schedule. Here the whole input is the schedule, so the first word can be
+    /// taken at face value.
+    /// </remarks>
+    private static bool StartsARepeat(string text)
+    {
+        var first = text.TrimStart().Split(' ', 2)[0];
+        return RepeatStarters.Contains(first, StringComparer.OrdinalIgnoreCase);
     }
 
     public void Complete(string id)

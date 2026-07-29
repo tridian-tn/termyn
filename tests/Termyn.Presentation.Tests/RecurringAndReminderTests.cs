@@ -263,6 +263,34 @@ public class RecurringAndReminderTests
         Assert.Equal(expected, Due(presenter));
     }
 
+    [Theory]
+    [InlineData("every Monday")]
+    [InlineData("daily 9am")]
+    [InlineData("each monday")]
+    [InlineData("weekly friday")]
+    public void A_repeat_written_any_way_at_all_repeats_before_the_server_says_so(string text)
+    {
+        // Sending the words on is only half of it: until the server answers, a task that looks
+        // ordinary gets ticked off by the next close instead of advanced.
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("i1", text);
+        Assert.True(presenter.Rows.Single(r => r.Id == "i1").IsRecurring);
+
+        presenter.Complete("i1");
+        Assert.Contains(presenter.Rows, r => r.Id == "i1");
+    }
+
+    [Fact]
+    public void An_ordinary_date_is_not_taken_for_a_repeat()
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("i1", "in three weeks");
+
+        Assert.False(presenter.Rows.Single(r => r.Id == "i1").IsRecurring);
+    }
+
     [Fact]
     public void Making_a_task_repeat_shows_it_repeating_straight_away()
     {
