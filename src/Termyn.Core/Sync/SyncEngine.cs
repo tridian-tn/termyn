@@ -186,13 +186,22 @@ public sealed class SyncEngine
                     continue;
                 _outbox.Add(c);
 
-                // A completion or deletion that hasn't flushed is still reversible after a restart.
-                if (c.State == OutboxState.Pending && c.PriorJson is not null
-                    && c.Type is "item_close" or "item_delete"
-                    && ParseArgs(c)["id"] is JsonValue id)
+                if (c.State != OutboxState.Pending || c.PriorJson is null)
+                    continue;
+
+                // A cascading delete keeps a resource per entry, so its prior is an array. Undo
+                // can't reverse one of those once the server has it, and leaving it off the stack
+                // entirely was worse than not restoring it: Ctrl+Z reached straight past the delete
+                // to whatever came before, and undid that instead.
+                if (TryParseNode(c.PriorJson) is JsonArray)
                 {
-                    RecordUndoable(c, id.ToString(), c.PriorJson);
+                    RecordUndoBarrier(c);
+                    continue;
                 }
+
+                // A completion or deletion that hasn't flushed is still reversible after a restart.
+                if (c.Type is "item_close" or "item_delete" && ParseArgs(c)["id"] is JsonValue id)
+                    RecordUndoable(c, id.ToString(), c.PriorJson);
             }
         }
     }
@@ -954,32 +963,44 @@ public sealed class SyncEngine
             if (cmd.TempId is { } temp)
                 RemoveObject(temp);
         }
-        else if (cmd.PriorJson is { } prior && TryParseNode(prior) is { } node)
+        else
         {
-            foreach (var restored in node is JsonArray array ? array.OfType<JsonNode>() : [node])
-            {
-                if (restored is not JsonObject entry)
-                    continue;
-
-                // A cascading delete records what type each removed resource was, since one command
-                // can span projects, sections and tasks.
-                var (type, resource) = entry["resource"] is JsonObject inner
-                    ? (entry["type"]?.ToString() ?? ResourceTypeFor(cmd), inner)
-                    : (ResourceTypeFor(cmd), entry);
-
-                if (resource["id"] is not JsonValue idValue)
-                    continue;
-
-                var id = idValue.ToString();
-                var copy = resource.DeepClone().AsObject();
-                _store.PutResource(type, id, copy.ToJsonString());
-                Model.Upsert(type, id, copy);
-            }
+            RestorePriors(cmd);
         }
 
         _outbox.Remove(cmd);
         _store.DeleteCommands([cmd.Uuid]);
         ForgetUndoable(cmd.Uuid);
+    }
+
+    /// <summary>
+    /// Puts every resource a command touched back to the state the server last gave us, so the
+    /// local copy returns to server truth instead of keeping a write that isn't going to happen.
+    /// </summary>
+    private void RestorePriors(OutboxCommand cmd)
+    {
+        if (cmd.PriorJson is not { } prior || TryParseNode(prior) is not { } node)
+            return;
+
+        foreach (var restored in node is JsonArray array ? array.OfType<JsonNode>() : [node])
+        {
+            if (restored is not JsonObject entry)
+                continue;
+
+            // A cascading delete records what type each removed resource was, since one command
+            // can span projects, sections and tasks.
+            var (type, resource) = entry["resource"] is JsonObject inner
+                ? (entry["type"]?.ToString() ?? ResourceTypeFor(cmd), inner)
+                : (ResourceTypeFor(cmd), entry);
+
+            if (resource["id"] is not JsonValue idValue)
+                continue;
+
+            var id = idValue.ToString();
+            var copy = resource.DeepClone().AsObject();
+            _store.PutResource(type, id, copy.ToJsonString());
+            Model.Upsert(type, id, copy);
+        }
     }
 
     // ---- Reconciliation --------------------------------------------------------------------------
@@ -1054,11 +1075,9 @@ public sealed class SyncEngine
                 // reports on cannot block its resource forever.
                 cmd.NoVerdictRounds++;
                 if (cmd.NoVerdictRounds >= _attemptCeiling)
-                {
-                    cmd.State = OutboxState.Failed;
-                    cmd.LastError = "Todoist did not report a result for this change.";
-                }
-                _store.UpdateCommand(cmd);
+                    Fail(cmd, "Todoist did not report a result for this change.");
+                else
+                    _store.UpdateCommand(cmd);
                 continue;
             }
 
@@ -1080,9 +1099,36 @@ public sealed class SyncEngine
             }
 
             if (cmd.Attempts >= _attemptCeiling)
-                cmd.State = OutboxState.Failed;
-            _store.UpdateCommand(cmd);
+                Fail(cmd, cmd.LastError);
+            else
+                _store.UpdateCommand(cmd);
         }
+    }
+
+    /// <summary>
+    /// Gives up on a command and rolls the local copy back to what the server last told us.
+    /// </summary>
+    /// <remarks>
+    /// The write is never going to land, and nothing else would undo it: the server has no reason to
+    /// resend a resource that never changed there, and the sync token has long since moved past it.
+    /// A delete is the one that hurts — the resource stays gone locally while the account still has
+    /// it, and a label quietly missing from a dozen tasks is not something anyone would spot.
+    /// The command stays in the outbox, failed, so the count still tells the user something went
+    /// wrong. Creates are left alone: an <c>_add</c> the server never ruled on may well have been
+    /// applied, and dropping the local copy would throw away what the user typed.
+    /// </remarks>
+    private void Fail(OutboxCommand cmd, string? error)
+    {
+        cmd.State = OutboxState.Failed;
+        cmd.LastError = error;
+
+        if (!IsCreate(cmd))
+            RestorePriors(cmd);
+
+        _store.UpdateCommand(cmd);
+
+        // Nothing left to reverse, and the barrier it may have recorded should no longer stop Undo.
+        ForgetUndoable(cmd.Uuid);
     }
 
     private void ApplyServerChanges(SyncResponse response)
