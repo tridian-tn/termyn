@@ -33,7 +33,10 @@ public static class ItemFields
         if (parse.Priority != Priority.P4)
             fields["priority"] = PriorityMap.ToApi(parse.Priority);
 
-        if (Due(parse.DueDate, parse.DueTime) is { } due)
+        // A recurrence goes over as no due date at all rather than a wrong one. A priority ends the
+        // recurrence run, so "every day p1 9am" leaves a bare time behind that the parser reads as
+        // this morning — filing a repeating task as a one-off due today.
+        if (!parse.IsRecurrence && Due(parse.DueDate, parse.DueTime) is { } due)
             fields["due"] = due;
 
         return fields;

@@ -88,8 +88,8 @@ public class RecurringAndReminderTests
         store.PutResource("reminders", "m2", """{"id":"m2","item_id":"i1","type":"relative","minute_offset":60}""");
         var presenter = NewPresenter(store);
 
-        Assert.Equal(2, presenter.Rows.Single(r => r.Id == "i1").Reminders);
-        Assert.Equal(0, presenter.Rows.Single(r => r.Id == "r1").Reminders);
+        Assert.Equal(2, presenter.Rows.Single(r => r.Id == "i1").ReminderCount);
+        Assert.Equal(0, presenter.Rows.Single(r => r.Id == "r1").ReminderCount);
     }
 
     // ---- Entitlement -------------------------------------------------------------------------------
@@ -97,8 +97,8 @@ public class RecurringAndReminderTests
     [Fact]
     public void A_free_plan_cannot_add_a_reminder_and_nothing_is_queued()
     {
-        // Refused here rather than sent and rejected: §9.4's rule is that the reminder UI never
-        // errors on save.
+        // Refused here rather than sent and rejected: the reminder UI never errors on save.
+
         var presenter = NewPresenter(WithPlan("""{"current":{"plan_name":"free","reminders":false}}"""));
 
         Assert.False(presenter.RemindersAvailable);
@@ -144,7 +144,7 @@ public class RecurringAndReminderTests
         store.PutResource("reminders", "m3", """{"id":"m3","item_id":"other","type":"relative","minute_offset":5}""");
         var presenter = NewPresenter(store);
 
-        Assert.Equal([10, 60], presenter.RemindersFor("i1").Select(r => r.MinuteOffset));
+        Assert.Equal([60, 10], presenter.RemindersFor("i1").Select(r => r.MinuteOffset)); // a bigger offset fires sooner
     }
 
     [Fact]
@@ -160,6 +160,72 @@ public class RecurringAndReminderTests
         presenter.DeleteReminder("m1");
 
         Assert.Empty(presenter.RemindersFor("i1"));
+    }
+
+    // ---- Regressions -------------------------------------------------------------------------------
+
+    [Fact]
+    public void Setting_a_recurrence_does_not_take_the_task_out_of_today()
+    {
+        // due is one object: replacing it with just the words dropped the date, and every
+        // date-driven view lost the task the moment its schedule was written.
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+        Assert.Contains(presenter.Rows, r => r.Id == "i1");
+
+        presenter.SetDueFromText("i1", "every Monday");
+
+        Assert.Contains(presenter.Rows, r => r.Id == "i1");
+    }
+
+    [Fact]
+    public void Rewriting_a_schedule_leaves_the_task_repeating()
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("r1", "every Tuesday");
+
+        Assert.True(presenter.Rows.Single(r => r.Id == "r1").IsRecurring);
+    }
+
+    [Fact]
+    public void A_plan_at_its_reminder_limit_refuses_another()
+    {
+        // The form promises never to offer a save the server would refuse, and the cap is part of
+        // what the server would refuse on.
+        var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":1}}""");
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"r1","type":"relative","minute_offset":30}""");
+        var presenter = NewPresenter(store);
+
+        Assert.False(presenter.AddRelativeReminder("i1", 30));
+        Assert.Empty(presenter.RemindersFor("i1"));
+    }
+
+    [Fact]
+    public void A_plan_reporting_no_cap_is_not_treated_as_a_cap_of_none()
+    {
+        var presenter = NewPresenter(WithPlan("""{"current":{"plan_name":"pro","reminders":true}}"""));
+
+        Assert.True(presenter.AddRelativeReminder("i1", 30));
+    }
+
+    [Fact]
+    public void A_reminder_is_refused_for_a_task_that_is_not_there()
+    {
+        var presenter = NewPresenter(WithPlan("""{"current":{"plan_name":"pro","reminders":true}}"""));
+
+        Assert.False(presenter.AddRelativeReminder("ghost", 30));
+        Assert.DoesNotContain("pending", presenter.Status);
+    }
+
+    [Fact]
+    public void A_time_typed_with_a_date_survives_to_the_task()
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("i1", "tomorrow 4pm");
+
+        Assert.Equal("2026-08-01T16:00:00", Due(presenter));
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------

@@ -9,7 +9,7 @@ namespace Termyn.Core.Model;
 public sealed class TodoistModel
 {
     /// <summary>Fields that hold a reference to another resource's id.</summary>
-    public static readonly string[] ReferenceKeys = ["parent_id", "section_id", "project_id"];
+    public static readonly string[] ReferenceKeys = ["parent_id", "section_id", "project_id", "item_id"];
 
     private readonly Dictionary<string, Dictionary<string, JsonObject>> _byType = new();
 

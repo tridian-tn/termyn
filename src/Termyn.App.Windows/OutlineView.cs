@@ -261,7 +261,7 @@ internal sealed class OutlineView : ListView
     /// </summary>
     private static string DueOf(TaskRow row)
     {
-        var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.Reminders > 0 ? "⏰" : string.Empty);
+        var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.ReminderCount > 0 ? "⏰" : string.Empty);
         if (marks.Length == 0)
             return row.Due;
 

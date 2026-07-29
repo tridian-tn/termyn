@@ -86,9 +86,10 @@ public static class Projections
             ItemId = JsonRead.String(o, "item_id"),
             Kind = JsonRead.String(o, "type") switch
             {
+                "relative" or null => ReminderKind.Relative,
                 "absolute" => ReminderKind.Absolute,
                 "location" => ReminderKind.Location,
-                _ => ReminderKind.Relative,
+                _ => ReminderKind.Unknown,
             },
             MinuteOffset = JsonRead.Int(o, "minute_offset"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),

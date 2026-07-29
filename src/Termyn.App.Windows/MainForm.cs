@@ -488,11 +488,8 @@ internal sealed class MainForm : Form
                 Guarded(() => wrote = PickLabels(id!));
                 break;
             case Keys.R when e.Control && id is not null:
-                Guarded(() =>
-                {
-                    if (_outline.SelectedRow is { } row)
-                        ReminderForm.Show(this, _presenter, id!, row.Content);
-                });
+                wrote = false;
+                Guarded(() => wrote = ShowReminders(id!));
                 break;
             case Keys.Z when e.Control:
                 wrote = false;
@@ -635,6 +632,11 @@ internal sealed class MainForm : Form
         _presenter.SetDueFromText(id, answer);
         return true;
     }
+
+    /// <summary>Shows the reminders on a task.</summary>
+    /// <returns>True when one was added or removed.</returns>
+    private bool ShowReminders(string id)
+        => _outline.SelectedRow is { } row && ReminderForm.Show(this, _presenter, id, row.Content);
 
     /// <summary>Ticks the labels on a task, creating any the account doesn't have yet.</summary>
     private bool PickLabels(string id)

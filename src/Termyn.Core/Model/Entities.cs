@@ -35,6 +35,12 @@ public enum ReminderKind
 
     /// <summary>Arriving at or leaving a place. Shown but not edited — there is no map here.</summary>
     Location,
+
+    /// <summary>
+    /// Something Todoist has that this client doesn't know. Shown, never touched: a kind we can't
+    /// describe is one we certainly can't recreate.
+    /// </summary>
+    Unknown,
 }
 
 /// <summary>A reminder on a task.</summary>

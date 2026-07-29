@@ -17,7 +17,7 @@ public sealed record TaskRow(
     IReadOnlyList<string> Labels,
     int Depth = 0,
     bool IsRecurring = false,
-    int Reminders = 0);
+    int ReminderCount = 0);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -189,11 +189,6 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// Sets the due date from text, which is the only way to author a recurrence. The server reads
-    /// the words and sends back the schedule it settled on, so the row shows what was written until
-    /// the next sync resolves it.
-    /// </summary>
-    /// <summary>
     /// Sets a task's due date from whatever the user typed, clearing it when that is nothing.
     /// </summary>
     /// <remarks>
@@ -221,12 +216,10 @@ public sealed class MainPresenter
             SetDueString(id, text);
     }
 
-    public void SetDueString(string id, string text)
+    /// <summary>Sets the due date from words for the server to resolve, which authors a recurrence.</summary>
+    private void SetDueString(string id, string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-
-        _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.DueString(text) });
+        _engine.SetItemDueString(id, text.Trim());
         Publish();
     }
 
@@ -289,35 +282,57 @@ public sealed class MainPresenter
     /// <summary>The plan's name, for telling the user what they'd need to upgrade to.</summary>
     public string PlanName { get; private set; } = string.Empty;
 
-    /// <summary>The reminders on a task, soonest relative offset first.</summary>
+    /// <summary>
+    /// The reminders on a task, in the order they will fire. A bigger offset goes off sooner, so
+    /// "1 day before" comes above "when it's due".
+    /// </summary>
     public IReadOnlyList<Reminder> RemindersFor(string itemId)
         => _engine.Snapshot().Reminders
             .Where(r => r.ItemId == itemId)
             .OrderBy(r => r.Kind)
-            .ThenBy(r => r.MinuteOffset)
+            .ThenByDescending(r => r.MinuteOffset)
             .ToList();
 
     /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
-    /// <returns>False when the plan doesn't allow reminders, so the caller can say why.</returns>
+    /// <returns>False when the plan won't take it, so the caller can say why rather than failing later.</returns>
     public bool AddRelativeReminder(string itemId, int minutesBefore)
     {
-        if (!RemindersAvailable)
+        if (!CanAddReminder())
             return false;
 
-        _engine.AddRelativeReminder(itemId, minutesBefore);
-        Publish();
-        return true;
+        var added = _engine.AddRelativeReminder(itemId, minutesBefore) is not null;
+        if (added)
+            Publish();
+        return added;
     }
 
     /// <summary>Adds a reminder for a fixed moment, whatever the task's own due date is.</summary>
     public bool AddAbsoluteReminder(string itemId, DateOnly date, TimeOnly time)
     {
-        if (!RemindersAvailable)
+        if (!CanAddReminder())
             return false;
 
-        _engine.AddAbsoluteReminder(itemId, date, time);
-        Publish();
-        return true;
+        var added = _engine.AddAbsoluteReminder(itemId, date, time) is not null;
+        if (added)
+            Publish();
+        return added;
+    }
+
+    /// <summary>
+    /// Whether another time-based reminder would be accepted. The plan caps how many the account
+    /// may hold, and a save the server refuses is the one thing this UI is meant never to offer.
+    /// </summary>
+    private bool CanAddReminder()
+    {
+        var snapshot = _engine.Snapshot();
+        if (!snapshot.RemindersAvailable)
+            return false;
+
+        var cap = snapshot.PlanLimits?.MaxTimeReminders ?? 0;
+        if (cap <= 0)
+            return true; // no cap reported, so nothing to check it against
+
+        return snapshot.Reminders.Count(r => r.Kind is not ReminderKind.Location) < cap;
     }
 
     public void DeleteReminder(string id)

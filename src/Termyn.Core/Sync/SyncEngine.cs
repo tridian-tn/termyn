@@ -50,7 +50,7 @@ public sealed class SyncEngine
     private const string UndoBarrier = "__barrier";
 
     /// <summary>Command argument fields that carry a resource id.</summary>
-    private static readonly string[] IdKeys = ["id", "parent_id", "section_id", "project_id"];
+    private static readonly string[] IdKeys = ["id", "parent_id", "section_id", "project_id", "item_id"];
 
     private readonly object _gate = new();
     private readonly ITodoistApi _api;
@@ -190,13 +190,29 @@ public sealed class SyncEngine
                     Model.Upsert(r.Type, r.Id, o);
             }
 
+            ResyncIfResourcesAreMissing();
+
             foreach (var c in snapshot.Outbox)
             {
                 if (TryParse(c.ArgsJson) is null)
                     continue;
                 _outbox.Add(c);
 
-                if (c.State != OutboxState.Pending || c.PriorJson is null)
+                if (c.State != OutboxState.Pending)
+                    continue;
+
+                // A queued close on a recurring task carries no prior, because it changed nothing.
+                // It still belongs on the stack: dropping it would let Ctrl+Z reach past and undo
+                // whatever came before instead.
+                if (c.Type == "item_close" && ParseArgs(c)["id"] is JsonValue closing
+                    && Model.Get(ResourceType.Items, closing.ToString()) is { } closed
+                    && Projections.ToTaskItem(closed).IsRecurring)
+                {
+                    RecordUndoBarrier(c);
+                    continue;
+                }
+
+                if (c.PriorJson is null)
                     continue;
 
                 // Undo can't reverse a cascading delete once the server has it, and leaving it off
@@ -370,46 +386,92 @@ public sealed class SyncEngine
         }
     }
 
-    /// <summary>Completes a task via <c>item_close</c>, which also advances a recurring task.</summary>
+    /// <summary>Completes a task via <c>item_close</c>, which advances a recurring task instead.</summary>
     /// <remarks>
-    /// The task is marked complete locally straight away. A recurring one therefore disappears from
-    /// the list until the server's next occurrence arrives on the following sync, rather than
-    /// showing that it is advancing.
+    /// An ordinary task is ticked off locally straight away. A recurring one is left exactly as it
+    /// is: the server moves it to its next occurrence rather than finishing it, and working out
+    /// where that lands is the recurrence guessing that belongs on the server.
     /// </remarks>
     public void CompleteItem(string id)
     {
         lock (_gate)
         {
             var existing = Model.Get(ResourceType.Items, id);
+            var recurring = existing is not null && Projections.ToTaskItem(existing).IsRecurring;
+
+            // Nothing on the row changes for a recurring close, so pressing the key again is the
+            // natural response to a press that looks like it did nothing — and every close the
+            // server takes advances the schedule another occurrence.
+            if (HasPendingClose(id))
+                return;
+
             JsonObject? completed = null;
             string? prior = null;
             StoredResource[] upserts = [];
 
-            // A recurring task isn't finished by closing it — the server moves it to its next
-            // occurrence and it stays open. Ticking it off locally would take it out of the list
-            // until the sync put it back, and working out the next date here is exactly the
-            // recurrence guessing that belongs on the server.
-            var recurring = existing is not null && Projections.ToTaskItem(existing).IsRecurring;
-
-            if (existing is not null && !recurring)
+            if (existing is not null)
             {
                 prior = existing.ToJsonString();
-                completed = existing.DeepClone().AsObject();
-                completed["checked"] = true;
-                upserts = [new StoredResource(ResourceType.Items, id, completed.ToJsonString())];
-            }
-            else if (existing is not null)
-            {
-                prior = existing.ToJsonString();
+
+                if (!recurring)
+                {
+                    completed = existing.DeepClone().AsObject();
+                    completed["checked"] = true;
+                    upserts = [new StoredResource(ResourceType.Items, id, completed.ToJsonString())];
+                }
             }
 
-            var cmd = Persist("item_close", new JsonObject { ["id"] = id }, null, prior, upserts, []);
+            // A recurring close mutates nothing locally, so it records no prior: a prior means
+            // "this command owns the resource until it lands", and owning a task it never touched
+            // would drop the server's advanced occurrence when the close isn't acked that round.
+            var cmd = Persist("item_close", new JsonObject { ["id"] = id }, null, recurring ? null : prior, upserts, []);
 
             if (completed is not null)
                 Model.Upsert(ResourceType.Items, id, completed);
 
-            if (existing is not null)
+            if (existing is null)
+                return;
+
+            // Reversible only while it's queued. Once the server has advanced the schedule there is
+            // no putting the occurrence back, and item_uncomplete would reopen a task that was
+            // never closed — so Ctrl+Z stops here rather than reporting a success it didn't manage.
+            if (recurring)
+                RecordUndoBarrier(cmd);
+            else
                 RecordUndoable(cmd, id, prior);
+        }
+    }
+
+    /// <summary>Whether a close for this task is already queued and unsent.</summary>
+    private bool HasPendingClose(string id)
+        => _outbox.Any(c => c is { State: OutboxState.Pending, Type: "item_close" }
+                            && ParseArgs(c)["id"] is JsonValue v && v.ToString() == id);
+
+    /// <summary>
+    /// Sets a task's due date from words for the server to resolve, and queues an
+    /// <c>item_update</c>. Only the string goes on the wire, but the local copy keeps the date and
+    /// the recurrence flag it already had: <c>due</c> is one object, and replacing it wholesale
+    /// takes the task out of every date view and makes a recurring one look ordinary to the next
+    /// close.
+    /// </summary>
+    public void SetItemDueString(string id, string text)
+    {
+        lock (_gate)
+        {
+            if (Model.Get(ResourceType.Items, id) is not { } existing)
+                return;
+
+            var prior = existing.ToJsonString();
+            var updated = existing.DeepClone().AsObject();
+
+            var due = existing["due"] is JsonObject held ? held.DeepClone().AsObject() : [];
+            due["string"] = text;
+            updated["due"] = due;
+
+            var args = new JsonObject { ["id"] = id, ["due"] = ItemFields.DueString(text) };
+
+            Persist("item_update", args, null, prior, [new StoredResource(ResourceType.Items, id, updated.ToJsonString())], []);
+            Model.Upsert(ResourceType.Items, id, updated);
         }
     }
 
@@ -727,8 +789,8 @@ public sealed class SyncEngine
     /// Adds a reminder a set number of minutes before the task falls due, and queues a
     /// <c>reminder_add</c>.
     /// </summary>
-    public string AddRelativeReminder(string itemId, int minutesBefore)
-        => AddReminder(new JsonObject
+    public string? AddRelativeReminder(string itemId, int minutesBefore)
+        => AddReminder(itemId, new JsonObject
         {
             ["item_id"] = itemId,
             ["type"] = "relative",
@@ -736,18 +798,23 @@ public sealed class SyncEngine
         });
 
     /// <summary>Adds a reminder for a moment of its own, and queues a <c>reminder_add</c>.</summary>
-    public string AddAbsoluteReminder(string itemId, DateOnly date, TimeOnly time)
-        => AddReminder(new JsonObject
+    public string? AddAbsoluteReminder(string itemId, DateOnly date, TimeOnly time)
+        => AddReminder(itemId, new JsonObject
         {
             ["item_id"] = itemId,
             ["type"] = "absolute",
             ["due"] = ItemFields.Due(date, time),
         });
 
-    private string AddReminder(JsonObject args)
+    /// <returns>The new reminder's temporary id, or null when the task isn't one we hold.</returns>
+    private string? AddReminder(string itemId, JsonObject args)
     {
         lock (_gate)
         {
+            // A reminder on a task we don't have can only fail until it poisons the outbox.
+            if (Model.Get(ResourceType.Items, itemId) is null)
+                return null;
+
             var tempId = "t-" + Guid.NewGuid().ToString("N");
             var obj = args.DeepClone().AsObject();
             obj["id"] = tempId;
@@ -766,8 +833,12 @@ public sealed class SyncEngine
                 return;
 
             var prior = existing.ToJsonString();
-            Persist("reminder_delete", new JsonObject { ["id"] = id }, null, prior, [], [new ResourceKey(ResourceType.Reminders, id)]);
+            var cmd = Persist("reminder_delete", new JsonObject { ["id"] = id }, null, prior, [], [new ResourceKey(ResourceType.Reminders, id)]);
             Model.Remove(ResourceType.Reminders, id);
+
+            // Reversible only while it's queued, like every other delete. Without the marker Ctrl+Z
+            // would reach past it and undo whatever came before instead.
+            RecordUndoBarrier(cmd);
         }
     }
 
@@ -1385,6 +1456,27 @@ public sealed class SyncEngine
         foreach (var entry in items)
             if (entry is JsonObject o && o["id"] is JsonValue id)
                 yield return id.ToString();
+    }
+
+    /// <summary>
+    /// Forces one full sync when the cache predates a resource type the client now asks for.
+    /// </summary>
+    /// <remarks>
+    /// An incremental sync returns only what has changed, and there is no per-resource watermark —
+    /// so a type added in a later version never arrives for anyone who already synced, and the
+    /// feature built on it stays silently dead. The singletons are the tell: every account has
+    /// them, so one missing means the set has grown since this cache was written.
+    /// </remarks>
+    private void ResyncIfResourcesAreMissing()
+    {
+        if (Model.SyncToken == "*")
+            return;
+
+        var missing = Model.Get(ResourceType.User, ResourceType.User) is null
+                      || Model.Get(ResourceType.UserPlanLimits, ResourceType.UserPlanLimits) is null;
+
+        if (missing)
+            Model.SyncToken = "*";
     }
 
     private void PurgeLocal()

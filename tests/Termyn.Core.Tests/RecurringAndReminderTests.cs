@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
+using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
@@ -74,7 +75,7 @@ public class RecurringAndReminderTests
     {
         var engine = Seeded();
 
-        engine.UpdateItem("i1", new JsonObject { ["due"] = Termyn.Core.Capture.ItemFields.DueString("every Monday") });
+        engine.UpdateItem("i1", new JsonObject { ["due"] = ItemFields.DueString("every Monday") });
 
         var due = Args(engine.Outbox.Single())["due"]!.AsObject();
         Assert.Equal("every Monday", due["string"]!.ToString());
@@ -211,7 +212,7 @@ public class RecurringAndReminderTests
         api.Next = commands => new SyncResponse
         {
             SyncToken = "s2",
-            TempIdMapping = new Dictionary<string, string> { [temp] = "M9" },
+            TempIdMapping = new Dictionary<string, string> { [temp!] = "M9" },
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
         await engine.SyncAsync();
@@ -220,6 +221,228 @@ public class RecurringAndReminderTests
         Assert.Equal("M9", reminder.Id);
         Assert.Equal("i1", reminder.ItemId);
         Assert.Equal(0, engine.PendingCount);
+    }
+
+    // ---- Regressions -------------------------------------------------------------------------------
+
+    [Fact]
+    public void Rewriting_a_schedule_keeps_the_date_and_the_repeat()
+    {
+        // due is one object, so sending only the string used to replace the lot — which dropped
+        // is_recurring and left the very next close free to tick the task off.
+        var engine = Seeded();
+
+        engine.SetItemDueString("r1", "every Monday");
+
+        var task = engine.Snapshot().Items.Single(i => i.Id == "r1");
+        Assert.Equal("every Monday", task.DueText);
+        Assert.Equal("2026-07-31", task.DueDate); // until the server resolves the new schedule
+        Assert.True(task.IsRecurring);
+
+        engine.CompleteItem("r1");
+        Assert.False(engine.Snapshot().Items.Single(i => i.Id == "r1").Completed);
+    }
+
+    [Fact]
+    public void Rewriting_a_schedule_sends_only_the_words()
+    {
+        var engine = Seeded();
+
+        engine.SetItemDueString("i1", "every Monday");
+
+        var due = Args(engine.Outbox.Single())["due"]!.AsObject();
+        Assert.Equal("every Monday", due["string"]!.ToString());
+        Assert.Null(due["date"]); // the server resolves it; inventing one here would be a guess
+    }
+
+    [Fact]
+    public void A_second_close_is_not_queued_while_the_first_is_waiting()
+    {
+        // A recurring row doesn't change when it is closed, so pressing again is the natural
+        // response — and each close the server takes skips another occurrence.
+        var engine = Seeded();
+
+        engine.CompleteItem("r1");
+        engine.CompleteItem("r1");
+
+        Assert.Single(engine.Outbox);
+    }
+
+    [Fact]
+    public async Task The_advanced_occurrence_lands_even_when_the_close_is_not_acked()
+    {
+        // The close changes nothing locally, so it owns nothing — and must not hold off the
+        // server's version of a task it never touched. The token moves on either way.
+        var store = Store();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        engine.CompleteItem("r1");
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [new ResourceChange("items", "r1", false, Json.Object("""{"id":"r1","content":"Water plants","due":{"date":"2026-08-01","string":"every day","is_recurring":true}}"""))],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal("2026-08-01", engine.Snapshot().Items.Single(i => i.Id == "r1").DueDate);
+    }
+
+    [Fact]
+    public async Task Undo_does_not_claim_to_reverse_a_close_the_server_has_taken()
+    {
+        // The occurrence is gone and item_uncomplete would reopen a task that was never closed.
+        // Reporting success while changing nothing is the worst of the options.
+        var store = Store();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        engine.CompleteItem("r1");
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        Assert.False(engine.Undo());
+        Assert.Empty(engine.Outbox);
+    }
+
+    [Fact]
+    public void A_queued_recurring_close_is_still_undoable_after_a_restart()
+    {
+        var store = Store();
+        NewEngine(store).CompleteItem("r1");
+
+        var restarted = NewEngine(store);
+
+        Assert.True(restarted.CanUndo);
+        Assert.True(restarted.Undo());
+        Assert.Equal(0, restarted.PendingCount);
+    }
+
+    [Fact]
+    public void Undo_does_not_reach_past_a_reminder_delete()
+    {
+        var store = Store();
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"i1","type":"relative","minute_offset":30}""");
+        var engine = NewEngine(store);
+
+        engine.CompleteItem("i1");
+        engine.DeleteReminder("m1");
+
+        // The delete is the last thing done, so it is the first thing undone — not the completion
+        // underneath it.
+        Assert.True(engine.Undo());
+        Assert.Single(engine.Snapshot().Reminders);
+        Assert.True(engine.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+    }
+
+    [Fact]
+    public void A_reminder_is_not_queued_for_a_task_that_is_not_held()
+    {
+        var engine = Seeded();
+
+        Assert.Null(engine.AddRelativeReminder("ghost", 30));
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Empty(engine.Snapshot().Reminders);
+    }
+
+    [Fact]
+    public async Task A_reminder_follows_its_task_when_the_task_gets_its_real_id()
+    {
+        // item_id is a reference like any other, and a reminder created alongside an offline task
+        // is left pointing at a temp id nothing holds if nothing rewrites it.
+        var store = new InMemorySnapshotStore();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        var taskId = engine.AddItem(new JsonObject { ["content"] = "Written offline" });
+        engine.AddRelativeReminder(taskId, 30);
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            TempIdMapping = new Dictionary<string, string> { [taskId] = "I9" },
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal("I9", engine.Snapshot().Reminders.Single().ItemId);
+    }
+
+    [Fact]
+    public async Task A_task_the_server_refuses_takes_its_reminder_with_it()
+    {
+        var store = new InMemorySnapshotStore();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        var taskId = engine.AddItem(new JsonObject { ["content"] = "Written offline" });
+        engine.AddRelativeReminder(taskId, 30);
+
+        // The task is rejected; the reminder hangs off it and can only fail on its own.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands
+                .Where(c => c.Type == "item_add")
+                .ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+        };
+        await engine.SyncAsync();
+
+        Assert.Empty(engine.Snapshot().Reminders);
+        Assert.Empty(engine.Outbox);
+    }
+
+    [Fact]
+    public void An_upgrade_that_asks_for_more_resources_resyncs_from_scratch()
+    {
+        // A resource type added in a later version never arrives on an incremental sync, because
+        // nothing about it changed. Without this the feature built on it is dead for everyone who
+        // already had the app.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Task"}""");
+        store.SaveSync([], [], "s-from-an-older-version");
+
+        Assert.Equal("*", NewEngine(store).SyncToken);
+    }
+
+    [Fact]
+    public void A_cache_holding_every_resource_keeps_its_place()
+    {
+        var store = Store();
+        store.PutResource("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}""");
+        store.PutResource("user_plan_limits", "user_plan_limits", """{"current":{"plan_name":"pro","reminders":true}}""");
+        store.SaveSync([], [], "s-current");
+
+        Assert.Equal("s-current", NewEngine(store).SyncToken);
+    }
+
+    [Fact]
+    public void A_reminder_kind_Termyn_does_not_know_is_kept_as_unknown()
+    {
+        // Guessing "relative" would describe it wrongly and, worse, offer to delete something
+        // Termyn could never put back.
+        var store = Store();
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"i1","type":"something_new"}""");
+        var engine = NewEngine(store);
+
+        Assert.Equal(ReminderKind.Unknown, engine.Snapshot().Reminders.Single().Kind);
+    }
+
+    [Fact]
+    public void An_offline_capture_of_a_recurrence_does_not_invent_a_one_off_date()
+    {
+        // A priority ends the recurrence run, so the "9am" after it reads as a bare time and a
+        // bare time means today — filing a repeating task as a one-off due this morning.
+        var parse = new QuickAddParser(new FixedClock(Today)).Parse("Water plants every day p1 9am");
+
+        Assert.True(parse.IsRecurrence);
+        Assert.NotNull(parse.DueDate); // the parser still finds one, which is exactly the trap
+        Assert.Null(ItemFields.ForAdd(parse)["due"]);
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------
