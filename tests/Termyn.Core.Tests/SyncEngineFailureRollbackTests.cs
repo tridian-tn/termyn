@@ -171,6 +171,36 @@ public class SyncEngineFailureRollbackTests
         Assert.True(restarted.Snapshot().Items.Single(i => i.Id == "i1").Completed);
     }
 
+    [Fact]
+    public async Task A_queued_reorder_does_not_become_an_undo_barrier_after_a_restart()
+    {
+        // A reorder keeps its priors in an array as well, but of bare tasks rather than entries
+        // naming a type. Reading that as a cascading delete puts a barrier in front of a write that
+        // is perfectly reversible — and acking the reorder leaves the barrier behind for good,
+        // because an ack deliberately doesn't forget undo records.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"First","project_id":"p1","child_order":1}""");
+        store.PutResource("items", "i2", """{"id":"i2","content":"Second","project_id":"p1","child_order":2}""");
+        var (engine, _) = Engine(store);
+
+        engine.CompleteItem("i1");
+        engine.ReorderItems(["i2", "i1"]);
+
+        var (restarted, api) = Engine(store);
+
+        // The reorder lands, so it is no longer in the outbox to be reverted from.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+        };
+        await restarted.SyncAsync();
+
+        // Ctrl+Z should still reach the completion underneath it.
+        Assert.True(restarted.Undo());
+        Assert.False(restarted.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+    }
+
     // ---- Helpers ---------------------------------------------------------------------------------
 
     private static InMemorySnapshotStore Seeded()

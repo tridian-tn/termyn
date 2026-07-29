@@ -189,11 +189,10 @@ public sealed class SyncEngine
                 if (c.State != OutboxState.Pending || c.PriorJson is null)
                     continue;
 
-                // A cascading delete keeps a resource per entry, so its prior is an array. Undo
-                // can't reverse one of those once the server has it, and leaving it off the stack
-                // entirely was worse than not restoring it: Ctrl+Z reached straight past the delete
-                // to whatever came before, and undid that instead.
-                if (TryParseNode(c.PriorJson) is JsonArray)
+                // Undo can't reverse a cascading delete once the server has it, and leaving it off
+                // the stack entirely was worse than not restoring it: Ctrl+Z reached straight past
+                // the delete to whatever came before, and undid that instead.
+                if (IsCascadingDelete(c.PriorJson))
                 {
                     RecordUndoBarrier(c);
                     continue;
@@ -1343,6 +1342,18 @@ public sealed class SyncEngine
         _outbox.Remove(cmd);
         _store.DeleteCommands([cmd.Uuid]);
     }
+
+    /// <summary>
+    /// Whether a command's prior state is the form a cascading delete records: one entry per
+    /// resource, each naming the type it carries, since one delete can span projects, sections and
+    /// tasks. A reorder stores an array too, but of bare tasks — reading that as a delete would put
+    /// an undo barrier in front of a write that is perfectly reversible.
+    /// </summary>
+    private static bool IsCascadingDelete(string? priorJson)
+        => priorJson is not null
+           && TryParseNode(priorJson) is JsonArray entries
+           && entries.Count > 0
+           && entries.All(e => e is JsonObject entry && entry["resource"] is JsonObject);
 
     /// <summary>Remembers a destructive write so <see cref="Undo"/> can reverse it later.</summary>
     private void RecordUndoable(OutboxCommand cmd, string id, string? prior)
