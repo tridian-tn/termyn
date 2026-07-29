@@ -193,6 +193,34 @@ public sealed class MainPresenter
     /// the words and sends back the schedule it settled on, so the row shows what was written until
     /// the next sync resolves it.
     /// </summary>
+    /// <summary>
+    /// Sets a task's due date from whatever the user typed, clearing it when that is nothing.
+    /// </summary>
+    /// <remarks>
+    /// A date the local grammar can read is sent as a date, so it still means the right day with no
+    /// network. Anything else goes as the words themselves, for the server to read the way the web
+    /// app would — which covers both a recurrence and the phrasings the bounded local grammar was
+    /// never meant to cover.
+    /// </remarks>
+    public void SetDueFromText(string id, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            SetDue(id, null);
+            return;
+        }
+
+        var parse = _parser.Parse(text);
+
+        // Never resolve a recurrence locally, even when a date can be picked out of it. A priority
+        // ends the recurrence run, so "every day p1 9am" leaves a time behind that reads as this
+        // morning — and that nine o'clock belongs to the schedule.
+        if (!parse.IsRecurrence && parse.DueDate is { } date)
+            SetDue(id, date, parse.DueTime);
+        else
+            SetDueString(id, text);
+    }
+
     public void SetDueString(string id, string text)
     {
         if (string.IsNullOrWhiteSpace(text))
