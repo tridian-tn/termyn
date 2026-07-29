@@ -1,3 +1,4 @@
+using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
@@ -226,6 +227,114 @@ public class RecurringAndReminderTests
         presenter.SetDueFromText("i1", "tomorrow 4pm");
 
         Assert.Equal("2026-08-01T16:00:00", Due(presenter));
+    }
+
+    // ---- Second round ------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("daily 9am")]
+    [InlineData("each monday")]
+    [InlineData("weekly friday")]
+    [InlineData("every other Tuesday")]
+    public void A_repeat_written_any_way_at_all_goes_to_the_server(string text)
+    {
+        // "every" was the only word that counted as a repeat, so these resolved to a one-off date
+        // locally and the repeat was dropped without a word. Leftover text is the tell that the
+        // local grammar didn't understand the phrase.
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("i1", text);
+
+        Assert.Equal(text, Due(presenter));
+    }
+
+    [Theory]
+    [InlineData("tomorrow", "2026-08-01")]
+    [InlineData("tomorrow 4pm", "2026-08-01T16:00:00")]
+    [InlineData("2026-12-25", "2026-12-25")]
+    [InlineData("friday", "2026-07-31")]
+    public void A_plain_date_is_still_resolved_here(string text, string expected)
+    {
+        // The rule has to keep working offline for the dates the grammar does cover.
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("i1", text);
+
+        Assert.Equal(expected, Due(presenter));
+    }
+
+    [Fact]
+    public void Making_a_task_repeat_shows_it_repeating_straight_away()
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("i1", "every Monday");
+
+        Assert.True(presenter.Rows.Single(r => r.Id == "i1").IsRecurring);
+    }
+
+    [Fact]
+    public void A_fixed_date_ends_a_repeat()
+    {
+        // The other direction: the server drops the recurrence when a plain date replaces it, and
+        // the local copy has to agree or the next close won't tick the task off.
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDueFromText("r1", "tomorrow");
+
+        Assert.False(presenter.Rows.Single(r => r.Id == "r1").IsRecurring);
+    }
+
+    [Fact]
+    public void A_location_reminder_does_not_count_against_the_time_limit()
+    {
+        var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":1}}""");
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"r1","type":"location","name":"Office"}""");
+        var presenter = NewPresenter(store);
+
+        Assert.True(presenter.AddRelativeReminder("i1", 30));
+    }
+
+    [Fact]
+    public void One_below_the_limit_is_still_offered()
+    {
+        var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":2}}""");
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"r1","type":"relative","minute_offset":30}""");
+        var presenter = NewPresenter(store);
+
+        Assert.True(presenter.AddRelativeReminder("i1", 30));
+    }
+
+    [Fact]
+    public void Reminders_tied_to_the_due_date_are_listed_before_ones_set_for_a_moment()
+    {
+        var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true}}""");
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"i1","type":"absolute","due":{"date":"2026-08-03T09:00:00"}}""");
+        store.PutResource("reminders", "m2", """{"id":"m2","item_id":"i1","type":"relative","minute_offset":30}""");
+        var presenter = NewPresenter(store);
+
+        Assert.Equal(
+            [ReminderKind.Relative, ReminderKind.Absolute],
+            presenter.RemindersFor("i1").Select(r => r.Kind));
+    }
+
+    [Fact]
+    public async Task A_rejected_token_takes_the_old_accounts_plan_with_it()
+    {
+        // The cache is emptied and the exception propagates, so without publishing on the way out
+        // the view keeps the last account's rows and its plan keeps saying reminders are allowed.
+        var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true}}""");
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
+        Assert.True(presenter.RemindersAvailable);
+
+        api.Throw = new TodoistAuthException("rejected");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+
+        Assert.False(presenter.RemindersAvailable);
+        Assert.Empty(presenter.Rows);
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------

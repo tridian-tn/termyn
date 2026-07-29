@@ -49,8 +49,12 @@ public sealed class SyncEngine
     /// <summary>Marker for a destructive write that cannot be reversed.</summary>
     private const string UndoBarrier = "__barrier";
 
-    /// <summary>Command argument fields that carry a resource id.</summary>
-    private static readonly string[] IdKeys = ["id", "parent_id", "section_id", "project_id", "item_id"];
+    /// <summary>
+    /// Command argument fields that carry a resource id: a command's own target, plus every field
+    /// that points at another resource. Derived from one list so a new reference field can't be
+    /// added to the model and forgotten here, which leaves commands holding dead temporary ids.
+    /// </summary>
+    private static readonly string[] IdKeys = ["id", .. TodoistModel.ReferenceKeys];
 
     private readonly object _gate = new();
     private readonly ITodoistApi _api;
@@ -401,8 +405,10 @@ public sealed class SyncEngine
 
             // Nothing on the row changes for a recurring close, so pressing the key again is the
             // natural response to a press that looks like it did nothing — and every close the
-            // server takes advances the schedule another occurrence.
-            if (HasPendingClose(id))
+            // server takes advances the schedule another occurrence. An ordinary task leaves the
+            // list when it's closed, so there is nothing there to press twice, and guarding it too
+            // would swallow a genuine re-close after an undo.
+            if (recurring && HasPendingClose(id))
                 return;
 
             JsonObject? completed = null;
@@ -454,21 +460,29 @@ public sealed class SyncEngine
     /// takes the task out of every date view and makes a recurring one look ordinary to the next
     /// close.
     /// </summary>
-    public void SetItemDueString(string id, string text)
+    /// <param name="recurring">
+    /// Whether the words describe a repeat. The server has the final say, but until it answers a
+    /// task the user has just made repeating has to look repeating — otherwise the next close ticks
+    /// it off as an ordinary one.
+    /// </param>
+    public void SetItemDueString(string id, string text, bool recurring = false)
     {
         lock (_gate)
         {
             if (Model.Get(ResourceType.Items, id) is not { } existing)
                 return;
 
+            var trimmed = text.Trim();
             var prior = existing.ToJsonString();
             var updated = existing.DeepClone().AsObject();
 
             var due = existing["due"] is JsonObject held ? held.DeepClone().AsObject() : [];
-            due["string"] = text;
+            due["string"] = trimmed;
+            if (recurring)
+                due["is_recurring"] = true;
             updated["due"] = due;
 
-            var args = new JsonObject { ["id"] = id, ["due"] = ItemFields.DueString(text) };
+            var args = new JsonObject { ["id"] = id, ["due"] = ItemFields.DueString(trimmed) };
 
             Persist("item_update", args, null, prior, [new StoredResource(ResourceType.Items, id, updated.ToJsonString())], []);
             Model.Upsert(ResourceType.Items, id, updated);
@@ -829,16 +843,12 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (Model.Get(ResourceType.Reminders, id) is not { } existing)
+            if (Model.Get(ResourceType.Reminders, id) is null)
                 return;
 
-            var prior = existing.ToJsonString();
-            var cmd = Persist("reminder_delete", new JsonObject { ["id"] = id }, null, prior, [], [new ResourceKey(ResourceType.Reminders, id)]);
-            Model.Remove(ResourceType.Reminders, id);
-
-            // Reversible only while it's queued, like every other delete. Without the marker Ctrl+Z
-            // would reach past it and undo whatever came before instead.
-            RecordUndoBarrier(cmd);
+            // Through the shared path so the prior takes the form Load recognises as a barrier.
+            // Recording one here alone would only hold until the app restarted.
+            RemoveAll("reminder_delete", id, [new ResourceKey(ResourceType.Reminders, id)]);
         }
     }
 
@@ -955,8 +965,8 @@ public sealed class SyncEngine
         foreach (var key in deletes)
             Model.Remove(key.Type, key.Id);
 
-        // Destructive, but not something Undo can reverse: Todoist has no undelete for a project or
-        // section. Mark the point so Ctrl+Z reports that rather than reaching past it.
+        // Destructive, and not something Undo can reverse once the server has it: Todoist has no
+        // undelete. Mark the point so Ctrl+Z reports that rather than reaching past it.
         RecordUndoBarrier(cmd);
     }
 
@@ -1319,6 +1329,28 @@ public sealed class SyncEngine
             }
         }
 
+        // A full sync is the whole live set and carries no tombstones, so anything held locally
+        // that it doesn't mention is gone — and this response is the only chance to notice, because
+        // the token moves past those deletions either way. Resources a queued command owns are left
+        // alone: a create the server hasn't seen yet is missing for a reason of our own making.
+        if (response.FullSync)
+        {
+            var live = response.Changes.Select(c => new ResourceKey(c.ResourceType, c.Id)).ToHashSet();
+
+            foreach (var type in ResourceType.All)
+            {
+                foreach (var id in Model.Keys(type))
+                {
+                    var stale = new ResourceKey(type, id);
+                    if (live.Contains(stale) || pendingKeys.Contains(stale) || reorderedKeys.Contains(stale))
+                        continue;
+
+                    if (Model.Remove(type, id))
+                        deletes.Add(stale);
+                }
+            }
+        }
+
         for (var i = _deferredDeletes.Count - 1; i >= 0; i--)
         {
             var deferred = _deferredDeletes[i];
@@ -1520,22 +1552,27 @@ public sealed class SyncEngine
 
     /// <summary>Remembers a destructive write so <see cref="Undo"/> can reverse it later.</summary>
     private void RecordUndoable(OutboxCommand cmd, string id, string? prior)
+        => Remember(cmd.Uuid, new UndoableWrite(cmd.Type, id, prior));
+
+    /// <summary>Marks a destructive write that <see cref="Undo"/> cannot reverse.</summary>
+    private void RecordUndoBarrier(OutboxCommand cmd)
+        => Remember(cmd.Uuid, new UndoableWrite(UndoBarrier, cmd.Uuid, null));
+
+    /// <summary>
+    /// Puts a write on the undo stack, dropping the oldest once it is deeper than anyone would
+    /// reach. Barriers go on the same stack as everything else — closing recurring tasks makes one
+    /// per keypress, so a stack that only ever grew would be a leak in a long session.
+    /// </summary>
+    private void Remember(string uuid, UndoableWrite write)
     {
-        _undoStack.Add(cmd.Uuid);
-        _undoable[cmd.Uuid] = new UndoableWrite(cmd.Type, id, prior);
+        _undoStack.Add(uuid);
+        _undoable[uuid] = write;
 
         while (_undoStack.Count > MaxUndoDepth)
         {
             _undoable.Remove(_undoStack[0]);
             _undoStack.RemoveAt(0);
         }
-    }
-
-    /// <summary>Marks a destructive write that <see cref="Undo"/> cannot reverse.</summary>
-    private void RecordUndoBarrier(OutboxCommand cmd)
-    {
-        _undoStack.Add(cmd.Uuid);
-        _undoable[cmd.Uuid] = new UndoableWrite(UndoBarrier, cmd.Uuid, null);
     }
 
     private void ForgetUndoable(string uuid)

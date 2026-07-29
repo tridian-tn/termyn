@@ -111,8 +111,14 @@ internal sealed class ReminderForm : Form
             foreach (Control control in new Control[] { _offset, _add, _absolute, _addAbsolute })
                 control.Enabled = false;
 
-            _message.Text = UpgradeMessage;
-            _tips.SetToolTip(writes, UpgradeMessage);
+            // "Not allowed" and "not asked yet" both come through as unavailable, and telling a
+            // paying user to buy what they already have is worse than saying we don't know yet.
+            var reason = presenter.PlanName.Length == 0
+                ? "Your plan hasn't synced yet."
+                : UpgradeMessage;
+
+            _message.Text = reason;
+            _tips.SetToolTip(writes, reason);
         }
 
         Reload();
@@ -176,10 +182,19 @@ internal sealed class ReminderForm : Form
     private static bool CanRemove(Reminder reminder)
         => reminder.Kind is ReminderKind.Relative or ReminderKind.Absolute;
 
+    /// <summary>
+    /// Why an add was turned down. A background sync runs while this dialog is open, so the task
+    /// itself may have gone — blaming the plan for that would send the user to check the wrong thing.
+    /// </summary>
     private string Refusal()
-        => _presenter.RemindersAvailable
+    {
+        if (!_presenter.RemindersAvailable)
+            return _presenter.PlanName.Length == 0 ? "Your plan hasn't synced yet." : UpgradeMessage;
+
+        return _presenter.Rows.Any(r => r.Id == _itemId)
             ? "This plan is at its limit for reminders."
-            : UpgradeMessage;
+            : "That task is no longer here.";
+    }
 
     private void Wrote()
     {
@@ -208,13 +223,20 @@ internal sealed class ReminderForm : Form
     {
         public override string ToString() => Reminder.Kind switch
         {
-            ReminderKind.Absolute => $"At {Reminder.DueDate}",
+            ReminderKind.Absolute => $"At {Moment(Reminder.DueDate)}",
             ReminderKind.Location => $"At {Reminder.LocationName ?? "a place"} (set in Todoist)",
             ReminderKind.Unknown => "A reminder set in Todoist",
             _ => Reminder.MinuteOffset == 0
                 ? "When it's due"
                 : $"{Describe(Reminder.MinuteOffset)} before it's due",
         };
+
+        /// <summary>
+        /// An absolute reminder's moment, in words rather than the timestamp the server sent, so it
+        /// sits beside the relative ones instead of standing out as raw data.
+        /// </summary>
+        private static string Moment(string? due)
+            => DateTime.TryParse(due, out var when) ? when.ToString("ddd d MMM, HH:mm") : due ?? "a set time";
 
         /// <summary>
         /// Offsets aren't limited to the ones this dialog offers — the web app sets whatever it

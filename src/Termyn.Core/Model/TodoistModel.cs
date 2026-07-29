@@ -79,6 +79,13 @@ public sealed class TodoistModel
     public IEnumerable<JsonObject> All(string type)
         => _byType.TryGetValue(type, out var m) ? m.Values : [];
 
+    /// <summary>
+    /// The keys held for a type, as a copy so the caller can remove while walking them. These are
+    /// the model's own keys, which for a singleton is the type name rather than anything inside.
+    /// </summary>
+    public IReadOnlyList<string> Keys(string type)
+        => _byType.TryGetValue(type, out var m) ? m.Keys.ToList() : [];
+
     public IEnumerable<TaskItem> Items() => All(ResourceType.Items).Select(Projections.ToTaskItem);
 
     public IEnumerable<Project> Projects() => All(ResourceType.Projects).Select(Projections.ToProject);

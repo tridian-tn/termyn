@@ -70,18 +70,6 @@ public class RecurringAndReminderTests
         Assert.False(engine.Snapshot().Items.Single(i => i.Id == "i1").IsRecurring);
     }
 
-    [Fact]
-    public void A_due_string_is_sent_as_words_for_the_server_to_read()
-    {
-        var engine = Seeded();
-
-        engine.UpdateItem("i1", new JsonObject { ["due"] = ItemFields.DueString("every Monday") });
-
-        var due = Args(engine.Outbox.Single())["due"]!.AsObject();
-        Assert.Equal("every Monday", due["string"]!.ToString());
-        Assert.Null(due["date"]); // no date invented alongside it
-    }
-
     // ---- Plan entitlement --------------------------------------------------------------------------
 
     [Fact]
@@ -443,6 +431,203 @@ public class RecurringAndReminderTests
         Assert.True(parse.IsRecurrence);
         Assert.NotNull(parse.DueDate); // the parser still finds one, which is exactly the trap
         Assert.Null(ItemFields.ForAdd(parse)["due"]);
+    }
+
+    // ---- Second round ------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_resync_after_an_upgrade_leaves_nothing_stale_behind()
+    {
+        // Forcing a full sync over a cache that already has content was a new situation: a full
+        // sync is the live set with no tombstones, so without pruning, anything deleted while the
+        // old version was installed survived for ever and the token moved past its tombstone.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Still there"}""");
+        store.PutResource("items", "gone", """{"id":"gone","content":"Deleted on the web"}""");
+        store.SaveSync([], [], "s-from-an-older-version");
+
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            FullSync = true,
+            Changes = [new ResourceChange("items", "i1", false, Json.Object("""{"id":"i1","content":"Still there"}"""))],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal(["i1"], engine.Snapshot().Items.Select(i => i.Id));
+    }
+
+    [Fact]
+    public async Task A_full_sync_keeps_what_a_queued_write_owns()
+    {
+        // A task created offline isn't in the server's live set for a reason of our own making.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Known"}""");
+        store.SaveSync([], [], "s-old");
+
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+        engine.AddItem(new JsonObject { ["content"] = "Written offline" });
+
+        api.Response = new SyncResponse { SyncToken = "s2", FullSync = true, Changes = [] };
+        await engine.SyncAsync();
+
+        Assert.Contains(engine.Snapshot().Items, i => i.Content == "Written offline");
+    }
+
+    [Fact]
+    public void A_queued_reminder_delete_is_still_a_barrier_after_a_restart()
+    {
+        // The barrier was recorded when the delete was made but not when the outbox was reloaded,
+        // so it lasted only as long as the session did.
+        var store = Store();
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"i1","type":"relative","minute_offset":30}""");
+
+        var engine = NewEngine(store);
+        engine.CompleteItem("i1");
+        engine.DeleteReminder("m1");
+
+        var restarted = NewEngine(store);
+
+        Assert.True(restarted.Undo());
+        Assert.Single(restarted.Snapshot().Reminders);
+        Assert.True(restarted.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+    }
+
+    [Fact]
+    public void Making_a_task_repeat_makes_the_next_close_advance_it()
+    {
+        // The merge kept an is_recurring it was given but never set one, so a task the user had
+        // just made repeating still looked ordinary — and the next close ticked it off.
+        var engine = Seeded();
+
+        engine.SetItemDueString("i1", "every Monday", recurring: true);
+        Assert.True(engine.Snapshot().Items.Single(i => i.Id == "i1").IsRecurring);
+
+        engine.CompleteItem("i1");
+        Assert.False(engine.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+    }
+
+    [Fact]
+    public void A_schedule_shows_the_same_words_that_were_sent()
+    {
+        var engine = Seeded();
+
+        engine.SetItemDueString("i1", "  every Monday  ");
+
+        Assert.Equal("every Monday", engine.Snapshot().Items.Single(i => i.Id == "i1").DueText);
+        Assert.Equal("every Monday", Args(engine.Outbox.Single())["due"]!["string"]!.ToString());
+    }
+
+    [Fact]
+    public void A_schedule_can_be_set_on_a_task_that_had_no_date()
+    {
+        var store = Store();
+        store.PutResource("items", "n1", """{"id":"n1","content":"No date"}""");
+        var engine = NewEngine(store);
+
+        engine.SetItemDueString("n1", "every Monday", recurring: true);
+
+        var task = engine.Snapshot().Items.Single(i => i.Id == "n1");
+        Assert.Equal("every Monday", task.DueText);
+        Assert.Null(task.DueDate);
+        Assert.True(task.IsRecurring);
+    }
+
+    [Fact]
+    public async Task A_close_can_be_repeated_while_an_earlier_one_is_on_the_wire()
+    {
+        // Undo can't withdraw a command already being sent, so it reopens the task instead — which
+        // leaves the close pending while the task is visibly open. Guarding every close on that
+        // would swallow the next press, and the user would be left looking at the row they had
+        // just ticked off. Only a recurring close needs the guard: an ordinary row leaves the list.
+        var store = Store();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        engine.CompleteItem("i1");
+
+        api.Next = _ =>
+        {
+            // Both of these land while the first close is in flight.
+            engine.Undo();
+            engine.CompleteItem("i1");
+            return new SyncResponse { SyncToken = "s2" };
+        };
+        await engine.SyncAsync();
+
+        Assert.True(engine.Snapshot().Items.Single(i => i.Id == "i1").Completed);
+    }
+
+    [Fact]
+    public void Only_the_singleton_the_cache_lacks_needs_to_be_missing()
+    {
+        // Either one absent means the cache predates the set the client now asks for.
+        var withoutPlan = Store();
+        withoutPlan.PutResource("user", "user", """{"id":"u"}""");
+        withoutPlan.SaveSync([], [], "s-old");
+        Assert.Equal("*", NewEngine(withoutPlan).SyncToken);
+
+        var withoutUser = Store();
+        withoutUser.PutResource("user_plan_limits", "user_plan_limits", """{"current":{"plan_name":"pro","reminders":true}}""");
+        withoutUser.SaveSync([], [], "s-old");
+        Assert.Equal("*", NewEngine(withoutUser).SyncToken);
+    }
+
+    [Fact]
+    public void The_resync_check_only_looks_for_resources_the_client_asks_for()
+    {
+        // If it watched for something never requested, the server would never send it and every
+        // start would full-sync for ever.
+        Assert.Contains(ResourceType.User, ResourceType.All);
+        Assert.Contains(ResourceType.UserPlanLimits, ResourceType.All);
+    }
+
+    [Fact]
+    public async Task A_reminder_the_server_sends_arrives_and_its_tombstone_takes_it_away()
+    {
+        var store = Store();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [new ResourceChange("reminders", "M1", false, Json.Object("""{"id":"M1","item_id":"i1","type":"relative","minute_offset":45}"""))],
+        };
+        await engine.SyncAsync();
+        Assert.Equal(45, engine.Snapshot().Reminders.Single().MinuteOffset);
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s3",
+            Changes = [new ResourceChange("reminders", "M1", true, Json.Object("""{"id":"M1"}"""))],
+        };
+        await engine.SyncAsync();
+        Assert.Empty(engine.Snapshot().Reminders);
+    }
+
+    [Fact]
+    public async Task The_plan_the_server_sends_reaches_the_snapshot()
+    {
+        // The singleton is keyed by its own type name, which is the one thing joining what the API
+        // client writes to what the model reads.
+        var store = Store();
+        var api = new FakeApi();
+        var engine = NewEngine(store, api);
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [new ResourceChange("user_plan_limits", "user_plan_limits", false, Json.Object("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":700}}"""))],
+        };
+        await engine.SyncAsync();
+
+        Assert.True(engine.Snapshot().RemindersAvailable);
+        Assert.Equal(700, engine.Snapshot().PlanLimits!.MaxTimeReminders);
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------

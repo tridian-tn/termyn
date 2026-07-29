@@ -106,8 +106,13 @@ public sealed class MainPresenter
         {
             IsOffline = true;
         }
-
-        Publish();
+        finally
+        {
+            // A rejected token empties the cache and then propagates, so this has to publish on the
+            // way out too: otherwise the view keeps the last account's tasks, and its plan keeps
+            // saying reminders are allowed.
+            Publish();
+        }
 
         // Only ask for another round while the network is answering, or the loop would spin.
         return !IsOffline && _engine.PendingCount > 0;
@@ -207,19 +212,17 @@ public sealed class MainPresenter
 
         var parse = _parser.Parse(text);
 
-        // Never resolve a recurrence locally, even when a date can be picked out of it. A priority
-        // ends the recurrence run, so "every day p1 9am" leaves a time behind that reads as this
-        // morning — and that nine o'clock belongs to the schedule.
-        if (!parse.IsRecurrence && parse.DueDate is { } date)
+        // Only resolve locally when the grammar accounted for every word. Anything left over is the
+        // tell that it didn't understand the phrase — "daily 9am" and "each monday" both yield a
+        // date while dropping the repeat on the floor, and "every day p1 9am" leaves a time behind
+        // that reads as this morning. Leftovers go to the server as words.
+        if (!parse.IsRecurrence && parse.Content.Length == 0 && parse.DueDate is { } date)
+        {
             SetDue(id, date, parse.DueTime);
-        else
-            SetDueString(id, text);
-    }
+            return;
+        }
 
-    /// <summary>Sets the due date from words for the server to resolve, which authors a recurrence.</summary>
-    private void SetDueString(string id, string text)
-    {
-        _engine.SetItemDueString(id, text.Trim());
+        _engine.SetItemDueString(id, text, parse.IsRecurrence);
         Publish();
     }
 
@@ -279,12 +282,12 @@ public sealed class MainPresenter
     /// </summary>
     public bool RemindersAvailable { get; private set; }
 
-    /// <summary>The plan's name, for telling the user what they'd need to upgrade to.</summary>
+    /// <summary>The plan the account is on, or empty until a sync has said. Not the upgrade target.</summary>
     public string PlanName { get; private set; } = string.Empty;
 
     /// <summary>
-    /// The reminders on a task, in the order they will fire. A bigger offset goes off sooner, so
-    /// "1 day before" comes above "when it's due".
+    /// The reminders on a task: the ones tied to its due date first, longest warning to shortest,
+    /// then the ones set for a moment of their own.
     /// </summary>
     public IReadOnlyList<Reminder> RemindersFor(string itemId)
         => _engine.Snapshot().Reminders
