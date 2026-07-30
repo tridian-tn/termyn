@@ -35,7 +35,9 @@ public sealed class TrayNotifier : INotifier
         };
         _icon.BalloonTipClicked += (_, _) => Activated?.Invoke();
 
-        SetStatus("Termyn", 0);
+        // Nothing is drawn here. The first icon costs the best part of a tenth of a second — GDI+
+        // coming up, mostly — and doing that before the window exists is a tenth of a second added
+        // to every start. The host asks for a status once it has something to show.
     }
 
     public event Action? Activated;

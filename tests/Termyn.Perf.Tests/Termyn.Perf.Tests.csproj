@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Measured against optimised code: a Debug build's timings say nothing about the shipped one. -->
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Termyn.Core\Termyn.Core.csproj" />
+    <ProjectReference Include="..\..\src\Termyn.Presentation\Termyn.Presentation.csproj" />
+    <ProjectReference Include="..\Termyn.TestSupport\Termyn.TestSupport.csproj" />
+  </ItemGroup>
+
+</Project>

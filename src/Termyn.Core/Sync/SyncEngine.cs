@@ -144,8 +144,14 @@ public sealed class SyncEngine
         lock (_gate)
         {
             var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
+
+            // Projected once and shared with the completed list. Reading the items twice meant
+            // parsing every task's JSON twice on every publish, and a publish happens on every
+            // keystroke, every write and every sync.
+            var items = Model.Items().ToList();
+
             return new ModelSnapshot(
-                Model.Items().ToList(),
+                items,
                 Model.Projects().ToList(),
                 Model.Sections().ToList(),
                 Model.Labels().ToList(),
@@ -156,7 +162,7 @@ public sealed class SyncEngine
                 zone,
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed),
-                CompletedItems());
+                CompletedItems(items));
         }
     }
 
@@ -165,9 +171,12 @@ public sealed class SyncEngine
     /// the model, flagged — plus the ones fetched on demand. The model's copy wins where both have
     /// one, since only it has the local writes applied.
     /// </summary>
-    private List<TaskItem> CompletedItems()
+    private List<TaskItem> CompletedItems(List<TaskItem> all)
     {
-        var all = Model.Items().ToList();
+        // Nothing fetched, so the completed set is whatever the model itself is holding.
+        if (_completed.Count == 0)
+            return all.Where(i => i.Completed).ToList();
+
         var items = all.Where(i => i.Completed).ToList();
 
         // Every id the model holds, not just the completed ones: a fetched task the model has as
@@ -410,7 +419,7 @@ public sealed class SyncEngine
             foreach (var change in fetched)
                 _completed[change.Id] = change.Json;
 
-            return new CompletedFetch(CompletedItems().Count, truncated);
+            return new CompletedFetch(CompletedItems(Model.Items().ToList()).Count, truncated);
         }
     }
 

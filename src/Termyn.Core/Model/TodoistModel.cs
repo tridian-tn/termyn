@@ -13,6 +13,17 @@ public sealed class TodoistModel
 
     private readonly Dictionary<string, Dictionary<string, JsonObject>> _byType = new();
 
+    /// <summary>
+    /// Projected tasks, held until their JSON changes.
+    /// </summary>
+    /// <remarks>
+    /// Only tasks are cached, because only tasks are numerous. Every publish reads all of them and a
+    /// publish happens on every keystroke, write and sync, so re-parsing five thousand unchanged
+    /// objects each time was the largest single cost in getting a write onto the screen. Every path
+    /// that changes a task's JSON goes through this type, which is what makes the cache safe to keep.
+    /// </remarks>
+    private readonly Dictionary<string, TaskItem> _projectedItems = new(StringComparer.Ordinal);
+
     public string SyncToken { get; set; } = "*";
 
     public JsonObject? Get(string type, string id)
@@ -35,10 +46,14 @@ public sealed class TodoistModel
             _byType[type] = m;
         }
         m[id] = json;
+        Invalidate(type, id);
     }
 
     public bool Remove(string type, string id)
-        => _byType.TryGetValue(type, out var m) && m.Remove(id);
+    {
+        Invalidate(type, id);
+        return _byType.TryGetValue(type, out var m) && m.Remove(id);
+    }
 
     public void Rename(string type, string oldId, string newId)
     {
@@ -46,7 +61,24 @@ public sealed class TodoistModel
         {
             o["id"] = newId;
             m[newId] = o;
+            Invalidate(type, oldId);
+            Invalidate(type, newId);
         }
+    }
+
+    /// <summary>
+    /// Drops a cached projection whose JSON has moved on.
+    /// </summary>
+    /// <remarks>
+    /// Only the calls from <see cref="Upsert"/> and <see cref="RewriteReferences"/> can prevent a
+    /// stale read — those are the paths where a task's JSON changes while it is still held. The rest
+    /// are there so the cache can't outlive the model it was projected from: nothing reads a
+    /// projection whose resource has gone, but without this it would sit there for the session.
+    /// </remarks>
+    private void Invalidate(string type, string id)
+    {
+        if (type == ResourceType.Items)
+            _projectedItems.Remove(id);
     }
 
     /// <summary>
@@ -69,12 +101,21 @@ public sealed class TodoistModel
                     }
                 }
                 if (changed)
+                {
+                    // Mutated in place rather than replaced, so the cache doesn't hear about it from
+                    // Upsert the way every other edit does.
+                    Invalidate(type, id);
                     yield return (type, id, obj);
+                }
             }
         }
     }
 
-    public void Clear() => _byType.Clear();
+    public void Clear()
+    {
+        _byType.Clear();
+        _projectedItems.Clear();
+    }
 
     public IEnumerable<JsonObject> All(string type)
         => _byType.TryGetValue(type, out var m) ? m.Values : [];
@@ -86,7 +127,23 @@ public sealed class TodoistModel
     public IReadOnlyList<string> Keys(string type)
         => _byType.TryGetValue(type, out var m) ? m.Keys.ToList() : [];
 
-    public IEnumerable<TaskItem> Items() => All(ResourceType.Items).Select(Projections.ToTaskItem);
+    public IEnumerable<TaskItem> Items()
+    {
+        if (!_byType.TryGetValue(ResourceType.Items, out var items))
+            return [];
+
+        var projected = new List<TaskItem>(items.Count);
+        foreach (var (id, json) in items)
+        {
+            if (!_projectedItems.TryGetValue(id, out var item))
+            {
+                item = Projections.ToTaskItem(json);
+                _projectedItems[id] = item;
+            }
+            projected.Add(item);
+        }
+        return projected;
+    }
 
     public IEnumerable<Project> Projects() => All(ResourceType.Projects).Select(Projections.ToProject);
 

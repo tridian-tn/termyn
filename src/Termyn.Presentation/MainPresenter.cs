@@ -46,7 +46,16 @@ public sealed class MainPresenter
     private readonly Lock _publishing = new();
 
     private IReadOnlyList<TaskRow> _allRows = [];
-    private IReadOnlyList<TaskRow> _searchableRows = [];
+
+    /// <summary>
+    /// Every task in the account as rows, for search. Built on the first keystroke rather than on
+    /// every publish: it is a second full projection of the account, and most publishes happen with
+    /// the search box empty.
+    /// </summary>
+    private IReadOnlyList<TaskRow>? _searchableRows;
+
+    /// <summary>The snapshot the current rows came from, so the search rows can be built from it later.</summary>
+    private ModelSnapshot? _projectedFrom;
 
     /// <summary>When the last sync succeeded, for "Synced 12s ago". Null until one has.</summary>
     private DateTimeOffset? _lastSyncedAt;
@@ -712,9 +721,8 @@ public sealed class MainPresenter
             Sidebar = BuildSidebar(snapshot);
             _allRows = BuildOutline(snapshot, scoped: true);
 
-            // Search runs over everything loaded, not just the view in front of you — otherwise
-            // Ctrl+F from Today silently misses most of the account.
-            _searchableRows = BuildOutline(snapshot, scoped: false);
+            _projectedFrom = snapshot;
+            _searchableRows = null;
 
             ApplyFilter(snapshot.PendingCount, snapshot.FailedCount);
         }
@@ -750,10 +758,18 @@ public sealed class MainPresenter
         var bySection = new Dictionary<string, int>(StringComparer.Ordinal);
         var byLabel = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
+        var horizon = today.AddDays(SmartViews.UpcomingDays);
+
         foreach (var item in active)
         {
-            if (SmartViews.IsToday(item, today, snapshot.TimeZone)) todayCount++;
-            if (SmartViews.IsUpcoming(item, today, snapshot.TimeZone)) upcomingCount++;
+            // Resolved once and compared twice. Asking the two predicates separately parsed every
+            // task's due date twice per publish, and a publish happens on every keystroke.
+            if (SmartViews.DueOn(item, snapshot.TimeZone) is { } due)
+            {
+                if (due <= today) todayCount++;
+                else if (due <= horizon) upcomingCount++;
+            }
+
             if (SmartViews.IsInbox(item, inbox)) inboxCount++;
 
             if (item.ProjectId is { } itemProject)
@@ -1053,7 +1069,7 @@ public sealed class MainPresenter
             // Matches rarely share a parent, so a filtered result is a flat list rather than a
             // tree with most of its structure missing.
             var q = SearchQuery.Trim();
-            Rows = _searchableRows
+            Rows = Searchable()
                 .Where(r =>
                     r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -1064,6 +1080,14 @@ public sealed class MainPresenter
 
         Status = ComposeStatus(pending, failed);
     }
+
+    /// <summary>
+    /// Every task as rows, for search. Search runs over everything loaded rather than just the view
+    /// in front of you — otherwise Ctrl+F from Today silently misses most of the account — but it
+    /// costs a full projection, so it waits until something is actually typed.
+    /// </summary>
+    private IReadOnlyList<TaskRow> Searchable()
+        => _searchableRows ??= _projectedFrom is { } snapshot ? BuildOutline(snapshot, scoped: false) : [];
 
     /// <summary>The whole status line: what is on screen, then where the sync loop stands.</summary>
     private string ComposeStatus(int pending, int failed)

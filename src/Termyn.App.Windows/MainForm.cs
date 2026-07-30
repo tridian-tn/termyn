@@ -21,6 +21,7 @@ namespace Termyn.App.Windows;
 /// </param>
 /// <param name="StartWithQuickAdd">Open the quick-add box straight away, and nothing else.</param>
 internal sealed record Shell(
+    IAppPaths Paths,
     SettingsStore Store,
     AppSettings Settings,
     IGlobalHotkey Hotkey,
@@ -51,8 +52,12 @@ internal sealed class MainForm : Form
     /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
     private readonly LinkLabel _unsupported;
 
-    /// <summary>Built once and hidden between uses, so the hotkey has it ready.</summary>
-    private readonly QuickAddForm _quickAdd;
+    /// <summary>
+    /// Built once and hidden between uses, so the hotkey has it ready. Made just after the window
+    /// appears rather than during startup: the hundred-millisecond budget is on the hotkey, and
+    /// building it before the first paint spends that time on every start instead.
+    /// </summary>
+    private QuickAddForm? _quickAdd;
 
     private AppSettings _settings;
     private Theme _theme;
@@ -73,6 +78,9 @@ internal sealed class MainForm : Form
     private HashSet<string>? _restoreCollapsed;
 
     private Font? _headerFont;
+
+    /// <summary>False until the window is up, so the first paint isn't held up drawing a tray icon.</summary>
+    private bool _trayReady;
 
     public MainForm(MainPresenter presenter, SyncScheduler scheduler, Shell shell)
     {
@@ -152,12 +160,11 @@ internal sealed class MainForm : Form
 
         _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
 
-        _quickAdd = new QuickAddForm(_presenter, _theme);
-        _quickAdd.Captured += () => _scheduler.NotifyWrite();
-        _quickAdd.Failed += Report;
-
         RestoreViewState(_settings.View);
-        ApplyTheme();
+
+        // Only the colours here. Loading publishes and renders a moment later anyway, and rendering
+        // the whole outline twice before the window is even up is time the user waits for.
+        ApplyTheme(render: false);
 
         _presenter.RowsChanged += OnRowsChanged;
         _presenter.StatusChanged += OnStatusChanged;
@@ -181,8 +188,8 @@ internal sealed class MainForm : Form
             _shell.Notifier.Activated -= OnTrayActivated;
             _shell.Instance.SignalReceived -= OnInstanceSignal;
 
-            _quickAdd.AllowClose();
-            _quickAdd.Dispose();
+            _quickAdd?.AllowClose();
+            _quickAdd?.Dispose();
             _headerFont?.Dispose();
             _cts.Dispose();
         };
@@ -216,14 +223,42 @@ internal sealed class MainForm : Form
     /// </summary>
     private void OnShown(object? sender, EventArgs e)
     {
-        if (!_shell.StartInTray)
-            return;
+        // Painted and taking input, which is what the startup budget is measured to.
+        StartupTrace.Interactive(_shell.Paths, _presenter.Rows.Count);
 
-        _shell.Notifier.Visible = true;
-        Hide();
+        // Posted rather than run here, so it happens after this paint has been processed: the first
+        // tray icon costs the best part of a tenth of a second, and none of it is work the user is
+        // waiting on.
+        BeginInvoke(() =>
+        {
+            _trayReady = true;
+            RenderTray();
+            _shell.Notifier.Visible = true;
+            _ = QuickAdd; // built now, so the first hotkey press finds it ready
 
-        if (_shell.StartWithQuickAdd)
-            Guarded(_quickAdd.Summon);
+            if (!_shell.StartInTray)
+                return;
+
+            Hide();
+
+            if (_shell.StartWithQuickAdd)
+                Guarded(QuickAdd.Summon);
+        });
+    }
+
+    /// <summary>The quick-add box, built on first use.</summary>
+    private QuickAddForm QuickAdd
+    {
+        get
+        {
+            if (_quickAdd is not null)
+                return _quickAdd;
+
+            _quickAdd = new QuickAddForm(_presenter, _theme);
+            _quickAdd.Captured += () => _scheduler.NotifyWrite();
+            _quickAdd.Failed += Report;
+            return _quickAdd;
+        }
     }
 
     private void OnHotkey()
@@ -232,7 +267,7 @@ internal sealed class MainForm : Form
         // is ever not this one.
         if (IsDisposed || !IsHandleCreated)
             return;
-        BeginInvoke(() => Guarded(_quickAdd.Summon));
+        BeginInvoke(() => Guarded(QuickAdd.Summon));
     }
 
     private void OnTrayActivated()
@@ -250,7 +285,7 @@ internal sealed class MainForm : Form
         BeginInvoke(() => Guarded(() =>
         {
             if (message == InstanceSignals.QuickAdd)
-                _quickAdd.Summon();
+                QuickAdd.Summon();
             else
                 RestoreWindow();
         }));
@@ -268,7 +303,7 @@ internal sealed class MainForm : Form
     private void BuildTrayMenu() => _shell.Notifier.SetCommands(
     [
         new NotifierCommand("Open Termyn", () => BeginInvoke(RestoreWindow)),
-        new NotifierCommand("Quick add…", () => BeginInvoke(() => Guarded(_quickAdd.Summon))),
+        new NotifierCommand("Quick add…", () => BeginInvoke(() => Guarded(QuickAdd.Summon))),
         new NotifierCommand("Sync now", () => _scheduler.RequestNow()),
         new NotifierCommand("Settings…", () => BeginInvoke(() => Guarded(OpenSettings))),
         new NotifierCommand("Exit", () => BeginInvoke(Exit)),
@@ -329,7 +364,7 @@ internal sealed class MainForm : Form
         {
             _theme = Theme.Resolve(_settings.Theme);
             ApplyTheme();
-            _quickAdd.ApplyTheme(_theme);
+            _quickAdd?.ApplyTheme(_theme);
 
             // The framework's own chrome — scrollbars, menus, title bars — is set once at startup.
             _status.Text = "Theme saved. Restart Termyn for the window frame to follow.";
@@ -342,7 +377,7 @@ internal sealed class MainForm : Form
             _status.Text = "Sync cadence saved. It takes effect when Termyn next starts.";
     }
 
-    private void ApplyTheme()
+    private void ApplyTheme(bool render = true)
     {
         _theme.Apply(this);
         _outline.Theme = _theme;
@@ -352,7 +387,9 @@ internal sealed class MainForm : Form
         _outline.BackColor = _theme.Panel;
         _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
         Invalidate(invalidateChildren: true);
-        Render();
+
+        if (render)
+            Render();
     }
 
     // ---- View state ----------------------------------------------------------------------------
@@ -478,6 +515,9 @@ internal sealed class MainForm : Form
     /// </summary>
     private void RenderTray()
     {
+        if (!_trayReady)
+            return;
+
         var today = _presenter.Sidebar
             .FirstOrDefault(n => n is { Kind: SidebarKind.SmartView, View: SmartView.Today })?.Count ?? 0;
 

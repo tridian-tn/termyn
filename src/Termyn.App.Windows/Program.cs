@@ -65,13 +65,12 @@ internal static class Program
             autoStart.SetEnabled(settings.LaunchAtLogin);
 
         using var hotkey = new WindowsGlobalHotkey();
+
+        // Not shown yet: the window puts it in the tray once it is up, so drawing the icon isn't on
+        // the path to the first paint.
         using var notifier = new TrayNotifier();
 
-        // In the tray from the start, so the badge is a live count of what is due rather than
-        // something that only appears once the window has been closed.
-        notifier.Visible = true;
-
-        var shell = new Shell(settingsStore, settings, hotkey, autoStart, notifier, instance, tray, quickAdd);
+        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, tray, quickAdd);
 
         try
         {
