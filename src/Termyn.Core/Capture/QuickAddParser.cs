@@ -36,6 +36,7 @@ public sealed partial class QuickAddParser
         var priority = Priority.P4;
         DateOnly? date = null;
         TimeOnly? time = null;
+        var recurrence = false;
 
         var tokens = (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
@@ -81,6 +82,7 @@ public sealed partial class QuickAddParser
                     .ToArray();
                 unsupported.Add(string.Join(' ', run));
                 content.AddRange(run);
+                recurrence = true;
                 i += run.Length - 1;
                 continue;
             }
@@ -114,6 +116,7 @@ public sealed partial class QuickAddParser
             DueDate = date,
             DueTime = time,
             Unsupported = unsupported,
+            IsRecurrence = recurrence,
         };
     }
 

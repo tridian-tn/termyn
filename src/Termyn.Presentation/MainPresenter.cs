@@ -15,7 +15,9 @@ public sealed record TaskRow(
     string Project,
     string Due,
     IReadOnlyList<string> Labels,
-    int Depth = 0);
+    int Depth = 0,
+    bool IsRecurring = false,
+    int ReminderCount = 0);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -104,8 +106,13 @@ public sealed class MainPresenter
         {
             IsOffline = true;
         }
-
-        Publish();
+        finally
+        {
+            // A rejected token empties the cache and then propagates, so this has to publish on the
+            // way out too: otherwise the view keeps the last account's tasks, and its plan keeps
+            // saying reminders are allowed.
+            Publish();
+        }
 
         // Only ask for another round while the network is answering, or the loop would spin.
         return !IsOffline && _engine.PendingCount > 0;
@@ -186,6 +193,58 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// Sets a task's due date from whatever the user typed, clearing it when that is nothing.
+    /// </summary>
+    /// <remarks>
+    /// A date the local grammar can read is sent as a date, so it still means the right day with no
+    /// network. Anything else goes as the words themselves, for the server to read the way the web
+    /// app would — which covers both a recurrence and the phrasings the bounded local grammar was
+    /// never meant to cover.
+    /// </remarks>
+    public void SetDueFromText(string id, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            SetDue(id, null);
+            return;
+        }
+
+        var parse = _parser.Parse(text);
+
+        // Only resolve locally when the grammar accounted for every word. Anything left over is the
+        // tell that it didn't understand the phrase — "daily 9am" and "each monday" both yield a
+        // date while dropping the repeat on the floor, and "every day p1 9am" leaves a time behind
+        // that reads as this morning. Leftovers go to the server as words.
+        if (!parse.IsRecurrence && parse.Content.Length == 0 && parse.DueDate is { } date)
+        {
+            SetDue(id, date, parse.DueTime);
+            return;
+        }
+
+        _engine.SetItemDueString(id, text, parse.IsRecurrence || StartsARepeat(text));
+        Publish();
+    }
+
+    /// <summary>The words a repeating schedule tends to open with, beyond the <c>every</c> the parser knows.</summary>
+    private static readonly string[] RepeatStarters = ["daily", "weekly", "monthly", "yearly", "annually", "each"];
+
+    /// <summary>
+    /// Whether typed text looks like a repeat. Only a hint, and only worth having until the server
+    /// answers: without it a task set to "daily 9am" looks ordinary to the close that follows, and
+    /// gets ticked off instead of advanced.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not in the parser, which also reads captured task text — "Write daily report"
+    /// is a title, not a schedule. Here the whole input is the schedule, so the first word can be
+    /// taken at face value.
+    /// </remarks>
+    private static bool StartsARepeat(string text)
+    {
+        var first = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return first is not null && RepeatStarters.Contains(first, StringComparer.OrdinalIgnoreCase);
+    }
+
     public void Complete(string id)
     {
         _engine.CompleteItem(id);
@@ -232,6 +291,79 @@ public sealed class MainPresenter
         if (outdented)
             Publish();
         return outdented;
+    }
+
+    // ---- Reminder intents ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether the account's plan allows reminders. False until the first sync has said otherwise,
+    /// so the UI offers nothing it would then have to take back.
+    /// </summary>
+    public bool RemindersAvailable { get; private set; }
+
+    /// <summary>The plan the account is on, or empty until a sync has said. Not the upgrade target.</summary>
+    public string PlanName { get; private set; } = string.Empty;
+
+    /// <summary>Whether the account still holds this task, whatever the current view happens to show.</summary>
+    public bool HasTask(string id) => _engine.Snapshot().Items.Any(i => i.Id == id);
+
+    /// <summary>
+    /// The reminders on a task: the ones tied to its due date first, longest warning to shortest,
+    /// then the ones set for a moment of their own.
+    /// </summary>
+    public IReadOnlyList<Reminder> RemindersFor(string itemId)
+        => _engine.Snapshot().Reminders
+            .Where(r => r.ItemId == itemId)
+            .OrderBy(r => r.Kind)
+            .ThenByDescending(r => r.MinuteOffset)
+            .ToList();
+
+    /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
+    /// <returns>False when the plan won't take it, so the caller can say why rather than failing later.</returns>
+    public bool AddRelativeReminder(string itemId, int minutesBefore)
+    {
+        if (!CanAddReminder())
+            return false;
+
+        var added = _engine.AddRelativeReminder(itemId, minutesBefore) is not null;
+        if (added)
+            Publish();
+        return added;
+    }
+
+    /// <summary>Adds a reminder for a fixed moment, whatever the task's own due date is.</summary>
+    public bool AddAbsoluteReminder(string itemId, DateOnly date, TimeOnly time)
+    {
+        if (!CanAddReminder())
+            return false;
+
+        var added = _engine.AddAbsoluteReminder(itemId, date, time) is not null;
+        if (added)
+            Publish();
+        return added;
+    }
+
+    /// <summary>
+    /// Whether another time-based reminder would be accepted. The plan caps how many the account
+    /// may hold, and a save the server refuses is the one thing this UI is meant never to offer.
+    /// </summary>
+    private bool CanAddReminder()
+    {
+        var snapshot = _engine.Snapshot();
+        if (!snapshot.RemindersAvailable)
+            return false;
+
+        var cap = snapshot.PlanLimits?.MaxTimeReminders ?? 0;
+        if (cap <= 0)
+            return true; // no cap reported, so nothing to check it against
+
+        return snapshot.Reminders.Count(r => r.Kind is not ReminderKind.Location) < cap;
+    }
+
+    public void DeleteReminder(string id)
+    {
+        _engine.DeleteReminder(id);
+        Publish();
     }
 
     // ---- Label intents -------------------------------------------------------------------------
@@ -457,6 +589,8 @@ public sealed class MainPresenter
             UnsupportedFilter = null;
 
             Labels = snapshot.Labels.OrderBy(l => l.ItemOrder).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            RemindersAvailable = snapshot.RemindersAvailable;
+            PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
             _allRows = BuildOutline(snapshot, scoped: true);
 
@@ -646,6 +780,13 @@ public sealed class MainPresenter
     private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
     {
         var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
+
+        // Counted once for the whole outline rather than looked up per row.
+        var reminderCounts = snapshot.Reminders
+            .Where(r => r.ItemId is not null)
+            .GroupBy(r => r.ItemId!)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
         var selected = scoped ? InSelection(snapshot) : _ => true;
         var visible = VisibleItems(snapshot)
             .Where(i => i.Id.Length > 0 && selected(i))
@@ -689,7 +830,9 @@ public sealed class MainPresenter
             item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var name) ? name : string.Empty,
             item.DueText ?? item.DueDate ?? string.Empty,
             item.Labels,
-            depth);
+            depth,
+            item.IsRecurring,
+            reminderCounts.GetValueOrDefault(item.Id));
     }
 
     /// <summary>

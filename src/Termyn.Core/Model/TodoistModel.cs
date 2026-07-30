@@ -9,7 +9,7 @@ namespace Termyn.Core.Model;
 public sealed class TodoistModel
 {
     /// <summary>Fields that hold a reference to another resource's id.</summary>
-    public static readonly string[] ReferenceKeys = ["parent_id", "section_id", "project_id"];
+    public static readonly string[] ReferenceKeys = ["parent_id", "section_id", "project_id", "item_id"];
 
     private readonly Dictionary<string, Dictionary<string, JsonObject>> _byType = new();
 
@@ -79,6 +79,13 @@ public sealed class TodoistModel
     public IEnumerable<JsonObject> All(string type)
         => _byType.TryGetValue(type, out var m) ? m.Values : [];
 
+    /// <summary>
+    /// The keys held for a type, as a copy so the caller can remove while walking them. These are
+    /// the model's own keys, which for a singleton is the type name rather than anything inside.
+    /// </summary>
+    public IReadOnlyList<string> Keys(string type)
+        => _byType.TryGetValue(type, out var m) ? m.Keys.ToList() : [];
+
     public IEnumerable<TaskItem> Items() => All(ResourceType.Items).Select(Projections.ToTaskItem);
 
     public IEnumerable<Project> Projects() => All(ResourceType.Projects).Select(Projections.ToProject);
@@ -88,4 +95,16 @@ public sealed class TodoistModel
     public IEnumerable<Label> Labels() => All(ResourceType.Labels).Select(Projections.ToLabel);
 
     public IEnumerable<Filter> Filters() => All(ResourceType.Filters).Select(Projections.ToFilter);
+
+    public IEnumerable<Reminder> Reminders() => All(ResourceType.Reminders).Select(Projections.ToReminder);
+
+    /// <summary>
+    /// The account's plan limits, or null before the first sync has brought them. Null is not
+    /// "unlimited": a caller gating on a plan feature has to treat not-knowing as not-allowed, or
+    /// it will offer something the server then refuses.
+    /// </summary>
+    public PlanLimits? PlanLimits()
+        => Get(ResourceType.UserPlanLimits, ResourceType.UserPlanLimits) is { } o
+            ? Projections.ToPlanLimits(o)
+            : null;
 }

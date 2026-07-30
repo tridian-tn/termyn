@@ -24,6 +24,7 @@ public static class Projections
             Completed = JsonRead.Bool(o, "checked"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
             DueText = due is null ? null : JsonRead.String(due, "string"),
+            IsRecurring = due is not null && JsonRead.Bool(due, "is_recurring"),
         };
     }
 
@@ -75,6 +76,41 @@ public static class Projections
         IsFavorite = JsonRead.Bool(o, "is_favorite"),
         ItemOrder = JsonRead.Int(o, "item_order"),
     };
+
+    public static Reminder ToReminder(JsonObject o)
+    {
+        var due = o["due"] as JsonObject;
+        return new Reminder
+        {
+            Id = JsonRead.String(o, "id") ?? string.Empty,
+            ItemId = JsonRead.String(o, "item_id"),
+            Kind = JsonRead.String(o, "type") switch
+            {
+                "relative" or null => ReminderKind.Relative,
+                "absolute" => ReminderKind.Absolute,
+                "location" => ReminderKind.Location,
+                _ => ReminderKind.Unknown,
+            },
+            MinuteOffset = JsonRead.Int(o, "minute_offset"),
+            DueDate = due is null ? null : JsonRead.String(due, "date"),
+            LocationName = JsonRead.String(o, "name"),
+        };
+    }
+
+    /// <summary>
+    /// Reads the plan's limits. The resource holds the current plan alongside the one it could be
+    /// upgraded to, and only the current one says what this account may do today.
+    /// </summary>
+    public static PlanLimits ToPlanLimits(JsonObject o)
+    {
+        var current = o["current"] as JsonObject ?? o;
+        return new PlanLimits
+        {
+            PlanName = JsonRead.String(current, "plan_name") ?? string.Empty,
+            Reminders = JsonRead.Bool(current, "reminders"),
+            MaxTimeReminders = JsonRead.Int(current, "max_reminders_time"),
+        };
+    }
 
     public static Filter ToFilter(JsonObject o) => new()
     {

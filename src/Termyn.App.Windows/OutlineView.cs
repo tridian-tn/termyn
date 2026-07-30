@@ -149,7 +149,7 @@ internal sealed class OutlineView : ListView
         if (_cache[e.ItemIndex] is not { } cached)
         {
             var row = _rows[e.ItemIndex];
-            cached = new ListViewItem([row.Content, string.Empty, row.Project, row.Due, LabelsOf(row)]) { Tag = row.Id };
+            cached = new ListViewItem([row.Content, string.Empty, row.Project, DueOf(row), LabelsOf(row)]) { Tag = row.Id };
             _cache[e.ItemIndex] = cached;
         }
 
@@ -242,7 +242,7 @@ internal sealed class OutlineView : ListView
                 break;
 
             case 3:
-                TextRenderer.DrawText(e.Graphics, row.Due, Font, Inset(e.Bounds), muted, Flags);
+                TextRenderer.DrawText(e.Graphics, DueOf(row), Font, Inset(e.Bounds), muted, Flags);
                 break;
 
             case 4:
@@ -254,6 +254,19 @@ internal sealed class OutlineView : ListView
     /// <summary>Labels as they are written in quick-add, so the row reads the way it was typed.</summary>
     private static string LabelsOf(TaskRow row)
         => row.Labels.Count == 0 ? string.Empty : "@" + string.Join(" @", row.Labels);
+
+    /// <summary>
+    /// The due column. A repeat and a reminder are marked here rather than given columns of their
+    /// own: both are about when the task comes round, and neither is worth the width.
+    /// </summary>
+    private static string DueOf(TaskRow row)
+    {
+        var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.ReminderCount > 0 ? "⏰" : string.Empty);
+        if (marks.Length == 0)
+            return row.Due;
+
+        return row.Due.Length == 0 ? marks : $"{marks} {row.Due}";
+    }
 
     /// <summary>Faint vertical rules showing how deep a sub-task sits.</summary>
     private static void DrawGuides(Graphics g, Rectangle bounds, int depth, bool selected)

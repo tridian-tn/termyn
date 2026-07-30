@@ -487,6 +487,10 @@ internal sealed class MainForm : Form
                 wrote = false;
                 Guarded(() => wrote = PickLabels(id!));
                 break;
+            case Keys.R when e.Control && id is not null:
+                wrote = false;
+                Guarded(() => wrote = ShowReminders(id!));
+                break;
             case Keys.Z when e.Control:
                 wrote = false;
                 Guarded(() =>
@@ -617,26 +621,22 @@ internal sealed class MainForm : Form
     /// <summary>Asks for a due date and applies it. Returns false when nothing was changed.</summary>
     private bool PromptForDue(string id)
     {
-        var answer = InputDialog.Ask(this, "Due date", "When is it due?  (today, tomorrow, friday, 2026-12-25, 4pm — blank clears)");
+        var answer = InputDialog.Ask(
+            this,
+            "Due date",
+            "When is it due?  (today, friday, 2026-12-25, 4pm, every Monday — blank clears)");
+
         if (answer is null)
             return false;
 
-        if (string.IsNullOrWhiteSpace(answer))
-        {
-            _presenter.SetDue(id, null);
-            return true;
-        }
-
-        var parse = _presenter.Preview(answer).Parse;
-        if (parse.DueDate is null)
-        {
-            _status.Text = $"Couldn't read \"{answer}\" as a date.";
-            return false;
-        }
-
-        _presenter.SetDue(id, parse.DueDate, parse.DueTime);
+        _presenter.SetDueFromText(id, answer);
         return true;
     }
+
+    /// <summary>Shows the reminders on a task.</summary>
+    /// <returns>True when one was added or removed.</returns>
+    private bool ShowReminders(string id)
+        => _outline.SelectedRow is { } row && ReminderForm.Show(this, _presenter, id, row.Content);
 
     /// <summary>Ticks the labels on a task, creating any the account doesn't have yet.</summary>
     private bool PickLabels(string id)

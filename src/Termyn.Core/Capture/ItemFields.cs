@@ -33,7 +33,10 @@ public static class ItemFields
         if (parse.Priority != Priority.P4)
             fields["priority"] = PriorityMap.ToApi(parse.Priority);
 
-        if (Due(parse.DueDate, parse.DueTime) is { } due)
+        // A recurrence goes over as no due date at all rather than a wrong one. A priority ends the
+        // recurrence run, so "every day p1 9am" leaves a bare time behind that the parser reads as
+        // this morning — filing a repeating task as a one-off due today.
+        if (!parse.IsRecurrence && Due(parse.DueDate, parse.DueTime) is { } due)
             fields["due"] = due;
 
         return fields;
@@ -54,6 +57,13 @@ public static class ItemFields
 
         return new JsonObject { ["date"] = value };
     }
+
+    /// <summary>
+    /// A due date written out rather than picked — "every Monday", "in 3 days". The server reads it
+    /// and sends back the schedule it settled on, which is the only way a recurrence can be set:
+    /// there is no field that says "repeat weekly", just the words.
+    /// </summary>
+    public static JsonObject DueString(string text) => new() { ["string"] = text.Trim() };
 
     /// <summary>
     /// The fields that may be sent when recreating a task, so replaying a deleted one never echoes

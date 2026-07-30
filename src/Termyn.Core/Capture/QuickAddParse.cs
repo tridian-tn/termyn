@@ -20,4 +20,11 @@ public sealed record QuickAddParse
     /// assignees. The capture UI surfaces these so the user knows what was left out.
     /// </summary>
     public IReadOnlyList<string> Unsupported { get; init; } = [];
+
+    /// <summary>
+    /// Whether the text describes a repeating schedule. Only the server resolves one, and a caller
+    /// must not act on <see cref="DueDate"/> when this is set: "every day at 9am" is a schedule,
+    /// and the nine o'clock in it is not a due time of its own.
+    /// </summary>
+    public bool IsRecurrence { get; init; }
 }
