@@ -304,8 +304,10 @@ public sealed class SettingsStore
         if (version >= AppSettings.CurrentSchemaVersion)
             return;
 
-        // A file written before schemaVersion existed. Nothing in it has moved, so bringing it
-        // forward is only a matter of stamping the version.
+        // An older version this build does know. There is nothing in the shape it wrote that has
+        // moved since, so bringing it forward is only a matter of stamping the version — a real
+        // migration would go here, before that line. A file with no version at all took the early
+        // return above and is stamped on the way out instead.
         root["schemaVersion"] = AppSettings.CurrentSchemaVersion;
     }
 

@@ -31,6 +31,12 @@ public sealed class WindowsGlobalHotkey : IGlobalHotkey
 
     public HotkeyBinding? Current { get; private set; }
 
+    /// <summary>
+    /// The window WM_HOTKEY is delivered to. Internal so a test can confirm it really is
+    /// message-only, and can post to it rather than synthesising a keypress on the user's desktop.
+    /// </summary>
+    internal IntPtr Handle => _window.Handle;
+
     /// <inheritdoc />
     public bool Register(HotkeyBinding binding)
     {
@@ -102,12 +108,19 @@ public sealed class WindowsGlobalHotkey : IGlobalHotkey
     /// <summary>A window with no chrome and no presence, existing only to receive WM_HOTKEY.</summary>
     private sealed class MessageWindow : NativeWindow, IDisposable
     {
+        /// <summary>
+        /// Parenting to <c>HWND_MESSAGE</c> is what makes a window message-only: it gets posted
+        /// messages and nothing else — no z-order, no taskbar presence, and none of the broadcasts
+        /// every top-level window otherwise has to be sent.
+        /// </summary>
+        private static readonly IntPtr MessageOnly = new(-3);
+
         private readonly Action _onHotkey;
 
         public MessageWindow(Action onHotkey)
         {
             _onHotkey = onHotkey;
-            CreateHandle(new CreateParams { Caption = "Termyn.Hotkey" });
+            CreateHandle(new CreateParams { Caption = "Termyn.Hotkey", Parent = MessageOnly });
         }
 
         protected override void WndProc(ref Message m)

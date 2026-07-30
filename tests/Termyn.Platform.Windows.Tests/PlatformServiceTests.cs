@@ -90,6 +90,66 @@ public class GlobalHotkeyTests
     }
 
     [Fact]
+    public void The_window_it_listens_on_is_message_only()
+    {
+        // Message-only means parented into the HWND_MESSAGE namespace: posted messages and nothing
+        // else — no z-order, no taskbar presence, none of the broadcasts a top-level window is sent.
+        // HWND_MESSAGE is a pseudo-handle you pass in, so what comes back is the system window that
+        // owns that namespace; an ordinary top-level window answers with the desktop instead.
+        using var hotkey = new WindowsGlobalHotkey();
+
+        var parent = GetAncestor(hotkey.Handle, GA_PARENT);
+
+        Assert.NotEqual(IntPtr.Zero, parent);
+        Assert.NotEqual(GetDesktopWindow(), parent);
+    }
+
+    [Fact]
+    public void A_press_reaches_the_subscriber()
+    {
+        // Posted rather than typed: synthesising Ctrl+Alt+Shift+F9 would press it on whatever the
+        // developer happens to be doing. This covers the wiring from the window's queue onwards,
+        // which is the half the message-only parenting could break; that the desktop accepts the
+        // registration at all is covered above.
+        using var hotkey = new WindowsGlobalHotkey();
+        var pressed = 0;
+        hotkey.Pressed += () => pressed++;
+
+        Assert.True(hotkey.Register(new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F9")));
+        PostMessage(hotkey.Handle, WM_HOTKEY, 1, 0);
+        Application.DoEvents();
+
+        Assert.Equal(1, pressed);
+    }
+
+    [Fact]
+    public void Another_windows_hotkey_id_is_ignored()
+    {
+        using var hotkey = new WindowsGlobalHotkey();
+        var pressed = 0;
+        hotkey.Pressed += () => pressed++;
+
+        hotkey.Register(new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F9"));
+        PostMessage(hotkey.Handle, WM_HOTKEY, 99, 0);
+        Application.DoEvents();
+
+        Assert.Equal(0, pressed);
+    }
+
+    private const int WM_HOTKEY = 0x0312;
+    private const uint GA_PARENT = 1;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr window, int message, int wParam, int lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetDesktopWindow();
+
+    [Fact]
     public void Using_it_after_disposal_says_so_rather_than_failing_obscurely()
     {
         var hotkey = new WindowsGlobalHotkey();
