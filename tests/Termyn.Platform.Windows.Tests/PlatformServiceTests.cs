@@ -87,13 +87,16 @@ public class GlobalHotkeyTests
 public class AutoStartTests : IDisposable
 {
     /// <summary>Somewhere of our own: a test has no business adding a real startup entry.</summary>
-    private const string TestKey = @"Software\Termyn\Tests\Run";
+    private const string TestRoot = @"Software\Termyn.Tests";
 
+    private const string TestKey = TestRoot + @"\Run";
+
+    /// <summary>Takes the root with it, so a test run leaves nothing on the machine at all.</summary>
     public void Dispose()
     {
         try
         {
-            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Termyn\Tests", throwOnMissingSubKey: false);
+            Registry.CurrentUser.DeleteSubKeyTree(TestRoot, throwOnMissingSubKey: false);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
