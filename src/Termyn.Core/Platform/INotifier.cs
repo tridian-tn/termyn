@@ -4,9 +4,9 @@ namespace Termyn.Core.Platform;
 public sealed record NotifierCommand(string Label, Action Invoke);
 
 /// <summary>
-/// The desktop's status area: an icon that says how much is due, a menu, and the occasional
-/// notification. Kept behind an interface because every desktop does this differently, and because
-/// tests of the shell shouldn't put an icon in anyone's tray.
+/// The desktop's status area: an icon that says how much is due, and a menu. Kept behind an
+/// interface because every desktop does this differently, and because tests of the shell shouldn't
+/// put an icon in anyone's tray.
 /// </summary>
 public interface INotifier : IDisposable
 {
@@ -15,9 +15,6 @@ public interface INotifier : IDisposable
 
     /// <summary>Whether the icon is currently in the status area.</summary>
     bool Visible { get; set; }
-
-    /// <summary>Shows a transient message.</summary>
-    void Notify(string title, string message);
 
     /// <summary>
     /// Updates the icon's hover text and the count it badges.

@@ -75,12 +75,94 @@ public class GlobalHotkeyTests
     }
 
     [Fact]
+    public void A_combination_something_else_already_owns_is_refused()
+    {
+        // The RegisterHotKey-said-no branch, which is what drives the "another application already
+        // owns it" message. The other refusal test never reaches the API at all.
+        var binding = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F8");
+
+        using var owner = new WindowsGlobalHotkey();
+        Assert.True(owner.Register(binding), "the desktop refused an unlikely combination");
+
+        using var latecomer = new WindowsGlobalHotkey();
+        Assert.False(latecomer.Register(binding));
+        Assert.Null(latecomer.Current);
+    }
+
+    [Fact]
     public void Using_it_after_disposal_says_so_rather_than_failing_obscurely()
     {
         var hotkey = new WindowsGlobalHotkey();
         hotkey.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => hotkey.Register(HotkeyBinding.Default));
+    }
+}
+
+public class TrayNotifierTests
+{
+    [Fact]
+    public void A_tooltip_longer_than_the_shell_allows_is_cut_short()
+    {
+        using var tray = new TrayNotifier();
+
+        // The shell rejects anything over 63 characters outright on older builds.
+        tray.SetStatus(new string('x', 200), 0);
+
+        Assert.True(tray.Tooltip.Length <= 63, $"tooltip was {tray.Tooltip.Length} characters");
+        Assert.EndsWith("…", tray.Tooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_tooltip_that_fits_is_left_alone()
+    {
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn — 3 tasks due today", 3);
+
+        Assert.Equal("Termyn — 3 tasks due today", tray.Tooltip);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(99)]
+    [InlineData(100)]
+    [InlineData(int.MaxValue)]
+    [InlineData(-3)]
+    public void Any_count_produces_an_icon(int dueToday)
+    {
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", dueToday);
+
+        Assert.NotNull(tray.Icon);
+    }
+
+    [Fact]
+    public void The_same_count_twice_does_not_redraw()
+    {
+        // A redraw per publish is a GDI handle churned on every keystroke.
+        using var tray = new TrayNotifier();
+        tray.SetStatus("Termyn", 3);
+        var first = tray.Icon;
+
+        tray.SetStatus("Termyn — a different tooltip", 3);
+
+        Assert.Same(first, tray.Icon);
+    }
+
+    [Fact]
+    public void A_negative_count_badges_nothing()
+    {
+        using var tray = new TrayNotifier();
+        tray.SetStatus("Termyn", 0);
+        var plain = tray.Icon;
+
+        tray.SetStatus("Termyn", -3);
+
+        // Clamped to zero, so it is the same plain icon rather than a fresh one.
+        Assert.Same(plain, tray.Icon);
     }
 }
 
@@ -257,6 +339,87 @@ public class SingleInstanceTests
 
         using var second = new WindowsSingleInstance(scope);
         Assert.True(second.TryAcquire());
+    }
+
+    [Fact]
+    public void The_default_scope_is_this_user_in_this_logon_session()
+    {
+        using var mine = new WindowsSingleInstance();
+        using var explicitly = new WindowsSingleInstance(CurrentSid());
+
+        // The mutex stays in the session namespace: creating a Global\\ object needs a privilege
+        // standard users are not granted, and an instance that could never start would be worse
+        // than the multi-session gap this leaves.
+        Assert.StartsWith(@"Local\Termyn-", mine.MutexName, StringComparison.Ordinal);
+        Assert.Equal(explicitly.MutexName, mine.MutexName);
+        Assert.Equal(explicitly.PipeName, mine.PipeName);
+    }
+
+    [Fact]
+    public void A_different_principal_gets_different_names()
+    {
+        using var mine = new WindowsSingleInstance("S-1-5-21-1-2-3-1001");
+        using var theirs = new WindowsSingleInstance("S-1-5-21-1-2-3-1002");
+
+        Assert.NotEqual(mine.MutexName, theirs.MutexName);
+        Assert.NotEqual(mine.PipeName, theirs.PipeName);
+    }
+
+    [Fact]
+    public async Task A_signal_that_arrives_before_anyone_is_listening_is_kept()
+    {
+        // The listener starts as soon as the instance is acquired, but the window that handles
+        // signals doesn't exist until the cache has loaded — with a token dialog in between on a
+        // first run. Dropping those told the second launch it had handed over when it hadn't.
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope);
+        Assert.True(holder.TryAcquire());
+
+        using var second = new WindowsSingleInstance(scope);
+        Assert.True(second.TrySignal(InstanceSignals.QuickAdd));
+
+        // Give the listener a moment to take it off the wire before anyone subscribes.
+        await Task.Delay(500);
+
+        var received = new TaskCompletionSource<string>();
+        holder.SignalReceived += m => received.TrySetResult(m);
+
+        Assert.Equal(InstanceSignals.QuickAdd, await received.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task A_squatted_pipe_name_makes_the_listener_give_up_rather_than_spin()
+    {
+        // Retrying flat out burned 140% of a core for the life of the process, silently, whenever
+        // the name was already taken — by another account, or by a stale process.
+        var scope = Scope();
+        using var probe = new WindowsSingleInstance(scope, retryDelay: TimeSpan.FromMilliseconds(5));
+        using var squatter = new System.IO.Pipes.NamedPipeServerStream(probe.PipeName, System.IO.Pipes.PipeDirection.In, 1);
+
+        Assert.True(probe.TryAcquire());
+
+        // Ten failures at five milliseconds apart; anything that hasn't stopped by now is spinning.
+        await probe.Listener!.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(probe.Listener.IsCompleted);
+    }
+
+    [Fact]
+    public async Task A_listener_that_is_working_does_not_give_up()
+    {
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope, retryDelay: TimeSpan.FromMilliseconds(5));
+        Assert.True(holder.TryAcquire());
+
+        await Task.Delay(200);
+
+        Assert.False(holder.Listener!.IsCompleted);
+    }
+
+    private static string CurrentSid()
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        return identity.User!.Value;
     }
 
     /// <summary>A scope unique to each test, so tests running side by side don't fight over one.</summary>

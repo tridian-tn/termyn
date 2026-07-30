@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -15,8 +16,10 @@ public sealed class SettingsStore
     private static readonly JsonSerializerOptions Format = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
         WriteIndented = true,
+        // The file is documented as hand-editable, and the default encoder writes the hotkey — the
+        // field most likely to be edited — as "Ctrl+Alt+A".
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         Converters = { new JsonStringEnumConverter() },
     };
 
@@ -24,6 +27,15 @@ public sealed class SettingsStore
 
     /// <summary>The file as last read, so a save can be an overlay rather than a replacement.</summary>
     private JsonObject _raw = new();
+
+    /// <summary>
+    /// The version the file claimed, kept apart from the settings record. A save must not read it
+    /// back off a record that may have been defaulted, or a later version's file gets stamped down.
+    /// </summary>
+    private int _version = AppSettings.CurrentSchemaVersion;
+
+    /// <summary>False when a file exists but couldn't be read, which makes saving unsafe.</summary>
+    private bool _readable = true;
 
     public SettingsStore(IAppPaths paths)
         : this(System.IO.Path.Combine(paths.ConfigDirectory, "config.json"))
@@ -46,18 +58,17 @@ public sealed class SettingsStore
             try
             {
                 if (!File.Exists(FilePath))
-                {
-                    _raw = new JsonObject();
-                    return new AppSettings();
-                }
+                    return Reset();
+
                 text = File.ReadAllText(FilePath);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Locked or unreadable: run on defaults for this session and leave the file alone,
-                // since it may well be fine and simply busy.
-                _raw = new JsonObject();
-                return new AppSettings();
+                // Locked or unreadable — busy, most likely. Run on defaults for this session and
+                // refuse to save, because an overlay onto nothing would write those defaults over a
+                // file whose real contents we never managed to read.
+                _readable = false;
+                return Reset();
             }
 
             JsonObject root;
@@ -69,53 +80,134 @@ public sealed class SettingsStore
             catch (JsonException)
             {
                 SetAside();
-                _raw = new JsonObject();
-                return new AppSettings();
+                return Reset();
             }
 
             Migrate(root);
             _raw = root;
-
-            try
-            {
-                return root.Deserialize<AppSettings>(Format) ?? new AppSettings();
-            }
-            catch (JsonException)
-            {
-                // Well-formed JSON with a value of the wrong shape — a string where a number belongs,
-                // say. Keep the raw object: the save that follows preserves what we couldn't read.
-                return new AppSettings();
-            }
+            _readable = true;
+            _version = Math.Max(ReadVersion(root), AppSettings.CurrentSchemaVersion);
+            return Read(root);
         }
     }
 
     /// <summary>Writes the settings, preserving any keys this version doesn't model.</summary>
-    public void Save(AppSettings settings)
+    /// <returns>False when the file could not be written, so the caller can say so.</returns>
+    public bool Save(AppSettings settings)
     {
         lock (_gate)
         {
-            // Never lower the version. A file written by a later Termyn is being saved by an earlier
-            // one here, and stamping our own number on it would have that later version re-run
-            // migrations over data already in its own shape.
-            var version = Math.Max(settings.SchemaVersion, AppSettings.CurrentSchemaVersion);
-            var known = JsonSerializer.SerializeToNode(settings with { SchemaVersion = version }, Format) as JsonObject
-                        ?? new JsonObject();
+            // Whatever is on disk is real and we couldn't read it. Overlaying defaults onto an empty
+            // object would replace every one of the user's settings with a default.
+            if (!_readable)
+                return false;
+
+            var known = JsonSerializer.SerializeToNode(settings, Format) as JsonObject ?? new JsonObject();
+
+            // Never lower the version, and take it from the file rather than the record: a record
+            // that fell back to defaults carries our version, not the file's.
+            known["schemaVersion"] = Math.Max(_version, AppSettings.CurrentSchemaVersion);
 
             var merged = _raw.DeepClone().AsObject();
             Overlay(merged, known);
-            _raw = merged;
 
-            var directory = System.IO.Path.GetDirectoryName(FilePath);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            // Written beside the target and moved into place, so a crash mid-write can't leave a
-            // half-written config that the next start would treat as corrupt.
             var temp = FilePath + ".tmp";
-            File.WriteAllText(temp, merged.ToJsonString(Format));
-            File.Move(temp, FilePath, overwrite: true);
+            try
+            {
+                var directory = System.IO.Path.GetDirectoryName(FilePath);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
+
+                // Written beside the target and moved into place, so a crash mid-write can't leave a
+                // half-written config that the next start would treat as corrupt.
+                File.WriteAllText(temp, merged.ToJsonString(Format));
+                File.Move(temp, FilePath, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Delete(temp);
+                return false;
+            }
+
+            _raw = merged;
+            return true;
         }
     }
+
+    /// <summary>Forgets the file and answers with defaults.</summary>
+    private AppSettings Reset()
+    {
+        _raw = new JsonObject();
+        _version = AppSettings.CurrentSchemaVersion;
+        return new AppSettings();
+    }
+
+    /// <summary>
+    /// Reads the settings a field at a time.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <c>Deserialize&lt;AppSettings&gt;</c>, which is all-or-nothing: one bad value —
+    /// a hand-edited typo, or an enum name a later version added — discarded every other setting in
+    /// the file, and the save that followed wrote those defaults through. A bad field now costs that
+    /// field alone.
+    /// </remarks>
+    private static AppSettings Read(JsonObject root)
+    {
+        var defaults = new AppSettings();
+        return new AppSettings
+        {
+            SchemaVersion = Int(root, "schemaVersion", defaults.SchemaVersion),
+            Hotkey = Text(root, "hotkey", defaults.Hotkey),
+            HotkeyEnabled = Flag(root, "hotkeyEnabled", defaults.HotkeyEnabled),
+            Theme = Choice(root, "theme", defaults.Theme),
+            SyncMode = Choice(root, "syncMode", defaults.SyncMode),
+            SyncIntervalSeconds = Int(root, "syncIntervalSeconds", defaults.SyncIntervalSeconds),
+            LaunchAtLogin = Flag(root, "launchAtLogin", defaults.LaunchAtLogin),
+            CloseToTray = Flag(root, "closeToTray", defaults.CloseToTray),
+            View = ReadView(root["view"] as JsonObject),
+        };
+    }
+
+    private static ViewState ReadView(JsonObject? view)
+    {
+        var defaults = new ViewState();
+        if (view is null)
+            return defaults;
+
+        return new ViewState
+        {
+            SelectedKey = view["selectedKey"] is JsonValue key && key.TryGetValue(out string? s) ? s : defaults.SelectedKey,
+            CollapsedKeys = view["collapsedKeys"] is JsonArray keys
+                ? keys.OfType<JsonValue>().Select(k => k.ToString()).ToList()
+                : defaults.CollapsedKeys,
+            SidebarWidth = Int(view, "sidebarWidth", defaults.SidebarWidth),
+            WindowX = Nullable(view, "windowX"),
+            WindowY = Nullable(view, "windowY"),
+            WindowWidth = Int(view, "windowWidth", defaults.WindowWidth),
+            WindowHeight = Int(view, "windowHeight", defaults.WindowHeight),
+            Maximized = Flag(view, "maximized", defaults.Maximized),
+        };
+    }
+
+    private static string Text(JsonObject o, string key, string fallback)
+        => o[key] is JsonValue v && v.TryGetValue(out string? s) && s is not null ? s : fallback;
+
+    private static bool Flag(JsonObject o, string key, bool fallback)
+        => o[key] is JsonValue v && v.TryGetValue(out bool b) ? b : fallback;
+
+    private static int Int(JsonObject o, string key, int fallback)
+        => o[key] is JsonValue v && v.TryGetValue(out int i) ? i : fallback;
+
+    private static int? Nullable(JsonObject o, string key)
+        => o[key] is JsonValue v && v.TryGetValue(out int i) ? i : null;
+
+    private static T Choice<T>(JsonObject o, string key, T fallback) where T : struct, Enum
+        => o[key] is JsonValue v && v.TryGetValue(out string? s) && Enum.TryParse<T>(s, ignoreCase: true, out var parsed)
+            ? parsed
+            : fallback;
+
+    private static int ReadVersion(JsonObject root)
+        => root["schemaVersion"] is JsonValue v && v.TryGetValue(out int parsed) ? parsed : 0;
 
     /// <summary>
     /// Copies the known keys over the retained file. Nested objects are merged rather than replaced,
@@ -141,8 +233,7 @@ public sealed class SettingsStore
     /// </summary>
     private static void Migrate(JsonObject root)
     {
-        var version = root["schemaVersion"] is JsonValue v && v.TryGetValue(out int parsed) ? parsed : 0;
-        if (version >= AppSettings.CurrentSchemaVersion)
+        if (ReadVersion(root) >= AppSettings.CurrentSchemaVersion)
             return;
 
         // Version 0 is a file written before schemaVersion existed; there is nothing in it that has
@@ -150,15 +241,29 @@ public sealed class SettingsStore
         root["schemaVersion"] = AppSettings.CurrentSchemaVersion;
     }
 
-    private void SetAside()
+    private void SetAside() => Move(FilePath, FilePath + ".bad");
+
+    private static void Delete(string path)
     {
         try
         {
-            File.Move(FilePath, FilePath + ".bad", overwrite: true);
+            File.Delete(path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Nothing more to do — the defaults still apply, and the save that follows will replace it.
+            // A stray temp file is not worth failing over.
+        }
+    }
+
+    private static void Move(string from, string to)
+    {
+        try
+        {
+            File.Move(from, to, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Nothing more to do — the defaults still apply.
         }
     }
 }

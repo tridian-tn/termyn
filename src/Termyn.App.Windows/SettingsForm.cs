@@ -27,7 +27,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _closeToTray;
     private readonly Label _warning;
 
-    private SettingsForm(AppSettings settings, Theme theme, bool autoStartAvailable)
+    private SettingsForm(AppSettings settings, Theme theme)
     {
         Text = "Termyn — settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -76,7 +76,6 @@ internal sealed class SettingsForm : Form
         };
 
         _launchAtLogin = Check("Start Termyn when I sign in", settings.LaunchAtLogin, 238, width: 300);
-        _launchAtLogin.Enabled = autoStartAvailable;
 
         _closeToTray = Check("Closing the window leaves Termyn in the tray", settings.CloseToTray, 266, width: 400);
 
@@ -95,12 +94,6 @@ internal sealed class SettingsForm : Form
             _launchAtLogin, _closeToTray, ok, cancel,
         ]);
 
-        if (!autoStartAvailable)
-        {
-            // Better said than left as a box that silently does nothing when ticked.
-            _launchAtLogin.Text += "  (unavailable — Termyn can't find its own binary)";
-        }
-
         _hotkeyEnabled.CheckedChanged += (_, _) => Sync();
         _syncMode.SelectedIndexChanged += (_, _) => Sync();
         foreach (var box in new[] { _ctrl, _alt, _win })
@@ -112,9 +105,13 @@ internal sealed class SettingsForm : Form
     }
 
     /// <summary>Shows the dialog and returns the amended settings, or null if cancelled.</summary>
-    public static AppSettings? Edit(IWin32Window owner, AppSettings settings, Theme theme, bool autoStartAvailable)
+    /// <remarks>
+    /// Whether launch-at-login can actually be set is the platform layer's to know, and it says so by
+    /// refusing — the caller reports that rather than the dialog second-guessing it here.
+    /// </remarks>
+    public static AppSettings? Edit(IWin32Window owner, AppSettings settings, Theme theme)
     {
-        using var form = new SettingsForm(settings, theme, autoStartAvailable);
+        using var form = new SettingsForm(settings, theme);
         return form.ShowDialog(owner) == DialogResult.OK ? form.Apply(settings) : null;
     }
 

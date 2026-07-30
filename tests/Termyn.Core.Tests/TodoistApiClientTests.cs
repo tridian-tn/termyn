@@ -214,6 +214,30 @@ public class TodoistApiClientTests
         Assert.Equal(TimeSpan.Zero, ex.RetryAfter);
     }
 
+    [Fact]
+    public async Task A_retry_after_date_in_the_future_becomes_the_wait_it_names()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
+            r => r.Headers.Add("Retry-After", DateTimeOffset.UtcNow.AddSeconds(90).ToString("R")));
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], []));
+
+        // A few seconds of slack: the header has one-second resolution and time passes in between.
+        Assert.InRange(ex.RetryAfter!.Value, TimeSpan.FromSeconds(80), TimeSpan.FromSeconds(95));
+    }
+
+    [Fact]
+    public async Task A_rate_limit_on_the_completed_fetch_is_reported_as_one()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
+            r => r.Headers.Add("Retry-After", "12"));
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow)));
+
+        Assert.Equal(TimeSpan.FromSeconds(12), ex.RetryAfter);
+    }
+
     // ---- Completed tasks -----------------------------------------------------------------------
 
     [Fact]
@@ -310,6 +334,27 @@ public class TodoistApiClientTests
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
         await Assert.ThrowsAsync<TodoistNetworkException>(() =>
             client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+    }
+
+    [Fact]
+    public async Task Completed_ignores_an_items_field_that_is_not_an_array()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"items":{},"next_cursor":null}""");
+
+        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        Assert.Empty(page.Items);
+    }
+
+    [Fact]
+    public async Task Completed_propagates_caller_cancellation()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new TaskCanceledException())));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), cts.Token));
     }
 
     // ---- Quick add -----------------------------------------------------------------------------

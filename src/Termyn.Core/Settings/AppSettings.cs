@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Termyn.Core.Sync;
 
 namespace Termyn.Core.Settings;
@@ -45,6 +46,12 @@ public sealed record AppSettings
     public ViewState View { get; init; } = new();
 
     /// <summary>The hotkey as a binding, falling back to the default when the file holds nonsense.</summary>
+    /// <remarks>
+    /// Not written to the file. These three are derived from the settings above, and persisting them
+    /// would give the user keys they can edit to no effect — and which contradict the real ones the
+    /// moment either changes.
+    /// </remarks>
+    [JsonIgnore]
     public HotkeyBinding HotkeyBinding => HotkeyBinding.ParseOrDefault(Hotkey);
 
     /// <summary>
@@ -52,11 +59,13 @@ public sealed record AppSettings
     /// poll, so an interval long enough to be effectively off is used rather than a special case in
     /// the loop.
     /// </summary>
+    [JsonIgnore]
     public SyncCadence Cadence => new(
         SyncMode == SyncMode.Manual ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(ClampedInterval),
         SyncCadence.Default.WriteDebounce);
 
     /// <summary>The interval held within the range the spec allows, whatever the file said.</summary>
+    [JsonIgnore]
     public int ClampedInterval => Math.Clamp(SyncIntervalSeconds, MinSyncIntervalSeconds, MaxSyncIntervalSeconds);
 }
 
@@ -81,4 +90,35 @@ public sealed record ViewState
     public int WindowHeight { get; init; } = 580;
 
     public bool Maximized { get; init; }
+
+    /// <summary>
+    /// Compares by what the state holds, not by which list instance holds it. A record compares a
+    /// collection by reference, so two view states read back from the same file would otherwise be
+    /// unequal — which is exactly the comparison anything checking for changes would want to make.
+    /// </summary>
+    public bool Equals(ViewState? other)
+        => other is not null
+           && SelectedKey == other.SelectedKey
+           && SidebarWidth == other.SidebarWidth
+           && WindowX == other.WindowX
+           && WindowY == other.WindowY
+           && WindowWidth == other.WindowWidth
+           && WindowHeight == other.WindowHeight
+           && Maximized == other.Maximized
+           && CollapsedKeys.SequenceEqual(other.CollapsedKeys);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(SelectedKey);
+        hash.Add(SidebarWidth);
+        hash.Add(WindowX);
+        hash.Add(WindowY);
+        hash.Add(WindowWidth);
+        hash.Add(WindowHeight);
+        hash.Add(Maximized);
+        foreach (var key in CollapsedKeys)
+            hash.Add(key);
+        return hash.ToHashCode();
+    }
 }

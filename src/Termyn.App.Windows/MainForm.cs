@@ -82,6 +82,9 @@ internal sealed class MainForm : Form
     /// <summary>False until the window is up, so the first paint isn't held up drawing a tray icon.</summary>
     private bool _trayReady;
 
+    /// <summary>Held from startup, when there is no status bar yet to put it in.</summary>
+    private string? _hotkeyNotice;
+
     public MainForm(MainPresenter presenter, SyncScheduler scheduler, Shell shell)
     {
         _presenter = presenter;
@@ -174,7 +177,7 @@ internal sealed class MainForm : Form
         _shell.Instance.SignalReceived += OnInstanceSignal;
 
         BuildTrayMenu();
-        RegisterHotkey(announce: false);
+        _hotkeyNotice = RegisterHotkey(announce: false);
 
         Load += async (_, _) => await LoadAsync();
         Shown += OnShown;
@@ -256,40 +259,41 @@ internal sealed class MainForm : Form
 
             _quickAdd = new QuickAddForm(_presenter, _theme);
             _quickAdd.Captured += () => _scheduler.NotifyWrite();
-            _quickAdd.Failed += Report;
+            _quickAdd.Failed += ex => Report(ex);
             return _quickAdd;
         }
     }
 
-    private void OnHotkey()
-    {
-        // WM_HOTKEY is dispatched on whichever thread owns the hotkey window; marshal in case that
-        // is ever not this one.
-        if (IsDisposed || !IsHandleCreated)
-            return;
-        BeginInvoke(() => Guarded(QuickAdd.Summon));
-    }
-
-    private void OnTrayActivated()
-    {
-        if (IsDisposed || !IsHandleCreated)
-            return;
-        BeginInvoke(RestoreWindow);
-    }
-
-    private void OnInstanceSignal(string message)
+    /// <summary>
+    /// Runs work on the UI thread, dropping it if the window has gone.
+    /// </summary>
+    /// <remarks>
+    /// Every event source here — the hotkey, the tray, a second launch, the sync loop, the presenter
+    /// — can fire from another thread or after the form is disposed. The guard used to be written
+    /// out at each of them, and omitted at the tray menu altogether.
+    /// </remarks>
+    private void OnUi(Action work)
     {
         if (IsDisposed || !IsHandleCreated)
             return;
 
-        BeginInvoke(() => Guarded(() =>
-        {
-            if (message == InstanceSignals.QuickAdd)
-                QuickAdd.Summon();
-            else
-                RestoreWindow();
-        }));
+        if (InvokeRequired)
+            BeginInvoke(work);
+        else
+            work();
     }
+
+    private void OnHotkey() => OnUi(() => Guarded(QuickAdd.Summon));
+
+    private void OnTrayActivated() => OnUi(RestoreWindow);
+
+    private void OnInstanceSignal(string message) => OnUi(() => Guarded(() =>
+    {
+        if (message == InstanceSignals.QuickAdd)
+            QuickAdd.Summon();
+        else
+            RestoreWindow();
+    }));
 
     private void RestoreWindow()
     {
@@ -302,11 +306,11 @@ internal sealed class MainForm : Form
 
     private void BuildTrayMenu() => _shell.Notifier.SetCommands(
     [
-        new NotifierCommand("Open Termyn", () => BeginInvoke(RestoreWindow)),
-        new NotifierCommand("Quick add…", () => BeginInvoke(() => Guarded(QuickAdd.Summon))),
+        new NotifierCommand("Open Termyn", () => OnUi(RestoreWindow)),
+        new NotifierCommand("Quick add…", () => OnUi(() => Guarded(QuickAdd.Summon))),
         new NotifierCommand("Sync now", () => _scheduler.RequestNow()),
-        new NotifierCommand("Settings…", () => BeginInvoke(() => Guarded(OpenSettings))),
-        new NotifierCommand("Exit", () => BeginInvoke(Exit)),
+        new NotifierCommand("Settings…", () => OnUi(() => Guarded(OpenSettings))),
+        new NotifierCommand("Exit", () => OnUi(Exit)),
     ]);
 
     private void Exit()
@@ -316,32 +320,28 @@ internal sealed class MainForm : Form
         Application.Exit();
     }
 
-    /// <summary>Takes the global hotkey, saying so in the status bar when the desktop refuses it.</summary>
-    private void RegisterHotkey(bool announce)
+    /// <summary>Takes the global hotkey.</summary>
+    /// <returns>What to tell the user, or null when there is nothing worth saying.</returns>
+    private string? RegisterHotkey(bool announce)
     {
         if (!_settings.HotkeyEnabled)
         {
             _shell.Hotkey.Unregister();
-            return;
+            return announce ? "Quick-add has no hotkey." : null;
         }
 
         var binding = _settings.HotkeyBinding;
         if (_shell.Hotkey.Register(binding))
-        {
-            if (announce)
-                _status.Text = $"Quick-add hotkey is {binding}.";
-            return;
-        }
+            return announce ? $"Quick-add hotkey is {binding}." : null;
 
         // Silence here would leave the user pressing a key that does nothing, with no way to tell
-        // that something else on the machine already owns it.
-        _status.Text = $"Another application already owns {binding} — quick-add has no hotkey.";
+        // that something else on the machine already owns it. Said whether or not this was a change.
+        return $"Another application already owns {binding} — quick-add has no hotkey.";
     }
 
     private void OpenSettings()
     {
-        var autoStartAvailable = Environment.ProcessPath is { Length: > 0 };
-        if (SettingsForm.Edit(this, _settings, _theme, autoStartAvailable) is not { } amended)
+        if (SettingsForm.Edit(this, _settings, _theme) is not { } amended)
             return;
 
         var themeChanged = amended.Theme != _settings.Theme;
@@ -350,15 +350,19 @@ internal sealed class MainForm : Form
         var cadenceChanged = amended.SyncMode != _settings.SyncMode
                              || amended.ClampedInterval != _settings.ClampedInterval;
 
+        // Collected rather than each written straight to the label: four of these can happen in one
+        // save, and the last to run used to be the only one the user saw — including the one saying
+        // their launch-at-login change had been refused and quietly put back.
+        var notices = new List<string>();
+
         if (amended.LaunchAtLogin != _settings.LaunchAtLogin && !_shell.AutoStart.SetEnabled(amended.LaunchAtLogin))
         {
             // Left where it was rather than saved as a wish the OS didn't grant.
             amended = amended with { LaunchAtLogin = _settings.LaunchAtLogin };
-            _status.Text = "Windows would not change the launch-at-login setting.";
+            notices.Add("Windows would not change the launch-at-login setting.");
         }
 
         _settings = amended;
-        _shell.Store.Save(_settings with { View = CurrentViewState() });
 
         if (themeChanged)
         {
@@ -367,14 +371,21 @@ internal sealed class MainForm : Form
             _quickAdd?.ApplyTheme(_theme);
 
             // The framework's own chrome — scrollbars, menus, title bars — is set once at startup.
-            _status.Text = "Theme saved. Restart Termyn for the window frame to follow.";
+            notices.Add("Restart Termyn for the window frame to follow the theme.");
         }
 
-        if (hotkeyChanged)
-            RegisterHotkey(announce: true);
+        if (hotkeyChanged && RegisterHotkey(announce: true) is { } hotkeyNotice)
+            notices.Add(hotkeyNotice);
 
         if (cadenceChanged)
-            _status.Text = "Sync cadence saved. It takes effect when Termyn next starts.";
+            notices.Add("The sync cadence takes effect when Termyn next starts.");
+
+        // Saved last, so the theme and hotkey are applied even when the file can't be written.
+        if (!SaveViewState())
+            notices.Add("Settings could not be written to disk.");
+
+        if (notices.Count > 0)
+            _status.Text = string.Join("  ·  ", notices);
     }
 
     private void ApplyTheme(bool render = true)
@@ -382,7 +393,6 @@ internal sealed class MainForm : Form
         _theme.Apply(this);
         _outline.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
-        _status.ForeColor = _theme.Muted;
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
         _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
@@ -396,6 +406,9 @@ internal sealed class MainForm : Form
 
     private void RestoreViewState(ViewState state)
     {
+        // Outer bounds throughout, matching what CurrentViewState saves. Saving the outer size and
+        // restoring it as the client size grew the window by the frame on every maximise-and-exit
+        // cycle, compounding until it walked off the screen.
         var size = new Size(
             Math.Max(state.WindowWidth, MinimumSize.Width),
             Math.Max(state.WindowHeight, MinimumSize.Height));
@@ -412,12 +425,19 @@ internal sealed class MainForm : Form
             }
         }
 
-        ClientSize = size;
+        Size = size;
         if (state.Maximized)
             WindowState = FormWindowState.Maximized;
 
+        // Given to the presenter, not just to the tree: highlighting the saved row while the outline
+        // showed Today was the opposite of remembering where the user was. It can refuse — the
+        // project may have been deleted elsewhere — in which case the key is still worth holding, so
+        // the row is picked up if a sync brings it back.
         if (state.SelectedKey is { Length: > 0 } key)
+        {
+            _presenter.SelectByKey(key);
             _sidebarKey = key;
+        }
 
         _restoreCollapsed = state.CollapsedKeys.Count > 0
             ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
@@ -428,9 +448,7 @@ internal sealed class MainForm : Form
     {
         // The restored bounds, not the current ones, when maximised or minimised: those report the
         // maximised frame, which would become the window's size the next time it was un-maximised.
-        var bounds = WindowState == FormWindowState.Normal
-            ? new Rectangle(Location, ClientSize)
-            : new Rectangle(RestoreBounds.Location, RestoreBounds.Size);
+        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
 
         return new ViewState
         {
@@ -445,55 +463,54 @@ internal sealed class MainForm : Form
         };
     }
 
-    private void SaveViewState()
+    /// <summary>Writes the settings and the current window state.</summary>
+    /// <returns>False when the file couldn't be written.</returns>
+    private bool SaveViewState()
     {
-        try
-        {
-            _settings = _settings with { View = CurrentViewState() };
-            _shell.Store.Save(_settings);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Losing the window position is not worth failing a shutdown over.
-        }
+        _settings = _settings with { View = CurrentViewState() };
+        return _shell.Store.Save(_settings);
     }
 
     // ---- Rendering -----------------------------------------------------------------------------
 
-    private void OnRowsChanged()
-    {
-        if (IsDisposed || !IsHandleCreated)
-            return;
-        if (InvokeRequired)
-        {
-            BeginInvoke(Render);
-            return;
-        }
-        Render();
-    }
+    private void OnRowsChanged() => OnUi(Render);
 
     /// <summary>
     /// Only the status moved. Kept apart from a full render so a sync starting and finishing doesn't
     /// rebuild the outline twice, and doesn't disturb a row being renamed.
     /// </summary>
-    private void OnStatusChanged()
-    {
-        if (IsDisposed || !IsHandleCreated)
-            return;
-        if (InvokeRequired)
-        {
-            BeginInvoke(RenderStatus);
-            return;
-        }
-        RenderStatus();
-    }
+    private void OnStatusChanged() => OnUi(RenderStatus);
 
     private void RenderStatus()
     {
         if (IsDisposed)
             return;
 
-        _status.Text = _reconnectNeeded ? ReconnectMessage : _presenter.Status;
+        if (_reconnectNeeded)
+        {
+            _status.Text = ReconnectMessage;
+            _status.ForeColor = Theme.ForPriority(Priority.P1);
+            return;
+        }
+
+        // Said once, on the first paint: at registration time there was no status bar to put it in.
+        if (_hotkeyNotice is { } notice)
+        {
+            _hotkeyNotice = null;
+            _status.Text = notice;
+            return;
+        }
+
+        _status.Text = _presenter.Status;
+
+        // Coloured by state, which is why the presenter hands back a status rather than a sentence:
+        // offline and reconnect are worth noticing, and everything else is not.
+        _status.ForeColor = _presenter.SyncStatus.State switch
+        {
+            SyncState.Offline or SyncState.Paused => _theme.Accent,
+            SyncState.ReconnectNeeded => Theme.ForPriority(Priority.P1),
+            _ => _theme.Muted,
+        };
     }
 
     private void Render()
@@ -518,8 +535,7 @@ internal sealed class MainForm : Form
         if (!_trayReady)
             return;
 
-        var today = _presenter.Sidebar
-            .FirstOrDefault(n => n is { Kind: SidebarKind.SmartView, View: SmartView.Today })?.Count ?? 0;
+        var today = _presenter.DueToday;
 
         var tooltip = today switch
         {
@@ -652,21 +668,11 @@ internal sealed class MainForm : Form
         return null;
     }
 
-    private void OnSyncFailed(Exception ex)
-    {
-        if (IsDisposed || !IsHandleCreated)
-            return;
-        BeginInvoke(() =>
-        {
-            if (IsDisposed)
-                return;
-
-            if (ex is TodoistAuthException)
-                _reconnectNeeded = true;
-
-            _status.Text = _reconnectNeeded ? ReconnectMessage : "Background sync failed: " + ex.Message;
-        });
-    }
+    /// <summary>
+    /// A background sync threw. Routed through the same reporting as everything else, so a
+    /// cancellation raised inside a sync is swallowed here too rather than painted as a failure.
+    /// </summary>
+    private void OnSyncFailed(Exception ex) => OnUi(() => Report(ex, "Background sync failed: "));
 
     // ---- Navigation ----------------------------------------------------------------------------
 
@@ -680,46 +686,36 @@ internal sealed class MainForm : Form
             return;
 
         _sidebarKey = node.Key;
-        Guarded(() => _presenter.Select(Selection(node)));
+        Guarded(() => _presenter.Select(MainPresenter.SelectionOf(node)));
     }
 
-    private static ViewSelection Selection(SidebarNode node) => node.Kind switch
-    {
-        SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
-        SidebarKind.Section => ViewSelection.OfSection(node.Id),
-        SidebarKind.Label => ViewSelection.OfLabel(node.Id),
-        SidebarKind.Filter => ViewSelection.OfFilter(node.Id),
-        _ => ViewSelection.OfProject(node.Id),
-    };
-
     /// <summary>
-    /// Moves to the next or previous view, skipping the group labels — Ctrl+↑/↓ from anywhere in the
-    /// window, so switching views doesn't need the sidebar to have focus first.
+    /// Moves to the next or previous view — Ctrl+↑/↓ from anywhere in the window, so switching views
+    /// doesn't need the sidebar to have focus first. The presenter owns which row is next, since it
+    /// owns the sidebar's order.
     /// </summary>
     private void SwitchView(int offset)
     {
-        var selectable = Flatten(_sidebar.Nodes)
-            .Where(n => n.Tag is SidebarNode { Kind: not SidebarKind.Header })
-            .ToList();
-
-        if (selectable.Count == 0)
+        if (!_presenter.SelectAdjacent(offset))
             return;
 
-        var current = selectable.FindIndex(n => ((SidebarNode)n.Tag!).Key == _sidebarKey);
-        var next = current < 0 ? 0 : Math.Clamp(current + offset, 0, selectable.Count - 1);
-
-        GoTo(Selection((SidebarNode)selectable[next].Tag!));
+        _sidebarKey = _presenter.SelectedKey;
+        Highlight();
     }
 
-    /// <summary>
-    /// Opens a view and moves the sidebar's highlight to match. The tree is updated with the select
-    /// handler suppressed, so navigating from the palette or a hotkey publishes once, not twice.
-    /// </summary>
     private void GoTo(ViewSelection selection)
     {
         _sidebarKey = selection.Key;
         Guarded(() => _presenter.Select(selection));
+        Highlight();
+    }
 
+    /// <summary>
+    /// Moves the tree's highlight to the current row with the select handler suppressed, so
+    /// navigating from the palette or a hotkey publishes once rather than twice.
+    /// </summary>
+    private void Highlight()
+    {
         _syncingSidebar = true;
         try
         {
@@ -848,10 +844,7 @@ internal sealed class MainForm : Form
         _scheduler.NotifyWrite();
     }
 
-    private void UpdatePreview()
-        => _preview.Text = string.IsNullOrWhiteSpace(_capture.Text)
-            ? string.Empty
-            : CapturePreviewText.For(_presenter.Preview(_capture.Text));
+    private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 
     // ---- Outline keys --------------------------------------------------------------------------
 
@@ -1198,7 +1191,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void Report(Exception ex)
+    private void Report(Exception ex, string prefix = "Something went wrong: ")
     {
         if (IsDisposed)
             return;
@@ -1217,7 +1210,7 @@ internal sealed class MainForm : Form
         _status.Text = ex switch
         {
             OperationCanceledException => _status.Text, // window closed mid-flight
-            _ => "Something went wrong: " + ex.Message,
+            _ => prefix + ex.Message,
         };
     }
 }

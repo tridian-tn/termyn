@@ -1,13 +1,13 @@
 using Termyn.Core.Model;
-using Termyn.Presentation;
 
-namespace Termyn.App.Windows;
+namespace Termyn.Presentation;
 
 /// <summary>
 /// Renders what the local parser made of some capture text, for the line under a quick-add box.
-/// Shared by the main window and the global one, which show the same thing.
+/// Shared by the main window and the global one, which show the same thing — and here rather than
+/// in the app, because none of it needs a window and all of it is user-facing wording.
 /// </summary>
-internal static class CapturePreviewText
+public static class CapturePreviewText
 {
     public static string For(CapturePreview preview)
     {

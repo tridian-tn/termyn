@@ -181,6 +181,79 @@ public class CompletedViewTests
         Assert.Equal(["c1"], presenter.Rows.Select(r => r.Id).ToArray());
     }
 
+    [Fact]
+    public async Task A_task_ticked_off_here_goes_to_the_top_of_the_completed_list()
+    {
+        // It has no completed_at until the server acks, and it was finished a moment ago — so it
+        // belongs above three months of history, not below it.
+        var api = WithCompleted(Done("old", "Older", "2026-07-01T09:00:00Z"));
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = [Json.Change("items", "a", """{"id":"a","content":"Active"}""")],
+        };
+        var presenter = await Loaded(api);
+        await presenter.ToggleCompletedAsync();
+
+        presenter.Complete("a");
+
+        Assert.Equal(["a", "old"], presenter.Rows.Select(r => r.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task A_rejected_token_during_the_fetch_takes_the_rows_with_it()
+    {
+        // The engine clears the token and purges the cache before rethrowing, so the rows on screen
+        // belong to an account we no longer hold.
+        var api = new FakeApi
+        {
+            Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Change("items", "a", """{"id":"a","content":"Secret"}""")] },
+            CompletedThrow = new TodoistAuthException("rejected"),
+        };
+        var presenter = await Loaded(api);
+        Assert.NotEmpty(presenter.Rows);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.ToggleCompletedAsync());
+
+        Assert.Empty(presenter.Rows);
+        Assert.Equal(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
+    }
+
+    [Fact]
+    public async Task A_rate_limited_fetch_is_not_reported_as_offline()
+    {
+        var api = new FakeApi
+        {
+            Response = new SyncResponse { SyncToken = "s1" },
+            CompletedThrow = new TodoistRateLimitException("slow down", TimeSpan.FromSeconds(30)),
+        };
+        var presenter = await Loaded(api);
+
+        Assert.False(await presenter.ToggleCompletedAsync());
+
+        Assert.False(presenter.ShowingCompleted);
+        Assert.False(presenter.IsOffline); // being refused is not being unreachable
+        Assert.Equal(SyncState.Paused, presenter.SyncStatus.State);
+    }
+
+    [Fact]
+    public async Task A_sync_arriving_while_completed_are_shown_leaves_them_shown()
+    {
+        var api = WithCompleted(Done("c1", "Book dentist"));
+        var presenter = await Loaded(api);
+        await presenter.ToggleCompletedAsync();
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [Json.Change("items", "new", """{"id":"new","content":"Arrived"}""")],
+        };
+        await presenter.SyncAsync();
+
+        Assert.True(presenter.ShowingCompleted);
+        Assert.Contains(presenter.Rows, r => r.Id == "c1");
+    }
+
     // ---- Helpers -----------------------------------------------------------------------------------
 
     private static async Task<MainPresenter> Loaded(FakeApi api)
@@ -279,20 +352,6 @@ public class SyncStatusTests
     }
 
     [Fact]
-    public void A_status_only_refresh_leaves_the_rows_alone()
-    {
-        var clock = new SteppableClock(Today);
-        var presenter = Presenter(new FakeApi { Response = new SyncResponse { SyncToken = "s1" } }, clock);
-        var rowPublishes = 0;
-        presenter.RowsChanged += () => rowPublishes++;
-
-        presenter.PublishStatus();
-
-        // Repainting a five-thousand-row outline to change one word is what this exists to avoid.
-        Assert.Equal(0, rowPublishes);
-    }
-
-    [Fact]
     public async Task A_rate_limit_pauses_for_as_long_as_the_server_asked()
     {
         var clock = new SteppableClock(Today);
@@ -363,6 +422,86 @@ public class SyncStatusTests
         await presenter.SyncAsync();
 
         Assert.Equal(SyncState.Offline, presenter.SyncStatus.State);
+    }
+
+    [Fact]
+    public async Task A_pause_that_has_elapsed_stops_reading_as_paused()
+    {
+        var clock = new SteppableClock(Today);
+        var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.FromSeconds(30)) };
+        var presenter = Presenter(api, clock);
+        await presenter.SyncAsync();
+        Assert.Equal(SyncState.Paused, presenter.SyncStatus.State);
+
+        clock.Advance(TimeSpan.FromSeconds(31));
+        presenter.PublishStatus();
+
+        // Otherwise the bar sits on "Paused (retry in -412s)" until something else happens.
+        Assert.NotEqual(SyncState.Paused, presenter.SyncStatus.State);
+    }
+
+    [Fact]
+    public async Task A_wait_the_server_asks_for_is_capped()
+    {
+        // Nothing wakes the loop out of a pause, so an unbounded Retry-After from a misbehaving proxy
+        // would park sync — and F5 with it — for the rest of the session.
+        var clock = new SteppableClock(Today);
+        var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.FromDays(40)) };
+        var presenter = Presenter(api, clock);
+
+        var outcome = await presenter.SyncAsync();
+
+        Assert.Equal(TimeSpan.FromMinutes(5), outcome.PauseFor);
+    }
+
+    [Fact]
+    public async Task A_retry_after_of_nothing_does_not_pause_the_loop()
+    {
+        var clock = new SteppableClock(Today);
+        var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.Zero) };
+        var presenter = Presenter(api, clock);
+
+        var outcome = await presenter.SyncAsync();
+
+        Assert.Equal(TimeSpan.Zero, outcome.PauseFor);
+        Assert.NotEqual(SyncState.Paused, presenter.SyncStatus.State);
+    }
+
+    [Fact]
+    public async Task Coming_back_from_offline_reads_as_synced()
+    {
+        var clock = new SteppableClock(Today);
+        var api = new FakeApi { Throw = new TodoistNetworkException("offline") };
+        var presenter = Presenter(api, clock);
+        await presenter.SyncAsync();
+        Assert.Equal(SyncState.Offline, presenter.SyncStatus.State);
+
+        api.Throw = null;
+        api.Response = new SyncResponse { SyncToken = "s1" };
+        await presenter.SyncAsync();
+
+        Assert.False(presenter.IsOffline);
+        Assert.Equal(SyncState.Synced, presenter.SyncStatus.State);
+    }
+
+    [Fact]
+    public async Task A_status_only_refresh_changes_the_status_without_touching_the_rows()
+    {
+        var clock = new SteppableClock(Today);
+        var presenter = Presenter(new FakeApi { Response = new SyncResponse { SyncToken = "s1" } }, clock);
+        await presenter.SyncAsync();
+
+        var rowPublishes = 0;
+        presenter.RowsChanged += () => rowPublishes++;
+        var statusPublishes = 0;
+        presenter.StatusChanged += () => statusPublishes++;
+
+        clock.Advance(TimeSpan.FromSeconds(20));
+        presenter.PublishStatus();
+
+        Assert.Equal(0, rowPublishes); // repainting the outline to change one word is the point of this
+        Assert.Equal(1, statusPublishes);
+        Assert.Contains("20s ago", presenter.Status);
     }
 
     private static MainPresenter Presenter(FakeApi api, IClock clock)

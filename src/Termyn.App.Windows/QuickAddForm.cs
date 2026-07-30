@@ -151,14 +151,5 @@ internal sealed class QuickAddForm : Form
         }
     }
 
-    private void UpdatePreview()
-    {
-        if (string.IsNullOrWhiteSpace(_capture.Text))
-        {
-            _preview.Text = string.Empty;
-            return;
-        }
-
-        _preview.Text = CapturePreviewText.For(_presenter.Preview(_capture.Text));
-    }
+    private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 }

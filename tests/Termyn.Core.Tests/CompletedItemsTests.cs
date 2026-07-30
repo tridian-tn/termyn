@@ -208,28 +208,142 @@ public class CompletedItemsTests
     }
 
     [Fact]
+    public async Task Deleting_a_fetched_task_takes_it_off_the_list_as_well_as_the_server()
+    {
+        // Otherwise the row survives the delete, and pressing delete again queues a second command
+        // for an id the server no longer has — which retries to the ceiling and sits there failed.
+        var engine = NewEngine(Returning([Done("c1", "Book dentist")]), new InMemorySnapshotStore());
+        await engine.FetchCompletedAsync();
+
+        engine.DeleteItem("c1");
+
+        Assert.Empty(engine.Snapshot().CompletedItems);
+        Assert.Equal("item_delete", Assert.Single(engine.Outbox).Type);
+    }
+
+    [Fact]
+    public async Task A_full_sync_that_no_longer_mentions_a_fetched_task_drops_it()
+    {
+        // A full sync carries no tombstones, so it is the only word we get that a completed task has
+        // been deleted elsewhere. The model-side prune can't see a task the model never held.
+        var api = Returning([Done("c1", "Book dentist")]);
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+        await engine.FetchCompletedAsync();
+
+        api.Response = new SyncResponse { SyncToken = "s1", FullSync = true, Changes = [] };
+        await engine.SyncAsync();
+
+        Assert.Empty(engine.Snapshot().CompletedItems);
+    }
+
+    [Fact]
+    public async Task A_full_sync_that_still_lists_a_fetched_task_keeps_it()
+    {
+        var api = Returning([Done("c1", "Book dentist")]);
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+        await engine.FetchCompletedAsync();
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            FullSync = true,
+            Changes = [Json.Change("items", "c1", """{"id":"c1","content":"Book dentist","checked":true}""")],
+        };
+        await engine.SyncAsync();
+
+        Assert.Single(engine.Snapshot().CompletedItems);
+    }
+
+    [Fact]
+    public async Task A_task_the_model_holds_as_active_does_not_come_back_from_the_fetch()
+    {
+        // Reopened on another device: the model's active copy is the truth, and the fetched completed
+        // copy must not put it back among the finished.
+        var api = Returning([Done("c1", "Book dentist")]);
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+        await engine.FetchCompletedAsync();
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = [Json.Change("items", "c1", """{"id":"c1","content":"Reopened elsewhere","checked":false}""")],
+        };
+        await engine.SyncAsync();
+
+        Assert.Empty(engine.Snapshot().CompletedItems);
+        Assert.False(Assert.Single(engine.Snapshot().Items).Completed);
+    }
+
+    [Fact]
     public async Task A_fetch_that_lands_after_the_cache_was_wiped_is_dropped()
     {
+        // The wipe happens mid-flight and the fetch itself succeeds, so the generation guard is the
+        // only thing that can discard the result.
         var secrets = new FakeSecrets { Stored = "tok" };
-        var api = new FakeApi();
+        var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets, new FixedClock(Today));
 
-        // The purge happens while the fetch is in flight, which is what the generation guard is for.
         api.Completed = _ =>
         {
             api.Throw = new TodoistAuthException("rejected");
-            engine.SyncAsync().GetAwaiter().GetResult();
+            try
+            {
+                engine.SyncAsync().GetAwaiter().GetResult();
+            }
+            catch (TodoistAuthException)
+            {
+                // Expected: it is what wipes the cache.
+            }
+            api.Throw = null;
             return new CompletedPage([Done("c1", "From the old account")], null);
         };
-        api.Response = new SyncResponse { SyncToken = "s1" };
 
-        await Assert.ThrowsAsync<TodoistAuthException>(async () =>
-        {
-            var fetch = await engine.FetchCompletedAsync();
-            Assert.Equal(0, fetch.Count);
-        });
+        var fetch = await engine.FetchCompletedAsync();
 
+        Assert.Equal(0, fetch.Count);
         Assert.Empty(engine.Snapshot().CompletedItems);
+    }
+
+    [Fact]
+    public async Task Completing_then_reopening_leaves_one_active_task()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Book dentist"}""");
+        var engine = NewEngine(Returning([]), store);
+        engine.Load();
+
+        engine.CompleteItem("i1");
+        await engine.FetchCompletedAsync();
+        engine.ReopenItem("i1");
+
+        var item = Assert.Single(engine.Snapshot().Items);
+        Assert.False(item.Completed);
+        Assert.Empty(engine.Snapshot().CompletedItems);
+        Assert.Equal(["item_close", "item_uncomplete"], engine.Outbox.Select(c => c.Type).ToArray());
+    }
+
+    [Fact]
+    public async Task Undoing_after_a_reopen_does_not_reach_past_it()
+    {
+        // Reopening records nothing undoable, so Ctrl+Z must not silently cancel the close it just
+        // reversed — the two commands would then contradict each other on the wire.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Book dentist"}""");
+        var engine = NewEngine(Returning([]), store);
+        engine.Load();
+
+        engine.CompleteItem("i1");
+        await engine.FetchCompletedAsync();
+        engine.ReopenItem("i1");
+
+        engine.Undo();
+
+        // Whatever undo did, the task must still be active and the outbox must not hold a close
+        // that would tick it off again.
+        Assert.False(Assert.Single(engine.Snapshot().Items).Completed);
+        var live = engine.Outbox.Select(c => c.Type).ToList();
+        Assert.False(live.Contains("item_close") && live.Contains("item_uncomplete"),
+            $"contradictory commands queued: {string.Join(", ", live)}");
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------

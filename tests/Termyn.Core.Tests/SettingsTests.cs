@@ -209,6 +209,177 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void One_unreadable_value_costs_that_field_and_no_other()
+    {
+        File.WriteAllText(Config, """
+        { "schemaVersion": 1, "theme": "Dark", "hotkey": "Ctrl+Shift+Q", "closeToTray": false,
+          "syncIntervalSeconds": "forty-five", "view": { "sidebarWidth": 333 } }
+        """);
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(45, settings.SyncIntervalSeconds); // the bad one falls back
+        Assert.Equal(ThemePreference.Dark, settings.Theme);
+        Assert.Equal("Ctrl+Shift+Q", settings.Hotkey);
+        Assert.False(settings.CloseToTray);
+        Assert.Equal(333, settings.View.SidebarWidth);
+    }
+
+    [Fact]
+    public void An_enum_name_a_later_version_added_costs_only_that_setting()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "Neon", "hotkey": "Ctrl+Shift+Q" }""");
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(ThemePreference.System, settings.Theme);
+        Assert.Equal("Ctrl+Shift+Q", settings.Hotkey);
+    }
+
+    [Fact]
+    public void A_later_version_survives_a_save_of_settings_that_did_not_come_from_it()
+    {
+        // The version is taken from the file, not from the record being saved: a caller that hands
+        // over settings it built rather than ones it loaded would otherwise stamp a later version's
+        // file down to ours, and that version would then re-run migrations over its own shape.
+        File.WriteAllText(Config, """{ "schemaVersion": 99, "theme": "Light", "mine": 1 }""");
+
+        var store = new SettingsStore(Config);
+        store.Load();
+        Assert.True(store.Save(new AppSettings { Theme = ThemePreference.Dark }));
+
+        var written = (JsonObject)JsonNode.Parse(File.ReadAllText(Config))!;
+        Assert.Equal(99, written["schemaVersion"]!.GetValue<int>());
+        Assert.Equal("Dark", written["theme"]!.ToString());
+        Assert.Equal(1, written["mine"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void A_later_version_with_an_unreadable_value_still_keeps_its_version()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 99, "syncIntervalSeconds": "forty-five", "mine": 1 }""");
+
+        var store = new SettingsStore(Config);
+        Assert.True(store.Save(store.Load()));
+
+        var written = (JsonObject)JsonNode.Parse(File.ReadAllText(Config))!;
+        Assert.Equal(99, written["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(1, written["mine"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Derived_values_are_not_written_to_the_file()
+    {
+        // They can't be read back, so a user editing them in the documented config file would be
+        // editing something with no effect — and they contradict the real settings once either moves.
+        new SettingsStore(Config).Save(new AppSettings { SyncMode = SyncMode.Manual });
+
+        var written = (JsonObject)JsonNode.Parse(File.ReadAllText(Config))!;
+        Assert.Null(written["hotkeyBinding"]);
+        Assert.Null(written["cadence"]);
+        Assert.Null(written["clampedInterval"]);
+    }
+
+    [Fact]
+    public void The_hotkey_is_written_so_a_person_can_read_it()
+    {
+        new SettingsStore(Config).Save(new AppSettings());
+
+        Assert.Contains("\"hotkey\": \"Ctrl+Alt+A\"", File.ReadAllText(Config));
+    }
+
+    [Fact]
+    public void A_file_that_could_not_be_read_is_never_overwritten_with_defaults()
+    {
+        // A transient lock at startup would otherwise reset theme, hotkey, cadence and geometry on
+        // the next window close, which saves unconditionally.
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "Dark", "syncIntervalSeconds": 120 }""");
+
+        var store = new SettingsStore(Config);
+        using (File.Open(Config, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Equal(new AppSettings(), store.Load());
+        }
+
+        // The lock has gone by the time the save comes — a transient lock at startup, and the save
+        // that every window close performs. Only the store's own memory of having failed to read
+        // stands between that and the user's whole config being replaced with defaults.
+        Assert.False(store.Save(new AppSettings()));
+
+        var reread = new SettingsStore(Config).Load();
+        Assert.Equal(ThemePreference.Dark, reread.Theme);
+        Assert.Equal(120, reread.SyncIntervalSeconds);
+    }
+
+    [Fact]
+    public void A_save_that_cannot_be_written_says_so_and_leaves_no_temp_file()
+    {
+        var store = new SettingsStore(Config);
+        Assert.True(store.Save(new AppSettings()));
+        File.SetAttributes(Config, FileAttributes.ReadOnly);
+
+        try
+        {
+            Assert.False(store.Save(new AppSettings { Hotkey = "Ctrl+Shift+Q" }));
+            Assert.False(File.Exists(Config + ".tmp"));
+        }
+        finally
+        {
+            File.SetAttributes(Config, FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
+    public void Valid_json_that_is_not_an_object_is_moved_aside()
+    {
+        File.WriteAllText(Config, "[]");
+
+        Assert.Equal(new AppSettings(), new SettingsStore(Config).Load());
+        Assert.Equal("[]", File.ReadAllText(Config + ".bad"));
+    }
+
+    [Fact]
+    public void Every_field_survives_a_round_trip()
+    {
+        var store = new SettingsStore(Config);
+        var settings = new AppSettings
+        {
+            Hotkey = "Ctrl+Shift+Q",
+            HotkeyEnabled = false,
+            Theme = ThemePreference.Light,
+            SyncMode = SyncMode.Manual,
+            SyncIntervalSeconds = 120,
+            LaunchAtLogin = true,
+            CloseToTray = false,
+            View = new ViewState
+            {
+                SelectedKey = "project:p1",
+                CollapsedKeys = ["Projects", "Labels"],
+                SidebarWidth = 300,
+                WindowX = -1200,
+                WindowY = 40,
+                WindowWidth = 1600,
+                WindowHeight = 900,
+                Maximized = true,
+            },
+        };
+
+        store.Save(settings);
+        var reread = new SettingsStore(Config).Load();
+
+        Assert.Equal(settings, reread);
+    }
+
+    [Fact]
+    public void A_non_ascii_selection_survives_a_round_trip()
+    {
+        var store = new SettingsStore(Config);
+        store.Save(new AppSettings { View = new ViewState { SelectedKey = "project:日本語" } });
+
+        Assert.Equal("project:日本語", new SettingsStore(Config).Load().View.SelectedKey);
+    }
+
+    [Fact]
     public void A_half_written_file_is_never_left_behind()
     {
         var store = new SettingsStore(Config);

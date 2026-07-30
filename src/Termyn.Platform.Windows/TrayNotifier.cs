@@ -5,7 +5,7 @@ using Termyn.Core.Settings;
 namespace Termyn.Platform.Windows;
 
 /// <summary>
-/// The tray icon, its menu and its balloon notifications.
+/// The tray icon and its menu.
 /// </summary>
 /// <remarks>
 /// The icon is drawn at runtime from the brand palette rather than loaded from a resource, because
@@ -33,8 +33,6 @@ public sealed class TrayNotifier : INotifier
             if (e.Button == MouseButtons.Left)
                 Activated?.Invoke();
         };
-        _icon.BalloonTipClicked += (_, _) => Activated?.Invoke();
-
         // Nothing is drawn here. The first icon costs the best part of a tenth of a second — GDI+
         // coming up, mostly — and doing that before the window exists is a tenth of a second added
         // to every start. The host asks for a status once it has something to show.
@@ -42,25 +40,16 @@ public sealed class TrayNotifier : INotifier
 
     public event Action? Activated;
 
+    /// <summary>The hover text as the shell has it. Internal so a test can check the truncation.</summary>
+    internal string Tooltip => _icon.Text;
+
+    /// <summary>The icon currently drawn, for a test that has no tray to look at.</summary>
+    internal Icon? Icon => _drawn;
+
     public bool Visible
     {
         get => _icon.Visible;
         set => _icon.Visible = value;
-    }
-
-    /// <inheritdoc />
-    public void Notify(string title, string message)
-    {
-        if (_disposed)
-            return;
-
-        // Balloons only appear while the icon is in the tray; showing one otherwise silently does
-        // nothing, which would lose the message.
-        var wasVisible = _icon.Visible;
-        _icon.Visible = true;
-        _icon.ShowBalloonTip(5000, title, message, ToolTipIcon.Info);
-        if (!wasVisible)
-            _icon.Visible = wasVisible;
     }
 
     /// <inheritdoc />

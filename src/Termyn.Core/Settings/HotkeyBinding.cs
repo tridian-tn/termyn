@@ -90,9 +90,9 @@ public sealed record HotkeyBinding(HotkeyModifiers Modifiers, string Key)
         return true;
     }
 
-    /// <summary>Reads a binding, falling back to <paramref name="fallback"/> when it can't be read.</summary>
-    public static HotkeyBinding ParseOrDefault(string? text, HotkeyBinding? fallback = null)
-        => TryParse(text, out var parsed) ? parsed : fallback ?? Default;
+    /// <summary>Reads a binding, falling back to <see cref="Default"/> when it can't be read.</summary>
+    public static HotkeyBinding ParseOrDefault(string? text)
+        => TryParse(text, out var parsed) ? parsed : Default;
 
     /// <summary>Renders the binding the way <see cref="TryParse"/> reads it, and the UI shows it.</summary>
     public override string ToString()

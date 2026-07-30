@@ -243,6 +243,25 @@ public class SyncSchedulerTests
     }
 
     [Fact]
+    public async Task A_pause_of_nothing_leaves_the_ordinary_interval_in_force()
+    {
+        var calls = 0;
+        var twice = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            var n = Interlocked.Increment(ref calls);
+            if (n >= 2)
+                twice.TrySetResult();
+            // Zero is what a Retry-After already in the past comes to; it must not hold anything up.
+            return Task.FromResult(new SyncOutcome(PauseFor: TimeSpan.Zero));
+        }, Fast);
+
+        scheduler.Start();
+
+        await twice.Task.WaitAsync(Patience);
+    }
+
+    [Fact]
     public async Task Starting_twice_runs_one_loop()
     {
         var calls = 0;

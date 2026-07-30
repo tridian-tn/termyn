@@ -16,16 +16,18 @@ internal static class ReferenceAccount
     public const int Labels = 25;
 
     /// <summary>Writes the account into a store, in one transaction, as a sync would.</summary>
-    public static void Seed(ISnapshotStore store)
+    /// <param name="tasks">How many tasks to seed; the scaling checks vary this.</param>
+    /// <param name="projects">How many projects to spread them over; the scaling checks vary this too.</param>
+    public static void Seed(ISnapshotStore store, int tasks = Tasks, int projects = Projects)
     {
-        var resources = new List<StoredResource>(Tasks + (Projects * (SectionsPerProject + 1)) + Labels + 2);
+        var resources = new List<StoredResource>(tasks + (projects * (SectionsPerProject + 1)) + Labels + 2);
 
         resources.Add(new StoredResource(ResourceType.User, ResourceType.User,
             """{"id":"u1","full_name":"Reference","tz_info":{"timezone":"Europe/London"}}"""));
         resources.Add(new StoredResource(ResourceType.UserPlanLimits, ResourceType.UserPlanLimits,
             """{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":100}}"""));
 
-        for (var p = 0; p < Projects; p++)
+        for (var p = 0; p < projects; p++)
         {
             var id = $"p{p}";
             var parent = p >= 10 ? $",\"parent_id\":\"p{p % 10}\"" : string.Empty;
@@ -47,9 +49,9 @@ internal static class ReferenceAccount
                 $$"""{"id":"l{{l}}","name":"label{{l}}","item_order":{{l}},"color":"berry_red"}"""));
         }
 
-        for (var i = 0; i < Tasks; i++)
+        for (var i = 0; i < tasks; i++)
         {
-            var project = i % Projects;
+            var project = i % projects;
             var section = i % SectionsPerProject;
 
             // Every fourth task is a sub-task of the one four places before it, so the projection has

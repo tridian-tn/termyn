@@ -61,8 +61,8 @@ internal static class Program
 
         // Re-asserted rather than assumed: the entry can be removed by a startup manager, and it
         // holds a path that a reinstall elsewhere would have left pointing at the old binary.
-        if (settings.LaunchAtLogin != autoStart.IsEnabled || settings.LaunchAtLogin)
-            autoStart.SetEnabled(settings.LaunchAtLogin);
+        // Unconditional, because turning it off when it is already off is a no-op.
+        autoStart.SetEnabled(settings.LaunchAtLogin);
 
         using var hotkey = new WindowsGlobalHotkey();
 

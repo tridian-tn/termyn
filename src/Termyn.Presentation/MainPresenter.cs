@@ -90,6 +90,9 @@ public sealed class MainPresenter
 
     public IReadOnlyList<SidebarNode> Sidebar { get; private set; } = [];
 
+    /// <summary>Active tasks due today or overdue — what the tray icon badges.</summary>
+    public int DueToday { get; private set; }
+
     public ViewSelection Selection { get; private set; } = ViewSelection.Default;
 
     public string Status { get; private set; } = string.Empty;
@@ -157,10 +160,7 @@ public sealed class MainPresenter
         {
             // Being refused is not being offline: the cached view is current, and the only thing to
             // do is wait. Honour what the server asked for, and grow our own wait when it didn't say.
-            _rateLimitStreak = Math.Min(_rateLimitStreak + 1, MaxBackoffSteps);
-            pause = ex.RetryAfter ?? Backoff(_rateLimitStreak);
-            _pausedUntil = _clock.UtcNow + pause;
-            IsOffline = false;
+            pause = Pause(ex);
         }
         catch (TodoistNetworkException)
         {
@@ -187,6 +187,30 @@ public sealed class MainPresenter
 
     /// <summary>Where the backoff stops growing: a shade over four minutes, inside the spec's cadence.</summary>
     private const int MaxBackoffSteps = 8;
+
+    /// <summary>The longest Termyn will hold off for, however long the server asks.</summary>
+    private static readonly TimeSpan MaxPause = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Notes a rate limit and works out how long to wait for.
+    /// </summary>
+    /// <remarks>
+    /// Capped, including when the server names the figure. Nothing wakes the loop out of a pause —
+    /// that is the point of it — so an unbounded <c>Retry-After</c> from a misbehaving proxy would
+    /// park background sync, F5 and the tray's "Sync now" for the rest of the session, with queued
+    /// writes and no way to flush them short of restarting.
+    /// </remarks>
+    private TimeSpan Pause(TodoistRateLimitException ex)
+    {
+        _rateLimitStreak = Math.Min(_rateLimitStreak + 1, MaxBackoffSteps);
+
+        var asked = ex.RetryAfter ?? Backoff(_rateLimitStreak);
+        var pause = asked > MaxPause ? MaxPause : asked;
+
+        _pausedUntil = _clock.UtcNow + pause;
+        IsOffline = false;
+        return pause;
+    }
 
     /// <summary>
     /// How long to wait after a rate limit the server gave no advice about. Doubles per consecutive
@@ -229,6 +253,13 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// The preview line for some capture text, empty when there is nothing typed. Both capture boxes
+    /// show the same thing, so neither of them owns the wording or the blank rule.
+    /// </summary>
+    public string PreviewText(string? text)
+        => string.IsNullOrWhiteSpace(text) ? string.Empty : CapturePreviewText.For(Preview(text));
+
     /// <summary>Shows what the local parser understood, for the capture preview.</summary>
     public CapturePreview Preview(string text)
     {
@@ -265,16 +296,32 @@ public sealed class MainPresenter
             ShowingCompleted = true;
             IsOffline = false;
         }
+        catch (TodoistRateLimitException ex)
+        {
+            // Being refused is not being unreachable: the cached view is current and the network is
+            // fine. Reported as offline it would have read as "showing cached", which is wrong.
+            Pause(ex);
+            return false;
+        }
         catch (TodoistNetworkException)
         {
             // Nothing to show and no way to get it. Left off rather than switched on and empty,
             // which would read as "you have completed nothing".
             IsOffline = true;
-            Publish();
             return false;
         }
+        catch (TodoistAuthException)
+        {
+            // The engine cleared the token and purged the cache before rethrowing, so the rows on
+            // screen belong to an account we no longer hold. Publishing is what takes them off.
+            _reconnectNeeded = true;
+            throw;
+        }
+        finally
+        {
+            Publish();
+        }
 
-        Publish();
         return true;
     }
 
@@ -290,8 +337,67 @@ public sealed class MainPresenter
     public void Select(ViewSelection selection)
     {
         Selection = selection;
+        SelectedKey = selection.Key;
         Publish();
     }
+
+    /// <summary>
+    /// The sidebar row that is selected, which is not the same as the selection: a favourited project
+    /// appears twice, and the two rows are told apart by their key alone.
+    /// </summary>
+    public string SelectedKey { get; private set; } = ViewSelection.Default.Key;
+
+    /// <summary>
+    /// Opens the view a sidebar key names — how a remembered selection is restored across a restart.
+    /// </summary>
+    /// <returns>False when nothing in the sidebar has that key, so the caller can leave things be.</returns>
+    public bool SelectByKey(string? key)
+    {
+        if (key is null || Sidebar.FirstOrDefault(n => n.Key == key) is not { } node || node.Kind == SidebarKind.Header)
+            return false;
+
+        Selection = SelectionOf(node);
+        SelectedKey = node.Key;
+        Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Moves to the next or previous view, skipping the group labels and stopping at either end.
+    /// </summary>
+    /// <remarks>
+    /// Stepped by key rather than by selection, so the Favourites copy of a project is a row of its
+    /// own: stepping by selection jumped to that project's other copy down in the tree, and there was
+    /// no way to walk through the Favourites group at all.
+    /// </remarks>
+    /// <returns>False when there was nowhere to move to.</returns>
+    public bool SelectAdjacent(int offset)
+    {
+        var rows = Sidebar.Where(n => n.Kind != SidebarKind.Header).ToList();
+        if (rows.Count == 0)
+            return false;
+
+        var current = rows.FindIndex(n => n.Key == SelectedKey);
+        var next = current < 0 ? 0 : Math.Clamp(current + offset, 0, rows.Count - 1);
+        if (next == current)
+            return false;
+
+        var node = rows[next];
+        Selection = SelectionOf(node);
+        SelectedKey = node.Key;
+        Publish();
+        return true;
+    }
+
+    /// <summary>The view a sidebar row opens.</summary>
+    public static ViewSelection SelectionOf(SidebarNode node) => node.Kind switch
+    {
+        SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
+        SidebarKind.Section => ViewSelection.OfSection(node.Id),
+        SidebarKind.Label => ViewSelection.OfLabel(node.Id),
+        SidebarKind.Filter => ViewSelection.OfFilter(node.Id),
+        _ => ViewSelection.OfProject(node.Id),
+    };
 
     public void Search(string query)
     {
@@ -719,6 +825,13 @@ public sealed class MainPresenter
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
+
+            // The selected row can go — deleted here, or removed by a sync — and every path that
+            // falls the selection back to a default would otherwise have to remember to move the key
+            // with it.
+            if (Sidebar.Count > 0 && Sidebar.All(n => n.Key != SelectedKey))
+                SelectedKey = Selection.Key;
+
             _allRows = BuildOutline(snapshot, scoped: true);
 
             _projectedFrom = snapshot;
@@ -780,6 +893,10 @@ public sealed class MainPresenter
             foreach (var label in item.Labels)
                 byLabel[label] = byLabel.GetValueOrDefault(label) + 1;
         }
+
+        // Kept for the tray badge, which wants the same number the sidebar shows and shouldn't have
+        // to read it back out of a rendered row label.
+        DueToday = todayCount;
 
         var nodes = new List<SidebarNode>
         {
@@ -979,6 +1096,12 @@ public sealed class MainPresenter
     /// go below the active ones rather than in among them: a task's place in the outline comes from
     /// its sibling order, which stops meaning anything once it is done.
     /// </summary>
+    /// <summary>
+    /// Stands in for the completion time of a task ticked off here and not yet acked. Sorts above
+    /// every real ISO timestamp, which is where a task finished a moment ago belongs.
+    /// </summary>
+    private const string JustNow = "￿";
+
     private static List<TaskRow> CompletedRows(
         ModelSnapshot snapshot,
         Func<TaskItem, bool> selected,
@@ -989,10 +1112,11 @@ public sealed class MainPresenter
         return snapshot.CompletedItems
             .Where(i => i.Id.Length > 0 && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
             .Where(selected)
-            // Ordinal on the server's own ISO timestamps, which sort as text. A task with none —
-            // one completed here and not yet acked — sorts last on the string and first once
-            // reversed, which is where a just-ticked task belongs anyway.
-            .OrderByDescending(i => i.CompletedAt ?? string.Empty, StringComparer.Ordinal)
+            // Ordinal on the server's own ISO timestamps, which sort as text. A task ticked off here
+            // has none until the server acks, and it was finished a moment ago — so it stands in for
+            // a timestamp that sorts above every real one, rather than the empty string, which would
+            // drop it to the bottom of three months of history.
+            .OrderByDescending(i => i.CompletedAt ?? JustNow, StringComparer.Ordinal)
             .ThenBy(i => i.Id, StringComparer.Ordinal)
             .Select(i => row(i, 0))
             .ToList();

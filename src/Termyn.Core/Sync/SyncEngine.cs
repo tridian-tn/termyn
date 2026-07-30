@@ -666,6 +666,12 @@ public sealed class SyncEngine
     }
 
     /// <summary>Deletes a task optimistically and queues an <c>item_delete</c>.</summary>
+    /// <remarks>
+    /// The task may only exist in the on-demand completed fetch, which the model never held. The
+    /// command still goes, so it has to leave the fetch too — otherwise the row stays on screen after
+    /// the server has removed it, and pressing delete again queues a second command for an id that no
+    /// longer exists, which retries to the ceiling and sits in the outbox as a permanent failure.
+    /// </remarks>
     public void DeleteItem(string id)
     {
         lock (_gate)
@@ -675,6 +681,8 @@ public sealed class SyncEngine
             ResourceKey[] deletes = existing is not null ? [new ResourceKey(ResourceType.Items, id)] : [];
 
             var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, [], deletes);
+            Forget(ResourceType.Items, id);
+
             if (existing is not null)
             {
                 Model.Remove(ResourceType.Items, id);
@@ -1489,6 +1497,13 @@ public sealed class SyncEngine
         if (response.FullSync)
         {
             var live = response.Changes.Select(c => new ResourceKey(c.ResourceType, c.Id)).ToHashSet();
+
+            // A full sync carries no tombstones, so it is the only word we get that a fetched
+            // completed task has been deleted server-side. The prune below only walks what the model
+            // holds, and a fetch-only task is never in there.
+            foreach (var id in _completed.Keys.ToList())
+                if (!live.Contains(new ResourceKey(ResourceType.Items, id)))
+                    _completed.Remove(id);
 
             foreach (var type in ResourceType.All)
             {
