@@ -1,6 +1,7 @@
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Platform;
+using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 using Termyn.Platform.Windows;
 using Termyn.Presentation;
@@ -10,8 +11,26 @@ namespace Termyn.App.Windows;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        var quickAdd = Has(args, "--quick-add");
+        var tray = quickAdd || Has(args, "--tray");
+
+        using var instance = new WindowsSingleInstance();
+        if (!instance.TryAcquire())
+        {
+            // Two processes would share one cache and outbox, and the second would fail to take the
+            // global hotkey. Hand over what this launch was asked to do and get out of the way.
+            instance.TrySignal(quickAdd ? InstanceSignals.QuickAdd : InstanceSignals.Show);
+            return;
+        }
+
+        IAppPaths paths = new WindowsAppPaths();
+        var settingsStore = new SettingsStore(paths);
+        var settings = settingsStore.Load();
+
+        // Before any window exists, which is the only time the framework will take it.
+        Theme.ApplyToFramework(settings.Theme);
         ApplicationConfiguration.Initialize();
 
         using var http = new HttpClient
@@ -21,7 +40,6 @@ internal static class Program
             MaxResponseContentBufferSize = 128 * 1024 * 1024,
         };
         ITodoistApi api = new TodoistApiClient(http);
-        IAppPaths paths = new WindowsAppPaths();
         ISecretStore secrets = new DpapiSecretStore(paths);
 
         var auth = new AuthPresenter(api, secrets);
@@ -37,15 +55,35 @@ internal static class Program
         engine.Load();
 
         var presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()));
-        var scheduler = new SyncScheduler(presenter.SyncAsync);
+        var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
+
+        var autoStart = new WindowsAutoStart();
+
+        // Re-asserted rather than assumed: the entry can be removed by a startup manager, and it
+        // holds a path that a reinstall elsewhere would have left pointing at the old binary.
+        if (settings.LaunchAtLogin != autoStart.IsEnabled || settings.LaunchAtLogin)
+            autoStart.SetEnabled(settings.LaunchAtLogin);
+
+        using var hotkey = new WindowsGlobalHotkey();
+        using var notifier = new TrayNotifier();
+
+        // In the tray from the start, so the badge is a live count of what is due rather than
+        // something that only appears once the window has been closed.
+        notifier.Visible = true;
+
+        var shell = new Shell(settingsStore, settings, hotkey, autoStart, notifier, instance, tray, quickAdd);
 
         try
         {
-            Application.Run(new MainForm(presenter, scheduler));
+            using var form = new MainForm(presenter, scheduler, shell);
+            Application.Run(form);
         }
         finally
         {
             scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
+
+    private static bool Has(string[] args, string flag)
+        => args.Any(a => a.Equals(flag, StringComparison.OrdinalIgnoreCase));
 }

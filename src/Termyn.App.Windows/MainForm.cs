@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
+using Termyn.Core.Platform;
+using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
 
@@ -9,6 +11,25 @@ using Label = System.Windows.Forms.Label;
 
 namespace Termyn.App.Windows;
 
+/// <summary>
+/// The platform services the shell is built on, handed in so the window doesn't construct its own
+/// and tests of the app could stand in for them.
+/// </summary>
+/// <param name="StartInTray">
+/// Start with no window on screen — how a launch-at-login entry gets Termyn running, and its hotkey
+/// live, without taking over what the user was doing.
+/// </param>
+/// <param name="StartWithQuickAdd">Open the quick-add box straight away, and nothing else.</param>
+internal sealed record Shell(
+    SettingsStore Store,
+    AppSettings Settings,
+    IGlobalHotkey Hotkey,
+    IAutoStartService AutoStart,
+    INotifier Notifier,
+    ISingleInstance Instance,
+    bool StartInTray = false,
+    bool StartWithQuickAdd = false);
+
 /// <summary>Main window: sidebar, capture box, task outline, and the keyboard map.</summary>
 internal sealed class MainForm : Form
 {
@@ -16,6 +37,7 @@ internal sealed class MainForm : Form
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
+    private readonly Shell _shell;
     private readonly CancellationTokenSource _cts = new();
 
     private readonly TextBox _capture;
@@ -24,14 +46,22 @@ internal sealed class MainForm : Form
     private readonly TreeView _sidebar;
     private readonly OutlineView _outline;
     private readonly Label _status;
+    private readonly SplitContainer _split;
 
     /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
     private readonly LinkLabel _unsupported;
+
+    /// <summary>Built once and hidden between uses, so the hotkey has it ready.</summary>
+    private readonly QuickAddForm _quickAdd;
+
+    private AppSettings _settings;
+    private Theme _theme;
 
     private string? _editingId;
     private string? _editingText;
     private bool _reconnectNeeded;
     private bool _syncingSidebar;
+    private bool _exiting;
 
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
     private string _sidebarKey = ViewSelection.Default.Key;
@@ -39,12 +69,18 @@ internal sealed class MainForm : Form
     /// <summary>The sidebar last rendered, so an unchanged one isn't rebuilt.</summary>
     private IReadOnlyList<SidebarNode>? _renderedSidebar;
 
+    /// <summary>Branches the user had closed last time, until the first render puts them back.</summary>
+    private HashSet<string>? _restoreCollapsed;
+
     private Font? _headerFont;
 
-    public MainForm(MainPresenter presenter, SyncScheduler scheduler)
+    public MainForm(MainPresenter presenter, SyncScheduler scheduler, Shell shell)
     {
         _presenter = presenter;
         _scheduler = scheduler;
+        _shell = shell;
+        _settings = shell.Settings;
+        _theme = Theme.Resolve(_settings.Theme);
 
         Text = "Termyn";
         StartPosition = FormStartPosition.CenterScreen;
@@ -56,7 +92,7 @@ internal sealed class MainForm : Form
         _capture.KeyDown += OnCaptureKeyDown;
         _capture.TextChanged += (_, _) => UpdatePreview();
 
-        _preview = new Label { Dock = DockStyle.Top, Height = 20, ForeColor = SystemColors.GrayText, Padding = new Padding(4, 2, 0, 0) };
+        _preview = new Label { Dock = DockStyle.Top, Height = 20, Padding = new Padding(4, 2, 0, 0) };
 
         _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
         _search.TextChanged += (_, _) => Guarded(() => _presenter.Search(_search.Text));
@@ -69,6 +105,7 @@ internal sealed class MainForm : Form
             ShowRootLines = false,
             FullRowSelect = true,
             Indent = 14,
+            BorderStyle = BorderStyle.None,
         };
         _sidebar.AfterSelect += OnSidebarSelect;
         _sidebar.KeyDown += OnSidebarKeyDown;
@@ -87,16 +124,16 @@ internal sealed class MainForm : Form
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
 
-        var split = new SplitContainer
+        _split = new SplitContainer
         {
             Dock = DockStyle.Fill,
             FixedPanel = FixedPanel.Panel1,
         };
-        split.Panel1.Controls.Add(_sidebar);
-        split.Panel2.Controls.Add(_outline);
+        _split.Panel1.Controls.Add(_sidebar);
+        _split.Panel2.Controls.Add(_outline);
 
         // Above the outline, so it reads as an explanation of the empty list below it.
-        split.Panel2.Controls.Add(_unsupported);
+        _split.Panel2.Controls.Add(_unsupported);
 
         _status = new Label
         {
@@ -107,29 +144,281 @@ internal sealed class MainForm : Form
             Text = "Loading…",
         };
 
-        Controls.Add(split);
+        Controls.Add(_split);
         Controls.Add(_status);
         Controls.Add(_search);
         Controls.Add(_preview);
         Controls.Add(_capture);
 
-        // Only once it's parented: before that the splitter is clamped against the container's
-        // default 150px width and silently sticks there.
-        split.SplitterDistance = 220;
-
         _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
 
+        _quickAdd = new QuickAddForm(_presenter, _theme);
+        _quickAdd.Captured += () => _scheduler.NotifyWrite();
+        _quickAdd.Failed += Report;
+
+        RestoreViewState(_settings.View);
+        ApplyTheme();
+
         _presenter.RowsChanged += OnRowsChanged;
+        _presenter.StatusChanged += OnStatusChanged;
         _scheduler.SyncFailed += OnSyncFailed;
+        _shell.Hotkey.Pressed += OnHotkey;
+        _shell.Notifier.Activated += OnTrayActivated;
+        _shell.Instance.SignalReceived += OnInstanceSignal;
+
+        BuildTrayMenu();
+        RegisterHotkey(announce: false);
+
         Load += async (_, _) => await LoadAsync();
-        FormClosing += (_, _) => _cts.Cancel();
+        Shown += OnShown;
+        FormClosing += OnFormClosing;
         FormClosed += (_, _) =>
         {
             _presenter.RowsChanged -= OnRowsChanged;
+            _presenter.StatusChanged -= OnStatusChanged;
             _scheduler.SyncFailed -= OnSyncFailed;
+            _shell.Hotkey.Pressed -= OnHotkey;
+            _shell.Notifier.Activated -= OnTrayActivated;
+            _shell.Instance.SignalReceived -= OnInstanceSignal;
+
+            _quickAdd.AllowClose();
+            _quickAdd.Dispose();
             _headerFont?.Dispose();
             _cts.Dispose();
         };
+    }
+
+    // ---- Shell ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Closing leaves Termyn in the tray when that is what the user asked for, because the global
+    /// hotkey only works while the process is alive. Exit from the tray menu closes for real.
+    /// </summary>
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_exiting && _settings.CloseToTray && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            SaveViewState();
+            _shell.Notifier.Visible = true;
+            Hide();
+            return;
+        }
+
+        SaveViewState();
+        _cts.Cancel();
+    }
+
+    /// <summary>
+    /// Drops straight to the tray when this launch wasn't meant to show a window. Done on Shown
+    /// rather than before: the form has to be realised for the outline to have painted anything, and
+    /// hiding it earlier leaves the first restore with nothing on it.
+    /// </summary>
+    private void OnShown(object? sender, EventArgs e)
+    {
+        if (!_shell.StartInTray)
+            return;
+
+        _shell.Notifier.Visible = true;
+        Hide();
+
+        if (_shell.StartWithQuickAdd)
+            Guarded(_quickAdd.Summon);
+    }
+
+    private void OnHotkey()
+    {
+        // WM_HOTKEY is dispatched on whichever thread owns the hotkey window; marshal in case that
+        // is ever not this one.
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        BeginInvoke(() => Guarded(_quickAdd.Summon));
+    }
+
+    private void OnTrayActivated()
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        BeginInvoke(RestoreWindow);
+    }
+
+    private void OnInstanceSignal(string message)
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+
+        BeginInvoke(() => Guarded(() =>
+        {
+            if (message == InstanceSignals.QuickAdd)
+                _quickAdd.Summon();
+            else
+                RestoreWindow();
+        }));
+    }
+
+    private void RestoreWindow()
+    {
+        Show();
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+        Activate();
+        BringToFront();
+    }
+
+    private void BuildTrayMenu() => _shell.Notifier.SetCommands(
+    [
+        new NotifierCommand("Open Termyn", () => BeginInvoke(RestoreWindow)),
+        new NotifierCommand("Quick add…", () => BeginInvoke(() => Guarded(_quickAdd.Summon))),
+        new NotifierCommand("Sync now", () => _scheduler.RequestNow()),
+        new NotifierCommand("Settings…", () => BeginInvoke(() => Guarded(OpenSettings))),
+        new NotifierCommand("Exit", () => BeginInvoke(Exit)),
+    ]);
+
+    private void Exit()
+    {
+        _exiting = true;
+        Close();
+        Application.Exit();
+    }
+
+    /// <summary>Takes the global hotkey, saying so in the status bar when the desktop refuses it.</summary>
+    private void RegisterHotkey(bool announce)
+    {
+        if (!_settings.HotkeyEnabled)
+        {
+            _shell.Hotkey.Unregister();
+            return;
+        }
+
+        var binding = _settings.HotkeyBinding;
+        if (_shell.Hotkey.Register(binding))
+        {
+            if (announce)
+                _status.Text = $"Quick-add hotkey is {binding}.";
+            return;
+        }
+
+        // Silence here would leave the user pressing a key that does nothing, with no way to tell
+        // that something else on the machine already owns it.
+        _status.Text = $"Another application already owns {binding} — quick-add has no hotkey.";
+    }
+
+    private void OpenSettings()
+    {
+        var autoStartAvailable = Environment.ProcessPath is { Length: > 0 };
+        if (SettingsForm.Edit(this, _settings, _theme, autoStartAvailable) is not { } amended)
+            return;
+
+        var themeChanged = amended.Theme != _settings.Theme;
+        var hotkeyChanged = amended.HotkeyEnabled != _settings.HotkeyEnabled
+                            || amended.HotkeyBinding != _settings.HotkeyBinding;
+        var cadenceChanged = amended.SyncMode != _settings.SyncMode
+                             || amended.ClampedInterval != _settings.ClampedInterval;
+
+        if (amended.LaunchAtLogin != _settings.LaunchAtLogin && !_shell.AutoStart.SetEnabled(amended.LaunchAtLogin))
+        {
+            // Left where it was rather than saved as a wish the OS didn't grant.
+            amended = amended with { LaunchAtLogin = _settings.LaunchAtLogin };
+            _status.Text = "Windows would not change the launch-at-login setting.";
+        }
+
+        _settings = amended;
+        _shell.Store.Save(_settings with { View = CurrentViewState() });
+
+        if (themeChanged)
+        {
+            _theme = Theme.Resolve(_settings.Theme);
+            ApplyTheme();
+            _quickAdd.ApplyTheme(_theme);
+
+            // The framework's own chrome — scrollbars, menus, title bars — is set once at startup.
+            _status.Text = "Theme saved. Restart Termyn for the window frame to follow.";
+        }
+
+        if (hotkeyChanged)
+            RegisterHotkey(announce: true);
+
+        if (cadenceChanged)
+            _status.Text = "Sync cadence saved. It takes effect when Termyn next starts.";
+    }
+
+    private void ApplyTheme()
+    {
+        _theme.Apply(this);
+        _outline.Theme = _theme;
+        _preview.ForeColor = _theme.Muted;
+        _status.ForeColor = _theme.Muted;
+        _sidebar.BackColor = _theme.Background;
+        _outline.BackColor = _theme.Panel;
+        _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
+        Invalidate(invalidateChildren: true);
+        Render();
+    }
+
+    // ---- View state ----------------------------------------------------------------------------
+
+    private void RestoreViewState(ViewState state)
+    {
+        var size = new Size(
+            Math.Max(state.WindowWidth, MinimumSize.Width),
+            Math.Max(state.WindowHeight, MinimumSize.Height));
+
+        if (state is { WindowX: { } x, WindowY: { } y })
+        {
+            var bounds = new Rectangle(new Point(x, y), size);
+
+            // A monitor that has since been unplugged would otherwise put the window out of reach.
+            if (Screen.AllScreens.Any(s => s.WorkingArea.IntersectsWith(bounds)))
+            {
+                StartPosition = FormStartPosition.Manual;
+                Location = bounds.Location;
+            }
+        }
+
+        ClientSize = size;
+        if (state.Maximized)
+            WindowState = FormWindowState.Maximized;
+
+        if (state.SelectedKey is { Length: > 0 } key)
+            _sidebarKey = key;
+
+        _restoreCollapsed = state.CollapsedKeys.Count > 0
+            ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
+            : null;
+    }
+
+    private ViewState CurrentViewState()
+    {
+        // The restored bounds, not the current ones, when maximised or minimised: those report the
+        // maximised frame, which would become the window's size the next time it was un-maximised.
+        var bounds = WindowState == FormWindowState.Normal
+            ? new Rectangle(Location, ClientSize)
+            : new Rectangle(RestoreBounds.Location, RestoreBounds.Size);
+
+        return new ViewState
+        {
+            SelectedKey = _sidebarKey,
+            CollapsedKeys = CollapsedKeys().ToList(),
+            SidebarWidth = _split.SplitterDistance,
+            WindowX = bounds.X,
+            WindowY = bounds.Y,
+            WindowWidth = bounds.Width,
+            WindowHeight = bounds.Height,
+            Maximized = WindowState == FormWindowState.Maximized,
+        };
+    }
+
+    private void SaveViewState()
+    {
+        try
+        {
+            _settings = _settings with { View = CurrentViewState() };
+            _shell.Store.Save(_settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Losing the window position is not worth failing a shutdown over.
+        }
     }
 
     // ---- Rendering -----------------------------------------------------------------------------
@@ -146,6 +435,30 @@ internal sealed class MainForm : Form
         Render();
     }
 
+    /// <summary>
+    /// Only the status moved. Kept apart from a full render so a sync starting and finishing doesn't
+    /// rebuild the outline twice, and doesn't disturb a row being renamed.
+    /// </summary>
+    private void OnStatusChanged()
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+        if (InvokeRequired)
+        {
+            BeginInvoke(RenderStatus);
+            return;
+        }
+        RenderStatus();
+    }
+
+    private void RenderStatus()
+    {
+        if (IsDisposed)
+            return;
+
+        _status.Text = _reconnectNeeded ? ReconnectMessage : _presenter.Status;
+    }
+
     private void Render()
     {
         // A background sync must not wipe the row the user is currently renaming.
@@ -154,8 +467,28 @@ internal sealed class MainForm : Form
 
         RenderSidebar();
         _outline.Rows = _presenter.Rows;
-        _status.Text = _presenter.Status;
+        RenderStatus();
         RenderUnsupported();
+        RenderTray();
+    }
+
+    /// <summary>
+    /// Keeps the tray icon in step: the count it badges is today's, which the sidebar has already
+    /// worked out as part of the same pass.
+    /// </summary>
+    private void RenderTray()
+    {
+        var today = _presenter.Sidebar
+            .FirstOrDefault(n => n is { Kind: SidebarKind.SmartView, View: SmartView.Today })?.Count ?? 0;
+
+        var tooltip = today switch
+        {
+            0 => "Termyn — nothing due today",
+            1 => "Termyn — 1 task due today",
+            _ => $"Termyn — {today} tasks due today",
+        };
+
+        _shell.Notifier.SetStatus(tooltip, today);
     }
 
     private void RenderUnsupported()
@@ -189,8 +522,10 @@ internal sealed class MainForm : Form
         _syncingSidebar = true;
         try
         {
-            // Remember which branches are closed; the rebuild would otherwise reopen them.
-            var collapsed = CollapsedKeys();
+            // Remember which branches are closed; the rebuild would otherwise reopen them. On the
+            // first render there is nothing to read yet, so the saved set stands in.
+            var collapsed = _restoreCollapsed ?? CollapsedKeys();
+            _restoreCollapsed = null;
 
             _sidebar.BeginUpdate();
             _sidebar.Nodes.Clear();
@@ -205,7 +540,7 @@ internal sealed class MainForm : Form
                 if (node.Kind == SidebarKind.Header)
                 {
                     tree.NodeFont = _headerFont;
-                    tree.ForeColor = SystemColors.GrayText;
+                    tree.ForeColor = _theme.Muted;
                 }
 
                 if (node.Depth > 0 && parents.TryGetValue(node.Depth - 1, out var parent))
@@ -240,7 +575,7 @@ internal sealed class MainForm : Form
 
     private HashSet<string> CollapsedKeys()
     {
-        var collapsed = new HashSet<string>();
+        var collapsed = new HashSet<string>(StringComparer.Ordinal);
         Walk(_sidebar.Nodes);
         return collapsed;
 
@@ -277,7 +612,6 @@ internal sealed class MainForm : Form
         return null;
     }
 
-
     private void OnSyncFailed(Exception ex)
     {
         if (IsDisposed || !IsHandleCreated)
@@ -306,14 +640,65 @@ internal sealed class MainForm : Form
             return;
 
         _sidebarKey = node.Key;
-        Guarded(() => _presenter.Select(node.Kind switch
+        Guarded(() => _presenter.Select(Selection(node)));
+    }
+
+    private static ViewSelection Selection(SidebarNode node) => node.Kind switch
+    {
+        SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
+        SidebarKind.Section => ViewSelection.OfSection(node.Id),
+        SidebarKind.Label => ViewSelection.OfLabel(node.Id),
+        SidebarKind.Filter => ViewSelection.OfFilter(node.Id),
+        _ => ViewSelection.OfProject(node.Id),
+    };
+
+    /// <summary>
+    /// Moves to the next or previous view, skipping the group labels — Ctrl+↑/↓ from anywhere in the
+    /// window, so switching views doesn't need the sidebar to have focus first.
+    /// </summary>
+    private void SwitchView(int offset)
+    {
+        var selectable = Flatten(_sidebar.Nodes)
+            .Where(n => n.Tag is SidebarNode { Kind: not SidebarKind.Header })
+            .ToList();
+
+        if (selectable.Count == 0)
+            return;
+
+        var current = selectable.FindIndex(n => ((SidebarNode)n.Tag!).Key == _sidebarKey);
+        var next = current < 0 ? 0 : Math.Clamp(current + offset, 0, selectable.Count - 1);
+
+        GoTo(Selection((SidebarNode)selectable[next].Tag!));
+    }
+
+    /// <summary>
+    /// Opens a view and moves the sidebar's highlight to match. The tree is updated with the select
+    /// handler suppressed, so navigating from the palette or a hotkey publishes once, not twice.
+    /// </summary>
+    private void GoTo(ViewSelection selection)
+    {
+        _sidebarKey = selection.Key;
+        Guarded(() => _presenter.Select(selection));
+
+        _syncingSidebar = true;
+        try
         {
-            SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
-            SidebarKind.Section => ViewSelection.OfSection(node.Id),
-            SidebarKind.Label => ViewSelection.OfLabel(node.Id),
-            SidebarKind.Filter => ViewSelection.OfFilter(node.Id),
-            _ => ViewSelection.OfProject(node.Id),
-        }));
+            _sidebar.SelectedNode = FindByKey(_sidebar.Nodes, _sidebarKey);
+        }
+        finally
+        {
+            _syncingSidebar = false;
+        }
+    }
+
+    private static IEnumerable<TreeNode> Flatten(TreeNodeCollection nodes)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            yield return node;
+            foreach (var child in Flatten(node.Nodes))
+                yield return child;
+        }
     }
 
     private void OnSidebarKeyDown(object? sender, KeyEventArgs e)
@@ -424,32 +809,9 @@ internal sealed class MainForm : Form
     }
 
     private void UpdatePreview()
-    {
-        if (string.IsNullOrWhiteSpace(_capture.Text))
-        {
-            _preview.Text = string.Empty;
-            return;
-        }
-
-        var preview = _presenter.Preview(_capture.Text);
-        var parse = preview.Parse;
-        var parts = new List<string> { $"\"{parse.Content}\"" };
-
-        if (parse.ProjectName is { } project)
-            parts.Add(preview.ProjectResolved ? "#" + project : $"#{project} (unknown — goes to Inbox)");
-        if (parse.SectionName is { } section)
-            parts.Add(preview.SectionResolved ? "/" + section : $"/{section} (unknown)");
-        foreach (var label in parse.Labels)
-            parts.Add("@" + label);
-        if (parse.Priority != Priority.P4)
-            parts.Add(parse.Priority.ToString());
-        if (parse.DueDate is { } date)
-            parts.Add(parse.DueTime is { } time ? $"{date:yyyy-MM-dd} {time:HH:mm}" : $"{date:yyyy-MM-dd}");
-        if (parse.Unsupported.Count > 0)
-            parts.Add("(needs a connection: " + string.Join(", ", parse.Unsupported) + ")");
-
-        _preview.Text = string.Join("  ·  ", parts);
-    }
+        => _preview.Text = string.IsNullOrWhiteSpace(_capture.Text)
+            ? string.Empty
+            : CapturePreviewText.For(_presenter.Preview(_capture.Text));
 
     // ---- Outline keys --------------------------------------------------------------------------
 
@@ -460,9 +822,16 @@ internal sealed class MainForm : Form
 
         switch (e.KeyCode)
         {
+            // Ticking off a task that is already done means putting it back.
             case Keys.Space when id is not null:
             case Keys.Enter when e.Control && id is not null:
-                Guarded(() => _presenter.Complete(id!));
+                Guarded(() =>
+                {
+                    if (_outline.SelectedRow is { Completed: true })
+                        _presenter.Reopen(id!);
+                    else
+                        _presenter.Complete(id!);
+                });
                 break;
             case Keys.Delete when id is not null:
                 Guarded(() => _presenter.Delete(id!));
@@ -534,6 +903,21 @@ internal sealed class MainForm : Form
                 _search.Focus();
                 _search.SelectAll();
                 return true;
+            case Keys.Control | Keys.K:
+                Guarded(OpenPalette);
+                return true;
+            case Keys.Control | Keys.H:
+                _ = ToggleCompletedAsync();
+                return true;
+            case Keys.Control | Keys.Oemcomma:
+                Guarded(OpenSettings);
+                return true;
+            case Keys.Control | Keys.Up:
+                SwitchView(-1);
+                return true;
+            case Keys.Control | Keys.Down:
+                SwitchView(1);
+                return true;
             // This runs ahead of every control's own key handling, so the sidebar can't claim
             // Ctrl+N for itself — the choice between a section and a task has to be made here.
             case Keys.Control | Keys.N when FocusedProject() is { } project:
@@ -550,11 +934,78 @@ internal sealed class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    /// <summary>Shows or hides completed tasks, fetching them the first time they're asked for.</summary>
+    private async Task ToggleCompletedAsync()
+    {
+        // The fetch is a round trip over up to three months of history, so it is worth saying that
+        // something is happening rather than leaving the list unchanged for a moment.
+        if (!_presenter.ShowingCompleted)
+            _status.Text = "Fetching completed tasks…";
+
+        await GuardedAsync(async () =>
+        {
+            if (!await _presenter.ToggleCompletedAsync(_cts.Token))
+                _status.Text = "Completed tasks need a connection.";
+        });
+    }
+
+    private void OpenPalette()
+    {
+        if (CommandPaletteForm.Pick(this, _presenter.Palette, _theme) is not { } chosen)
+            return;
+
+        if (chosen.Selection is { } selection)
+        {
+            GoTo(selection);
+            _outline.Focus();
+            return;
+        }
+
+        switch (chosen.Command)
+        {
+            case PaletteCommand.NewTask:
+                _capture.Focus();
+                break;
+            case PaletteCommand.NewProject:
+                AddProject();
+                break;
+            // Whatever the sidebar is sitting on, since the palette is what has the focus here.
+            case PaletteCommand.NewSection when SelectedProject() is { } project:
+                AddSection(project.Id);
+                break;
+            case PaletteCommand.NewSection:
+                _status.Text = "Pick a project first — a section belongs to one.";
+                break;
+            case PaletteCommand.SyncNow:
+                _scheduler.RequestNow();
+                break;
+            case PaletteCommand.ToggleCompleted:
+                _ = ToggleCompletedAsync();
+                break;
+            case PaletteCommand.Undo:
+                Guarded(() =>
+                {
+                    if (!_presenter.Undo())
+                        _status.Text = "Nothing to undo.";
+                    else
+                        _scheduler.NotifyWrite();
+                });
+                break;
+            case PaletteCommand.Settings:
+                OpenSettings();
+                break;
+        }
+    }
+
     /// <summary>The project the sidebar is sitting on, when the sidebar is the one with focus.</summary>
     private SidebarNode? FocusedProject()
         => _sidebar.Focused && _sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } node
             ? node
             : null;
+
+    /// <summary>The project the sidebar is sitting on, wherever the focus happens to be.</summary>
+    private SidebarNode? SelectedProject()
+        => _sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } node ? node : null;
 
     private void AddProject()
     {
@@ -673,6 +1124,10 @@ internal sealed class MainForm : Form
 
     private async Task LoadAsync()
     {
+        // Restored here rather than in the constructor: before the splitter is parented and sized it
+        // clamps the distance against the container's default width and silently sticks there.
+        _split.SplitterDistance = Math.Clamp(_settings.View.SidebarWidth, 120, Math.Max(120, ClientSize.Width - 200));
+
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
         _scheduler.Start();
     }

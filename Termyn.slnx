@@ -9,5 +9,6 @@
     <Project Path="tests/Termyn.TestSupport/Termyn.TestSupport.csproj" />
     <Project Path="tests/Termyn.Core.Tests/Termyn.Core.Tests.csproj" />
     <Project Path="tests/Termyn.Presentation.Tests/Termyn.Presentation.Tests.csproj" />
+    <Project Path="tests/Termyn.Platform.Windows.Tests/Termyn.Platform.Windows.Tests.csproj" />
   </Folder>
 </Solution>

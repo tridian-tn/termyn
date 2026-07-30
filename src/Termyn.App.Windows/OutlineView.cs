@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Termyn.Core.Model;
+using Termyn.Core.Settings;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
@@ -14,11 +15,10 @@ internal sealed class OutlineView : ListView
     private const int IndentWidth = 18;
     private const int TextInset = 6;
 
-    private static readonly Color P1 = Color.FromArgb(0xE4, 0x48, 0x3A);
-    private static readonly Color P2 = Color.FromArgb(0xF5, 0xA6, 0x23);
-    private static readonly Color P3 = Color.FromArgb(0x3B, 0x82, 0xF6);
-
     private IReadOnlyList<TaskRow> _rows = [];
+
+    /// <summary>Struck through, for a completed row. Built once rather than per cell painted.</summary>
+    private Font? _struck;
 
     /// <summary>
     /// Virtual mode asks for the same row repeatedly — on every hover, focus change and repaint —
@@ -50,6 +50,31 @@ internal sealed class OutlineView : ListView
         Columns.Add("Due", 120);
         Columns.Add("Labels", 140);
     }
+
+    /// <summary>
+    /// The colours to draw with. Not the system ones: on a dark theme the highlight and grey-text
+    /// system colours are the light-theme values, so a selected row came out unreadable.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Theme Theme { get; set; } = Theme.Resolve(ThemePreference.System);
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        _struck?.Dispose();
+        _struck = null;
+        base.OnFontChanged(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _struck?.Dispose();
+        base.Dispose(disposing);
+    }
+
+    /// <summary>The strike-through font, made on first use so a theme change can't leak one.</summary>
+    private Font Struck => _struck ??= new Font(Font, FontStyle.Strikeout);
 
     /// <summary>The rows to show. Selection is preserved by id where the task is still present.</summary>
     [Browsable(false)]
@@ -167,7 +192,7 @@ internal sealed class OutlineView : ListView
             _ => TextFormatFlags.Left,
         };
 
-        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), SystemColors.GrayText, Flags | alignment);
+        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), Theme.Muted, Flags | alignment);
     }
 
     /// <summary>
@@ -185,7 +210,7 @@ internal sealed class OutlineView : ListView
         if (left >= e.Bounds.Right)
             return;
 
-        using var background = new SolidBrush(BackColor);
+        using var background = new SolidBrush(Theme.Panel);
         e.Graphics.FillRectangle(background, left, e.Bounds.Y, e.Bounds.Right - left, e.Bounds.Height);
     }
 
@@ -217,10 +242,14 @@ internal sealed class OutlineView : ListView
         // Not e.ItemState: in virtual owner-draw mode its Selected flag is unreliable for sub-items,
         // which painted rows as selected simply because the mouse passed over them.
         var selected = IsSelected(e.ItemIndex);
-        var text = selected ? SystemColors.HighlightText : ForeColor;
-        var muted = selected ? SystemColors.HighlightText : SystemColors.GrayText;
 
-        using (var background = new SolidBrush(selected ? SystemColors.Highlight : BackColor))
+        // A completed row is greyed and struck through: it is here to be seen and reopened, not
+        // read alongside the work that is still outstanding.
+        var text = selected ? Theme.OnAccent : row.Completed ? Theme.Muted : Theme.Text;
+        var muted = selected ? Theme.OnAccent : Theme.Muted;
+        var font = row.Completed ? Struck : Font;
+
+        using (var background = new SolidBrush(selected ? Theme.Accent : Theme.Panel))
             e.Graphics.FillRectangle(background, e.Bounds);
 
         switch (e.ColumnIndex)
@@ -229,8 +258,8 @@ internal sealed class OutlineView : ListView
                 var bounds = e.Bounds;
                 bounds.X += row.Depth * IndentWidth;
                 bounds.Width -= row.Depth * IndentWidth;
-                DrawGuides(e.Graphics, e.Bounds, row.Depth, selected);
-                TextRenderer.DrawText(e.Graphics, row.Content, Font, Inset(bounds), text, Flags);
+                DrawGuides(e.Graphics, e.Bounds, row.Depth, selected ? Theme.OnAccent : Theme.Border);
+                TextRenderer.DrawText(e.Graphics, row.Content, font, Inset(bounds), text, Flags);
                 break;
 
             case 1:
@@ -269,12 +298,12 @@ internal sealed class OutlineView : ListView
     }
 
     /// <summary>Faint vertical rules showing how deep a sub-task sits.</summary>
-    private static void DrawGuides(Graphics g, Rectangle bounds, int depth, bool selected)
+    private static void DrawGuides(Graphics g, Rectangle bounds, int depth, Color colour)
     {
         if (depth == 0)
             return;
 
-        using var pen = new Pen(selected ? SystemColors.HighlightText : SystemColors.ControlLight);
+        using var pen = new Pen(colour);
         for (var level = 0; level < depth; level++)
         {
             var x = bounds.X + (level * IndentWidth) + (IndentWidth / 2);
@@ -287,12 +316,7 @@ internal sealed class OutlineView : ListView
         if (priority == Priority.P4)
             return;
 
-        var colour = priority switch
-        {
-            Priority.P1 => P1,
-            Priority.P2 => P2,
-            _ => P3,
-        };
+        var colour = Theme.ForPriority(priority);
 
         var size = Math.Min(9, bounds.Height - 8);
         var dot = new Rectangle(
