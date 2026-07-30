@@ -1,10 +1,25 @@
 namespace Termyn.Core.Sync;
 
 /// <summary>How often Termyn reconciles with Todoist in the background.</summary>
+/// <param name="Interval">
+/// Time between background syncs. <see cref="Timeout.InfiniteTimeSpan"/> turns the timer off, which
+/// is manual mode: the loop then only runs when a write or an explicit request wakes it.
+/// </param>
 public sealed record SyncCadence(TimeSpan Interval, TimeSpan WriteDebounce)
 {
     /// <summary>A background sync every 45 seconds, with writes coalesced over 800 ms.</summary>
     public static readonly SyncCadence Default = new(TimeSpan.FromSeconds(45), TimeSpan.FromMilliseconds(800));
+}
+
+/// <summary>What one sync round tells the loop to do next.</summary>
+/// <param name="MoreQueued">More writes are waiting than one round could flush.</param>
+/// <param name="PauseFor">
+/// Hold off this long before trying again — the server asked us to. Nothing wakes the loop early
+/// out of a pause, since the reason for it is that requests are being refused.
+/// </param>
+public sealed record SyncOutcome(bool MoreQueued = false, TimeSpan? PauseFor = null)
+{
+    public static readonly SyncOutcome Done = new();
 }
 
 /// <summary>
@@ -18,7 +33,7 @@ public sealed record SyncCadence(TimeSpan Interval, TimeSpan WriteDebounce)
 /// </remarks>
 public sealed class SyncScheduler : IAsyncDisposable
 {
-    private readonly Func<CancellationToken, Task<bool>> _sync;
+    private readonly Func<CancellationToken, Task<SyncOutcome>> _sync;
     private readonly SyncCadence _cadence;
     private readonly CancellationTokenSource _stopping = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
@@ -31,15 +46,18 @@ public sealed class SyncScheduler : IAsyncDisposable
 
     private bool _writePending;
 
-    /// <param name="sync">Performs one sync; returns true when work remains to be flushed.</param>
-    public SyncScheduler(Func<CancellationToken, Task<bool>> sync, SyncCadence? cadence = null)
+    /// <summary>When the loop may next try, as a tick count. Zero when it isn't holding off.</summary>
+    private long _pausedUntil;
+
+    /// <param name="sync">Performs one sync and says what the loop should do next.</param>
+    public SyncScheduler(Func<CancellationToken, Task<SyncOutcome>> sync, SyncCadence? cadence = null)
     {
         _sync = sync;
         _cadence = cadence ?? SyncCadence.Default;
     }
 
     public SyncScheduler(Func<CancellationToken, Task> sync, SyncCadence? cadence = null)
-        : this(async ct => { await sync(ct); return false; }, cadence)
+        : this(async ct => { await sync(ct); return SyncOutcome.Done; }, cadence)
     {
     }
 
@@ -129,13 +147,18 @@ public sealed class SyncScheduler : IAsyncDisposable
     {
         while (!ct.IsCancellationRequested)
         {
-            bool writePending;
+            TimeSpan wait;
             lock (_state)
-                writePending = _writePending;
+            {
+                var remaining = _pausedUntil - Environment.TickCount64;
+                wait = remaining > 0
+                    ? TimeSpan.FromMilliseconds(remaining)
+                    : _writePending ? _cadence.WriteDebounce : _cadence.Interval;
+            }
 
             try
             {
-                await _wake.WaitAsync(writePending ? _cadence.WriteDebounce : _cadence.Interval, ct).ConfigureAwait(false);
+                await _wake.WaitAsync(wait, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -147,6 +170,11 @@ public sealed class SyncScheduler : IAsyncDisposable
 
             lock (_state)
             {
+                // Something woke the loop mid-pause — a write, or an F5. The server is refusing
+                // requests, so the wake is noted and the wait resumes rather than being cut short.
+                if (Environment.TickCount64 < _pausedUntil)
+                    continue;
+
                 // Hold off while edits are still arriving, so a burst coalesces into one sync.
                 if (_writePending && Environment.TickCount64 - _writePendingAt < _cadence.WriteDebounce.TotalMilliseconds)
                     continue;
@@ -155,7 +183,16 @@ public sealed class SyncScheduler : IAsyncDisposable
 
             try
             {
-                if (await _sync(ct).ConfigureAwait(false))
+                var outcome = await _sync(ct).ConfigureAwait(false);
+
+                lock (_state)
+                {
+                    _pausedUntil = outcome.PauseFor is { Ticks: > 0 } pause
+                        ? Environment.TickCount64 + (long)pause.TotalMilliseconds
+                        : 0;
+                }
+
+                if (outcome.MoreQueued)
                     Wake(); // more queued than one round could flush; come straight back
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

@@ -99,7 +99,7 @@ public class MainPresenterTests
 
         presenter.Rename("i1", "Renamed");
 
-        Assert.Equal("1 task · 1 pending", presenter.Status);
+        Assert.Equal("1 task · Not synced yet · 1 pending", presenter.Status);
     }
 
     // ---- Capture -------------------------------------------------------------------------------
@@ -425,8 +425,8 @@ public class MainPresenterTests
 
         api.Throw = new TodoistNetworkException("offline");
 
-        // Returning true here would spin the scheduler with no delay against a dead network.
-        Assert.False(await presenter.SyncAsync());
+        // Asking for another round here would spin the scheduler against a dead network.
+        Assert.False((await presenter.SyncAsync()).MoreQueued);
         Assert.True(presenter.IsOffline);
     }
 
@@ -437,7 +437,7 @@ public class MainPresenterTests
         var presenter = NewPresenter(api, SeededStore());
         presenter.Rename("i1", "B");
 
-        Assert.True(await presenter.SyncAsync()); // no verdict yet, so it stays queued
+        Assert.True((await presenter.SyncAsync()).MoreQueued); // no verdict yet, so it stays queued
     }
 
     [Fact]

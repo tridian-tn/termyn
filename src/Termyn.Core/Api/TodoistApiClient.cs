@@ -14,6 +14,7 @@ public sealed class TodoistApiClient : ITodoistApi
 {
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
     private const string QuickAddUrl = "https://api.todoist.com/api/v1/tasks/quick_add";
+    private const string CompletedUrl = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date";
 
     private readonly HttpClient _http;
 
@@ -97,6 +98,76 @@ public sealed class TodoistApiClient : ITodoistApi
         }
     }
 
+    /// <inheritdoc />
+    public async Task<CompletedPage> GetCompletedAsync(string token, CompletedQuery query, CancellationToken ct = default)
+    {
+        var parameters = new List<KeyValuePair<string, string>>
+        {
+            // Both bounds are required, and the endpoint reads them as UTC instants.
+            new("since", Instant(query.Since)),
+            new("until", Instant(query.Until)),
+            new("limit", query.Limit.ToString()),
+        };
+
+        if (query.Cursor is { Length: > 0 } cursor)
+            parameters.Add(new("cursor", cursor));
+
+        var url = CompletedUrl + "?" + string.Join('&', parameters.Select(p => $"{p.Key}={Uri.EscapeDataString(p.Value)}"));
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+        }
+
+        using (resp)
+        {
+            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                throw new TodoistAuthException("Todoist rejected the API token.");
+            EnsureReachable(resp);
+
+            try
+            {
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                if (JsonNode.Parse(stream) is not JsonObject root)
+                    throw new TodoistNetworkException("Todoist returned an unexpected completed-tasks response.");
+
+                var items = new List<ResourceChange>();
+                if (root["items"] is JsonArray array)
+                {
+                    foreach (var node in array)
+                    {
+                        if (node is not JsonObject obj || obj["id"] is not { } id)
+                            continue;
+                        items.Add(new ResourceChange(Model.ResourceType.Items, id.ToString(), false, obj.DeepClone().AsObject()));
+                    }
+                }
+
+                var next = root["next_cursor"]?.ToString();
+                return new CompletedPage(items, string.IsNullOrEmpty(next) ? null : next);
+            }
+            catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
+            {
+                throw new TodoistNetworkException("Todoist returned an unreadable completed-tasks response.", ex);
+            }
+        }
+    }
+
+    /// <summary>An instant in the form the completed-items endpoint expects.</summary>
+    private static string Instant(DateTimeOffset moment)
+        => moment.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
+
     private async Task<HttpResponseMessage> SendAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct)
     {
         var fields = new Dictionary<string, string>
@@ -144,8 +215,35 @@ public sealed class TodoistApiClient : ITodoistApi
 
     private static void EnsureReachable(HttpResponseMessage resp)
     {
-        if (!resp.IsSuccessStatusCode)
-            throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.");
+        if (resp.IsSuccessStatusCode)
+            return;
+
+        if (resp.StatusCode is HttpStatusCode.TooManyRequests)
+            throw new TodoistRateLimitException("Todoist is rate-limiting this account.", RetryAfter(resp));
+
+        throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.");
+    }
+
+    /// <summary>
+    /// How long <c>Retry-After</c> asks us to wait. The header may be a number of seconds or an HTTP
+    /// date; a date already in the past becomes zero rather than a negative wait.
+    /// </summary>
+    private static TimeSpan? RetryAfter(HttpResponseMessage resp)
+    {
+        var header = resp.Headers.RetryAfter;
+        if (header is null)
+            return null;
+
+        if (header.Delta is { } delta)
+            return delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
+
+        if (header.Date is { } date)
+        {
+            var wait = date - DateTimeOffset.UtcNow;
+            return wait < TimeSpan.Zero ? TimeSpan.Zero : wait;
+        }
+
+        return null;
     }
 
     private static SyncResponse Parse(JsonObject root, IReadOnlyList<string> resourceTypes)

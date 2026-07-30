@@ -12,6 +12,10 @@ public sealed class TaskItem
     public Priority Priority { get; init; } = Priority.P4;
     public IReadOnlyList<string> Labels { get; init; } = [];
     public bool Completed { get; init; }
+
+    /// <summary>When it was ticked off, as the server wrote it. Null while the task is still active.</summary>
+    public string? CompletedAt { get; init; }
+
     public string? DueDate { get; init; }
 
     /// <summary>The schedule as it was written — "every Monday" — which is what a recurrence is.</summary>

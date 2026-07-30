@@ -90,7 +90,7 @@ public class SyncSchedulerTests
             var n = Interlocked.Increment(ref calls);
             if (n >= 2)
                 twice.TrySetResult();
-            return Task.FromResult(n < 2); // more remains after the first round
+            return Task.FromResult(new SyncOutcome(MoreQueued: n < 2)); // more remains after the first round
         }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
 
         scheduler.Start();
@@ -166,6 +166,80 @@ public class SyncSchedulerTests
 
         var dispose = scheduler.DisposeAsync().AsTask();
         await dispose.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task A_pause_is_waited_out_even_when_something_wakes_the_loop()
+    {
+        var calls = 0;
+        var paused = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            var n = Interlocked.Increment(ref calls);
+            if (n == 1)
+            {
+                paused.TrySetResult();
+                return Task.FromResult(new SyncOutcome(PauseFor: TimeSpan.FromSeconds(30)));
+            }
+            return Task.FromResult(SyncOutcome.Done);
+        }, Fast);
+
+        scheduler.Start();
+        await paused.Task.WaitAsync(Patience);
+
+        // The server is refusing requests, so neither a write nor an F5 may cut the wait short.
+        for (var i = 0; i < 5; i++)
+        {
+            scheduler.NotifyWrite();
+            scheduler.RequestNow();
+            await Task.Delay(20);
+        }
+
+        await Task.Delay(200);
+        Assert.Equal(1, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task The_loop_comes_back_once_a_pause_has_elapsed()
+    {
+        var calls = 0;
+        var twice = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            var n = Interlocked.Increment(ref calls);
+            if (n >= 2)
+                twice.TrySetResult();
+            return Task.FromResult(n == 1
+                ? new SyncOutcome(PauseFor: TimeSpan.FromMilliseconds(80))
+                : SyncOutcome.Done);
+            // No timer: only the pause elapsing can produce the second call.
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start();
+        scheduler.RequestNow();
+
+        await twice.Task.WaitAsync(Patience);
+    }
+
+    [Fact]
+    public async Task A_sync_that_no_longer_pauses_clears_the_hold()
+    {
+        var calls = 0;
+        var thrice = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            var n = Interlocked.Increment(ref calls);
+            if (n >= 3)
+                thrice.TrySetResult();
+            return Task.FromResult(n == 1
+                ? new SyncOutcome(PauseFor: TimeSpan.FromMilliseconds(60))
+                : SyncOutcome.Done);
+        }, Fast);
+
+        scheduler.Start();
+
+        // A third call can only happen if the ordinary interval resumed after the pause.
+        await thrice.Task.WaitAsync(Patience);
     }
 
     [Fact]
