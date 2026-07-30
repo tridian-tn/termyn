@@ -380,6 +380,92 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_numeric_enum_value_is_refused_rather_than_becoming_one_the_enum_lacks()
+    {
+        // Enum.TryParse takes "3" happily and hands back (ThemePreference)3, which the settings
+        // dialog can't show and then throws on, and which is written back as a bare number this
+        // reader can't read.
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "3", "syncMode": "7" }""");
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(ThemePreference.System, settings.Theme);
+        Assert.Equal(SyncMode.Automatic, settings.SyncMode);
+    }
+
+    [Fact]
+    public void A_hand_edited_key_is_read_whatever_its_capitalisation()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "Theme": "Dark", "Hotkey": "Ctrl+Shift+Q" }""");
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(ThemePreference.Dark, settings.Theme);
+        Assert.Equal("Ctrl+Shift+Q", settings.Hotkey);
+    }
+
+    [Fact]
+    public void Saving_does_not_leave_two_spellings_of_one_key()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "Theme": "Dark" }""");
+
+        var store = new SettingsStore(Config);
+        store.Save(store.Load());
+
+        var written = (JsonObject)JsonNode.Parse(File.ReadAllText(Config))!;
+        Assert.Null(written["Theme"]);
+        Assert.Equal("Dark", written["theme"]!.ToString());
+    }
+
+    [Fact]
+    public void A_nested_key_is_read_whatever_its_capitalisation_too()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "View": { "SidebarWidth": 333, "SelectedKey": "project:p1" } }""");
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(333, settings.View.SidebarWidth);
+        Assert.Equal("project:p1", settings.View.SelectedKey);
+    }
+
+    [Theory]
+    [InlineData("99.0")]
+    [InlineData("\"99\"")]
+    [InlineData("2147483648")]
+    public void A_version_this_build_cannot_read_is_left_exactly_as_it_is(string version)
+    {
+        // Stamping our own number over it would tell whichever version wrote it that its migrations
+        // had already run — the one thing the marker exists to prevent.
+        File.WriteAllText(Config, $$"""{ "schemaVersion": {{version}}, "mine": 1 }""");
+
+        var store = new SettingsStore(Config);
+        store.Save(store.Load());
+
+        var written = (JsonObject)JsonNode.Parse(File.ReadAllText(Config))!;
+        Assert.Equal(version, written["schemaVersion"]!.ToJsonString());
+        Assert.Equal(1, written["mine"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void A_reload_after_a_locked_read_can_save_again_once_the_file_has_gone()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "Dark" }""");
+        var store = new SettingsStore(Config);
+
+        using (File.Open(Config, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            store.Load();
+        }
+
+        File.Delete(Config);
+        store.Load();
+
+        // "We couldn't read it" must not outlive the file it was about.
+        Assert.True(store.Save(new AppSettings { Theme = ThemePreference.Light }));
+        Assert.Equal(ThemePreference.Light, new SettingsStore(Config).Load().Theme);
+    }
+
+    [Fact]
     public void A_half_written_file_is_never_left_behind()
     {
         var store = new SettingsStore(Config);

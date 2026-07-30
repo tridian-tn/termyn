@@ -82,8 +82,15 @@ internal sealed class MainForm : Form
     /// <summary>False until the window is up, so the first paint isn't held up drawing a tray icon.</summary>
     private bool _trayReady;
 
-    /// <summary>Held from startup, when there is no status bar yet to put it in.</summary>
+    /// <summary>
+    /// What to say about the hotkey, held until the user has something else worth reading. Sticky,
+    /// not one-shot: the first render happens before any paint and the sync that follows overwrites
+    /// the line immediately, so a one-shot notice was never on screen.
+    /// </summary>
     private string? _hotkeyNotice;
+
+    /// <summary>Whether the signal subscription is live, so shutdown doesn't unhook what was never hooked.</summary>
+    private bool _signalsWired;
 
     public MainForm(MainPresenter presenter, SyncScheduler scheduler, Shell shell)
     {
@@ -95,7 +102,6 @@ internal sealed class MainForm : Form
 
         Text = "Termyn";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(940, 580);
         MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
@@ -174,7 +180,6 @@ internal sealed class MainForm : Form
         _scheduler.SyncFailed += OnSyncFailed;
         _shell.Hotkey.Pressed += OnHotkey;
         _shell.Notifier.Activated += OnTrayActivated;
-        _shell.Instance.SignalReceived += OnInstanceSignal;
 
         BuildTrayMenu();
         _hotkeyNotice = RegisterHotkey(announce: false);
@@ -189,7 +194,8 @@ internal sealed class MainForm : Form
             _scheduler.SyncFailed -= OnSyncFailed;
             _shell.Hotkey.Pressed -= OnHotkey;
             _shell.Notifier.Activated -= OnTrayActivated;
-            _shell.Instance.SignalReceived -= OnInstanceSignal;
+            if (_signalsWired)
+                _shell.Instance.SignalReceived -= OnInstanceSignal;
 
             _quickAdd?.AllowClose();
             _quickAdd?.Dispose();
@@ -238,6 +244,12 @@ internal sealed class MainForm : Form
             RenderTray();
             _shell.Notifier.Visible = true;
             _ = QuickAdd; // built now, so the first hotkey press finds it ready
+
+            // Subscribed here rather than in the constructor: anything a second launch signalled
+            // during startup is handed over the moment this runs, and OnUi would have dropped it
+            // while the window still had no handle.
+            _signalsWired = true;
+            _shell.Instance.SignalReceived += OnInstanceSignal;
 
             if (!_shell.StartInTray)
                 return;
@@ -374,8 +386,13 @@ internal sealed class MainForm : Form
             notices.Add("Restart Termyn for the window frame to follow the theme.");
         }
 
-        if (hotkeyChanged && RegisterHotkey(announce: true) is { } hotkeyNotice)
-            notices.Add(hotkeyNotice);
+        if (hotkeyChanged)
+        {
+            // Cleared either way: whatever it said is about the binding that has just been replaced.
+            _hotkeyNotice = null;
+            if (RegisterHotkey(announce: true) is { } hotkeyNotice)
+                notices.Add(hotkeyNotice);
+        }
 
         if (cadenceChanged)
             notices.Add("The sync cadence takes effect when Termyn next starts.");
@@ -493,11 +510,12 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // Said once, on the first paint: at registration time there was no status bar to put it in.
+        // Held until the hotkey is next set, rather than shown once: the first render runs before
+        // any paint, and the sync that immediately follows would replace it unseen.
         if (_hotkeyNotice is { } notice)
         {
-            _hotkeyNotice = null;
             _status.Text = notice;
+            _status.ForeColor = _theme.Accent;
             return;
         }
 
@@ -686,7 +704,10 @@ internal sealed class MainForm : Form
             return;
 
         _sidebarKey = node.Key;
-        Guarded(() => _presenter.Select(MainPresenter.SelectionOf(node)));
+
+        // By key, not by selection: a favourited project is two rows, and telling the presenter only
+        // which view to open would leave it believing the copy down in the tree was the one clicked.
+        Guarded(() => _presenter.SelectByKey(node.Key));
     }
 
     /// <summary>

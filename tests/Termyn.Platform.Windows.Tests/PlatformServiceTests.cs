@@ -422,6 +422,67 @@ public class SingleInstanceTests
         return identity.User!.Value;
     }
 
+    [Fact]
+    public async Task A_subscriber_that_throws_does_not_stop_the_next_signal_arriving()
+    {
+        // The listening loop only catches pipe errors; anything else thrown by a handler would end
+        // it for the life of the process.
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope);
+        var second = new TaskCompletionSource<string>();
+        var calls = 0;
+
+        holder.SignalReceived += m =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+                throw new InvalidOperationException("boom");
+            second.TrySetResult(m);
+        };
+        Assert.True(holder.TryAcquire());
+
+        using var launcher = new WindowsSingleInstance(scope);
+        Assert.True(launcher.TrySignal(InstanceSignals.Show));
+        await Task.Delay(200);
+        Assert.True(launcher.TrySignal(InstanceSignals.QuickAdd));
+
+        Assert.Equal(InstanceSignals.QuickAdd, await second.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task A_throwing_subscriber_does_not_escape_the_replay()
+    {
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope);
+        Assert.True(holder.TryAcquire());
+
+        using var launcher = new WindowsSingleInstance(scope);
+        Assert.True(launcher.TrySignal(InstanceSignals.Show));
+        await Task.Delay(500);
+
+        // The replay runs on the subscribing thread, so a throw would come out of whatever was
+        // wiring the handler up — the window's constructor, in the app.
+        holder.SignalReceived += _ => throw new InvalidOperationException("boom");
+    }
+
+    [Fact]
+    public async Task Signals_pile_up_no_further_than_the_buffer_allows()
+    {
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope);
+        Assert.True(holder.TryAcquire());
+
+        using var launcher = new WindowsSingleInstance(scope);
+        for (var i = 0; i < 30; i++)
+            launcher.TrySignal(InstanceSignals.Show);
+
+        await Task.Delay(700);
+
+        var delivered = new List<string>();
+        holder.SignalReceived += delivered.Add;
+
+        Assert.InRange(delivered.Count, 1, 8);
+    }
+
     /// <summary>A scope unique to each test, so tests running side by side don't fight over one.</summary>
     private static string Scope() => "termyn-test-" + Guid.NewGuid().ToString("N");
 }

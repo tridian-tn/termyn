@@ -222,24 +222,11 @@ public class CompletedItemsTests
     }
 
     [Fact]
-    public async Task A_full_sync_that_no_longer_mentions_a_fetched_task_drops_it()
+    public async Task A_full_sync_leaves_the_completed_fetch_alone()
     {
-        // A full sync carries no tombstones, so it is the only word we get that a completed task has
-        // been deleted elsewhere. The model-side prune can't see a task the model never held.
-        var api = Returning([Done("c1", "Book dentist")]);
-        var engine = NewEngine(api, new InMemorySnapshotStore());
-        await engine.FetchCompletedAsync();
-
-        api.Response = new SyncResponse { SyncToken = "s1", FullSync = true, Changes = [] };
-        await engine.SyncAsync();
-
-        Assert.Empty(engine.Snapshot().CompletedItems);
-    }
-
-    [Fact]
-    public async Task A_full_sync_that_still_lists_a_fetched_task_keeps_it()
-    {
-        var api = Returning([Done("c1", "Book dentist")]);
+        // A full sync returns the live set. A task completed in May is not in it, so treating its
+        // absence as a deletion emptied the entire list — the state the toggle exists to avoid.
+        var api = Returning([Done("old", "Done in May", "2026-05-02T09:00:00Z")]);
         var engine = NewEngine(api, new InMemorySnapshotStore());
         await engine.FetchCompletedAsync();
 
@@ -247,7 +234,7 @@ public class CompletedItemsTests
         {
             SyncToken = "s1",
             FullSync = true,
-            Changes = [Json.Change("items", "c1", """{"id":"c1","content":"Book dentist","checked":true}""")],
+            Changes = [Json.Change("items", "active", """{"id":"active","content":"Still to do"}""")],
         };
         await engine.SyncAsync();
 

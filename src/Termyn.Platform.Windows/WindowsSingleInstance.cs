@@ -45,6 +45,13 @@ public sealed class WindowsSingleInstance : ISingleInstance
     /// </summary>
     private readonly List<string> _buffered = [];
 
+    /// <summary>
+    /// How many unhandled signals to hold. A signal is idempotent — show, or open quick-add — so the
+    /// most recent few say everything the older ones would, and a launcher stuck in a loop during
+    /// startup can't grow this without bound.
+    /// </summary>
+    private const int MaxBufferedSignals = 8;
+
     private readonly TimeSpan _retryDelay;
 
     private Action<string>? _received;
@@ -82,9 +89,10 @@ public sealed class WindowsSingleInstance : ISingleInstance
             }
 
             // Anything that arrived before this subscriber is delivered to it now, so a launch during
-            // startup isn't lost.
+            // startup isn't lost. Guarded, because this runs on the subscriber's own thread and a
+            // throw here would come out of whatever was wiring the handler up.
             foreach (var message in pending)
-                value?.Invoke(message);
+                Invoke(value, message);
         }
         remove
         {
@@ -268,11 +276,29 @@ public sealed class WindowsSingleInstance : ISingleInstance
             subscriber = _received;
             if (subscriber is null)
             {
+                if (_buffered.Count >= MaxBufferedSignals)
+                    _buffered.RemoveAt(0);
                 _buffered.Add(message);
                 return;
             }
         }
 
-        subscriber(message);
+        Invoke(subscriber, message);
+    }
+
+    /// <summary>
+    /// Hands a signal to a subscriber without letting its failure matter. The listening loop only
+    /// catches pipe errors, so anything else thrown here would end it for the life of the process.
+    /// </summary>
+    private static void Invoke(Action<string>? subscriber, string message)
+    {
+        try
+        {
+            subscriber?.Invoke(message);
+        }
+        catch
+        {
+            // A subscriber's failure must not stop us listening for the next signal.
+        }
     }
 }

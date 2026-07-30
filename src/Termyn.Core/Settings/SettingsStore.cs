@@ -29,10 +29,11 @@ public sealed class SettingsStore
     private JsonObject _raw = new();
 
     /// <summary>
-    /// The version the file claimed, kept apart from the settings record. A save must not read it
+    /// The version the file claimed, kept apart from the settings record: a save must not read it
     /// back off a record that may have been defaulted, or a later version's file gets stamped down.
+    /// Null when the file carries a version this build can't read, which is left exactly as it is.
     /// </summary>
-    private int _version = AppSettings.CurrentSchemaVersion;
+    private int? _version = AppSettings.CurrentSchemaVersion;
 
     /// <summary>False when a file exists but couldn't be read, which makes saving unsafe.</summary>
     private bool _readable = true;
@@ -66,9 +67,11 @@ public sealed class SettingsStore
             {
                 // Locked or unreadable — busy, most likely. Run on defaults for this session and
                 // refuse to save, because an overlay onto nothing would write those defaults over a
-                // file whose real contents we never managed to read.
+                // file whose real contents we never managed to read. Set after Reset, which clears it:
+                // the flag means "a file is there and we couldn't read it", nothing else.
+                var settings = Reset();
                 _readable = false;
-                return Reset();
+                return settings;
             }
 
             JsonObject root;
@@ -86,7 +89,7 @@ public sealed class SettingsStore
             Migrate(root);
             _raw = root;
             _readable = true;
-            _version = Math.Max(ReadVersion(root), AppSettings.CurrentSchemaVersion);
+            _version = HasVersion(root) ? ReadVersion(root) : AppSettings.CurrentSchemaVersion;
             return Read(root);
         }
     }
@@ -105,8 +108,13 @@ public sealed class SettingsStore
             var known = JsonSerializer.SerializeToNode(settings, Format) as JsonObject ?? new JsonObject();
 
             // Never lower the version, and take it from the file rather than the record: a record
-            // that fell back to defaults carries our version, not the file's.
-            known["schemaVersion"] = Math.Max(_version, AppSettings.CurrentSchemaVersion);
+            // that fell back to defaults carries our version, not the file's. A version we couldn't
+            // read is left alone entirely — writing ours over it would tell whichever build put it
+            // there that our migrations were its own.
+            if (_version is { } version)
+                known["schemaVersion"] = Math.Max(version, AppSettings.CurrentSchemaVersion);
+            else
+                known.Remove("schemaVersion");
 
             var merged = _raw.DeepClone().AsObject();
             Overlay(merged, known);
@@ -139,6 +147,7 @@ public sealed class SettingsStore
     {
         _raw = new JsonObject();
         _version = AppSettings.CurrentSchemaVersion;
+        _readable = true;
         return new AppSettings();
     }
 
@@ -156,7 +165,7 @@ public sealed class SettingsStore
         var defaults = new AppSettings();
         return new AppSettings
         {
-            SchemaVersion = Int(root, "schemaVersion", defaults.SchemaVersion),
+            SchemaVersion = ReadVersion(root) ?? defaults.SchemaVersion,
             Hotkey = Text(root, "hotkey", defaults.Hotkey),
             HotkeyEnabled = Flag(root, "hotkeyEnabled", defaults.HotkeyEnabled),
             Theme = Choice(root, "theme", defaults.Theme),
@@ -164,7 +173,7 @@ public sealed class SettingsStore
             SyncIntervalSeconds = Int(root, "syncIntervalSeconds", defaults.SyncIntervalSeconds),
             LaunchAtLogin = Flag(root, "launchAtLogin", defaults.LaunchAtLogin),
             CloseToTray = Flag(root, "closeToTray", defaults.CloseToTray),
-            View = ReadView(root["view"] as JsonObject),
+            View = ReadView(Object(root, "view")),
         };
     }
 
@@ -176,8 +185,8 @@ public sealed class SettingsStore
 
         return new ViewState
         {
-            SelectedKey = view["selectedKey"] is JsonValue key && key.TryGetValue(out string? s) ? s : defaults.SelectedKey,
-            CollapsedKeys = view["collapsedKeys"] is JsonArray keys
+            SelectedKey = Value(view, "selectedKey") is { } key && key.TryGetValue(out string? s) ? s : defaults.SelectedKey,
+            CollapsedKeys = Array(view, "collapsedKeys") is { } keys
                 ? keys.OfType<JsonValue>().Select(k => k.ToString()).ToList()
                 : defaults.CollapsedKeys,
             SidebarWidth = Int(view, "sidebarWidth", defaults.SidebarWidth),
@@ -189,25 +198,68 @@ public sealed class SettingsStore
         };
     }
 
+    /// <summary>
+    /// Finds a value by name, ignoring case.
+    /// </summary>
+    /// <remarks>
+    /// Indexing a <see cref="JsonObject"/> is case-sensitive, and the file is documented as
+    /// hand-editable — so <c>"Theme"</c> would be silently ignored and then sit in the file next to
+    /// the <c>"theme"</c> a save writes, the two contradicting each other.
+    /// </remarks>
+    private static JsonValue? Value(JsonObject o, string key) => Find(o, key) as JsonValue;
+
+    /// <summary>The nested object by that name, ignoring case.</summary>
+    private static JsonObject? Object(JsonObject o, string key)
+        => Find(o, key) as JsonObject;
+
+    /// <summary>The array by that name, ignoring case.</summary>
+    private static JsonArray? Array(JsonObject o, string key)
+        => Find(o, key) as JsonArray;
+
+    /// <summary>Any node by that name, ignoring case.</summary>
+    private static JsonNode? Find(JsonObject o, string key)
+    {
+        if (o[key] is { } exact)
+            return exact;
+
+        foreach (var (name, node) in o)
+            if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+                return node;
+
+        return null;
+    }
+
     private static string Text(JsonObject o, string key, string fallback)
-        => o[key] is JsonValue v && v.TryGetValue(out string? s) && s is not null ? s : fallback;
+        => Value(o, key) is { } v && v.TryGetValue(out string? s) && s is not null ? s : fallback;
 
     private static bool Flag(JsonObject o, string key, bool fallback)
-        => o[key] is JsonValue v && v.TryGetValue(out bool b) ? b : fallback;
+        => Value(o, key) is { } v && v.TryGetValue(out bool b) ? b : fallback;
 
     private static int Int(JsonObject o, string key, int fallback)
-        => o[key] is JsonValue v && v.TryGetValue(out int i) ? i : fallback;
+        => Value(o, key) is { } v && v.TryGetValue(out int i) ? i : fallback;
 
     private static int? Nullable(JsonObject o, string key)
-        => o[key] is JsonValue v && v.TryGetValue(out int i) ? i : null;
+        => Value(o, key) is { } v && v.TryGetValue(out int i) ? i : null;
 
+    /// <summary>
+    /// Reads an enum by name. <see cref="Enum.TryParse{T}(string, bool, out T)"/> alone would accept
+    /// <c>"3"</c> and hand back a value the enum doesn't have — which the settings dialog can't show
+    /// and then fails on, and which is written back as a bare number this reader can't read.
+    /// </summary>
     private static T Choice<T>(JsonObject o, string key, T fallback) where T : struct, Enum
-        => o[key] is JsonValue v && v.TryGetValue(out string? s) && Enum.TryParse<T>(s, ignoreCase: true, out var parsed)
+        => Value(o, key) is { } v
+           && v.TryGetValue(out string? s)
+           && Enum.TryParse<T>(s, ignoreCase: true, out var parsed)
+           && Enum.IsDefined(parsed)
             ? parsed
             : fallback;
 
-    private static int ReadVersion(JsonObject root)
-        => root["schemaVersion"] is JsonValue v && v.TryGetValue(out int parsed) ? parsed : 0;
+    /// <summary>The version the file claims, or null when it doesn't claim one this version can read.</summary>
+    private static int? ReadVersion(JsonObject root)
+        => Value(root, "schemaVersion") is { } v && v.TryGetValue(out int parsed) ? parsed : null;
+
+    /// <summary>Whether the file names a version at all, readable or not.</summary>
+    private static bool HasVersion(JsonObject root) => Find(root, "schemaVersion") is not null;
 
     /// <summary>
     /// Copies the known keys over the retained file. Nested objects are merged rather than replaced,
@@ -217,6 +269,16 @@ public sealed class SettingsStore
     {
         foreach (var (key, value) in source)
         {
+            // A hand-edited "Theme" was read case-insensitively, so leaving it in place beside the
+            // "theme" written here would put two spellings in the file contradicting each other.
+            foreach (var variant in target
+                         .Where(p => p.Key != key && string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase))
+                         .Select(p => p.Key)
+                         .ToList())
+            {
+                target.Remove(variant);
+            }
+
             if (value is JsonObject nested && target[key] is JsonObject existing)
             {
                 Overlay(existing, nested);
@@ -233,11 +295,17 @@ public sealed class SettingsStore
     /// </summary>
     private static void Migrate(JsonObject root)
     {
-        if (ReadVersion(root) >= AppSettings.CurrentSchemaVersion)
+        // A version this build can't read is left exactly as it is. Stamping our own number over a
+        // "99.0" or a "99" would tell whichever version wrote it that its migrations had already run
+        // — which is the one thing the version marker exists to prevent.
+        if (ReadVersion(root) is not { } version)
             return;
 
-        // Version 0 is a file written before schemaVersion existed; there is nothing in it that has
-        // moved, so bringing it forward is only a matter of stamping the version.
+        if (version >= AppSettings.CurrentSchemaVersion)
+            return;
+
+        // A file written before schemaVersion existed. Nothing in it has moved, so bringing it
+        // forward is only a matter of stamping the version.
         root["schemaVersion"] = AppSettings.CurrentSchemaVersion;
     }
 

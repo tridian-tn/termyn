@@ -115,6 +115,34 @@ public class NavigationTests
     }
 
     [Fact]
+    public async Task Choosing_the_favourites_copy_steps_on_from_the_favourites_copy()
+    {
+        // The window reaches the presenter by key when a row is clicked. Selecting by view instead
+        // would name the canonical row, and stepping would carry on from the tree copy — skipping
+        // the row the user is actually sitting on.
+        var presenter = await Loaded();
+        var favourite = SidebarKeys.Favourite(SidebarKind.Project, "p1");
+        Assert.True(presenter.SelectByKey(favourite));
+
+        Assert.True(presenter.SelectAdjacent(1));
+
+        Assert.Equal(SidebarKeys.For(SidebarKind.Project, "p1"), presenter.SelectedKey);
+    }
+
+    [Fact]
+    public async Task The_two_copies_of_a_favourite_open_the_same_view()
+    {
+        var presenter = await Loaded();
+
+        presenter.SelectByKey(SidebarKeys.Favourite(SidebarKind.Project, "p1"));
+        var fromFavourites = presenter.Rows.Select(r => r.Id).ToArray();
+
+        presenter.SelectByKey(SidebarKeys.For(SidebarKind.Project, "p1"));
+
+        Assert.Equal(fromFavourites, presenter.Rows.Select(r => r.Id).ToArray());
+    }
+
+    [Fact]
     public async Task A_row_that_disappears_hands_the_selection_back_to_where_the_outline_actually_is()
     {
         var presenter = await Loaded();

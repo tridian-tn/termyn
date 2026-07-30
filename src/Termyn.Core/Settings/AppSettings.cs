@@ -95,6 +95,7 @@ public sealed record ViewState
     /// Compares by what the state holds, not by which list instance holds it. A record compares a
     /// collection by reference, so two view states read back from the same file would otherwise be
     /// unequal — which is exactly the comparison anything checking for changes would want to make.
+    /// The collapsed keys are compared as a set, since that is what they are built from.
     /// </summary>
     public bool Equals(ViewState? other)
         => other is not null
@@ -105,7 +106,8 @@ public sealed record ViewState
            && WindowWidth == other.WindowWidth
            && WindowHeight == other.WindowHeight
            && Maximized == other.Maximized
-           && CollapsedKeys.SequenceEqual(other.CollapsedKeys);
+           && CollapsedKeys.Count == other.CollapsedKeys.Count
+           && !CollapsedKeys.Except(other.CollapsedKeys, StringComparer.Ordinal).Any();
 
     public override int GetHashCode()
     {
@@ -117,8 +119,15 @@ public sealed record ViewState
         hash.Add(WindowWidth);
         hash.Add(WindowHeight);
         hash.Add(Maximized);
+
+        // Order-independent, to match the comparison: the keys come from a set walked in sidebar
+        // order, so renaming a project reorders them without changing what is collapsed.
+        hash.Add(CollapsedKeys.Count);
+        var keys = 0;
         foreach (var key in CollapsedKeys)
-            hash.Add(key);
+            keys ^= StringComparer.Ordinal.GetHashCode(key);
+        hash.Add(keys);
+
         return hash.ToHashCode();
     }
 }

@@ -1498,13 +1498,10 @@ public sealed class SyncEngine
         {
             var live = response.Changes.Select(c => new ResourceKey(c.ResourceType, c.Id)).ToHashSet();
 
-            // A full sync carries no tombstones, so it is the only word we get that a fetched
-            // completed task has been deleted server-side. The prune below only walks what the model
-            // holds, and a fetch-only task is never in there.
-            foreach (var id in _completed.Keys.ToList())
-                if (!live.Contains(new ResourceKey(ResourceType.Items, id)))
-                    _completed.Remove(id);
-
+            // Deliberately not pruning the on-demand completed fetch here. A full sync returns the
+            // live set, and a task completed weeks ago is not in it — so treating absence as deletion
+            // emptied the whole list on any full sync, which reads as "you have completed nothing".
+            // A completed task that really is deleted arrives as a tombstone, which Forget handles.
             foreach (var type in ResourceType.All)
             {
                 foreach (var id in Model.Keys(type))
