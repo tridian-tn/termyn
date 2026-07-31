@@ -26,6 +26,11 @@ public class LinksTests
     [InlineData("https://github.com.evil.example/termyn")]
     [InlineData("https://github.com@evil.example/termyn")]
     [InlineData("https://app.todoist.com.evil.example/app")]
+    [InlineData("https://github.com/someone-else/termyn/releases")]                  // not this project
+    [InlineData("https://github.com/x/y/releases/download/v9/Termyn-setup.exe")]     // an arbitrary binary
+    [InlineData("https://github.com/login/oauth/authorize?client_id=x&scope=repo")]  // an account prompt
+    [InlineData("https://github.com/tridian-tn/termyn")]        // the repo itself, not a page under it
+    [InlineData("https://app.todoist.com/oauth/authorize?client_id=x")]
     [InlineData("")]
     [InlineData(null)]
     public void A_link_that_is_not_ours_is_not_opened(string? url)
@@ -37,6 +42,16 @@ public class LinksTests
     [InlineData("https://app.todoist.com/app/filters")]
     public void A_link_that_is_ours_is_opened(string url)
         => Assert.Equal(url, Links.Openable(url));
+
+    [Fact]
+    public void The_host_alone_is_not_enough_to_be_worth_opening()
+    {
+        // github.com isn't the project's own host — it's shared with every account on the site, and
+        // it serves release assets, so a host check alone would still let a tampered response offer
+        // an arbitrary unsigned download from a URL the dialog never shows.
+        Assert.Null(Links.Openable("https://github.com/anyone/anything/releases/download/v1/setup.exe"));
+        Assert.NotNull(Links.Openable("https://github.com/tridian-tn/termyn/releases/tag/v1.4.0"));
+    }
 
     [Fact]
     public void Both_of_the_places_the_app_offers_to_open_are_openable()
