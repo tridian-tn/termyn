@@ -7,6 +7,11 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>Termyn</AssemblyName>
     <RootNamespace>Termyn.App.Windows</RootNamespace>
+    <!-- Framework-dependent and precompiled ahead of time: ReadyToRun is what keeps the cold start
+         inside its budget, since without it every method on the startup path is jitted on the way. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

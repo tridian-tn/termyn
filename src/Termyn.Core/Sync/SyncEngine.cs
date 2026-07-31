@@ -19,7 +19,8 @@ public sealed record ModelSnapshot(
     DateOnly Today,
     TimeZoneInfo TimeZone,
     int PendingCount,
-    int FailedCount)
+    int FailedCount,
+    IReadOnlyList<TaskItem> CompletedItems)
 {
     /// <summary>The Inbox, which tasks fall back to when they name no project.</summary>
     public string? InboxProjectId => Projects.FirstOrDefault(p => p.IsInboxProject)?.Id;
@@ -69,6 +70,13 @@ public sealed class SyncEngine
     /// arrive once, so they are held here and applied as soon as the blocking command clears.
     /// </summary>
     private readonly List<ResourceKey> _deferredDeletes = [];
+
+    /// <summary>
+    /// Completed tasks fetched on demand, keyed by id. Held only for as long as the user is looking
+    /// at them: incremental sync never mentions completed tasks, so there would be nothing to tell
+    /// this copy when it went stale, and nothing to tombstone it when the task was deleted.
+    /// </summary>
+    private readonly Dictionary<string, JsonObject> _completed = new(StringComparer.Ordinal);
 
     /// <summary>Uuids of destructive writes, most recent last, that <see cref="Undo"/> can reverse.</summary>
     private readonly List<string> _undoStack = [];
@@ -136,8 +144,14 @@ public sealed class SyncEngine
         lock (_gate)
         {
             var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
+
+            // Projected once and shared with the completed list. Reading the items twice meant
+            // parsing every task's JSON twice on every publish, and a publish happens on every
+            // keystroke, every write and every sync.
+            var items = Model.Items().ToList();
+
             return new ModelSnapshot(
-                Model.Items().ToList(),
+                items,
                 Model.Projects().ToList(),
                 Model.Sections().ToList(),
                 Model.Labels().ToList(),
@@ -147,8 +161,33 @@ public sealed class SyncEngine
                 DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime),
                 zone,
                 _outbox.Count(c => c.State == OutboxState.Pending),
-                _outbox.Count(c => c.State == OutboxState.Failed));
+                _outbox.Count(c => c.State == OutboxState.Failed),
+                CompletedItems(items));
         }
+    }
+
+    /// <summary>
+    /// Every completed task known: the ones the model still holds — a task ticked off here stays in
+    /// the model, flagged — plus the ones fetched on demand. The model's copy wins where both have
+    /// one, since only it has the local writes applied.
+    /// </summary>
+    private List<TaskItem> CompletedItems(List<TaskItem> all)
+    {
+        // Nothing fetched, so the completed set is whatever the model itself is holding.
+        if (_completed.Count == 0)
+            return all.Where(i => i.Completed).ToList();
+
+        var items = all.Where(i => i.Completed).ToList();
+
+        // Every id the model holds, not just the completed ones: a fetched task the model has as
+        // active was reopened since the fetch, and must not come back under its old state.
+        var known = all.Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var (id, json) in _completed)
+            if (!known.Contains(id))
+                items.Add(Projections.ToTaskItem(json));
+
+        return items;
     }
 
     public int PendingCount
@@ -187,6 +226,7 @@ public sealed class SyncEngine
             _deferredDeletes.AddRange(snapshot.DeferredDeletes);
             _undoStack.Clear();
             _undoable.Clear();
+            _completed.Clear();
 
             foreach (var r in snapshot.Resources)
             {
@@ -298,6 +338,106 @@ public sealed class SyncEngine
             ProcessCommandResults(response.SyncStatus, pending);
             ApplyServerChanges(response);
         }
+    }
+
+    // ---- Completed tasks (on demand, never persisted) --------------------------------------------
+
+    /// <summary>Pages a completed-items fetch takes before giving up on an unbounded history.</summary>
+    private const int MaxCompletedPages = 10;
+
+    /// <summary>What a completed-items fetch brought back.</summary>
+    /// <param name="Count">Completed tasks now held.</param>
+    /// <param name="Truncated">
+    /// True when the account has more than the fetch was willing to page through, so the caller can
+    /// say the list is the most recent rather than all of them.
+    /// </param>
+    public sealed record CompletedFetch(int Count, bool Truncated);
+
+    /// <summary>
+    /// Fetches recently completed tasks across the account. Results are held in memory only — they
+    /// are never written to the snapshot, because nothing would ever arrive to correct or remove them.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not narrowed to the view being looked at, even though the endpoint would take a
+    /// project: the same fetch then serves every view, including the label, filter and smart views
+    /// the endpoint has no way to express. Which of them are shown is decided locally, by the same
+    /// predicate that decides it for active tasks.
+    /// </remarks>
+    public async Task<CompletedFetch> FetchCompletedAsync(CancellationToken ct = default)
+    {
+        string token;
+        int generation;
+        lock (_gate)
+        {
+            token = _secrets.GetToken()
+                    ?? throw new InvalidOperationException("No Todoist token is stored.");
+            generation = _generation;
+        }
+
+        var until = _clock.UtcNow;
+        var since = until - CompletedQuery.MaxWindow;
+
+        var fetched = new List<ResourceChange>();
+        string? cursor = null;
+        var truncated = false;
+
+        for (var page = 0; page < MaxCompletedPages; page++)
+        {
+            CompletedPage result;
+            try
+            {
+                result = await _api.GetCompletedAsync(token, new CompletedQuery(since, until, cursor), ct);
+            }
+            catch (TodoistAuthException)
+            {
+                lock (_gate)
+                {
+                    _secrets.ClearToken();
+                    PurgeLocal();
+                }
+                throw;
+            }
+
+            fetched.AddRange(result.Items);
+            cursor = result.NextCursor;
+
+            if (cursor is null)
+                break;
+
+            // The last page allowed still reported more behind it.
+            if (page == MaxCompletedPages - 1)
+                truncated = true;
+        }
+
+        lock (_gate)
+        {
+            // Wiped while this was in flight: these belong to an account we no longer hold.
+            if (generation != _generation)
+                return new CompletedFetch(0, false);
+
+            _completed.Clear();
+            foreach (var change in fetched)
+                _completed[change.Id] = change.Json;
+
+            return new CompletedFetch(CompletedItems(Model.Items().ToList()).Count, truncated);
+        }
+    }
+
+    /// <summary>Drops the fetched completed tasks, leaving only what the model itself holds.</summary>
+    public void ClearCompleted()
+    {
+        lock (_gate)
+            _completed.Clear();
+    }
+
+    /// <summary>
+    /// Drops a deleted task from the completed fetch. A tombstone arrives once, and the fetch is the
+    /// only copy that would otherwise keep showing it.
+    /// </summary>
+    private void Forget(string type, string id)
+    {
+        if (type == ResourceType.Items)
+            _completed.Remove(id);
     }
 
     // ---- Optimistic writes (field-level) ---------------------------------------------------------
@@ -492,18 +632,25 @@ public sealed class SyncEngine
     }
 
     /// <summary>Reopens a completed task and queues an <c>item_uncomplete</c>.</summary>
+    /// <remarks>
+    /// The task may only exist in the on-demand completed fetch, which is where a long-completed one
+    /// comes from. Reopening it makes it an ordinary active task, so it moves into the model — and
+    /// into the snapshot with it, since from here on incremental sync will keep it current.
+    /// </remarks>
     public void ReopenItem(string id)
     {
         lock (_gate)
         {
-            var existing = Model.Get(ResourceType.Items, id);
+            var existing = Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id);
             JsonObject? reopened = null;
-            string? prior = null;
+
+            // Only what the model already held counts as prior state. A fetched task had none, and
+            // recording one would have undo write a completed task into the snapshot.
+            var prior = Model.Get(ResourceType.Items, id)?.ToJsonString();
             StoredResource[] upserts = [];
 
             if (existing is not null)
             {
-                prior = existing.ToJsonString();
                 reopened = existing.DeepClone().AsObject();
                 reopened["checked"] = false;
                 upserts = [new StoredResource(ResourceType.Items, id, reopened.ToJsonString())];
@@ -512,10 +659,19 @@ public sealed class SyncEngine
             Persist("item_uncomplete", new JsonObject { ["id"] = id }, null, prior, upserts, []);
             if (reopened is not null)
                 Model.Upsert(ResourceType.Items, id, reopened);
+
+            // It is active now, so the completed list has no further claim on it.
+            _completed.Remove(id);
         }
     }
 
     /// <summary>Deletes a task optimistically and queues an <c>item_delete</c>.</summary>
+    /// <remarks>
+    /// The task may only exist in the on-demand completed fetch, which the model never held. The
+    /// command still goes, so it has to leave the fetch too — otherwise the row stays on screen after
+    /// the server has removed it, and pressing delete again queues a second command for an id that no
+    /// longer exists, which retries to the ceiling and sits in the outbox as a permanent failure.
+    /// </remarks>
     public void DeleteItem(string id)
     {
         lock (_gate)
@@ -525,6 +681,8 @@ public sealed class SyncEngine
             ResourceKey[] deletes = existing is not null ? [new ResourceKey(ResourceType.Items, id)] : [];
 
             var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, [], deletes);
+            Forget(ResourceType.Items, id);
+
             if (existing is not null)
             {
                 Model.Remove(ResourceType.Items, id);
@@ -1311,6 +1469,7 @@ public sealed class SyncEngine
 
             if (change.IsDeleted)
             {
+                Forget(change.ResourceType, change.Id);
                 if (Model.Remove(change.ResourceType, change.Id))
                     deletes.Add(new ResourceKey(change.ResourceType, change.Id));
             }
@@ -1339,6 +1498,10 @@ public sealed class SyncEngine
         {
             var live = response.Changes.Select(c => new ResourceKey(c.ResourceType, c.Id)).ToHashSet();
 
+            // Deliberately not pruning the on-demand completed fetch here. A full sync returns the
+            // live set, and a task completed weeks ago is not in it — so treating absence as deletion
+            // emptied the whole list on any full sync, which reads as "you have completed nothing".
+            // A completed task that really is deleted arrives as a tombstone, which Forget handles.
             foreach (var type in ResourceType.All)
             {
                 foreach (var id in Model.Keys(type))
@@ -1359,6 +1522,7 @@ public sealed class SyncEngine
             if (pendingKeys.Contains(deferred) || reorderedKeys.Contains(deferred))
                 continue;
             _deferredDeletes.RemoveAt(i);
+            Forget(deferred.Type, deferred.Id);
             if (Model.Remove(deferred.Type, deferred.Id))
                 deletes.Add(deferred);
         }
@@ -1522,6 +1686,7 @@ public sealed class SyncEngine
         _deferredDeletes.Clear();
         _undoStack.Clear();
         _undoable.Clear();
+        _completed.Clear();
         _store.Purge();
     }
 

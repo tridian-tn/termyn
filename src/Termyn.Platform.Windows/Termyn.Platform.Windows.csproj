@@ -2,11 +2,11 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- The tray icon is a NotifyIcon and the hotkey needs a message pump, so the platform layer
+         sits on WinForms too. It stays free of the app's own windows and presenters. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Termyn.Core\Termyn.Core.csproj" />

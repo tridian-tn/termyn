@@ -3,6 +3,7 @@ using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
 using Termyn.Core.Model;
+using Termyn.Core.Platform;
 using Termyn.Core.Sync;
 
 namespace Termyn.Presentation;
@@ -17,7 +18,8 @@ public sealed record TaskRow(
     IReadOnlyList<string> Labels,
     int Depth = 0,
     bool IsRecurring = false,
-    int ReminderCount = 0);
+    int ReminderCount = 0,
+    bool Completed = false);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -34,6 +36,7 @@ public sealed class MainPresenter
 {
     private readonly SyncEngine _engine;
     private readonly QuickAddParser _parser;
+    private readonly IClock _clock;
 
     /// <summary>
     /// Serialises publishing. Intents run on the UI thread while the background sync publishes from
@@ -43,27 +46,70 @@ public sealed class MainPresenter
     private readonly Lock _publishing = new();
 
     private IReadOnlyList<TaskRow> _allRows = [];
-    private IReadOnlyList<TaskRow> _searchableRows = [];
 
-    public MainPresenter(SyncEngine engine, QuickAddParser parser)
+    /// <summary>
+    /// Every task in the account as rows, for search. Built on the first keystroke rather than on
+    /// every publish: it is a second full projection of the account, and most publishes happen with
+    /// the search box empty.
+    /// </summary>
+    private IReadOnlyList<TaskRow>? _searchableRows;
+
+    /// <summary>The snapshot the current rows came from, so the search rows can be built from it later.</summary>
+    private ModelSnapshot? _projectedFrom;
+
+    /// <summary>When the last sync succeeded, for "Synced 12s ago". Null until one has.</summary>
+    private DateTimeOffset? _lastSyncedAt;
+
+    /// <summary>When a rate-limited loop may try again, so the status bar can count it down.</summary>
+    private DateTimeOffset? _pausedUntil;
+
+    /// <summary>Consecutive rate-limit refusals, which is what the backoff grows on.</summary>
+    private int _rateLimitStreak;
+
+    private bool _syncing;
+    private bool _reconnectNeeded;
+
+    public MainPresenter(SyncEngine engine, QuickAddParser parser, IClock? clock = null)
     {
         _engine = engine;
         _parser = parser;
+        _clock = clock ?? new SystemClock();
         Publish(); // reflect whatever the engine already has loaded
     }
 
     /// <summary>Raised whenever the sidebar, rows or status have been refreshed.</summary>
     public event Action? RowsChanged;
 
+    /// <summary>
+    /// Raised when only <see cref="Status"/> has moved. Kept apart from <see cref="RowsChanged"/> so
+    /// a sync starting and finishing doesn't repaint a five-thousand-row outline to change one word.
+    /// </summary>
+    public event Action? StatusChanged;
+
     public IReadOnlyList<TaskRow> Rows { get; private set; } = [];
 
     public IReadOnlyList<SidebarNode> Sidebar { get; private set; } = [];
+
+    /// <summary>Active tasks due today or overdue — what the tray icon badges.</summary>
+    public int DueToday { get; private set; }
 
     public ViewSelection Selection { get; private set; } = ViewSelection.Default;
 
     public string Status { get; private set; } = string.Empty;
 
+    /// <summary>Where the sync loop stands, for a status bar that wants to style it rather than print it.</summary>
+    public SyncStatus SyncStatus { get; private set; } = new(SyncState.Never);
+
     public bool IsOffline { get; private set; }
+
+    /// <summary>Whether the outline is also showing completed tasks.</summary>
+    public bool ShowingCompleted { get; private set; }
+
+    /// <summary>
+    /// True when the account has more completed history than the fetch was willing to page through,
+    /// so the view can say the list is the most recent rather than all of it.
+    /// </summary>
+    public bool CompletedTruncated { get; private set; }
 
     public bool CanUndo => _engine.CanUndo;
 
@@ -94,20 +140,41 @@ public sealed class MainPresenter
     }
 
     /// <summary>Reconciles with the server and republishes, keeping the current view if offline.</summary>
-    /// <returns>True when writes are still queued, so the caller can come back sooner.</returns>
-    public async Task<bool> SyncAsync(CancellationToken ct = default)
+    /// <returns>What the sync loop should do next — come straight back, or hold off.</returns>
+    public async Task<SyncOutcome> SyncAsync(CancellationToken ct = default)
     {
+        TimeSpan? pause = null;
+
+        _syncing = true;
+        PublishStatus();
+
         try
         {
             await _engine.SyncAsync(ct);
             IsOffline = false;
+            _lastSyncedAt = _clock.UtcNow;
+            _pausedUntil = null;
+            _rateLimitStreak = 0;
+        }
+        catch (TodoistRateLimitException ex)
+        {
+            // Being refused is not being offline: the cached view is current, and the only thing to
+            // do is wait. Honour what the server asked for, and grow our own wait when it didn't say.
+            pause = Pause(ex);
         }
         catch (TodoistNetworkException)
         {
             IsOffline = true;
         }
+        catch (TodoistAuthException)
+        {
+            _reconnectNeeded = true;
+            throw;
+        }
         finally
         {
+            _syncing = false;
+
             // A rejected token empties the cache and then propagates, so this has to publish on the
             // way out too: otherwise the view keeps the last account's tasks, and its plan keeps
             // saying reminders are allowed.
@@ -115,7 +182,45 @@ public sealed class MainPresenter
         }
 
         // Only ask for another round while the network is answering, or the loop would spin.
-        return !IsOffline && _engine.PendingCount > 0;
+        return new SyncOutcome(!IsOffline && pause is null && _engine.PendingCount > 0, pause);
+    }
+
+    /// <summary>Where the backoff stops growing: a shade over four minutes, inside the spec's cadence.</summary>
+    private const int MaxBackoffSteps = 8;
+
+    /// <summary>The longest Termyn will hold off for, however long the server asks.</summary>
+    private static readonly TimeSpan MaxPause = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Notes a rate limit and works out how long to wait for.
+    /// </summary>
+    /// <remarks>
+    /// Capped, including when the server names the figure. Nothing wakes the loop out of a pause —
+    /// that is the point of it — so an unbounded <c>Retry-After</c> from a misbehaving proxy would
+    /// park background sync, F5 and the tray's "Sync now" for the rest of the session, with queued
+    /// writes and no way to flush them short of restarting.
+    /// </remarks>
+    private TimeSpan Pause(TodoistRateLimitException ex)
+    {
+        _rateLimitStreak = Math.Min(_rateLimitStreak + 1, MaxBackoffSteps);
+
+        var asked = ex.RetryAfter ?? Backoff(_rateLimitStreak);
+        var pause = asked > MaxPause ? MaxPause : asked;
+
+        _pausedUntil = _clock.UtcNow + pause;
+        IsOffline = false;
+        return pause;
+    }
+
+    /// <summary>
+    /// How long to wait after a rate limit the server gave no advice about. Doubles per consecutive
+    /// refusal, with jitter so several clients that started together don't come back together.
+    /// </summary>
+    private static TimeSpan Backoff(int step)
+    {
+        var seconds = Math.Min(Math.Pow(2, step), 300);
+        var jitter = Random.Shared.NextDouble() * 0.25 * seconds;
+        return TimeSpan.FromSeconds(seconds + jitter);
     }
 
     /// <summary>
@@ -148,6 +253,13 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// The preview line for some capture text, empty when there is nothing typed. Both capture boxes
+    /// show the same thing, so neither of them owns the wording or the blank rule.
+    /// </summary>
+    public string PreviewText(string? text)
+        => string.IsNullOrWhiteSpace(text) ? string.Empty : CapturePreviewText.For(Preview(text));
+
     /// <summary>Shows what the local parser understood, for the capture preview.</summary>
     public CapturePreview Preview(string text)
     {
@@ -158,13 +270,134 @@ public sealed class MainPresenter
             parse.SectionName is null || sectionId is not null);
     }
 
+    // ---- Completed tasks -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Shows or hides completed tasks. Turning it on fetches them — incremental sync never carries
+    /// them — and turning it off drops the fetch, since nothing would ever tell it that it had gone
+    /// stale.
+    /// </summary>
+    /// <returns>False when the fetch couldn't be made, so the caller can say why.</returns>
+    public async Task<bool> ToggleCompletedAsync(CancellationToken ct = default)
+    {
+        if (ShowingCompleted)
+        {
+            ShowingCompleted = false;
+            CompletedTruncated = false;
+            _engine.ClearCompleted();
+            Publish();
+            return true;
+        }
+
+        try
+        {
+            var fetch = await _engine.FetchCompletedAsync(ct);
+            CompletedTruncated = fetch.Truncated;
+            ShowingCompleted = true;
+            IsOffline = false;
+        }
+        catch (TodoistRateLimitException ex)
+        {
+            // Being refused is not being unreachable: the cached view is current and the network is
+            // fine. Reported as offline it would have read as "showing cached", which is wrong.
+            Pause(ex);
+            return false;
+        }
+        catch (TodoistNetworkException)
+        {
+            // Nothing to show and no way to get it. Left off rather than switched on and empty,
+            // which would read as "you have completed nothing".
+            IsOffline = true;
+            return false;
+        }
+        catch (TodoistAuthException)
+        {
+            // The engine cleared the token and purged the cache before rethrowing, so the rows on
+            // screen belong to an account we no longer hold. Publishing is what takes them off.
+            _reconnectNeeded = true;
+            throw;
+        }
+        finally
+        {
+            Publish();
+        }
+
+        return true;
+    }
+
+    /// <summary>Reopens a completed task, moving it back among the active ones.</summary>
+    public void Reopen(string id)
+    {
+        _engine.ReopenItem(id);
+        Publish();
+    }
+
     // ---- Navigation ----------------------------------------------------------------------------
 
     public void Select(ViewSelection selection)
     {
         Selection = selection;
+        SelectedKey = selection.Key;
         Publish();
     }
+
+    /// <summary>
+    /// The sidebar row that is selected, which is not the same as the selection: a favourited project
+    /// appears twice, and the two rows are told apart by their key alone.
+    /// </summary>
+    public string SelectedKey { get; private set; } = ViewSelection.Default.Key;
+
+    /// <summary>
+    /// Opens the view a sidebar key names — how a remembered selection is restored across a restart.
+    /// </summary>
+    /// <returns>False when nothing in the sidebar has that key, so the caller can leave things be.</returns>
+    public bool SelectByKey(string? key)
+    {
+        if (key is null || Sidebar.FirstOrDefault(n => n.Key == key) is not { } node || node.Kind == SidebarKind.Header)
+            return false;
+
+        Selection = SelectionOf(node);
+        SelectedKey = node.Key;
+        Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Moves to the next or previous view, skipping the group labels and stopping at either end.
+    /// </summary>
+    /// <remarks>
+    /// Stepped by key rather than by selection, so the Favourites copy of a project is a row of its
+    /// own: stepping by selection jumped to that project's other copy down in the tree, and there was
+    /// no way to walk through the Favourites group at all.
+    /// </remarks>
+    /// <returns>False when there was nowhere to move to.</returns>
+    public bool SelectAdjacent(int offset)
+    {
+        var rows = Sidebar.Where(n => n.Kind != SidebarKind.Header).ToList();
+        if (rows.Count == 0)
+            return false;
+
+        var current = rows.FindIndex(n => n.Key == SelectedKey);
+        var next = current < 0 ? 0 : Math.Clamp(current + offset, 0, rows.Count - 1);
+        if (next == current)
+            return false;
+
+        var node = rows[next];
+        Selection = SelectionOf(node);
+        SelectedKey = node.Key;
+        Publish();
+        return true;
+    }
+
+    /// <summary>The view a sidebar row opens.</summary>
+    public static ViewSelection SelectionOf(SidebarNode node) => node.Kind switch
+    {
+        SidebarKind.SmartView => ViewSelection.Of(node.View ?? SmartView.Today),
+        SidebarKind.Section => ViewSelection.OfSection(node.Id),
+        SidebarKind.Label => ViewSelection.OfLabel(node.Id),
+        SidebarKind.Filter => ViewSelection.OfFilter(node.Id),
+        _ => ViewSelection.OfProject(node.Id),
+    };
 
     public void Search(string query)
     {
@@ -592,11 +825,17 @@ public sealed class MainPresenter
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
+
+            // The selected row can go — deleted here, or removed by a sync — and every path that
+            // falls the selection back to a default would otherwise have to remember to move the key
+            // with it.
+            if (Sidebar.Count > 0 && Sidebar.All(n => n.Key != SelectedKey))
+                SelectedKey = Selection.Key;
+
             _allRows = BuildOutline(snapshot, scoped: true);
 
-            // Search runs over everything loaded, not just the view in front of you — otherwise
-            // Ctrl+F from Today silently misses most of the account.
-            _searchableRows = BuildOutline(snapshot, scoped: false);
+            _projectedFrom = snapshot;
+            _searchableRows = null;
 
             ApplyFilter(snapshot.PendingCount, snapshot.FailedCount);
         }
@@ -632,10 +871,18 @@ public sealed class MainPresenter
         var bySection = new Dictionary<string, int>(StringComparer.Ordinal);
         var byLabel = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
+        var horizon = today.AddDays(SmartViews.UpcomingDays);
+
         foreach (var item in active)
         {
-            if (SmartViews.IsToday(item, today, snapshot.TimeZone)) todayCount++;
-            if (SmartViews.IsUpcoming(item, today, snapshot.TimeZone)) upcomingCount++;
+            // Resolved once and compared twice. Asking the two predicates separately parsed every
+            // task's due date twice per publish, and a publish happens on every keystroke.
+            if (SmartViews.DueOn(item, snapshot.TimeZone) is { } due)
+            {
+                if (due <= today) todayCount++;
+                else if (due <= horizon) upcomingCount++;
+            }
+
             if (SmartViews.IsInbox(item, inbox)) inboxCount++;
 
             if (item.ProjectId is { } itemProject)
@@ -646,6 +893,10 @@ public sealed class MainPresenter
             foreach (var label in item.Labels)
                 byLabel[label] = byLabel.GetValueOrDefault(label) + 1;
         }
+
+        // Kept for the tray badge, which wants the same number the sidebar shows and shouldn't have
+        // to read it back out of a rendered row label.
+        DueToday = todayCount;
 
         var nodes = new List<SidebarNode>
         {
@@ -805,6 +1056,10 @@ public sealed class MainPresenter
         var rows = new List<TaskRow>(visible.Count);
         var emitted = new HashSet<string>();
         Emit(string.Empty, 0);
+
+        if (ShowingCompleted)
+            rows.AddRange(CompletedRows(snapshot, selected, Row));
+
         return rows;
 
         void Emit(string parentKey, int depth)
@@ -832,7 +1087,39 @@ public sealed class MainPresenter
             item.Labels,
             depth,
             item.IsRecurring,
-            reminderCounts.GetValueOrDefault(item.Id));
+            reminderCounts.GetValueOrDefault(item.Id),
+            item.Completed);
+    }
+
+    /// <summary>
+    /// The completed tasks belonging to the current view, most recently finished first, flat. They
+    /// go below the active ones rather than in among them: a task's place in the outline comes from
+    /// its sibling order, which stops meaning anything once it is done.
+    /// </summary>
+    /// <summary>
+    /// Stands in for the completion time of a task ticked off here and not yet acked. Sorts above
+    /// every real ISO timestamp, which is where a task finished a moment ago belongs.
+    /// </summary>
+    private const string JustNow = "￿";
+
+    private static List<TaskRow> CompletedRows(
+        ModelSnapshot snapshot,
+        Func<TaskItem, bool> selected,
+        Func<TaskItem, int, TaskRow> row)
+    {
+        var archived = snapshot.Projects.Where(p => p.IsArchived).Select(p => p.Id).ToHashSet();
+
+        return snapshot.CompletedItems
+            .Where(i => i.Id.Length > 0 && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
+            .Where(selected)
+            // Ordinal on the server's own ISO timestamps, which sort as text. A task ticked off here
+            // has none until the server acks, and it was finished a moment ago — so it stands in for
+            // a timestamp that sorts above every real one, rather than the empty string, which would
+            // drop it to the bottom of three months of history.
+            .OrderByDescending(i => i.CompletedAt ?? JustNow, StringComparer.Ordinal)
+            .ThenBy(i => i.Id, StringComparer.Ordinal)
+            .Select(i => row(i, 0))
+            .ToList();
     }
 
     /// <summary>
@@ -906,7 +1193,7 @@ public sealed class MainPresenter
             // Matches rarely share a parent, so a filtered result is a flat list rather than a
             // tree with most of its structure missing.
             var q = SearchQuery.Trim();
-            Rows = _searchableRows
+            Rows = Searchable()
                 .Where(r =>
                     r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -915,13 +1202,112 @@ public sealed class MainPresenter
                 .ToList();
         }
 
-        Status = string.Join(" · ",
+        Status = ComposeStatus(pending, failed);
+    }
+
+    /// <summary>
+    /// Every task as rows, for search. Search runs over everything loaded rather than just the view
+    /// in front of you — otherwise Ctrl+F from Today silently misses most of the account — but it
+    /// costs a full projection, so it waits until something is actually typed.
+    /// </summary>
+    private IReadOnlyList<TaskRow> Searchable()
+        => _searchableRows ??= _projectedFrom is { } snapshot ? BuildOutline(snapshot, scoped: false) : [];
+
+    /// <summary>The whole status line: what is on screen, then where the sync loop stands.</summary>
+    private string ComposeStatus(int pending, int failed)
+    {
+        SyncStatus = BuildSyncStatus(pending, failed);
+
+        return string.Join(" · ",
             new[]
             {
                 Rows.Count == 1 ? "1 task" : $"{Rows.Count} tasks",
-                IsOffline ? "offline (showing cached)" : null,
-                pending > 0 ? $"{pending} pending" : null,
-                failed > 0 ? $"{failed} failed" : null,
+                CompletedTruncated ? "most recent completed only" : null,
+                SyncStatus.Describe(),
             }.Where(s => s is not null));
+    }
+
+    private SyncStatus BuildSyncStatus(int pending, int failed)
+    {
+        var now = _clock.UtcNow;
+
+        // The states are mutually exclusive and ordered by what the user can do about them: a
+        // rejected token needs attention whatever else is true, and a sync in flight is the most
+        // recent thing that happened.
+        if (_reconnectNeeded)
+            return new SyncStatus(SyncState.ReconnectNeeded, null, null, pending, failed);
+
+        if (_syncing)
+            return new SyncStatus(SyncState.Syncing, null, null, pending, failed);
+
+        if (_pausedUntil is { } until && until > now)
+            return new SyncStatus(SyncState.Paused, null, until - now, pending, failed);
+
+        if (IsOffline)
+            return new SyncStatus(SyncState.Offline, null, null, pending, failed);
+
+        return _lastSyncedAt is { } synced
+            ? new SyncStatus(SyncState.Synced, now - synced, null, pending, failed)
+            : new SyncStatus(SyncState.Never, null, null, pending, failed);
+    }
+
+    /// <summary>
+    /// Refreshes the status line alone, leaving the rows exactly as they are — and leaving anything
+    /// mid-edit in the view undisturbed, which a full publish would not.
+    /// </summary>
+    public void PublishStatus()
+    {
+        lock (_publishing)
+            Status = ComposeStatus(_engine.PendingCount, _engine.FailedCount);
+
+        StatusChanged?.Invoke();
+    }
+
+    // ---- Command palette -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The palette's entries, ranked against what has been typed. Actions come before places when
+    /// nothing has been typed, since an empty palette is being browsed rather than searched.
+    /// </summary>
+    public IReadOnlyList<PaletteEntry> Palette(string? query)
+        => Fuzzy.Rank(PaletteEntries(), query);
+
+    private IEnumerable<PaletteEntry> PaletteEntries()
+    {
+        yield return new PaletteEntry(PaletteKind.Action, "New task", "action", Command: PaletteCommand.NewTask);
+        yield return new PaletteEntry(PaletteKind.Action, "New project", "action", Command: PaletteCommand.NewProject);
+        yield return new PaletteEntry(PaletteKind.Action, "New section", "action", Command: PaletteCommand.NewSection);
+        yield return new PaletteEntry(PaletteKind.Action, "Sync now", "action", Command: PaletteCommand.SyncNow);
+        yield return new PaletteEntry(
+            PaletteKind.Action,
+            ShowingCompleted ? "Hide completed tasks" : "Show completed tasks",
+            "action",
+            Command: PaletteCommand.ToggleCompleted);
+        yield return new PaletteEntry(PaletteKind.Action, "Undo", "action", Command: PaletteCommand.Undo);
+        yield return new PaletteEntry(PaletteKind.Action, "Settings", "action", Command: PaletteCommand.Settings);
+
+        // Built from the sidebar rather than the model, so the palette reaches exactly what the tree
+        // does — same names, same order, and nothing archived or unaddressable.
+        foreach (var node in Sidebar)
+        {
+            var entry = node.Kind switch
+            {
+                SidebarKind.SmartView when node.View is { } view
+                    => new PaletteEntry(PaletteKind.SmartView, node.Label, "view", ViewSelection.Of(view)),
+                SidebarKind.Project
+                    => new PaletteEntry(PaletteKind.Project, node.Label, "project", ViewSelection.OfProject(node.Id)),
+                SidebarKind.Section
+                    => new PaletteEntry(PaletteKind.Section, node.Label, "section", ViewSelection.OfSection(node.Id)),
+                SidebarKind.Label
+                    => new PaletteEntry(PaletteKind.Label, node.Label, "label", ViewSelection.OfLabel(node.Id)),
+                SidebarKind.Filter
+                    => new PaletteEntry(PaletteKind.Filter, node.Label, "filter", ViewSelection.OfFilter(node.Id)),
+                _ => null,
+            };
+
+            // A favourited project is in the sidebar twice; the palette lists it once.
+            if (entry is not null && node.Key == SidebarKeys.For(node.Kind, node.Id))
+                yield return entry;
+        }
     }
 }

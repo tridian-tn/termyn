@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- No Optimize override here: it would only optimise this project, not the Core and Presentation
+         assemblies actually being measured, which follow the solution's configuration. A default
+         `dotnet test` therefore measures unoptimised code, which makes these gates conservative
+         rather than wrong — anything that passes there passes in Release. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Termyn.Core\Termyn.Core.csproj" />
+    <ProjectReference Include="..\..\src\Termyn.Presentation\Termyn.Presentation.csproj" />
+    <ProjectReference Include="..\Termyn.TestSupport\Termyn.TestSupport.csproj" />
+  </ItemGroup>
+
+</Project>

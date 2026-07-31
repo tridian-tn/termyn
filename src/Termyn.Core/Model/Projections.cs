@@ -22,6 +22,7 @@ public static class Projections
             Priority = PriorityMap.FromApi(JsonRead.Int(o, "priority")),
             Labels = ReadLabels(o),
             Completed = JsonRead.Bool(o, "checked"),
+            CompletedAt = JsonRead.String(o, "completed_at"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
             DueText = due is null ? null : JsonRead.String(due, "string"),
             IsRecurring = due is not null && JsonRead.Bool(due, "is_recurring"),

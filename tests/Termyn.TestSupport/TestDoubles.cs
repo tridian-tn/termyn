@@ -68,6 +68,23 @@ public sealed class FakeApi : ITodoistApi
             ? Task.FromResult(QuickAdd(text))
             : throw new TodoistNetworkException("offline");
     }
+
+    /// <summary>Builds the completed page for each request, so paging can be exercised.</summary>
+    public Func<CompletedQuery, CompletedPage>? Completed;
+
+    /// <summary>Every completed-items query made, in order, for asserting on scope and paging.</summary>
+    public List<CompletedQuery> CompletedQueries = [];
+
+    public Task<CompletedPage> GetCompletedAsync(string token, CompletedQuery query, CancellationToken ct = default)
+    {
+        CompletedQueries.Add(query);
+        if (CompletedThrow is not null)
+            throw CompletedThrow;
+        return Task.FromResult(Completed is not null ? Completed(query) : new CompletedPage([], null));
+    }
+
+    /// <summary>Kept apart from <see cref="Throw"/> so a test can fail one call without failing sync.</summary>
+    public Exception? CompletedThrow;
 }
 
 /// <summary>An in-memory store whose durable write fails, standing in for a full or unwritable disk.</summary>

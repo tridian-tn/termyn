@@ -117,12 +117,10 @@ public class TodoistApiClientTests
         Assert.True(await client.ValidateTokenAsync("good"));
     }
 
-    [Theory]
-    [InlineData(HttpStatusCode.TooManyRequests)]
-    [InlineData(HttpStatusCode.InternalServerError)]
-    public async Task ValidateToken_throws_network_on_server_error(HttpStatusCode status)
+    [Fact]
+    public async Task ValidateToken_throws_network_on_server_error()
     {
-        var client = ClientReturning(status, "{}");
+        var client = ClientReturning(HttpStatusCode.InternalServerError, "{}");
         await Assert.ThrowsAsync<TodoistNetworkException>(() => client.ValidateTokenAsync("tok"));
     }
 
@@ -183,6 +181,182 @@ public class TodoistApiClientTests
         Assert.Contains("\"content\":\"Hi\"", decoded);
     }
 
+    // ---- Rate limiting -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_rate_limit_is_reported_as_its_own_failure_with_the_wait_the_server_asked_for()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}", r => r.Headers.Add("Retry-After", "42"));
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], []));
+
+        Assert.Equal(TimeSpan.FromSeconds(42), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task A_rate_limit_with_no_advice_says_so_rather_than_guessing()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}");
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.QuickAddAsync("tok", "A"));
+
+        Assert.Null(ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task A_retry_after_date_already_past_is_no_wait_rather_than_a_negative_one()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
+            r => r.Headers.Add("Retry-After", DateTimeOffset.UtcNow.AddMinutes(-5).ToString("R")));
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.ValidateTokenAsync("tok"));
+
+        Assert.Equal(TimeSpan.Zero, ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task A_retry_after_date_in_the_future_becomes_the_wait_it_names()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
+            r => r.Headers.Add("Retry-After", DateTimeOffset.UtcNow.AddSeconds(90).ToString("R")));
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], []));
+
+        // A few seconds of slack: the header has one-second resolution and time passes in between.
+        Assert.InRange(ex.RetryAfter!.Value, TimeSpan.FromSeconds(80), TimeSpan.FromSeconds(95));
+    }
+
+    [Fact]
+    public async Task A_rate_limit_on_the_completed_fetch_is_reported_as_one()
+    {
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
+            r => r.Headers.Add("Retry-After", "12"));
+
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow)));
+
+        Assert.Equal(TimeSpan.FromSeconds(12), ex.RetryAfter);
+    }
+
+    // ---- Completed tasks -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Completed_tasks_are_fetched_from_the_by_completion_date_endpoint()
+    {
+        var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"items":[],"next_cursor":null}"""));
+        var client = new TodoistApiClient(new HttpClient(handler));
+        var since = new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero);
+        var until = new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);
+
+        await client.GetCompletedAsync("secret-token", new CompletedQuery(since, until, Cursor: "c-1", Limit: 100));
+
+        var uri = handler.LastRequest!.RequestUri!;
+        Assert.Equal(HttpMethod.Get, handler.LastRequest.Method);
+        Assert.Equal("/api/v1/tasks/completed/by_completion_date", uri.AbsolutePath);
+        Assert.Equal("secret-token", handler.LastRequest.Headers.Authorization!.Parameter);
+
+        var query = Uri.UnescapeDataString(uri.Query);
+        Assert.Contains("since=2026-05-01T00:00:00Z", query);
+        Assert.Contains("until=2026-07-30T12:00:00Z", query);
+        Assert.Contains("limit=100", query);
+        Assert.Contains("cursor=c-1", query);
+    }
+
+    [Fact]
+    public async Task A_first_page_asks_for_no_cursor_and_a_local_time_is_sent_as_utc()
+    {
+        var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"items":[]}"""));
+        var client = new TodoistApiClient(new HttpClient(handler));
+        var since = new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.FromHours(2));
+
+        await client.GetCompletedAsync("tok", new CompletedQuery(since, since.AddDays(1)));
+
+        var query = Uri.UnescapeDataString(handler.LastRequest!.RequestUri!.Query);
+        Assert.Contains("since=2026-05-01T07:00:00Z", query);
+        Assert.DoesNotContain("cursor=", query);
+    }
+
+    [Fact]
+    public async Task Completed_items_come_back_whole_with_the_cursor_for_the_next_page()
+    {
+        const string json = """
+        {
+          "items": [
+            { "id": "c1", "content": "Book dentist", "checked": true, "completed_at": "2026-07-30T09:00:00Z", "unknown_field": 7 },
+            { "content": "no id at all" }
+          ],
+          "next_cursor": "page-2"
+        }
+        """;
+        var client = ClientReturning(HttpStatusCode.OK, json);
+
+        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow));
+
+        Assert.Equal("page-2", page.NextCursor);
+        var item = Assert.Single(page.Items);
+        Assert.Equal("c1", item.Id);
+        Assert.Equal("items", item.ResourceType);
+        Assert.False(item.IsDeleted);
+        Assert.Equal(7, item.Json["unknown_field"]!.GetValue<int>()); // nothing dropped on the way in
+    }
+
+    [Fact]
+    public async Task A_last_page_reports_no_cursor()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"items":[],"next_cursor":null}""");
+
+        Assert.Null((await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))).NextCursor);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Completed_throws_auth_when_token_rejected(HttpStatusCode status)
+    {
+        var client = ClientReturning(status, "{}");
+        await Assert.ThrowsAsync<TodoistAuthException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+    }
+
+    [Theory]
+    [InlineData("{ this is not json")]
+    [InlineData("[]")]
+    public async Task Completed_reports_an_unusable_body_as_a_network_failure(string body)
+    {
+        var client = ClientReturning(HttpStatusCode.OK, body);
+        await Assert.ThrowsAsync<TodoistNetworkException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+    }
+
+    [Fact]
+    public async Task Completed_wraps_transport_failure_as_network()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+    }
+
+    [Fact]
+    public async Task Completed_ignores_an_items_field_that_is_not_an_array()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"items":{},"next_cursor":null}""");
+
+        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+
+        Assert.Empty(page.Items);
+    }
+
+    [Fact]
+    public async Task Completed_propagates_caller_cancellation()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new TaskCanceledException())));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), cts.Token));
+    }
+
     // ---- Quick add -----------------------------------------------------------------------------
 
     [Fact]
@@ -229,12 +403,10 @@ public class TodoistApiClientTests
         await Assert.ThrowsAsync<TodoistAuthException>(() => client.QuickAddAsync("tok", "A"));
     }
 
-    [Theory]
-    [InlineData(HttpStatusCode.TooManyRequests)]
-    [InlineData(HttpStatusCode.InternalServerError)]
-    public async Task Quick_add_throws_network_on_server_error(HttpStatusCode status)
+    [Fact]
+    public async Task Quick_add_throws_network_on_server_error()
     {
-        var client = ClientReturning(status, "{}");
+        var client = ClientReturning(HttpStatusCode.InternalServerError, "{}");
         await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
     }
 
@@ -263,8 +435,13 @@ public class TodoistApiClientTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.QuickAddAsync("tok", "A", cts.Token));
     }
 
-    private static TodoistApiClient ClientReturning(HttpStatusCode status, string json)
-        => new(new HttpClient(new StubHandler(_ => Resp(status, json))));
+    private static TodoistApiClient ClientReturning(HttpStatusCode status, string json, Action<HttpResponseMessage>? decorate = null)
+        => new(new HttpClient(new StubHandler(_ =>
+        {
+            var resp = Resp(status, json);
+            decorate?.Invoke(resp);
+            return resp;
+        })));
 
     private static HttpResponseMessage Resp(HttpStatusCode status, string json)
         => new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
