@@ -13,6 +13,8 @@ public enum PaletteCommand
     ToggleCompleted,
     Undo,
     Settings,
+    CheckForUpdates,
+    About,
 }
 
 /// <summary>Which list an entry came from, so the view can group or icon them.</summary>

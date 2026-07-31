@@ -4,6 +4,7 @@ using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
+using Termyn.Core.Update;
 using Termyn.Presentation;
 
 // Both namespaces have a Label, and in a form file the control is what "Label" should mean.
@@ -28,6 +29,7 @@ internal sealed record Shell(
     IAutoStartService AutoStart,
     INotifier Notifier,
     ISingleInstance Instance,
+    IUpdateCheck Updates,
     bool StartInTray = false,
     bool StartWithQuickAdd = false);
 
@@ -322,6 +324,7 @@ internal sealed class MainForm : Form
         new NotifierCommand("Quick add…", () => OnUi(() => Guarded(QuickAdd.Summon))),
         new NotifierCommand("Sync now", () => _scheduler.RequestNow()),
         new NotifierCommand("Settings…", () => OnUi(() => Guarded(OpenSettings))),
+        new NotifierCommand("Check for updates…", () => OnUi(() => _ = CheckForUpdatesAsync())),
         new NotifierCommand("Exit", () => OnUi(Exit)),
     ]);
 
@@ -350,6 +353,58 @@ internal sealed class MainForm : Form
         // that something else on the machine already owns it. Said whether or not this was a change.
         return $"Another application already owns {binding} — quick-add has no hotkey.";
     }
+
+    /// <summary>
+    /// Asks whether a newer Termyn has been published, and offers to open its page.
+    /// </summary>
+    /// <remarks>
+    /// Manual, as the spec has it for v1: nothing checks on a timer, nothing downloads, and nothing
+    /// about the account leaves the machine — this is a GET for a version number.
+    /// </remarks>
+    private async Task CheckForUpdatesAsync()
+    {
+        _status.Text = "Checking for updates…";
+
+        var result = await _shell.Updates.LatestAsync(_cts.Token);
+
+        if (IsDisposed)
+            return;
+
+        if (result.Latest is null)
+        {
+            _status.Text = "Couldn't reach the update check. Termyn " + AppVersion.Tag + " is what's running.";
+            return;
+        }
+
+        if (!result.IsNewerThan(AppVersion.Current))
+        {
+            _status.Text = $"Termyn {AppVersion.Tag} is the latest.";
+            return;
+        }
+
+        _status.Text = $"Termyn v{result.Latest.ToString(3)} is available.";
+
+        var answer = MessageBox.Show(
+            this,
+            $"Termyn v{result.Latest.ToString(3)} is available. You have {AppVersion.Tag}.\r\n\r\nOpen the release page?",
+            "Termyn",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Information);
+
+        if (answer == DialogResult.OK && result.ReleaseUrl is { Length: > 0 } url)
+            Guarded(() => AppVersion.OpenLink(url));
+    }
+
+    private void ShowAbout()
+        => MessageBox.Show(
+            this,
+            $"Termyn {AppVersion.Tag}\r\n\r\nA keyboard-driven Todoist client for Windows.\r\n\r\n"
+            + $"Installed in:\r\n{AppVersion.Location}\r\n\r\n"
+            + $"Settings and token:\r\n{_shell.Paths.ConfigDirectory}\r\n\r\n"
+            + $"Cache and logs:\r\n{_shell.Paths.CacheDirectory}",
+            "About Termyn",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
 
     private void OpenSettings()
     {
@@ -1047,6 +1102,12 @@ internal sealed class MainForm : Form
                 break;
             case PaletteCommand.Settings:
                 OpenSettings();
+                break;
+            case PaletteCommand.CheckForUpdates:
+                _ = CheckForUpdatesAsync();
+                break;
+            case PaletteCommand.About:
+                ShowAbout();
                 break;
         }
     }

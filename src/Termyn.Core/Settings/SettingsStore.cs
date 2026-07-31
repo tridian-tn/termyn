@@ -48,6 +48,12 @@ public sealed class SettingsStore
     public string FilePath { get; }
 
     /// <summary>
+    /// Whether a settings file existed the last time <see cref="Load"/> ran. False on a first run,
+    /// which is when the app should take its cue from the machine rather than from its own defaults.
+    /// </summary>
+    public bool Existed { get; private set; }
+
+    /// <summary>
     /// Reads the settings, falling back to defaults when there is no file or it can't be read. An
     /// unreadable file is moved aside rather than overwritten, so whatever was in it is recoverable.
     /// </summary>
@@ -58,7 +64,8 @@ public sealed class SettingsStore
             string text;
             try
             {
-                if (!File.Exists(FilePath))
+                Existed = File.Exists(FilePath);
+                if (!Existed)
                     return Reset();
 
                 text = File.ReadAllText(FilePath);

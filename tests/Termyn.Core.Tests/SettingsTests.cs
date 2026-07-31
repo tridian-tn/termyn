@@ -466,6 +466,32 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_first_run_is_told_apart_from_a_later_one()
+    {
+        // What lets the app adopt the machine's own launch-at-login state on a first run instead of
+        // asserting its default over whatever the installer just wrote.
+        var store = new SettingsStore(Config);
+
+        store.Load();
+        Assert.False(store.Existed);
+
+        store.Save(new AppSettings());
+        store.Load();
+        Assert.True(store.Existed);
+    }
+
+    [Fact]
+    public void An_unreadable_file_still_counts_as_one_that_existed()
+    {
+        File.WriteAllText(Config, "{ this is not json");
+
+        var store = new SettingsStore(Config);
+        store.Load();
+
+        Assert.True(store.Existed);
+    }
+
+    [Fact]
     public void A_half_written_file_is_never_left_behind()
     {
         var store = new SettingsStore(Config);

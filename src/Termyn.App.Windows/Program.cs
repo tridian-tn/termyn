@@ -3,6 +3,7 @@ using Termyn.Core.Capture;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
+using Termyn.Core.Update;
 using Termyn.Platform.Windows;
 using Termyn.Presentation;
 
@@ -59,10 +60,22 @@ internal static class Program
 
         var autoStart = new WindowsAutoStart();
 
-        // Re-asserted rather than assumed: the entry can be removed by a startup manager, and it
-        // holds a path that a reinstall elsewhere would have left pointing at the old binary.
-        // Unconditional, because turning it off when it is already off is a no-op.
-        autoStart.SetEnabled(settings.LaunchAtLogin);
+        if (settingsStore.Existed)
+        {
+            // Re-asserted rather than assumed: the entry can be removed by a startup manager, and it
+            // holds a path that a reinstall elsewhere would have left pointing at the old binary.
+            // Unconditional, because turning it off when it is already off is a no-op.
+            autoStart.SetEnabled(settings.LaunchAtLogin);
+        }
+        else
+        {
+            // First run, so there is no preference of ours to assert — and the installer may have
+            // just written one on the user's behalf. Adopting what the machine already says is what
+            // makes the installer's "start when I sign in" tick mean anything: asserting our own
+            // default here deleted it before the user had ever seen the setting.
+            settings = settings with { LaunchAtLogin = autoStart.IsEnabled };
+            settingsStore.Save(settings);
+        }
 
         using var hotkey = new WindowsGlobalHotkey();
 
@@ -70,7 +83,10 @@ internal static class Program
         // the path to the first paint.
         using var notifier = new TrayNotifier();
 
-        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, tray, quickAdd);
+        // The same HttpClient as the API: one connection pool, one timeout, one place to configure.
+        IUpdateCheck updates = new GitHubReleaseCheck(http);
+
+        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, tray, quickAdd);
 
         try
         {
