@@ -48,10 +48,18 @@ public sealed class SettingsStore
     public string FilePath { get; }
 
     /// <summary>
-    /// Whether a settings file existed the last time <see cref="Load"/> ran. False on a first run,
-    /// which is when the app should take its cue from the machine rather than from its own defaults.
+    /// Whether a settings file was there and still is after the last <see cref="Load"/>. False on a
+    /// first run — and false when the file turned out to be unreadable and was moved aside, because
+    /// from that point there genuinely isn't one.
     /// </summary>
     public bool Existed { get; private set; }
+
+    /// <summary>
+    /// Whether the last <see cref="Load"/> read real settings. False when a file was there and
+    /// couldn't be read, which is the case where the returned settings are our defaults rather than
+    /// anything the user chose — and so are not something to act on.
+    /// </summary>
+    public bool Readable => _readable;
 
     /// <summary>
     /// Reads the settings, falling back to defaults when there is no file or it can't be read. An
@@ -89,8 +97,13 @@ public sealed class SettingsStore
             }
             catch (JsonException)
             {
+                // Moved aside, so from here on there is no settings file at all — which makes the
+                // next start a first run, and stops a typo in one field being read as a decision
+                // about launch-at-login.
                 SetAside();
-                return Reset();
+                var settings = Reset();
+                Existed = false;
+                return settings;
             }
 
             Migrate(root);

@@ -29,7 +29,7 @@ internal sealed record Shell(
     IAutoStartService AutoStart,
     INotifier Notifier,
     ISingleInstance Instance,
-    IUpdateCheck Updates,
+    GitHubReleaseCheck Updates,
     bool StartInTray = false,
     bool StartWithQuickAdd = false);
 
@@ -365,34 +365,29 @@ internal sealed class MainForm : Form
     {
         _status.Text = "Checking for updates…";
 
-        var result = await _shell.Updates.LatestAsync(_cts.Token);
-
-        if (IsDisposed)
-            return;
-
-        if (result.Latest is null)
+        await GuardedAsync(async () =>
         {
-            _status.Text = "Couldn't reach the update check. Termyn " + AppVersion.Tag + " is what's running.";
-            return;
-        }
+            var advice = (await _shell.Updates.LatestAsync(_cts.Token)).Advise(AppVersion.Current);
 
-        if (!result.IsNewerThan(AppVersion.Current))
-        {
-            _status.Text = $"Termyn {AppVersion.Tag} is the latest.";
-            return;
-        }
+            if (IsDisposed)
+                return;
 
-        _status.Text = $"Termyn v{result.Latest.ToString(3)} is available.";
+            _status.Text = advice.Message;
 
-        var answer = MessageBox.Show(
-            this,
-            $"Termyn v{result.Latest.ToString(3)} is available. You have {AppVersion.Tag}.\r\n\r\nOpen the release page?",
-            "Termyn",
-            MessageBoxButtons.OKCancel,
-            MessageBoxIcon.Information);
+            // Nothing to open means nothing to ask about — there is no update, or we never found out.
+            if (advice.OpenUrl is not { } url)
+                return;
 
-        if (answer == DialogResult.OK && result.ReleaseUrl is { Length: > 0 } url)
-            Guarded(() => AppVersion.OpenLink(url));
+            var answer = MessageBox.Show(
+                this,
+                advice.Message + "\r\n\r\nOpen the release page?",
+                "Termyn",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information);
+
+            if (answer == DialogResult.OK && !AppVersion.OpenLink(url))
+                _status.Text = "That release didn't come with a page we could open.";
+        });
     }
 
     private void ShowAbout()
@@ -637,7 +632,7 @@ internal sealed class MainForm : Form
     private void OpenTodoist()
     {
         // The saved filter lives in the account, so the app's own filter page is where to land.
-        Guarded(() => Process.Start(new ProcessStartInfo("https://app.todoist.com/app/filters") { UseShellExecute = true }));
+        Guarded(() => AppVersion.OpenLink("https://app.todoist.com/app/filters"));
     }
 
     private void RenderSidebar()

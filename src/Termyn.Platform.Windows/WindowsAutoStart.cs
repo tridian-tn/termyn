@@ -12,7 +12,8 @@ public sealed class WindowsAutoStart : IAutoStartService
     /// <summary>Where Windows looks for per-user startup entries.</summary>
     internal const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
-    private const string ValueName = "Termyn";
+    /// <summary>The entry's name. Internal so a test can hold the installer to writing the same one.</summary>
+    internal const string ValueName = "Termyn";
 
     /// <summary>
     /// Signing in is not a request to be shown a task list, so the login entry starts Termyn in the

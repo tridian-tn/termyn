@@ -45,6 +45,9 @@ public sealed class TrayNotifier : INotifier
     /// <summary>The icon currently drawn, for a test that has no tray to look at.</summary>
     internal Icon? Icon => _drawn;
 
+    /// <summary>The menu as it stands, for the same reason.</summary>
+    internal IReadOnlyList<string> MenuLabels => _menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text ?? string.Empty).ToList();
+
     public bool Visible
     {
         get => _icon.Visible;
@@ -57,8 +60,18 @@ public sealed class TrayNotifier : INotifier
         if (_disposed)
             return;
 
-        // The shell truncates anything longer, and older shells reject it outright.
-        _icon.Text = tooltip.Length > 63 ? tooltip[..62] + "…" : tooltip;
+        // The shell truncates anything longer, and older shells reject it outright. Cut back off a
+        // surrogate pair if the boundary lands inside one — a project name can hold an emoji, and
+        // half a character is not something to hand the shell.
+        if (tooltip.Length > 63)
+        {
+            var cut = 62;
+            if (char.IsHighSurrogate(tooltip[cut - 1]))
+                cut--;
+            tooltip = tooltip[..cut] + "…";
+        }
+
+        _icon.Text = tooltip;
 
         var badge = Math.Max(dueToday, 0);
         if (badge == _badged)

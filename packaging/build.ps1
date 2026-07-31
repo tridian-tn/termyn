@@ -30,13 +30,17 @@ $publish = Join-Path $artifacts 'publish'
 $app = Join-Path $root 'src/Termyn.App.Windows/Termyn.App.Windows.csproj'
 
 function Get-ProductVersion {
-    # SelectNodes rather than property access: the file has several PropertyGroups, so the dotted
-    # form returns an array whose Version member StrictMode refuses to resolve.
-    $props = Join-Path $root 'Directory.Build.props'
-    $xml = [xml](Get-Content $props)
-    $node = $xml.SelectSingleNode('/Project/PropertyGroup/Version')
-    if (-not $node) { throw "No <Version> in $props" }
-    return $node.InnerText.Trim()
+    # Asked of MSBuild rather than parsed out of the props file, so this is the version that actually
+    # stamped the assembly even if a project overrides it.
+    $version = (dotnet msbuild $app -getProperty:Version -nologo).Trim()
+    if (-not $version) { throw 'Could not read <Version> from the project.' }
+
+    # Caught here rather than by the installer compiler, which rejects a pre-release VersionInfoVersion
+    # with an error pointing at a line in the .iss — after the whole test suite has already run.
+    if ($version -notmatch '^\d+(\.\d+){1,3}$') {
+        throw "Version '$version' is not plain numbers; the installer cannot stamp it."
+    }
+    return $version
 }
 
 function Find-InnoSetup {
@@ -65,11 +69,8 @@ if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
 New-Item -ItemType Directory -Path $publish -Force | Out-Null
 
 Write-Host 'Publishing...' -ForegroundColor Cyan
-dotnet publish $app -c Release -o $publish --nologo --verbosity quiet
+dotnet publish $app -c Release -o $publish --nologo --verbosity quiet -p:DebugType=none
 if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
-
-# Symbols are for debugging a local build, not for a release download.
-Get-ChildItem $publish -Filter *.pdb | Remove-Item -Force
 
 $zip = Join-Path $artifacts "Termyn-$version-portable.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }

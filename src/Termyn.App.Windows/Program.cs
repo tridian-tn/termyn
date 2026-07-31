@@ -34,12 +34,10 @@ internal static class Program
         Theme.ApplyToFramework(settings.Theme);
         ApplicationConfiguration.Initialize();
 
-        using var http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(30),
-            // Bound the response we will buffer, so a runaway or hostile body can't exhaust memory.
-            MaxResponseContentBufferSize = 128 * 1024 * 1024,
-        };
+        // Deliberately no MaxResponseContentBufferSize: it only applies to responses HttpClient
+        // buffers for you, and every call here reads the stream itself, so setting it would have
+        // promised a bound that was never in force. Each caller bounds its own read.
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         ITodoistApi api = new TodoistApiClient(http);
         ISecretStore secrets = new DpapiSecretStore(paths);
 
@@ -59,23 +57,7 @@ internal static class Program
         var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
 
         var autoStart = new WindowsAutoStart();
-
-        if (settingsStore.Existed)
-        {
-            // Re-asserted rather than assumed: the entry can be removed by a startup manager, and it
-            // holds a path that a reinstall elsewhere would have left pointing at the old binary.
-            // Unconditional, because turning it off when it is already off is a no-op.
-            autoStart.SetEnabled(settings.LaunchAtLogin);
-        }
-        else
-        {
-            // First run, so there is no preference of ours to assert — and the installer may have
-            // just written one on the user's behalf. Adopting what the machine already says is what
-            // makes the installer's "start when I sign in" tick mean anything: asserting our own
-            // default here deleted it before the user had ever seen the setting.
-            settings = settings with { LaunchAtLogin = autoStart.IsEnabled };
-            settingsStore.Save(settings);
-        }
+        settings = StartupReconciliation.OnLaunch(settingsStore, settings, autoStart);
 
         using var hotkey = new WindowsGlobalHotkey();
 
@@ -84,7 +66,9 @@ internal static class Program
         using var notifier = new TrayNotifier();
 
         // The same HttpClient as the API: one connection pool, one timeout, one place to configure.
-        IUpdateCheck updates = new GitHubReleaseCheck(http);
+        // The Todoist token rides on each request rather than on the client, so nothing of the
+        // account's goes to GitHub with this.
+        var updates = new GitHubReleaseCheck(http);
 
         var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, tray, quickAdd);
 

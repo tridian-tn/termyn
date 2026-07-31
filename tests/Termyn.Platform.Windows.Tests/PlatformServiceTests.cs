@@ -200,6 +200,89 @@ public class TrayNotifierTests
     }
 
     [Fact]
+    public void The_tray_icon_is_drawn_at_the_size_the_shell_asks_for()
+    {
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", 0);
+
+        // Floored at 16: a shell reporting something smaller would otherwise get an icon too small
+        // to read the mark in.
+        Assert.Equal(Math.Max(SystemInformation.SmallIconSize.Width, 16), tray.Icon!.Width);
+    }
+
+    [Fact]
+    public void A_count_makes_the_tray_icon_look_different()
+    {
+        // Every other test here is satisfied by an icon existing, so this is the one that would
+        // fail if the badge stopped being drawn.
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", 0);
+        using var plain = tray.Icon!.ToBitmap();
+
+        tray.SetStatus("Termyn", 3);
+        using var badged = tray.Icon!.ToBitmap();
+
+        var differing = 0;
+        for (var x = 0; x < plain.Width; x++)
+            for (var y = 0; y < plain.Height; y++)
+                if (plain.GetPixel(x, y) != badged.GetPixel(x, y))
+                    differing++;
+
+        Assert.True(differing > 0, "a badged tray icon should not look like the plain one");
+    }
+
+    [Fact]
+    public void A_tooltip_is_cut_only_when_it_is_actually_too_long()
+    {
+        using var tray = new TrayNotifier();
+
+        var exact = new string('x', 63);
+        tray.SetStatus(exact, 0);
+        Assert.Equal(exact, tray.Tooltip);
+
+        tray.SetStatus(new string('x', 64), 0);
+        Assert.Equal(63, tray.Tooltip.Length);
+        Assert.EndsWith("…", tray.Tooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Cutting_a_tooltip_never_leaves_half_a_character()
+    {
+        // The tooltip is built from project names, and Todoist allows emoji in them. Slicing by code
+        // unit can split a surrogate pair and hand the shell half a character.
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus(new string('x', 61) + "🎯" + new string('y', 20), 0);
+
+        Assert.DoesNotContain(tray.Tooltip, char.IsSurrogate);
+    }
+
+    [Fact]
+    public void Setting_commands_twice_replaces_rather_than_stacks()
+    {
+        using var tray = new TrayNotifier();
+        var invoked = 0;
+
+        tray.SetCommands([new NotifierCommand("One", () => invoked++), new NotifierCommand("Two", () => { })]);
+        tray.SetCommands([new NotifierCommand("Only", () => invoked++)]);
+
+        Assert.Equal("Only", Assert.Single(tray.MenuLabels));
+    }
+
+    [Fact]
+    public void Nothing_is_asked_of_it_after_disposal()
+    {
+        var tray = new TrayNotifier();
+        tray.Dispose();
+
+        // Both guarded, because the window's own teardown can reach these after the shell is gone.
+        tray.SetStatus("Termyn", 3);
+        tray.SetCommands([new NotifierCommand("One", () => { })]);
+    }
+
+    [Fact]
     public void The_same_count_twice_does_not_redraw()
     {
         // A redraw per publish is a GDI handle churned on every keystroke.

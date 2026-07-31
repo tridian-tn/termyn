@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Reflection;
+using Termyn.Core.Update;
 
 namespace Termyn.App.Windows;
 
-/// <summary>What this build calls itself, for the about box and the update check.</summary>
+/// <summary>What this build calls itself, and the one way it opens a link.</summary>
 internal static class AppVersion
 {
     /// <summary>
@@ -12,19 +13,32 @@ internal static class AppVersion
     /// </summary>
     public static Version Current { get; } =
         Assembly.GetExecutingAssembly().GetName().Version is { } version
-            ? new Version(version.Major, version.Minor, version.Build < 0 ? 0 : version.Build)
+            ? new Version(version.Major, version.Minor, Math.Max(version.Build, 0))
             : new Version(0, 0, 0);
 
     /// <summary>The version as a release tag is written, which is the number with a leading v.</summary>
-    public static string Tag => "v" + Current.ToString(3);
+    public static string Tag => UpdateResult.Tag(Current);
 
     /// <summary>Where the app is running from, for the about box.</summary>
     public static string Location => Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
 
     /// <summary>
-    /// Opens a link in the user's browser. Everything Termyn opens is one of its own constants, so
-    /// there is nothing here that a task's content could steer.
+    /// Opens a link in the user's browser.
     /// </summary>
-    public static void OpenLink(string url)
-        => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    /// <remarks>
+    /// The scheme is checked here even though callers are expected to pass something already
+    /// vetted, because this ends in ShellExecute — which runs a UNC path or a <c>file:</c> URL as
+    /// readily as it opens a page. One of the callers passes a URL that came off the network, and a
+    /// single missed check there would be the difference between opening a page and running a
+    /// program.
+    /// </remarks>
+    /// <returns>False when the link wasn't one worth opening.</returns>
+    public static bool OpenLink(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+            return false;
+
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        return true;
+    }
 }

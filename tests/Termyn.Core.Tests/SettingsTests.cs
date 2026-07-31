@@ -481,14 +481,34 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void An_unreadable_file_still_counts_as_one_that_existed()
+    public void A_file_moved_aside_leaves_no_file_behind_it()
     {
+        // Unparseable, so it is renamed — and from that point there genuinely is no settings file,
+        // which is what stops a typo in one field being read as a decision about anything else.
         File.WriteAllText(Config, "{ this is not json");
 
         var store = new SettingsStore(Config);
         store.Load();
 
+        Assert.False(store.Existed);
+        Assert.True(store.Readable);
+    }
+
+    [Fact]
+    public void A_file_that_is_there_but_locked_is_existing_and_unreadable()
+    {
+        // The pair that lets a caller tell "the user has no settings" from "the user has settings we
+        // could not read" — which are opposite answers for anything acting on them.
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "Dark" }""");
+
+        var store = new SettingsStore(Config);
+        using (File.Open(Config, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            store.Load();
+        }
+
         Assert.True(store.Existed);
+        Assert.False(store.Readable);
     }
 
     [Fact]

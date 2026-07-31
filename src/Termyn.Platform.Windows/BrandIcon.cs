@@ -16,8 +16,11 @@ namespace Termyn.Platform.Windows;
 /// </remarks>
 public static class BrandIcon
 {
+    /// <summary>The largest an icon frame can be: above this the format has no way to say the size.</summary>
+    public const int MaxSize = 256;
+
     /// <summary>The sizes Windows asks for, smallest first. 256 is the one Explorer shows large.</summary>
-    public static readonly int[] IconSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
+    public static readonly IReadOnlyList<int> IconSizes = [16, 20, 24, 32, 40, 48, 64, 128, MaxSize];
 
     /// <summary>
     /// Draws the mark at one size, optionally badged with a count instead of the tick.
@@ -26,6 +29,11 @@ public static class BrandIcon
     /// <param name="badge">Tasks due today. Zero draws the tick, which is the mark proper.</param>
     public static Bitmap Draw(int size, int badge = 0)
     {
+        // Checked here rather than left to Bitmap, which answers a zero or a negative with a bare
+        // "Parameter is not valid" that says nothing about which size was asked for.
+        ArgumentOutOfRangeException.ThrowIfLessThan(size, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(size, MaxSize);
+
         var bitmap = new Bitmap(size, size);
 
         using var g = Graphics.FromImage(bitmap);
@@ -78,6 +86,18 @@ public static class BrandIcon
     public static void WriteIcoFile(string path, IReadOnlyList<int>? sizes = null)
     {
         var wanted = sizes ?? IconSizes;
+
+        // An empty list writes a header claiming no frames — a file that parses and then can't be
+        // loaded, which is worse than refusing.
+        if (wanted.Count == 0)
+            throw new ArgumentException("An icon needs at least one size.", nameof(sizes));
+
+        foreach (var size in wanted)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(size, 1, nameof(sizes));
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(size, MaxSize, nameof(sizes));
+        }
+
         var frames = wanted.Select(size =>
         {
             using var bitmap = Draw(size);
@@ -99,8 +119,8 @@ public static class BrandIcon
         foreach (var (size, png) in frames)
         {
             // 256 is written as 0: the field is one byte, so it can't hold 256 itself.
-            writer.Write((byte)(size >= 256 ? 0 : size));
-            writer.Write((byte)(size >= 256 ? 0 : size));
+            writer.Write((byte)(size >= MaxSize ? 0 : size));
+            writer.Write((byte)(size >= MaxSize ? 0 : size));
             writer.Write((byte)0);  // no colour palette
             writer.Write((byte)0);  // reserved
             writer.Write((ushort)1);   // colour planes

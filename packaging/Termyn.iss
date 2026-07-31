@@ -7,7 +7,9 @@
 ; Built by packaging/build.ps1, which publishes the app first and passes the version in.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  ; No fallback on purpose. A default here would be a second place the version lives, and compiling
+  ; this directly would then produce an installer confidently mislabelled with a stale number.
+  #error AppVersion must be passed in — build with packaging/build.ps1
 #endif
 
 #ifndef PublishDir
@@ -94,8 +96,10 @@ var
 begin
   Result := False;
 
+  { Termyn publishes win-x64, so it is the x64 runtime that has to be there. On an Arm64 machine
+    that lives under dotnet\x64 — the plain path holds the Arm64 one, which this apphost can't use. }
   Roots[0] := ExpandConstant('{commonpf64}\dotnet\shared\Microsoft.WindowsDesktop.App');
-  Roots[1] := ExpandConstant('{localappdata}\Microsoft\dotnet\shared\Microsoft.WindowsDesktop.App');
+  Roots[1] := ExpandConstant('{commonpf64}\dotnet\x64\shared\Microsoft.WindowsDesktop.App');
 
   for I := 0 to GetArrayLength(Roots) - 1 do
   begin
@@ -104,9 +108,11 @@ begin
       if FindFirst(Roots[I] + '\{#DotnetChannel}.*', Found) then
       begin
         try
-          { Any directory is a version of the channel; the host picks the highest itself. }
           repeat
-            if (Found.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+            { A pre-release build doesn't count: by default the host won't roll a release-versioned
+              app forward onto one, so finding 10.0.0-preview here would be a false yes — and a
+              false yes is the bad direction. It installs cleanly and then won't start. }
+            if ((Found.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and (Pos('-', Found.Name) = 0) then
             begin
               Result := True;
               Exit;
@@ -128,6 +134,15 @@ begin
   Result := True;
   if DesktopRuntimeFound() then
     Exit;
+
+  { Nobody is there to answer. MsgBox is not suppressible — /SUPPRESSMSGBOXES doesn't reach it — so
+    prompting here would hang an unattended install on a modal dialog until something killed it.
+    Install anyway, which is the branch the interactive default prefers too, and say so in the log. }
+  if WizardSilent() then
+  begin
+    Log('The .NET {#DotnetChannel} Desktop Runtime was not found. Installing anyway; Termyn will not start until it is present.');
+    Exit;
+  end;
 
   { Offered rather than forced: the runtime is a separate download and Termyn cannot install it
     without elevation, so the honest thing is to send the user to it and let them come back. }
@@ -154,7 +169,7 @@ function CloseRunningTermyn(): Boolean;
 var
   ResultCode: Integer;
 begin
-  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM "{#AppExe}" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM "{#AppExe}" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   { Give the shell a moment to release the tray icon and the file handles. }
   Sleep(700);
@@ -213,7 +228,7 @@ begin
     ExpandConstant('{localappdata}\Termyn') + #13#10#13#10 +
     'Choose No to keep them, so reinstalling picks up where you left off.' + #13#10#13#10 +
     'Nothing in your Todoist account is touched either way.',
-    mbConfirmation, MB_YESNO) = IDYES;
+    mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 
   if Result then
     Log('User data: removing, at the user''s request.')
@@ -227,6 +242,12 @@ begin
     so removing it is a real logout. }
   if CurUninstallStep <> usPostUninstall then
     Exit;
+
+  { Removed whoever wrote it. uninsdeletevalue only covers the entry this installer created, and the
+    app writes the same key and value name when launch-at-login is turned on from its settings — so
+    installing without the tick, enabling it later and then uninstalling used to leave a startup
+    entry pointing at a binary that no longer exists. }
+  RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Termyn');
 
   if not ShouldRemoveUserData() then
     Exit;
