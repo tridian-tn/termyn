@@ -13,6 +13,8 @@
 #endif
 
 #ifndef PublishDir
+  ; Only for compiling the script by hand. build.ps1 passes the directory it actually published to,
+  ; so what it builds and what it packages can't drift apart.
   #define PublishDir "..\artifacts\publish"
 #endif
 

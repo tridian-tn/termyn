@@ -45,6 +45,10 @@ public sealed class TrayNotifier : INotifier
     /// <summary>The icon currently drawn, for a test that has no tray to look at.</summary>
     internal Icon? Icon => _drawn;
 
+    /// <summary>Runs the menu item with this label, for a test that has no tray to click.</summary>
+    internal void Invoke(string label)
+        => _menu.Items.OfType<ToolStripMenuItem>().First(item => item.Text == label).PerformClick();
+
     /// <summary>The menu as it stands, for the same reason.</summary>
     internal IReadOnlyList<string> MenuLabels => _menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text ?? string.Empty).ToList();
 

@@ -23,7 +23,7 @@ public static class StartupReconciliation
         // rather than assumed: the entry can be removed by a startup manager, and it holds a path a
         // reinstall elsewhere would have left pointing at the old binary. Unconditional, because
         // turning it off when it is already off is a no-op.
-        if (store.Existed && store.Readable)
+        if (store.Origin is SettingsOrigin.File)
         {
             autoStart.SetEnabled(settings.LaunchAtLogin);
             return settings;
@@ -35,9 +35,10 @@ public static class StartupReconciliation
         // the machine says is the better evidence, so adopt it.
         var adopted = settings with { LaunchAtLogin = autoStart.IsEnabled };
 
-        // Only worth persisting when there is nothing on disk to persist over. A file we failed to
-        // read is one the store already refuses to write, and it may still be perfectly good.
-        if (!store.Existed)
+        // Only worth persisting when there is nothing on disk to persist over. A file we couldn't
+        // read may still be perfectly good, and writing our defaults over it would destroy the
+        // settings we just failed to understand.
+        if (store.Origin is SettingsOrigin.Defaults)
             store.Save(adopted);
 
         return adopted;

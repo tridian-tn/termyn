@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using Termyn.Core.Platform;
+using Termyn.Core.Update;
 using Termyn.Platform.Windows;
 
 namespace Termyn.Platform.Windows.Tests;
@@ -37,7 +38,10 @@ public class PackagingConsistencyTests
             .Replace("{app}", installed)
             .Replace("{#AppExe}", "Termyn.exe");
 
-        var key = $@"Software\Termyn.Tests\{Guid.NewGuid():N}";
+        // A root of this test's own. AutoStartTests works under Software\Termyn.Tests and clears
+        // that whole tree between its cases; xUnit runs the two classes in parallel, so sharing the
+        // root meant each could delete the other's key mid-test.
+        var key = $@"Software\Termyn.Tests.Packaging\{Guid.NewGuid():N}";
         try
         {
             new WindowsAutoStart($@"{installed}\Termyn.exe", key).SetEnabled(true);
@@ -46,7 +50,14 @@ public class PackagingConsistencyTests
         }
         finally
         {
-            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Termyn.Tests", throwOnMissingSubKey: false);
+            try
+            {
+                Registry.CurrentUser.DeleteSubKeyTree(key, throwOnMissingSubKey: false);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                // Nothing to clean up, or not ours to clean.
+            }
         }
     }
 
@@ -54,9 +65,12 @@ public class PackagingConsistencyTests
     public void The_uninstaller_removes_the_startup_entry_whoever_wrote_it()
     {
         // The app writes the same entry from its settings screen, so removal can't be conditional on
-        // the installer's own task having been ticked.
+        // the installer's own task having been ticked. Built from the app's own constants rather
+        // than repeated as literals: the sibling test above compares the *write* against them, so
+        // repeating them here would let a rename break uninstall silently while that test failed
+        // loudly and this one went on passing against a stale string.
         Assert.Matches(
-            @"RegDeleteValue\(HKEY_CURRENT_USER,\s*'Software\\Microsoft\\Windows\\CurrentVersion\\Run',\s*'Termyn'\)",
+            $@"RegDeleteValue\(HKEY_CURRENT_USER,\s*'{Regex.Escape(WindowsAutoStart.RunKey)}',\s*'{Regex.Escape(WindowsAutoStart.ValueName)}'\)",
             Script);
     }
 
@@ -153,6 +167,88 @@ public class PackagingConsistencyTests
         // And both roots have to be under Program Files: without DOTNET_ROOT set that's where the
         // apphost looks, so a runtime found anywhere else wouldn't be one it could load.
         Assert.All(roots, r => Assert.StartsWith("{commonpf64}", r, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_silent_install_never_stops_on_a_dialog_nobody_can_answer()
+    {
+        // MsgBox isn't suppressible — /SUPPRESSMSGBOXES doesn't reach it — so an unattended install
+        // with no runtime present hung on a modal dialog until something killed it. The guard has to
+        // come before the first prompt, which is the part a text search can hold it to.
+        var body = Match(@"function InitializeSetup\(\): Boolean;([\s\S]*?)\nend;").Groups[1].Value;
+
+        var guard = body.IndexOf("WizardSilent()", StringComparison.Ordinal);
+        var prompt = body.IndexOf("MsgBox(", StringComparison.Ordinal);
+
+        Assert.True(guard >= 0, "InitializeSetup must give up on prompting when nobody is there");
+        Assert.True(prompt >= 0, "InitializeSetup is expected to prompt when somebody is");
+        Assert.True(guard < prompt, "the silent check has to happen before the dialog it avoids");
+        Assert.Contains("Exit", body[guard..prompt]);
+    }
+
+    [Fact]
+    public void An_unattended_uninstall_keeps_the_user_s_data_unless_told_otherwise()
+    {
+        // The highest-consequence branch in the packaging: backwards, it deletes the encrypted token
+        // and the whole cache of anyone who scripts an uninstall, silently and with no way back.
+        // Inno's own suppressed MB_YESNO answers Yes, which is why this can't be left to it.
+        var body = Match(@"function ShouldRemoveUserData\(\): Boolean;([\s\S]*?)\nend;").Groups[1].Value;
+
+        var silent = body.IndexOf("UninstallSilent()", StringComparison.Ordinal);
+        Assert.True(silent >= 0, "the unattended case has to be decided explicitly");
+        Assert.True(silent < body.IndexOf("MsgBox(", StringComparison.Ordinal));
+
+        // Keeping is False, and it is what the silent branch settles on.
+        Assert.Matches(@"UninstallSilent\(\)[\s\S]{0,300}?Result := False;", body);
+
+        // Only an explicit yes overrides it, under the name the docs tell people to pass.
+        Assert.Contains("{param:REMOVEDATA", body);
+        Assert.Contains(
+            "/REMOVEDATA=yes",
+            File.ReadAllText(Path.Combine(BrandIconTests.RepoRoot(), "docs", "packaging.md")));
+
+        // And interactively, No is the button under the finger.
+        Assert.Contains("MB_DEFBUTTON2", body);
+    }
+
+    [Fact]
+    public void A_pre_release_runtime_does_not_count_as_the_runtime()
+    {
+        // A false yes is the bad direction: it installs cleanly and then won't start, because the
+        // host won't roll a release-versioned app forward onto a pre-release by default.
+        var body = Match(@"function DesktopRuntimeFound\(\): Boolean;([\s\S]*?)\nend;").Groups[1].Value;
+
+        Assert.Contains("Pos('-', Found.Name) = 0", body);
+    }
+
+    [Fact]
+    public void The_startup_entry_names_an_argument_the_app_still_understands()
+    {
+        // The flag lives in three places: the installer's ValueData, WindowsAutoStart, and Program's
+        // own parsing. The write test above holds the first two to each other; rename it in the
+        // third and both writers agree with one another and are wrong — so every sign-in opens a
+        // full window instead of going to the tray, which is the whole point of the tick-box.
+        var program = File.ReadAllText(Path.Combine(
+            BrandIconTests.RepoRoot(), "src", "Termyn.App.Windows", "Program.cs"));
+
+        Assert.Contains(
+            WindowsAutoStart.StartupArgument,
+            Match(@"ValueData: ""(.+?)"";").Groups[1].Value,
+            StringComparison.Ordinal);
+
+        Assert.Contains($"\"{WindowsAutoStart.StartupArgument}\"", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_installer_and_the_update_check_name_the_same_project()
+    {
+        // The project is written out in two languages here. A rename that fixes the places you can
+        // see leaves the update check 404-ing, which surfaces as "couldn't reach it" — which is
+        // indistinguishable from being offline, so nobody ever finds out.
+        var appUrl = Match(@"#define AppUrl ""([^""]+)""").Groups[1].Value;
+
+        Assert.Equal(UpdateResult.ReleasesPage, appUrl + "/releases");
+        Assert.Contains(GitHubReleaseCheck.Repository, GitHubReleaseCheck.DefaultEndpoint, StringComparison.Ordinal);
     }
 
     private static Match Match(string pattern, string? text = null)

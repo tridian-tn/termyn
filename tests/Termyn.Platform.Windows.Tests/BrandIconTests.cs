@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Drawing;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
@@ -98,20 +99,81 @@ public class BrandIconTests
         var fresh = Temp();
         BrandIcon.WriteIcoFile(fresh);
 
-        Assert.Equal(Directory(File.ReadAllBytes(fresh)), Directory(File.ReadAllBytes(committed)));
+        // Compared as pictures rather than as bytes. PNG is lossless, so decoding both sides gives
+        // the same pixels whatever the encoder did with them — and the encoder is not ours: this
+        // machine and the CI runner have different builds of gdiplus, so comparing compressed
+        // lengths would fail on CI and tell whoever read it to regenerate a mark that hadn't changed.
+        var a = Frames(File.ReadAllBytes(fresh));
+        var b = Frames(File.ReadAllBytes(committed));
 
-        // The frame count and sizes, which is what survives a different PNG encoder.
-        static List<(int Size, int Length)> Directory(byte[] bytes)
+        Assert.Equal(a.Keys.Order(), b.Keys.Order());
+
+        foreach (var size in a.Keys)
         {
+            using var drawn = a[size];
+            using var stored = b[size];
+            Assert.True(Differences(drawn, stored) == 0, $"the {size}px frame is not what the code draws now");
+        }
+
+        static Dictionary<int, Bitmap> Frames(byte[] bytes)
+        {
+            var frames = new Dictionary<int, Bitmap>();
             var count = BitConverter.ToUInt16(bytes, 4);
-            var entries = new List<(int, int)>(count);
             for (var i = 0; i < count; i++)
             {
                 var entry = 6 + (i * 16);
-                entries.Add((bytes[entry] == 0 ? 256 : bytes[entry], BitConverter.ToInt32(bytes, entry + 8)));
+                var size = bytes[entry] == 0 ? BrandIcon.MaxSize : bytes[entry];
+                var length = BitConverter.ToInt32(bytes, entry + 8);
+                var offset = BitConverter.ToInt32(bytes, entry + 12);
+
+                using var png = new MemoryStream(bytes, offset, length);
+                frames[size] = new Bitmap(png);
             }
-            return entries;
+            return frames;
         }
+    }
+
+    [Fact]
+    public void Every_frame_is_a_picture_of_the_size_the_directory_claims()
+    {
+        // Including 256, which the shell-loading test has to skip because the Icon API won't decode
+        // it — so this is the only thing checking the size of the frame Explorer shows large and the
+        // installer stamps on the setup binary.
+        var bytes = File.ReadAllBytes(Path.Combine(RepoRoot(), "assets", "termyn.ico"));
+        var count = BitConverter.ToUInt16(bytes, 4);
+
+        Assert.Equal(BrandIcon.IconSizes.Count, count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var entry = 6 + (i * 16);
+            var declared = bytes[entry] == 0 ? BrandIcon.MaxSize : bytes[entry];
+            var offset = BitConverter.ToInt32(bytes, entry + 12);
+
+            // Straight out of the PNG's own header, big-endian, so this is the picture's opinion of
+            // its size rather than the directory's.
+            var width = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(offset + 16, 4));
+            var height = BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(offset + 20, 4));
+
+            Assert.Equal(declared, width);
+            Assert.Equal(declared, height);
+        }
+    }
+
+    [Fact]
+    public void An_icon_written_to_a_chosen_set_of_sizes_holds_exactly_those()
+    {
+        // The sizes parameter is a documented entry point with no other coverage: ignoring the
+        // caller's list and writing IconSizes regardless passes every other test here, including
+        // both of the rejection ones, which throw before the list is ever used.
+        var path = Temp();
+        BrandIcon.WriteIcoFile(path, [16, 32]);
+
+        var bytes = File.ReadAllBytes(path);
+
+        Assert.Equal(2, BitConverter.ToUInt16(bytes, 4));
+        Assert.Equal(16, bytes[6]);
+        Assert.Equal(32, bytes[6 + 16]);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Termyn.Core;
 using Termyn.Core.Update;
 
 namespace Termyn.Core.Tests;
@@ -88,6 +89,35 @@ public class UpdateVersionTests
         Assert.Contains("Couldn't reach", advice.Message);
         Assert.Contains("v1.0.0", advice.Message);
         Assert.Null(advice.OpenUrl);
+    }
+
+    [Fact]
+    public void Being_up_to_date_names_the_version_that_is_running()
+    {
+        // Different numbers on the two sides, because with them equal this can't tell Tag(running)
+        // from Tag(latest) — and running ahead of the published release is the normal state on the
+        // machine of whoever builds it.
+        var advice = new UpdateResult(new Version(1, 0, 0), "https://github.com/x/y").Advise(new Version(1, 1, 0));
+
+        Assert.Equal("Termyn v1.1.0 is the latest.", advice.Message);
+        Assert.Null(advice.OpenUrl);
+    }
+
+    [Fact]
+    public void The_page_we_fall_back_to_is_one_we_would_actually_open()
+    {
+        // The fallback only runs for a release published without a page of its own, so a bad
+        // constant here would dead-end on a dialog whose OK does nothing, and ship unnoticed.
+        Assert.Equal(UpdateResult.ReleasesPage, GitHubReleaseCheck.SafeUrl(UpdateResult.ReleasesPage));
+        Assert.Equal(UpdateResult.ReleasesPage, Links.Openable(UpdateResult.ReleasesPage));
+    }
+
+    [Fact]
+    public void A_release_naming_an_empty_page_falls_back_like_one_naming_none()
+    {
+        var advice = new UpdateResult(new Version(1, 4, 0), "").Advise(new Version(1, 0, 0));
+
+        Assert.Equal(UpdateResult.ReleasesPage, advice.OpenUrl);
     }
 
     [Fact]
@@ -200,6 +230,10 @@ public class GitHubReleaseCheckTests
     [InlineData("\\\\evil.example\\share\\Termyn-Update.exe")]
     [InlineData("http://github.com/tridian-tn/termyn/releases/tag/v9")]  // not https
     [InlineData("https://evil.example/termyn")]                          // not the project's host
+    [InlineData("https://github.com/someone-else/termyn/releases/tag/v9")]        // not this project
+    [InlineData("https://github.com/x/y/releases/download/v9/Termyn-setup.exe")]  // an arbitrary binary
+    [InlineData("https://github.com/login/oauth/authorize?client_id=x&scope=repo")]
+    [InlineData("https://github.com/tridian-tn/termyn")]        // the repo itself, not a page under it
     public async Task A_release_page_we_would_not_open_is_dropped(string url)
     {
         // This ends at ShellExecute, which runs a UNC path or a file: URL as readily as it opens a
@@ -289,8 +323,130 @@ public class GitHubReleaseCheckTests
         Assert.Contains("application/vnd.github+json", handler.LastRequest.Headers.Accept.ToString());
     }
 
+    [Fact]
+    public async Task A_release_the_size_GitHub_actually_sends_is_read()
+    {
+        // Every other success case here is a hundred bytes of hand-written JSON, so a cap lowered to
+        // some plausible-sounding "8KB is plenty" would pass the whole suite while turning the update
+        // check into a permanent "couldn't reach it" on every real machine.
+        var notes = new string('x', 40 * 1024);
+        var assets = string.Join(",", Enumerable.Range(0, 6).Select(i =>
+            $$$"""{"name":"Termyn-1.4.0-setup-{{{i}}}.exe","size":3000000,"uploader":{"login":"tridian-tn","id":{{{i}}}}}"""));
+        var body = $$"""{"tag_name":"v1.4.0","html_url":"https://github.com/tridian-tn/termyn/releases/tag/v1.4.0","body":"{{notes}}","assets":[{{assets}}]}""";
+
+        Assert.True(body.Length > 40 * 1024, "the point of this test is a realistically large body");
+
+        var result = await Returning(HttpStatusCode.OK, body).LatestAsync();
+
+        Assert.Equal(new Version(1, 4, 0), result.Latest);
+    }
+
+    [Theory]
+    [InlineData(1024 * 1024, true)]
+    [InlineData(1024 * 1024 + 1, false)]
+    public async Task A_body_at_the_cap_is_read_and_one_byte_past_it_is_not(int total, bool readable)
+    {
+        // The only other cap test is two orders of magnitude past the boundary, so it says nothing
+        // about an off-by-one here.
+        const string head = @"{""tag_name"":""v9.0.0"",""note"":""";
+        var body = head + new string('x', total - head.Length - 2) + @"""}";
+        Assert.Equal(total, body.Length);
+
+        var result = await Returning(HttpStatusCode.OK, body).LatestAsync();
+
+        Assert.Equal(readable ? new Version(9, 0, 0) : null, result.Latest);
+    }
+
+    [Fact]
+    public async Task A_server_that_lies_about_the_length_is_still_capped()
+    {
+        // The cap is enforced on what arrives, not on what the sender claims — which is the whole
+        // reason it isn't a Content-Length check, and nothing else here would notice it becoming one.
+        var huge = $$"""{"tag_name":"v9.0.0","note":"{{new string('x', 2 * 1024 * 1024)}}"}""";
+        var content = new StringContent(huge, Encoding.UTF8, "application/json");
+        content.Headers.ContentLength = 10;
+
+        var check = new GitHubReleaseCheck(new HttpClient(new StubHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
+
+        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync());
+    }
+
+    [Fact]
+    public async Task A_body_that_never_finishes_arriving_ends_anyway()
+    {
+        // HttpClient.Timeout stops covering things once the headers are in, so without a deadline of
+        // its own this waits for as long as the server cares to hold the socket — measured at 45 and
+        // 63 seconds against a three-second client timeout before the fix.
+        var check = new GitHubReleaseCheck(
+            new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new StallingStream()),
+            })),
+            deadline: TimeSpan.FromMilliseconds(250));
+
+        // Raced against a clock rather than simply awaited: without the deadline this never returns
+        // at all, and a test that hangs forever is a worse thing to leave in CI than one that fails.
+        var running = check.LatestAsync();
+        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.Same(running, finished);
+        Assert.Equal(UpdateResult.Unknown, await running);
+    }
+
+    [Fact]
+    public async Task Cancelling_while_the_body_is_arriving_is_not_swallowed()
+    {
+        // The other cancellation test proves the token reaches SendAsync. This one is about the read
+        // that actually takes time — and about the check not outliving the window that asked for it.
+        using var cts = new CancellationTokenSource();
+        var check = new GitHubReleaseCheck(new HttpClient(new StubHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream(cts)) })));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check.LatestAsync(cts.Token));
+    }
+
     private static GitHubReleaseCheck Returning(HttpStatusCode status, string json)
         => new(new HttpClient(new StubHandler(_ => Resp(status, json))));
+
+    /// <summary>A body that starts arriving and then doesn't finish — a stalled server, or a dead link.</summary>
+    private sealed class StallingStream : Stream
+    {
+        private readonly CancellationTokenSource? _cancelOnFirstRead;
+        private bool _served;
+
+        public StallingStream(CancellationTokenSource? cancelOnFirstRead = null)
+            => _cancelOnFirstRead = cancelOnFirstRead;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (!_served)
+            {
+                _served = true;
+                _cancelOnFirstRead?.Cancel();
+
+                // Enough to be under way, so this is a stall mid-body rather than a refusal.
+                var opening = Encoding.UTF8.GetBytes(@"{""tag_name"":");
+                opening.CopyTo(buffer.Span);
+                return opening.Length;
+            }
+
+            // Never completes of its own accord: only the deadline or the caller's cancel ends it.
+            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            return 0;
+        }
+    }
 
     private static HttpResponseMessage Resp(HttpStatusCode status, string json)
         => new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };

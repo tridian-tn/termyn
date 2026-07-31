@@ -473,11 +473,11 @@ public class SettingsStoreTests : IDisposable
         var store = new SettingsStore(Config);
 
         store.Load();
-        Assert.False(store.Existed);
+        Assert.Equal(SettingsOrigin.Defaults, store.Origin);
 
         store.Save(new AppSettings());
         store.Load();
-        Assert.True(store.Existed);
+        Assert.Equal(SettingsOrigin.File, store.Origin);
     }
 
     [Fact]
@@ -485,20 +485,45 @@ public class SettingsStoreTests : IDisposable
     {
         // Unparseable, so it is renamed — and from that point there genuinely is no settings file,
         // which is what stops a typo in one field being read as a decision about anything else.
-        File.WriteAllText(Config, "{ this is not json");
+        File.WriteAllText(Config, """{ "theme": "Dark", this is not json""");
 
         var store = new SettingsStore(Config);
         store.Load();
 
-        Assert.False(store.Existed);
-        Assert.True(store.Readable);
+        Assert.Equal(SettingsOrigin.Defaults, store.Origin);
+
+        // The name of this test, actually asserted: the file is gone from where it was, its contents
+        // are recoverable beside it, and the store will write again because there is nothing to lose.
+        Assert.False(File.Exists(Config));
+        Assert.Contains("this is not json", File.ReadAllText(Config + ".bad"));
+
+        Assert.True(store.Save(new AppSettings { Theme = ThemePreference.Dark }));
+        Assert.Equal(ThemePreference.Dark, new SettingsStore(Config).Load().Theme);
     }
 
     [Fact]
-    public void A_file_that_is_there_but_locked_is_existing_and_unreadable()
+    public void A_file_we_could_not_even_move_aside_is_left_exactly_as_it_was()
     {
-        // The pair that lets a caller tell "the user has no settings" from "the user has settings we
-        // could not read" — which are opposite answers for anything acting on them.
+        // The half that matters most: if the rename fails the original is still sitting there full
+        // of the user's settings, and calling that a first run invites the caller to save defaults
+        // straight over it — losing the very thing moving it aside was meant to preserve.
+        File.WriteAllText(Config, """{ "theme": "Dark", this is not json""");
+        Directory.CreateDirectory(Config + ".bad");
+        File.WriteAllText(Path.Combine(Config + ".bad", "occupied.txt"), "in the way");
+
+        var store = new SettingsStore(Config);
+        store.Load();
+
+        Assert.Equal(SettingsOrigin.Unreadable, store.Origin);
+        Assert.False(store.Save(new AppSettings()));
+        Assert.Contains("this is not json", File.ReadAllText(Config));
+    }
+
+    [Fact]
+    public void A_file_that_is_there_but_locked_is_unreadable_rather_than_absent()
+    {
+        // The distinction that lets a caller tell "the user has no settings" from "the user has
+        // settings we could not read" — opposite answers for anything acting on them.
         File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "Dark" }""");
 
         var store = new SettingsStore(Config);
@@ -507,8 +532,7 @@ public class SettingsStoreTests : IDisposable
             store.Load();
         }
 
-        Assert.True(store.Existed);
-        Assert.False(store.Readable);
+        Assert.Equal(SettingsOrigin.Unreadable, store.Origin);
     }
 
     [Fact]

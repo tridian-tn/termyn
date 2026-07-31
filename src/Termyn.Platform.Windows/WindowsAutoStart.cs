@@ -19,7 +19,8 @@ public sealed class WindowsAutoStart : IAutoStartService
     /// Signing in is not a request to be shown a task list, so the login entry starts Termyn in the
     /// tray — where the global hotkey is live and nothing has taken over the screen.
     /// </summary>
-    private const string StartupArgument = "--tray";
+    /// <summary>Internal so a test can hold the installer and the app to the same flag.</summary>
+    internal const string StartupArgument = "--tray";
 
     private readonly string _command;
     private readonly string _key;

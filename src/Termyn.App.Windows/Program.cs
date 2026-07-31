@@ -36,7 +36,11 @@ internal static class Program
 
         // Deliberately no MaxResponseContentBufferSize: it only applies to responses HttpClient
         // buffers for you, and every call here reads the stream itself, so setting it would have
-        // promised a bound that was never in force. Each caller bounds its own read.
+        // promised a bound that was never in force. The update check bounds its own read; the
+        // Todoist body is the account's own data and is parsed straight off the stream.
+        //
+        // The timeout is likewise only half of one — it stops applying once the headers arrive, so
+        // each caller puts a deadline on its own read as well.
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         ITodoistApi api = new TodoistApiClient(http);
         ISecretStore secrets = new DpapiSecretStore(paths);

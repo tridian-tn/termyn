@@ -122,6 +122,22 @@ public class StartupReconciliationTests : IDisposable
         Assert.True(settled.LaunchAtLogin);
     }
 
+    [Fact]
+    public void A_machine_that_refuses_the_change_does_not_get_to_rewrite_the_setting()
+    {
+        // A locked-down machine can refuse the write. What must not follow is Termyn concluding the
+        // user never wanted it — the setting is the user's, the registry is only where it's kept.
+        new SettingsStore(Config).Save(new AppSettings { LaunchAtLogin = true });
+
+        var autoStart = new FakeAutoStart { IsEnabled = false, Refuses = true };
+        var store = new SettingsStore(Config);
+
+        var settled = StartupReconciliation.OnLaunch(store, store.Load(), autoStart);
+
+        Assert.Equal([true], autoStart.Calls);
+        Assert.True(settled.LaunchAtLogin);
+    }
+
     /// <summary>Records what it was asked to do, since that is the whole question here.</summary>
     private sealed class FakeAutoStart : IAutoStartService
     {
@@ -129,9 +145,15 @@ public class StartupReconciliationTests : IDisposable
 
         public bool IsEnabled { get; set; }
 
+        /// <summary>A machine that won't have it — a policy, or a locked-down registry.</summary>
+        public bool Refuses { get; init; }
+
         public bool SetEnabled(bool enabled)
         {
             Calls.Add(enabled);
+            if (Refuses)
+                return false;
+
             IsEnabled = enabled;
             return true;
         }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Termyn.Core;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
@@ -374,19 +375,27 @@ internal sealed class MainForm : Form
 
             _status.Text = advice.Message;
 
-            // Nothing to open means nothing to ask about — there is no update, or we never found out.
+            // Nothing to open means nothing to ask about — there is no update, or we never found
+            // out. The status bar has said so, but only if there is a window to say it on: launched
+            // with --tray, or closed to the tray, this was invoked from a menu attached to nothing
+            // the user can see, and the commonest answer of all — "you're on the latest" — would
+            // leave the menu item looking broken.
             if (advice.OpenUrl is not { } url)
+            {
+                if (!Visible || WindowState == FormWindowState.Minimized)
+                    MessageBox.Show(advice.Message, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
+            }
 
             var answer = MessageBox.Show(
-                this,
+                Visible ? this : null,
                 advice.Message + "\r\n\r\nOpen the release page?",
                 "Termyn",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Information);
 
             if (answer == DialogResult.OK && !AppVersion.OpenLink(url))
-                _status.Text = "That release didn't come with a page we could open.";
+                _status.Text = "Couldn't open the release page.";
         });
     }
 
@@ -632,7 +641,7 @@ internal sealed class MainForm : Form
     private void OpenTodoist()
     {
         // The saved filter lives in the account, so the app's own filter page is where to land.
-        Guarded(() => AppVersion.OpenLink("https://app.todoist.com/app/filters"));
+        Guarded(() => AppVersion.OpenLink(Links.TodoistFilters));
     }
 
     private void RenderSidebar()

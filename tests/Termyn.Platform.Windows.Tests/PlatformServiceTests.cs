@@ -263,23 +263,54 @@ public class TrayNotifierTests
     public void Setting_commands_twice_replaces_rather_than_stacks()
     {
         using var tray = new TrayNotifier();
-        var invoked = 0;
+        var ran = new List<string>();
 
-        tray.SetCommands([new NotifierCommand("One", () => invoked++), new NotifierCommand("Two", () => { })]);
-        tray.SetCommands([new NotifierCommand("Only", () => invoked++)]);
+        tray.SetCommands([new NotifierCommand("One", () => ran.Add("One")), new NotifierCommand("Two", () => ran.Add("Two"))]);
+        tray.SetCommands([new NotifierCommand("Only", () => ran.Add("Only"))]);
 
         Assert.Equal("Only", Assert.Single(tray.MenuLabels));
+
+        // And it runs the command it is labelled with. Capturing the wrong element while wiring the
+        // handlers — the usual closure-over-the-loop-variable slip — leaves every label correct and
+        // every item firing the last command, which an assertion on labels alone can't see.
+        tray.Invoke("Only");
+        Assert.Equal(["Only"], ran);
     }
 
     [Fact]
     public void Nothing_is_asked_of_it_after_disposal()
     {
         var tray = new TrayNotifier();
+        tray.SetStatus("Before", 1);
+        tray.SetCommands([new NotifierCommand("One", () => { })]);
+
         tray.Dispose();
 
         // Both guarded, because the window's own teardown can reach these after the shell is gone.
+        tray.SetStatus("After", 3);
+        tray.SetCommands([new NotifierCommand("Two", () => { })]);
+
+        // That neither took, rather than merely that neither threw — disposal clears the tooltip
+        // itself, so "unchanged" would be asserting the wrong thing, but "the new value didn't
+        // land" is exactly what the guards are for. Without them SetStatus goes on to draw, leaking
+        // an icon handle during teardown, and nothing here would have noticed.
+        Assert.NotEqual("After", tray.Tooltip);
+        Assert.DoesNotContain("Two", tray.MenuLabels);
+    }
+
+    [Fact]
+    public void Replacing_the_tray_icon_releases_the_one_it_replaced()
+    {
+        // One unmanaged handle per badge change — every task completed, every sync — with no symptom
+        // at all until the process runs out of GDI objects hours later.
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", 0);
+        var first = tray.Icon!;
+
         tray.SetStatus("Termyn", 3);
-        tray.SetCommands([new NotifierCommand("One", () => { })]);
+
+        Assert.Throws<ObjectDisposedException>(() => _ = first.Handle);
     }
 
     [Fact]

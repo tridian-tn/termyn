@@ -20,10 +20,37 @@ public sealed class TodoistApiClient : ITodoistApi
 
     public TodoistApiClient(HttpClient http) => _http = http;
 
+    /// <summary>
+    /// How long one call gets, headers and body together.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately far longer than any sync should take. It isn't a performance limit — it's there
+    /// so a stalled response ends at all, and a first sync on a big account over a slow link is
+    /// genuinely slow, so cutting it fine would break something that works today.
+    /// </remarks>
+    private static readonly TimeSpan RequestDeadline = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// A deadline for one call, linked to the caller's token so a cancel still gets through.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="HttpClient.Timeout"/> stops applying the moment the response headers arrive,
+    /// because reading the body is our own work from there. Every call here reads its body as a
+    /// stream, so without this a server that sends a header and then goes quiet holds the read, the
+    /// connection and the task for as long as it cares to.
+    /// </remarks>
+    private static CancellationTokenSource Deadline(CancellationToken ct)
+    {
+        var source = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        source.CancelAfter(RequestDeadline);
+        return source;
+    }
+
     /// <inheritdoc />
     public async Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
     {
-        using var resp = await SendAsync(token, "*", ["user"], [], ct);
+        using var deadline = Deadline(ct);
+        using var resp = await SendAsync(token, "*", ["user"], [], deadline.Token, ct);
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return false;
         EnsureReachable(resp);
@@ -33,7 +60,8 @@ public sealed class TodoistApiClient : ITodoistApi
     /// <inheritdoc />
     public async Task<SyncResponse> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct = default)
     {
-        using var resp = await SendAsync(token, syncToken, resourceTypes, commands, ct);
+        using var deadline = Deadline(ct);
+        using var resp = await SendAsync(token, syncToken, resourceTypes, commands, deadline.Token, ct);
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new TodoistAuthException("Todoist rejected the API token.");
         EnsureReachable(resp);
@@ -42,7 +70,7 @@ public sealed class TodoistApiClient : ITodoistApi
         // roughly double peak memory on a large sync.
         try
         {
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
             if (JsonNode.Parse(stream) is not JsonObject root)
                 throw new TodoistNetworkException("Todoist returned an unexpected sync response.");
             return Parse(root, resourceTypes);
@@ -64,10 +92,12 @@ public sealed class TodoistApiClient : ITodoistApi
         };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
+        using var deadline = Deadline(ct);
+
         HttpResponseMessage resp;
         try
         {
-            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         }
         catch (HttpRequestException ex)
         {
@@ -86,7 +116,7 @@ public sealed class TodoistApiClient : ITodoistApi
 
             try
             {
-                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
                 if (JsonNode.Parse(stream) is not JsonObject created || created["id"] is not { } id)
                     throw new TodoistNetworkException("Todoist returned an unexpected quick-add response.");
                 return new ResourceChange(Model.ResourceType.Items, id.ToString(), false, created);
@@ -117,10 +147,12 @@ public sealed class TodoistApiClient : ITodoistApi
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
+        using var deadline = Deadline(ct);
+
         HttpResponseMessage resp;
         try
         {
-            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         }
         catch (HttpRequestException ex)
         {
@@ -139,7 +171,7 @@ public sealed class TodoistApiClient : ITodoistApi
 
             try
             {
-                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
                 if (JsonNode.Parse(stream) is not JsonObject root)
                     throw new TodoistNetworkException("Todoist returned an unexpected completed-tasks response.");
 
@@ -168,7 +200,7 @@ public sealed class TodoistApiClient : ITodoistApi
     private static string Instant(DateTimeOffset moment)
         => moment.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
 
-    private async Task<HttpResponseMessage> SendAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct)
+    private async Task<HttpResponseMessage> SendAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct, CancellationToken caller)
     {
         var fields = new Dictionary<string, string>
         {
@@ -189,7 +221,7 @@ public sealed class TodoistApiClient : ITodoistApi
         {
             throw new TodoistNetworkException("Could not reach Todoist.", ex);
         }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!caller.IsCancellationRequested)
         {
             throw new TodoistNetworkException("The Todoist request timed out.", ex);
         }

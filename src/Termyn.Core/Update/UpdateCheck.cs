@@ -31,19 +31,28 @@ public sealed record UpdateResult(Version? Latest, string? ReleaseUrl)
             return new UpdateAdvice($"Termyn {Tag(running)} is the latest.", null);
 
         // A release with no page of its own still gets one: the releases list always exists, and an
-        // offer to open something has to open something.
-        return new UpdateAdvice($"Termyn {Tag(latest)} is available. You have {Tag(running)}.", ReleaseUrl ?? ReleasesPage);
+        // offer to open something has to open something. Empty counts as none — otherwise the
+        // dialog appears and its OK button does nothing.
+        var page = ReleaseUrl is { Length: > 0 } named ? named : ReleasesPage;
+        return new UpdateAdvice($"Termyn {Tag(latest)} is available. You have {Tag(running)}.", page);
     }
 
     /// <summary>Where releases are listed, for when a particular one names no page.</summary>
-    public const string ReleasesPage = "https://github.com/tridian-tn/termyn/releases";
+    public const string ReleasesPage = $"https://github.com/{GitHubReleaseCheck.Repository}/releases";
 
     /// <summary>
-    /// A version written the way a release tag is. Always three numbers: <c>Version.ToString(3)</c>
-    /// throws on a version carrying fewer, and versions arrive here from a tag someone typed.
+    /// A version cut to three components, with an absent one read as zero.
     /// </summary>
-    public static string Tag(Version version)
-        => $"v{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
+    /// <remarks>
+    /// The one place this rule lives. <see cref="Version"/> stores an absent component as -1, which
+    /// sorts below a real zero — so without this, a tag written <c>v1.0.0.0</c> compares as newer
+    /// than the <c>1.0.0</c> that is running, and <c>v2.0</c> throws on the way to being printed.
+    /// </remarks>
+    public static Version ThreeParts(Version version)
+        => new(version.Major, version.Minor, Math.Max(version.Build, 0));
+
+    /// <summary>A version written the way a release tag is, which is the number with a leading v.</summary>
+    public static string Tag(Version version) => "v" + ThreeParts(version).ToString(3);
 }
 
 /// <summary>What to say about an update, and what to open if the user wants it.</summary>
@@ -63,8 +72,14 @@ public sealed record UpdateAdvice(string Message, string? OpenUrl);
 /// </remarks>
 public sealed class GitHubReleaseCheck
 {
+    /// <summary>
+    /// The project, in the owner/name form both the API and the website use. Written once because a
+    /// rename that misses one of them leaves the check quietly 404-ing, which reads as being offline.
+    /// </summary>
+    public const string Repository = "tridian-tn/termyn";
+
     /// <summary>The latest published release, excluding drafts and pre-releases.</summary>
-    public const string DefaultEndpoint = "https://api.github.com/repos/tridian-tn/termyn/releases/latest";
+    public const string DefaultEndpoint = $"https://api.github.com/repos/{Repository}/releases/latest";
 
     /// <summary>
     /// The most of a response we will read. The answer is a few kilobytes of JSON; anything past this
@@ -73,13 +88,25 @@ public sealed class GitHubReleaseCheck
     /// </summary>
     private const int MaxResponseBytes = 1024 * 1024;
 
+    /// <summary>
+    /// How long the whole check gets, headers and body together.
+    /// </summary>
+    /// <remarks>
+    /// Generous, because this is never on anyone's critical path — the point is that it ends, not
+    /// that it ends quickly.
+    /// </remarks>
+    private static readonly TimeSpan DefaultDeadline = TimeSpan.FromSeconds(30);
+
     private readonly HttpClient _http;
     private readonly string _endpoint;
+    private readonly TimeSpan _deadline;
 
-    public GitHubReleaseCheck(HttpClient http, string? endpoint = null)
+    /// <param name="deadline">How long the whole check gets. Shortened by tests that stall a body</param>
+    public GitHubReleaseCheck(HttpClient http, string? endpoint = null, TimeSpan? deadline = null)
     {
         _http = http;
         _endpoint = endpoint ?? DefaultEndpoint;
+        _deadline = deadline ?? DefaultDeadline;
     }
 
     /// <summary>Reads the latest published release.</summary>
@@ -94,12 +121,19 @@ public sealed class GitHubReleaseCheck
             // carries — nothing about the machine, the account or even the version.
             request.Headers.Add("User-Agent", "Termyn");
 
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            // HttpClient.Timeout stops applying the moment the headers arrive, because reading the
+            // body is our own work from there — so a server that sends a header and then dribbles
+            // one byte a minute would hold this forever, under the cap the whole way. The deadline
+            // covers the read as well, and links the caller's token so a cancel still gets through.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(_deadline);
+
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token)
                                             .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return UpdateResult.Unknown;
 
-            if (await ReadBoundedAsync(response, ct).ConfigureAwait(false) is not { } body)
+            if (await ReadBoundedAsync(response, deadline.Token).ConfigureAwait(false) is not { } body)
                 return UpdateResult.Unknown;
 
             if (JsonNode.Parse(body) is not JsonObject release)
@@ -149,9 +183,14 @@ public sealed class GitHubReleaseCheck
     /// <remarks>
     /// This comes off the network, and opening it goes through ShellExecute — which will run a UNC
     /// path or a <c>file:</c> URL as happily as it opens a web page. Anyone able to tamper with the
-    /// response would otherwise be one dialog away from launching a program of their choosing, so
-    /// only https to the project's own host is accepted; anything else is dropped and the caller
-    /// falls back to the releases page.
+    /// response would otherwise be one dialog away from launching a program of their choosing.
+    /// <para>
+    /// The path is checked as well as the host, because github.com is not the project's own host —
+    /// it's shared with every account on the site, and it serves release assets. Host alone would
+    /// still allow a link to someone else's signed-in-looking download of an arbitrary executable,
+    /// which is most of the way back to the thing being prevented. Anything not under this
+    /// project's own path is dropped, and the caller falls back to the releases page.
+    /// </para>
     /// </remarks>
     public static string? SafeUrl(string? url)
     {
@@ -161,7 +200,12 @@ public sealed class GitHubReleaseCheck
         if (uri.Scheme != Uri.UriSchemeHttps)
             return null;
 
-        return uri.Host is "github.com" or "www.github.com" ? uri.AbsoluteUri : null;
+        if (uri.Host is not ("github.com" or "www.github.com"))
+            return null;
+
+        return uri.AbsolutePath.StartsWith($"/{Repository}/", StringComparison.OrdinalIgnoreCase)
+            ? uri.AbsoluteUri
+            : null;
     }
 
     /// <summary>
@@ -183,8 +227,6 @@ public sealed class GitHubReleaseCheck
         if (trimmed.Contains('-') || !Version.TryParse(trimmed, out var version))
             return null;
 
-        // Three components, always. An absent one is -1, which sorts below a real zero and makes
-        // v1.0.0.0 look newer than the 1.0.0 that is running.
-        return new Version(version.Major, version.Minor, Math.Max(version.Build, 0));
+        return UpdateResult.ThreeParts(version);
     }
 }

@@ -13,12 +13,17 @@
 .PARAMETER SkipTests
     Package without running the test suite first. For iterating on the packaging itself.
 
+.PARAMETER RegenerateIcon
+    Redraw assets/termyn.ico from BrandIcon and exit, packaging nothing. Run this after changing the
+    mark; the test that compares the committed file against the drawing will tell you when.
+
 .EXAMPLE
     ./packaging/build.ps1
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$RegenerateIcon
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +33,22 @@ $root = Split-Path -Parent $PSScriptRoot
 $artifacts = Join-Path $root 'artifacts'
 $publish = Join-Path $artifacts 'publish'
 $app = Join-Path $root 'src/Termyn.App.Windows/Termyn.App.Windows.csproj'
+
+if ($RegenerateIcon) {
+    # Through the built library rather than a copy of the drawing code, so what lands in the file is
+    # by construction what the tray draws.
+    $platform = Join-Path $root 'src/Termyn.Platform.Windows/Termyn.Platform.Windows.csproj'
+    dotnet build $platform -c Release --nologo | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not build Termyn.Platform.Windows.' }
+
+    $dll = Join-Path $root 'src/Termyn.Platform.Windows/bin/Release/net10.0-windows/Termyn.Platform.Windows.dll'
+    $icon = Join-Path $root 'assets/termyn.ico'
+    Add-Type -Path $dll
+    [Termyn.Platform.Windows.BrandIcon]::WriteIcoFile($icon, $null)
+
+    Write-Host "Wrote $icon"
+    return
+}
 
 function Get-ProductVersion {
     # Asked of MSBuild rather than parsed out of the props file, so this is the version that actually
@@ -85,7 +106,9 @@ if (-not $iscc) {
 }
 
 Write-Host 'Building the installer...' -ForegroundColor Cyan
-& $iscc "/DAppVersion=$version" (Join-Path $PSScriptRoot 'Termyn.iss') | Out-String -Stream |
+# Both facts passed in, so the script has no second home for either. What it publishes and
+# what it packages cannot drift apart.
+& $iscc "/DAppVersion=$version" "/DPublishDir=$publish" (Join-Path $PSScriptRoot 'Termyn.iss') | Out-String -Stream |
     Where-Object { $_ -match 'error|warning' } | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
 
