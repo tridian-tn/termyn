@@ -1285,6 +1285,8 @@ public sealed class MainPresenter
             Command: PaletteCommand.ToggleCompleted);
         yield return new PaletteEntry(PaletteKind.Action, "Undo", "action", Command: PaletteCommand.Undo);
         yield return new PaletteEntry(PaletteKind.Action, "Settings", "action", Command: PaletteCommand.Settings);
+        yield return new PaletteEntry(PaletteKind.Action, "Check for updates", "action", Command: PaletteCommand.CheckForUpdates);
+        yield return new PaletteEntry(PaletteKind.Action, "About Termyn", "action", Command: PaletteCommand.About);
 
         // Built from the sidebar rather than the model, so the palette reaches exactly what the tree
         // does — same names, same order, and nothing archived or unaddressable.

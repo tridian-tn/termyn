@@ -124,6 +124,18 @@ public class CommandPaletteTests
     }
 
     [Fact]
+    public async Task Every_command_the_palette_can_run_is_reachable_from_it()
+    {
+        // Enum-driven rather than spot-checked by name: adding a command without an entry, or with
+        // two, then fails here instead of shipping a palette that can't reach it.
+        var presenter = await Loaded();
+        var palette = presenter.Palette("");
+
+        foreach (var command in Enum.GetValues<PaletteCommand>().Where(c => c != PaletteCommand.None))
+            Assert.Single(palette, e => e.Command == command);
+    }
+
+    [Fact]
     public async Task A_favourited_project_is_listed_once()
     {
         var presenter = await Loaded();

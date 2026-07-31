@@ -35,8 +35,8 @@ public sealed class SettingsStore
     /// </summary>
     private int? _version = AppSettings.CurrentSchemaVersion;
 
-    /// <summary>False when a file exists but couldn't be read, which makes saving unsafe.</summary>
-    private bool _readable = true;
+    /// <summary>Where the settings in hand came from, which decides what may be done with them.</summary>
+    private SettingsOrigin _origin = SettingsOrigin.Defaults;
 
     public SettingsStore(IAppPaths paths)
         : this(System.IO.Path.Combine(paths.ConfigDirectory, "config.json"))
@@ -46,6 +46,17 @@ public sealed class SettingsStore
     public SettingsStore(string path) => FilePath = path;
 
     public string FilePath { get; }
+
+    /// <summary>
+    /// Where the settings from the last <see cref="Load"/> came from.
+    /// </summary>
+    /// <remarks>
+    /// One property rather than a pair of flags, because the three outcomes are exclusive and a
+    /// caller reading either flag alone gets a plausible-looking wrong answer: settings are
+    /// "readable" on a first run when there was nothing to read, and no file "exists" after a bad
+    /// one was moved aside even though there certainly was one.
+    /// </remarks>
+    public SettingsOrigin Origin => _origin;
 
     /// <summary>
     /// Reads the settings, falling back to defaults when there is no file or it can't be read. An
@@ -67,10 +78,10 @@ public sealed class SettingsStore
             {
                 // Locked or unreadable — busy, most likely. Run on defaults for this session and
                 // refuse to save, because an overlay onto nothing would write those defaults over a
-                // file whose real contents we never managed to read. Set after Reset, which clears it:
-                // the flag means "a file is there and we couldn't read it", nothing else.
+                // file whose real contents we never managed to read. Set after Reset, which clears
+                // it: this means "a file is there and we couldn't read it", nothing else.
                 var settings = Reset();
-                _readable = false;
+                _origin = SettingsOrigin.Unreadable;
                 return settings;
             }
 
@@ -82,13 +93,18 @@ public sealed class SettingsStore
             }
             catch (JsonException)
             {
-                SetAside();
-                return Reset();
+                // Only a file we actually managed to move counts as gone. If the rename failed the
+                // original is still sitting there full of the user's settings, and calling that a
+                // first run would invite the caller to save defaults straight over it — losing the
+                // very thing moving it aside was meant to preserve.
+                var settings = Reset();
+                _origin = SetAside() ? SettingsOrigin.Defaults : SettingsOrigin.Unreadable;
+                return settings;
             }
 
             Migrate(root);
             _raw = root;
-            _readable = true;
+            _origin = SettingsOrigin.File;
             _version = HasVersion(root) ? ReadVersion(root) : AppSettings.CurrentSchemaVersion;
             return Read(root);
         }
@@ -102,7 +118,7 @@ public sealed class SettingsStore
         {
             // Whatever is on disk is real and we couldn't read it. Overlaying defaults onto an empty
             // object would replace every one of the user's settings with a default.
-            if (!_readable)
+            if (_origin is SettingsOrigin.Unreadable)
                 return false;
 
             var known = JsonSerializer.SerializeToNode(settings, Format) as JsonObject ?? new JsonObject();
@@ -147,7 +163,7 @@ public sealed class SettingsStore
     {
         _raw = new JsonObject();
         _version = AppSettings.CurrentSchemaVersion;
-        _readable = true;
+        _origin = SettingsOrigin.Defaults;
         return new AppSettings();
     }
 
@@ -311,7 +327,8 @@ public sealed class SettingsStore
         root["schemaVersion"] = AppSettings.CurrentSchemaVersion;
     }
 
-    private void SetAside() => Move(FilePath, FilePath + ".bad");
+    /// <returns>False when the file is still where it was, so it must not be written over</returns>
+    private bool SetAside() => Move(FilePath, FilePath + ".bad");
 
     private static void Delete(string path)
     {
@@ -325,15 +342,36 @@ public sealed class SettingsStore
         }
     }
 
-    private static void Move(string from, string to)
+    /// <returns>Whether the file is now at <paramref name="to"/></returns>
+    private static bool Move(string from, string to)
     {
         try
         {
             File.Move(from, to, overwrite: true);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Nothing more to do — the defaults still apply.
+            // Locked, or a directory in the way. The caller has to know, because leaving the file
+            // where it is changes what may safely be done to it.
+            return false;
         }
     }
+}
+
+/// <summary>Where the settings a <see cref="SettingsStore"/> handed back came from.</summary>
+public enum SettingsOrigin
+{
+    /// <summary>No file to read, so these are this build's defaults and nothing was overridden.</summary>
+    Defaults,
+
+    /// <summary>
+    /// A file is there and its contents couldn't be honoured — locked, or unparseable and not
+    /// movable. The settings in hand are defaults standing in for choices we couldn't read, so they
+    /// must not be acted on and must not be written back over the file.
+    /// </summary>
+    Unreadable,
+
+    /// <summary>Read from the file, so they are what the user chose.</summary>
+    File,
 }

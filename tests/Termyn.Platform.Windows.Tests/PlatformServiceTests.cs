@@ -200,6 +200,121 @@ public class TrayNotifierTests
     }
 
     [Fact]
+    public void The_tray_icon_is_drawn_at_the_size_the_shell_asks_for()
+    {
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", 0);
+
+        // Floored at 16: a shell reporting something smaller would otherwise get an icon too small
+        // to read the mark in.
+        Assert.Equal(Math.Max(SystemInformation.SmallIconSize.Width, 16), tray.Icon!.Width);
+    }
+
+    [Fact]
+    public void A_count_makes_the_tray_icon_look_different()
+    {
+        // Every other test here is satisfied by an icon existing, so this is the one that would
+        // fail if the badge stopped being drawn.
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", 0);
+        using var plain = tray.Icon!.ToBitmap();
+
+        tray.SetStatus("Termyn", 3);
+        using var badged = tray.Icon!.ToBitmap();
+
+        var differing = 0;
+        for (var x = 0; x < plain.Width; x++)
+            for (var y = 0; y < plain.Height; y++)
+                if (plain.GetPixel(x, y) != badged.GetPixel(x, y))
+                    differing++;
+
+        Assert.True(differing > 0, "a badged tray icon should not look like the plain one");
+    }
+
+    [Fact]
+    public void A_tooltip_is_cut_only_when_it_is_actually_too_long()
+    {
+        using var tray = new TrayNotifier();
+
+        var exact = new string('x', 63);
+        tray.SetStatus(exact, 0);
+        Assert.Equal(exact, tray.Tooltip);
+
+        tray.SetStatus(new string('x', 64), 0);
+        Assert.Equal(63, tray.Tooltip.Length);
+        Assert.EndsWith("…", tray.Tooltip, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Cutting_a_tooltip_never_leaves_half_a_character()
+    {
+        // The tooltip is built from project names, and Todoist allows emoji in them. Slicing by code
+        // unit can split a surrogate pair and hand the shell half a character.
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus(new string('x', 61) + "🎯" + new string('y', 20), 0);
+
+        Assert.DoesNotContain(tray.Tooltip, char.IsSurrogate);
+    }
+
+    [Fact]
+    public void Setting_commands_twice_replaces_rather_than_stacks()
+    {
+        using var tray = new TrayNotifier();
+        var ran = new List<string>();
+
+        tray.SetCommands([new NotifierCommand("Gone", () => ran.Add("Gone"))]);
+        tray.SetCommands([new NotifierCommand("First", () => ran.Add("First")), new NotifierCommand("Last", () => ran.Add("Last"))]);
+
+        Assert.Equal(["First", "Last"], tray.MenuLabels);
+
+        // And each item runs the command it is labelled with. Two of them on purpose, and the one
+        // invoked is deliberately not the last: capturing the wrong element while wiring the
+        // handlers — the usual closure-over-the-loop-variable slip — leaves every label correct and
+        // every item firing the last command, and a single-item menu can't tell the two apart.
+        tray.Invoke("First");
+        Assert.Equal(["First"], ran);
+    }
+
+    [Fact]
+    public void Nothing_is_asked_of_it_after_disposal()
+    {
+        var tray = new TrayNotifier();
+        tray.SetStatus("Before", 1);
+        tray.SetCommands([new NotifierCommand("One", () => { })]);
+
+        tray.Dispose();
+
+        // Both guarded, because the window's own teardown can reach these after the shell is gone.
+        tray.SetStatus("After", 3);
+        tray.SetCommands([new NotifierCommand("Two", () => { })]);
+
+        // That neither took, rather than merely that neither threw — disposal clears the tooltip
+        // itself, so "unchanged" would be asserting the wrong thing, but "the new value didn't
+        // land" is exactly what the guards are for. Without them SetStatus goes on to draw, leaking
+        // an icon handle during teardown, and nothing here would have noticed.
+        Assert.NotEqual("After", tray.Tooltip);
+        Assert.DoesNotContain("Two", tray.MenuLabels);
+    }
+
+    [Fact]
+    public void Replacing_the_tray_icon_releases_the_one_it_replaced()
+    {
+        // One unmanaged handle per badge change — every task completed, every sync — with no symptom
+        // at all until the process runs out of GDI objects hours later.
+        using var tray = new TrayNotifier();
+
+        tray.SetStatus("Termyn", 0);
+        var first = tray.Icon!;
+
+        tray.SetStatus("Termyn", 3);
+
+        Assert.Throws<ObjectDisposedException>(() => _ = first.Handle);
+    }
+
+    [Fact]
     public void The_same_count_twice_does_not_redraw()
     {
         // A redraw per publish is a GDI handle churned on every keystroke.

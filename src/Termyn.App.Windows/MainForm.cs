@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using Termyn.Core;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
+using Termyn.Core.Update;
 using Termyn.Presentation;
 
 // Both namespaces have a Label, and in a form file the control is what "Label" should mean.
@@ -28,6 +30,7 @@ internal sealed record Shell(
     IAutoStartService AutoStart,
     INotifier Notifier,
     ISingleInstance Instance,
+    GitHubReleaseCheck Updates,
     bool StartInTray = false,
     bool StartWithQuickAdd = false);
 
@@ -322,6 +325,7 @@ internal sealed class MainForm : Form
         new NotifierCommand("Quick add…", () => OnUi(() => Guarded(QuickAdd.Summon))),
         new NotifierCommand("Sync now", () => _scheduler.RequestNow()),
         new NotifierCommand("Settings…", () => OnUi(() => Guarded(OpenSettings))),
+        new NotifierCommand("Check for updates…", () => OnUi(() => _ = CheckForUpdatesAsync())),
         new NotifierCommand("Exit", () => OnUi(Exit)),
     ]);
 
@@ -350,6 +354,61 @@ internal sealed class MainForm : Form
         // that something else on the machine already owns it. Said whether or not this was a change.
         return $"Another application already owns {binding} — quick-add has no hotkey.";
     }
+
+    /// <summary>
+    /// Asks whether a newer Termyn has been published, and offers to open its page.
+    /// </summary>
+    /// <remarks>
+    /// Manual, as the spec has it for v1: nothing checks on a timer, nothing downloads, and nothing
+    /// about the account leaves the machine — this is a GET for a version number.
+    /// </remarks>
+    private async Task CheckForUpdatesAsync()
+    {
+        _status.Text = "Checking for updates…";
+
+        await GuardedAsync(async () =>
+        {
+            var advice = (await _shell.Updates.LatestAsync(_cts.Token)).Advise(AppVersion.Current);
+
+            if (IsDisposed)
+                return;
+
+            _status.Text = advice.Message;
+
+            // Nothing to open means nothing to ask about — there is no update, or we never found
+            // out. The status bar has said so, but only if there is a window to say it on: launched
+            // with --tray, or closed to the tray, this was invoked from a menu attached to nothing
+            // the user can see, and the commonest answer of all — "you're on the latest" — would
+            // leave the menu item looking broken.
+            if (advice.OpenUrl is not { } url)
+            {
+                if (!Visible || WindowState == FormWindowState.Minimized)
+                    MessageBox.Show(advice.Message, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                Visible ? this : null,
+                advice.Message + "\r\n\r\nOpen the release page?",
+                "Termyn",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information);
+
+            if (answer == DialogResult.OK && !AppVersion.OpenLink(url))
+                _status.Text = "Couldn't open the release page.";
+        });
+    }
+
+    private void ShowAbout()
+        => MessageBox.Show(
+            this,
+            $"Termyn {AppVersion.Tag}\r\n\r\nA keyboard-driven Todoist client for Windows.\r\n\r\n"
+            + $"Installed in:\r\n{AppVersion.Location}\r\n\r\n"
+            + $"Settings and token:\r\n{_shell.Paths.ConfigDirectory}\r\n\r\n"
+            + $"Cache and logs:\r\n{_shell.Paths.CacheDirectory}",
+            "About Termyn",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
 
     private void OpenSettings()
     {
@@ -582,7 +641,7 @@ internal sealed class MainForm : Form
     private void OpenTodoist()
     {
         // The saved filter lives in the account, so the app's own filter page is where to land.
-        Guarded(() => Process.Start(new ProcessStartInfo("https://app.todoist.com/app/filters") { UseShellExecute = true }));
+        Guarded(() => AppVersion.OpenLink(Links.TodoistFilters));
     }
 
     private void RenderSidebar()
@@ -1047,6 +1106,12 @@ internal sealed class MainForm : Form
                 break;
             case PaletteCommand.Settings:
                 OpenSettings();
+                break;
+            case PaletteCommand.CheckForUpdates:
+                _ = CheckForUpdatesAsync();
+                break;
+            case PaletteCommand.About:
+                ShowAbout();
                 break;
         }
     }
