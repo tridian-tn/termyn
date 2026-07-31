@@ -17,8 +17,14 @@ public sealed class TodoistApiClient : ITodoistApi
     private const string CompletedUrl = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date";
 
     private readonly HttpClient _http;
+    private readonly TimeSpan _deadline;
 
-    public TodoistApiClient(HttpClient http) => _http = http;
+    /// <param name="deadline">How long one call gets. Shortened by tests that stall a body</param>
+    public TodoistApiClient(HttpClient http, TimeSpan? deadline = null)
+    {
+        _http = http;
+        _deadline = deadline ?? DefaultDeadline;
+    }
 
     /// <summary>
     /// How long one call gets, headers and body together.
@@ -28,7 +34,7 @@ public sealed class TodoistApiClient : ITodoistApi
     /// so a stalled response ends at all, and a first sync on a big account over a slow link is
     /// genuinely slow, so cutting it fine would break something that works today.
     /// </remarks>
-    private static readonly TimeSpan RequestDeadline = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan DefaultDeadline = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// A deadline for one call, linked to the caller's token so a cancel still gets through.
@@ -39,10 +45,10 @@ public sealed class TodoistApiClient : ITodoistApi
     /// stream, so without this a server that sends a header and then goes quiet holds the read, the
     /// connection and the task for as long as it cares to.
     /// </remarks>
-    private static CancellationTokenSource Deadline(CancellationToken ct)
+    private CancellationTokenSource Deadline(CancellationToken ct)
     {
         var source = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        source.CancelAfter(RequestDeadline);
+        source.CancelAfter(_deadline);
         return source;
     }
 
@@ -71,7 +77,7 @@ public sealed class TodoistApiClient : ITodoistApi
         try
         {
             await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
-            if (JsonNode.Parse(stream) is not JsonObject root)
+            if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject root)
                 throw new TodoistNetworkException("Todoist returned an unexpected sync response.");
             return Parse(root, resourceTypes);
         }
@@ -117,7 +123,7 @@ public sealed class TodoistApiClient : ITodoistApi
             try
             {
                 await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
-                if (JsonNode.Parse(stream) is not JsonObject created || created["id"] is not { } id)
+                if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject created || created["id"] is not { } id)
                     throw new TodoistNetworkException("Todoist returned an unexpected quick-add response.");
                 return new ResourceChange(Model.ResourceType.Items, id.ToString(), false, created);
             }
@@ -172,7 +178,7 @@ public sealed class TodoistApiClient : ITodoistApi
             try
             {
                 await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
-                if (JsonNode.Parse(stream) is not JsonObject root)
+                if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject root)
                     throw new TodoistNetworkException("Todoist returned an unexpected completed-tasks response.");
 
                 var items = new List<ResourceChange>();

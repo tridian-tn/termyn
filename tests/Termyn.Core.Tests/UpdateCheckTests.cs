@@ -437,9 +437,11 @@ public class GitHubReleaseCheckTests
                 _cancelOnFirstRead?.Cancel();
 
                 // Enough to be under way, so this is a stall mid-body rather than a refusal.
-                var opening = Encoding.UTF8.GetBytes(@"{""tag_name"":");
-                opening.CopyTo(buffer.Span);
-                return opening.Length;
+                // Trimmed to the buffer, which the JSON reader can offer a byte at a time.
+                var opening = Encoding.UTF8.GetBytes(@"{""tag_name"":").AsSpan();
+                var served = Math.Min(opening.Length, buffer.Length);
+                opening[..served].CopyTo(buffer.Span);
+                return served;
             }
 
             // Never completes of its own accord: only the deadline or the caller's cancel ends it.

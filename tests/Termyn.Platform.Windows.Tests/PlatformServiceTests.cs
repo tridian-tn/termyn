@@ -265,16 +265,17 @@ public class TrayNotifierTests
         using var tray = new TrayNotifier();
         var ran = new List<string>();
 
-        tray.SetCommands([new NotifierCommand("One", () => ran.Add("One")), new NotifierCommand("Two", () => ran.Add("Two"))]);
-        tray.SetCommands([new NotifierCommand("Only", () => ran.Add("Only"))]);
+        tray.SetCommands([new NotifierCommand("Gone", () => ran.Add("Gone"))]);
+        tray.SetCommands([new NotifierCommand("First", () => ran.Add("First")), new NotifierCommand("Last", () => ran.Add("Last"))]);
 
-        Assert.Equal("Only", Assert.Single(tray.MenuLabels));
+        Assert.Equal(["First", "Last"], tray.MenuLabels);
 
-        // And it runs the command it is labelled with. Capturing the wrong element while wiring the
+        // And each item runs the command it is labelled with. Two of them on purpose, and the one
+        // invoked is deliberately not the last: capturing the wrong element while wiring the
         // handlers — the usual closure-over-the-loop-variable slip — leaves every label correct and
-        // every item firing the last command, which an assertion on labels alone can't see.
-        tray.Invoke("Only");
-        Assert.Equal(["Only"], ran);
+        // every item firing the last command, and a single-item menu can't tell the two apart.
+        tray.Invoke("First");
+        Assert.Equal(["First"], ran);
     }
 
     [Fact]

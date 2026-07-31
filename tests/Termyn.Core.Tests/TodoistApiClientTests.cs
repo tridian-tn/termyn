@@ -8,6 +8,65 @@ namespace Termyn.Core.Tests;
 public class TodoistApiClientTests
 {
     [Fact]
+    public async Task A_sync_body_that_never_finishes_arriving_ends_anyway()
+    {
+        // HttpClient.Timeout stops applying once the headers are in, so a server that sends a header
+        // and then goes quiet held the read, the connection and the sync loop for as long as it
+        // liked. Worse here than on the update check: this is what the app does on a timer.
+        var client = new TodoistApiClient(
+            new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new StallingStream()),
+            })),
+            deadline: TimeSpan.FromMilliseconds(250));
+
+        // Raced against a clock rather than simply awaited: without the deadline it never returns at
+        // all, and a test that hangs forever is a worse thing to leave in CI than one that fails.
+        var running = Record.ExceptionAsync(() => client.SyncAsync("tok", "*", ["items"], []));
+        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.Same(running, finished);
+        // A cancellation, not some other failure — the point is that the deadline is what ended it.
+        Assert.IsAssignableFrom<OperationCanceledException>(await running);
+    }
+
+    /// <summary>A body that starts arriving and then doesn't finish — a stalled server, or a dead link.</summary>
+    private sealed class StallingStream : Stream
+    {
+        private bool _served;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (!_served)
+            {
+                _served = true;
+
+                // Enough to be under way, so this is a stall mid-body rather than a refusal.
+                // Trimmed to the buffer, which the JSON reader can offer a byte at a time.
+                var opening = Encoding.UTF8.GetBytes(@"{""sync_token"":").AsSpan();
+                var served = Math.Min(opening.Length, buffer.Length);
+                opening[..served].CopyTo(buffer.Span);
+                return served;
+            }
+
+            // Never completes of its own accord: only the deadline ends it.
+            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            return 0;
+        }
+    }
+
+    [Fact]
     public async Task Parses_changes_tombstones_status_and_temp_ids()
     {
         const string json = """
