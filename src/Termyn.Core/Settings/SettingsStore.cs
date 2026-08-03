@@ -206,6 +206,10 @@ public sealed class SettingsStore
                 ? keys.OfType<JsonValue>().Select(k => k.ToString()).ToList()
                 : defaults.CollapsedKeys,
             SidebarWidth = Int(view, "sidebarWidth", defaults.SidebarWidth),
+            ShowDescription = Flag(view, "showDescription", defaults.ShowDescription),
+            DescriptionHeight = Int(view, "descriptionHeight", defaults.DescriptionHeight),
+            ShowPreview = Flag(view, "showPreview", defaults.ShowPreview),
+            PreviewWidth = Int(view, "previewWidth", defaults.PreviewWidth),
             WindowX = Nullable(view, "windowX"),
             WindowY = Nullable(view, "windowY"),
             WindowWidth = Int(view, "windowWidth", defaults.WindowWidth),

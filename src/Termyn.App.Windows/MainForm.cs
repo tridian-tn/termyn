@@ -56,6 +56,38 @@ internal sealed class MainForm : Form
     /// <summary>The right-click menu on a task, refilled for whichever row it opens over.</summary>
     private readonly ContextMenuStrip _taskMenu;
 
+    /// <summary>Splits the outline from the notes panel under it.</summary>
+    private readonly SplitContainer _detail;
+
+    /// <summary>Splits the notes as they are written from the notes as they read.</summary>
+    private readonly SplitContainer _notesSplit;
+
+    /// <summary>The task's description, in the markdown the account stores it as.</summary>
+    private readonly TextBox _notes;
+
+    /// <summary>The same description, rendered.</summary>
+    private readonly MarkdownView _rendered;
+
+    /// <summary>Which task the notes box is on and what it was opened with.</summary>
+    private readonly DescriptionDraft _draft = new();
+
+    /// <summary>
+    /// Holds the rendering back until the typing stops. Re-parsing and re-styling on every
+    /// keystroke is work nobody is waiting on, and it is done while they are still typing.
+    /// </summary>
+    private readonly System.Windows.Forms.Timer _renderIdle;
+
+    /// <summary>
+    /// Writes the notes once the typing has stopped for a while, so an edit left on screen while
+    /// the user goes elsewhere isn't held hostage to them coming back to it.
+    /// </summary>
+    private readonly System.Windows.Forms.Timer _saveIdle;
+
+    /// <summary>The panel sizes as the user last left them, which is what gets saved.</summary>
+    private int _notesHeight;
+
+    private int _previewWidth;
+
     /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
     private readonly LinkLabel _unsupported;
 
@@ -139,6 +171,7 @@ internal sealed class MainForm : Form
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
+        _outline.SelectedIndexChanged += (_, _) => FollowSelection();
 
         // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
         // also what makes Shift+F10 and the menu key reach it, without either being handled.
@@ -155,13 +188,69 @@ internal sealed class MainForm : Form
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
 
+        _notes = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            AcceptsReturn = true,
+            WordWrap = true,
+            ScrollBars = ScrollBars.Vertical,
+            PlaceholderText = "Notes…  **bold**  *italic*  - a list",
+
+            // Fixed-width, so the half you write in doesn't read as the half you read from. With
+            // both in the same face a description with no formatting in it is the same text twice,
+            // and the panel looks like it has done nothing.
+            Font = new Font(FontFamily.GenericMonospace, Font.Size),
+        };
+        _notes.TextChanged += OnNotesChanged;
+        _notes.Leave += (_, _) => SaveNotes();
+
+        _rendered = new MarkdownView { Dock = DockStyle.Fill };
+        _rendered.LinkOpened += OnNotesLinkOpened;
+
+        _notesSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            FixedPanel = FixedPanel.Panel2,
+        };
+        _notesSplit.Panel1.Controls.Add(_notes);
+        _notesSplit.Panel2.Controls.Add(_rendered);
+        _notesSplit.SplitterMoved += (_, _) => RememberPanelSizes();
+
+        // The notes go under the outline rather than beside it: the outline is five columns wide
+        // before it is useful, and a panel down the side of it takes that from the task names.
+        _detail = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            FixedPanel = FixedPanel.Panel2,
+        };
+        _detail.Panel1.Controls.Add(_outline);
+        _detail.Panel2.Controls.Add(_notesSplit);
+        _detail.SplitterMoved += (_, _) => RememberPanelSizes();
+
+        _renderIdle = new System.Windows.Forms.Timer { Interval = 300 };
+        _renderIdle.Tick += (_, _) =>
+        {
+            _renderIdle.Stop();
+            _rendered.Markdown = _notes.Text;
+        };
+
+        // Long enough that it isn't saving mid-sentence, short enough that walking away from a
+        // half-written note doesn't leave it only in the window. Each save is a queued
+        // item_update, which the outbox coalesces on the way out and which — unlike a completion
+        // or a delete — records nothing on the undo stack, so a session of these can't push a
+        // Ctrl+Z out of reach.
+        _saveIdle = new System.Windows.Forms.Timer { Interval = 5000 };
+        _saveIdle.Tick += (_, _) => SaveNotes();
+
         _split = new SplitContainer
         {
             Dock = DockStyle.Fill,
             FixedPanel = FixedPanel.Panel1,
         };
         _split.Panel1.Controls.Add(_sidebar);
-        _split.Panel2.Controls.Add(_outline);
+        _split.Panel2.Controls.Add(_detail);
 
         // Above the outline, so it reads as an explanation of the empty list below it.
         _split.Panel2.Controls.Add(_unsupported);
@@ -207,6 +296,13 @@ internal sealed class MainForm : Form
         Load += async (_, _) => await LoadAsync();
         Shown += OnShown;
         FormClosing += OnFormClosing;
+
+        // The notes box losing the focus to another control raises Leave; the whole window losing
+        // it to another application does not — the box stays the window's active control and takes
+        // the focus back on return. Without this, alt-tabbing away from a half-written note left it
+        // sitting in the window: not queued, so not on the phone, and not there at all if the
+        // process went without closing.
+        Deactivate += (_, _) => SaveNotes();
         FormClosed += (_, _) =>
         {
             _presenter.RowsChanged -= OnRowsChanged;
@@ -217,6 +313,8 @@ internal sealed class MainForm : Form
             if (_signalsWired)
                 _shell.Instance.SignalReceived -= OnInstanceSignal;
 
+            _renderIdle.Dispose();
+            _saveIdle.Dispose();
             _quickAdd?.AllowClose();
             _quickAdd?.Dispose();
             _headerFont?.Dispose();
@@ -233,6 +331,10 @@ internal sealed class MainForm : Form
     /// </summary>
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
+        // Before the state is written either way: closing to the tray leaves the window standing,
+        // but it is still the moment the user stopped working in the notes box.
+        SaveNotes();
+
         if (!_exiting && _settings.CloseToTray && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
@@ -486,6 +588,7 @@ internal sealed class MainForm : Form
     {
         _theme.Apply(this);
         _outline.Theme = _theme;
+        _rendered.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
@@ -500,6 +603,14 @@ internal sealed class MainForm : Form
 
     private void RestoreViewState(ViewState state)
     {
+        // Only remembered here. The splitters are set once the window has a size to divide, which
+        // is not yet: before it is parented a SplitContainer clamps every distance it is given
+        // against its own default and quietly sticks there.
+        _notesHeight = state.DescriptionHeight;
+        _previewWidth = state.PreviewWidth;
+        _detail.Panel2Collapsed = !state.ShowDescription;
+        _notesSplit.Panel2Collapsed = !state.ShowPreview;
+
         // Outer bounds throughout, matching what CurrentViewState saves. Saving the outer size and
         // restoring it as the client size grew the window by the frame on every maximise-and-exit
         // cycle, compounding until it walked off the screen.
@@ -549,6 +660,10 @@ internal sealed class MainForm : Form
             SelectedKey = _sidebarKey,
             CollapsedKeys = CollapsedKeys().ToList(),
             SidebarWidth = _split.SplitterDistance,
+            ShowDescription = !_detail.Panel2Collapsed,
+            DescriptionHeight = _notesHeight,
+            ShowPreview = !_notesSplit.Panel2Collapsed,
+            PreviewWidth = _previewWidth,
             WindowX = bounds.X,
             WindowY = bounds.Y,
             WindowWidth = bounds.Width,
@@ -619,6 +734,9 @@ internal sealed class MainForm : Form
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
         _outline.Rows = _presenter.Rows;
+
+        // After the rows, which is what decides whether the selected task is still there.
+        FollowSelection();
         RenderStatus();
         RenderUnsupported();
         RenderTray();
@@ -965,6 +1083,155 @@ internal sealed class MainForm : Form
 
     private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 
+    // ---- Notes ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Puts the notes box on whichever task the outline is now on, writing anything typed into the
+    /// one it was on before.
+    /// </summary>
+    /// <remarks>
+    /// Called from the outline's selection and from every render, which is why it does nothing when
+    /// the task hasn't actually changed: a sync republishes the rows every forty-five seconds, and
+    /// each of those reassignments moves the native selection whether or not the user did.
+    /// </remarks>
+    private void FollowSelection()
+    {
+        var id = _outline.SelectedId;
+        if (id == _draft.TaskId)
+        {
+            RefreshNotes();
+            return;
+        }
+
+        // The task under the box is changing, so whatever was typed into it belongs to the old one
+        // and has to go before the box is refilled.
+        SaveNotes();
+
+        _draft.Open(id, _presenter.DescriptionOf(id));
+        ShowNotes(_draft.Opened);
+        _notes.Enabled = id is not null;
+    }
+
+    /// <summary>
+    /// Takes a republished description, unless it would land on top of something being typed.
+    /// </summary>
+    private void RefreshNotes()
+    {
+        if (_draft.TaskId is not { } id || !_draft.CanRefresh(_notes.Text))
+            return;
+
+        var current = _presenter.DescriptionOf(id);
+        if (current == DescriptionDraft.Normalised(_notes.Text))
+            return;
+
+        // Changed elsewhere while the box sat open and untouched — on the web, or by an undo.
+        _draft.Open(id, current);
+        ShowNotes(current);
+    }
+
+    /// <summary>Fills the box without it counting as something the user typed.</summary>
+    private void ShowNotes(string text)
+    {
+        _notes.TextChanged -= OnNotesChanged;
+        try
+        {
+            // Paired on the way in. A text box draws a bare newline as nothing at all, so a
+            // description written on the web arrived here as one unbroken run of words.
+            _notes.Text = text.ReplaceLineEndings(Environment.NewLine);
+        }
+        finally
+        {
+            _notes.TextChanged += OnNotesChanged;
+        }
+
+        _renderIdle.Stop();
+        _saveIdle.Stop();
+        _rendered.Markdown = text;
+    }
+
+    /// <summary>Follows a link out of the notes, if it is one worth following.</summary>
+    private void OnNotesLinkOpened(string url) => Guarded(() =>
+    {
+        // Refused rather than passed to the shell: a description is text that syncs from an
+        // account and gets pasted into from anywhere, and a scheme other than the two that mean
+        // "a page" is an instruction rather than a link.
+        if (!AppVersion.OpenExternal(url))
+            _status.Text = "That link doesn't go anywhere Termyn will open.";
+    });
+
+    private void OnNotesChanged(object? sender, EventArgs e)
+    {
+        // Both restarted on each keystroke, so each happens once the typing pauses rather than
+        // between two letters.
+        _renderIdle.Stop();
+        _renderIdle.Start();
+
+        _saveIdle.Stop();
+        _saveIdle.Start();
+    }
+
+    /// <summary>
+    /// Writes what was typed, if anything was. Called whenever the box stops being the place the
+    /// user is working: the focus leaving it, another task selected, the window closing.
+    /// </summary>
+    private void SaveNotes()
+    {
+        // Whatever brought us here has done what the wait was for.
+        _saveIdle.Stop();
+
+        // The draft puts the box's line endings back to the account's before it compares or saves.
+        if (_draft.Take(_notes.Text) is not { } edit)
+            return;
+
+        Guarded(() => _presenter.SetDescription(edit.TaskId, edit.Text));
+        _scheduler.NotifyWrite();
+    }
+
+    /// <summary>Opens or closes the notes panel.</summary>
+    private void ShowDescriptionPanel(bool shown)
+    {
+        // Saved on the way out: the panel closing is the box losing the user as surely as the focus
+        // leaving it, and a collapsed panel gives nothing back.
+        if (!shown)
+            SaveNotes();
+
+        _detail.Panel2Collapsed = !shown;
+
+        if (!shown)
+            return;
+
+        ApplyPanelSizes();
+        FollowSelection();
+    }
+
+    /// <summary>Puts the panels back to the sizes the user left them at.</summary>
+    private void ApplyPanelSizes()
+    {
+        // Clamped, because the window may have been resized — or moved to a smaller screen — since
+        // the sizes were saved, and a splitter set beyond its own container throws.
+        if (!_detail.Panel2Collapsed && _detail.Height > 0)
+        {
+            var room = _detail.Height - _detail.SplitterWidth;
+            _detail.SplitterDistance = Math.Clamp(room - _notesHeight, 60, Math.Max(60, room - 60));
+        }
+
+        if (!_notesSplit.Panel2Collapsed && _notesSplit.Width > 0)
+        {
+            var room = _notesSplit.Width - _notesSplit.SplitterWidth;
+            _notesSplit.SplitterDistance = Math.Clamp(room - _previewWidth, 120, Math.Max(120, room - 120));
+        }
+    }
+
+    /// <summary>Notes what the user has dragged the splitters to, for the next start.</summary>
+    private void RememberPanelSizes()
+    {
+        if (!_detail.Panel2Collapsed)
+            _notesHeight = _detail.Panel2.Height;
+
+        if (!_notesSplit.Panel2Collapsed)
+            _previewWidth = _notesSplit.Panel2.Width;
+    }
+
     // ---- Commands ------------------------------------------------------------------------------
 
     /// <summary>Where a keystroke has to be pressed for it to mean what the table says.</summary>
@@ -1092,7 +1359,9 @@ internal sealed class MainForm : Form
         _sidebar.SelectedNode?.Tag as SidebarNode,
         _presenter.ShowingCompleted,
         _presenter.CanUndo,
-        _presenter.Sort);
+        _presenter.Sort,
+        !_detail.Panel2Collapsed,
+        !_notesSplit.Panel2Collapsed);
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -1266,6 +1535,16 @@ internal sealed class MainForm : Form
 
             case AppCommand.SortDefault:
                 Guarded(() => _presenter.ClearSort());
+                return false;
+
+            case AppCommand.ToggleDescription:
+                ShowDescriptionPanel(_detail.Panel2Collapsed);
+                return false;
+
+            case AppCommand.TogglePreview:
+                RememberPanelSizes();
+                _notesSplit.Panel2Collapsed = !_notesSplit.Panel2Collapsed;
+                ApplyPanelSizes();
                 return false;
 
             case AppCommand.Undo:
@@ -1652,6 +1931,7 @@ internal sealed class MainForm : Form
         // Restored here rather than in the constructor: before the splitter is parented and sized it
         // clamps the distance against the container's default width and silently sticks there.
         _split.SplitterDistance = Math.Clamp(_settings.View.SidebarWidth, 120, Math.Max(120, ClientSize.Width - 200));
+        ApplyPanelSizes();
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
         _scheduler.Start();

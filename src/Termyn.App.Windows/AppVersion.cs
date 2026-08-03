@@ -41,4 +41,23 @@ internal static class AppVersion
         Process.Start(new ProcessStartInfo(safe) { UseShellExecute = true });
         return true;
     }
+
+    /// <summary>
+    /// Opens a link out of the user's own notes, which may point anywhere on the web.
+    /// </summary>
+    /// <remarks>
+    /// Apart from <see cref="OpenLink"/> because the question is a different one: that asks whether
+    /// a link is one of Termyn's own, and this asks only whether it is a web address at all. What
+    /// the two have in common is that neither hands the shell anything it was not asked to check.
+    /// </remarks>
+    /// <param name="url">A link written in a task's notes</param>
+    /// <returns>False when it isn't a web address, so the caller can say so</returns>
+    public static bool OpenExternal(string? url)
+    {
+        if (Links.External(url) is not { } safe)
+            return false;
+
+        Process.Start(new ProcessStartInfo(safe) { UseShellExecute = true });
+        return true;
+    }
 }

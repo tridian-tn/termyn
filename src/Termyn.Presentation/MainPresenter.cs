@@ -419,6 +419,19 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// The notes on a task, as the markdown the account stores. Empty for a task with none, and for
+    /// one the account no longer holds.
+    /// </summary>
+    public string DescriptionOf(string? id) => id is null ? string.Empty : _engine.DescriptionOf(id);
+
+    /// <summary>Writes the notes on a task.</summary>
+    public void SetDescription(string id, string description)
+    {
+        _engine.UpdateItem(id, new JsonObject { ["description"] = description });
+        Publish();
+    }
+
     public void SetPriority(string id, Priority priority)
     {
         _engine.UpdateItem(id, new JsonObject { ["priority"] = PriorityMap.ToApi(priority) });

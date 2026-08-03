@@ -80,6 +80,18 @@ public sealed record ViewState
 
     public int SidebarWidth { get; init; } = 220;
 
+    /// <summary>Whether the notes panel under the outline is open.</summary>
+    public bool ShowDescription { get; init; }
+
+    /// <summary>How tall the notes panel is, in pixels off the bottom of the outline.</summary>
+    public int DescriptionHeight { get; init; } = 180;
+
+    /// <summary>Whether the notes panel shows the rendered half beside the text it is written in.</summary>
+    public bool ShowPreview { get; init; } = true;
+
+    /// <summary>How wide the rendered half is.</summary>
+    public int PreviewWidth { get; init; } = 320;
+
     /// <summary>Null means "wherever the window manager puts it" — the first run, or a lost monitor.</summary>
     public int? WindowX { get; init; }
 
@@ -101,6 +113,10 @@ public sealed record ViewState
         => other is not null
            && SelectedKey == other.SelectedKey
            && SidebarWidth == other.SidebarWidth
+           && ShowDescription == other.ShowDescription
+           && DescriptionHeight == other.DescriptionHeight
+           && ShowPreview == other.ShowPreview
+           && PreviewWidth == other.PreviewWidth
            && WindowX == other.WindowX
            && WindowY == other.WindowY
            && WindowWidth == other.WindowWidth
@@ -114,6 +130,10 @@ public sealed record ViewState
         var hash = new HashCode();
         hash.Add(SelectedKey);
         hash.Add(SidebarWidth);
+        hash.Add(ShowDescription);
+        hash.Add(DescriptionHeight);
+        hash.Add(ShowPreview);
+        hash.Add(PreviewWidth);
         hash.Add(WindowX);
         hash.Add(WindowY);
         hash.Add(WindowWidth);

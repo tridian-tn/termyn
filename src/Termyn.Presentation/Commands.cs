@@ -41,6 +41,8 @@ public enum AppCommand
     SyncNow,
     ToggleCompleted,
     SortDefault,
+    ToggleDescription,
+    TogglePreview,
     Undo,
     Search,
     Palette,
@@ -77,13 +79,17 @@ public sealed record TaskAbilities(
 /// <param name="ShowingCompleted">Whether the outline is also showing completed tasks.</param>
 /// <param name="CanUndo">Whether there is anything to take back.</param>
 /// <param name="Sort">How the outline is currently ordered.</param>
+/// <param name="ShowingDescription">Whether the notes panel is open under the outline.</param>
+/// <param name="ShowingPreview">Whether that panel is showing the rendered half.</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
     SidebarNode? Selection = null,
     bool ShowingCompleted = false,
     bool CanUndo = false,
-    TaskSort? Sort = null)
+    TaskSort? Sort = null,
+    bool ShowingDescription = false,
+    bool ShowingPreview = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -182,6 +188,17 @@ public static class Commands
             AppCommand.SortDefault => new CommandState(
                 "Default order",
                 !(context.Sort ?? TaskSort.Default).IsDefault),
+
+            AppCommand.ToggleDescription => new CommandState(
+                context.ShowingDescription ? "Hide notes" : "Show notes",
+                true,
+                context.ShowingDescription),
+
+            // Only worth offering while the panel it belongs to is open.
+            AppCommand.TogglePreview => new CommandState(
+                context.ShowingPreview ? "Hide formatted notes" : "Show formatted notes",
+                context.ShowingDescription,
+                context.ShowingPreview),
 
             AppCommand.Undo => new CommandState("Undo", context.CanUndo),
             AppCommand.Search => Always("Search…"),

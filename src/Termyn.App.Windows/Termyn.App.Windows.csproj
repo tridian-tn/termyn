@@ -18,6 +18,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Parses the markdown a description is written in, for the rendered half of the notes panel.
+         Only ever read from: the text the account holds is what gets saved, so nothing here can
+         rewrite a description into a poorer version of itself. -->
+    <PackageReference Include="Markdig" Version="0.42.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Termyn.Core\Termyn.Core.csproj" />
     <ProjectReference Include="..\Termyn.Presentation\Termyn.Presentation.csproj" />
     <ProjectReference Include="..\Termyn.Platform.Windows\Termyn.Platform.Windows.csproj" />

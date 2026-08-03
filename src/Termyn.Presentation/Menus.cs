@@ -93,6 +93,8 @@ public static class Menus
             MenuEntry.Of(AppCommand.PreviousView),
             MenuEntry.Of(AppCommand.NextView),
             MenuEntry.AfterRule(AppCommand.ToggleCompleted),
+            MenuEntry.AfterRule(AppCommand.ToggleDescription),
+            MenuEntry.Of(AppCommand.TogglePreview),
 
             // Sorting is done by clicking a column header; this is the way back from it, and the
             // only part of it that needs somewhere to live.

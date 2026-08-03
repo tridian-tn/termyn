@@ -261,6 +261,28 @@ public class MenuTests
     }
 
     [Fact]
+    public void The_notes_panel_says_which_way_it_would_go_and_is_ticked_while_open()
+    {
+        using var closed = Build(View, CommandContext.Empty);
+        using var open = Build(View, new CommandContext(ShowingDescription: true));
+
+        Assert.Equal("Show notes", Find(closed, "Show notes").Text);
+        Assert.False(Find(closed, "Show notes").Checked);
+        Assert.True(Find(open, "Hide notes").Checked);
+    }
+
+    [Fact]
+    public void The_rendered_half_is_offered_only_while_the_panel_it_lives_in_is_open()
+    {
+        using var closed = Build(View, CommandContext.Empty);
+        using var open = Build(View, new CommandContext(ShowingDescription: true, ShowingPreview: true));
+
+        Assert.False(Find(closed, "Show formatted notes").Enabled);
+        Assert.True(Find(open, "Hide formatted notes").Enabled);
+        Assert.True(Find(open, "Hide formatted notes").Checked);
+    }
+
+    [Fact]
     public void Showing_completed_tasks_is_ticked_while_they_are_showing()
     {
         using var hidden = Build(View, CommandContext.Empty);

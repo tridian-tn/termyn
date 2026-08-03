@@ -15,6 +15,7 @@ public static class Projections
         {
             Id = JsonRead.String(o, "id") ?? string.Empty,
             Content = JsonRead.String(o, "content") ?? string.Empty,
+            Description = JsonRead.String(o, "description") ?? string.Empty,
             ProjectId = JsonRead.String(o, "project_id"),
             SectionId = JsonRead.String(o, "section_id"),
             ParentId = JsonRead.String(o, "parent_id"),

@@ -56,4 +56,31 @@ public static class Links
         // settled here, so what the shell receives is what was checked.
         return uri.AbsoluteUri;
     }
+
+    /// <summary>
+    /// A link out of the user's own notes, in the form to open it in.
+    /// </summary>
+    /// <remarks>
+    /// A different question from <see cref="Openable"/>, which asks whether a link is one of
+    /// Termyn's own and answers against a list of three places. A description can point anywhere,
+    /// so there is no host to check against — what there is instead is the scheme, and only the two
+    /// that mean "a page". Everything else goes to the shell as a command: <c>file:</c> opens a
+    /// document off the disk, and a bare UNC path reaches across the network to fetch one. A task
+    /// description is text that arrives from an account, gets pasted into from anywhere, and syncs
+    /// between machines; it does not get to say "run this".
+    /// </remarks>
+    /// <param name="url">A link written in a task's notes</param>
+    /// <returns>The parsed and normalised URL, or null when it isn't a web address</returns>
+    public static string? External(string? url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return null;
+
+        // Both, unlike our own links: plenty of what people note down is still plain http, and
+        // refusing to open it would only send them to copy it out by hand.
+        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            return null;
+
+        return uri.AbsoluteUri;
+    }
 }

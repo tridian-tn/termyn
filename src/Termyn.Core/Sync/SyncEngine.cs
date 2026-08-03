@@ -797,6 +797,25 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>
+    /// The notes on a task, or empty when it has none — and when the model has never heard of it,
+    /// which is the same answer as far as anything showing them is concerned.
+    /// </summary>
+    /// <remarks>
+    /// Asked for one task rather than carried on every row: a description runs to thousands of
+    /// characters, only the selected task's is ever on screen, and the outline projects the lot on
+    /// every publish.
+    /// </remarks>
+    public string DescriptionOf(string id)
+    {
+        lock (_gate)
+        {
+            return Model.Get(ResourceType.Items, id) is { } json
+                ? Projections.ToTaskItem(json).Description
+                : string.Empty;
+        }
+    }
+
     /// <summary>A task with the siblings it is ordered among, or null when the model doesn't hold it.</summary>
     private (TaskItem Item, List<TaskItem> Siblings, int Index)? Placement(string id)
     {
