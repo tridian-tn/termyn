@@ -41,14 +41,51 @@ internal sealed class OutlineView : ListView
         HoverSelection = false;
         HotTracking = false;
         LabelEdit = true;
-        HeaderStyle = ColumnHeaderStyle.Nonclickable;
+        HeaderStyle = ColumnHeaderStyle.Clickable;
         DoubleBuffered = true;
 
-        Columns.Add("Task", 360);
-        Columns.Add("!", 34, HorizontalAlignment.Center);
-        Columns.Add("Project", 140);
-        Columns.Add("Due", 120);
-        Columns.Add("Labels", 140);
+        // Each header carries the column it stands for, so a click has something to name without a
+        // second table of indices to keep in step with this one.
+        Columns.Add("Task", 360).Tag = TaskColumn.Content;
+        Columns.Add("!", 46, HorizontalAlignment.Center).Tag = TaskColumn.Priority;
+        Columns.Add("Project", 140).Tag = TaskColumn.Project;
+        Columns.Add("Due", 120).Tag = TaskColumn.Due;
+        Columns.Add("Labels", 140).Tag = TaskColumn.Labels;
+    }
+
+    /// <summary>Raised when a header is clicked, with the column it stands for.</summary>
+    public event Action<TaskColumn>? SortRequested;
+
+    private TaskSort _sort = TaskSort.Default;
+
+    /// <summary>
+    /// Which column the rows are ordered by, marked with an arrow on that header. Named apart from
+    /// ListView.Sort, which sorts a list this one never lets the control own.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public TaskSort Ordering
+    {
+        get => _sort;
+        set
+        {
+            if (_sort == value)
+                return;
+
+            _sort = value;
+
+            // Children as well: the header is a window of its own, and invalidating only the list
+            // would leave the arrow on whichever column had it last.
+            Invalidate(invalidateChildren: true);
+        }
+    }
+
+    protected override void OnColumnClick(ColumnClickEventArgs e)
+    {
+        if (e.Column >= 0 && e.Column < Columns.Count && Columns[e.Column].Tag is TaskColumn column)
+            SortRequested?.Invoke(column);
+
+        base.OnColumnClick(e);
     }
 
     /// <summary>
@@ -208,9 +245,31 @@ internal sealed class OutlineView : ListView
         e.Item = cached;
     }
 
+    /// <summary>Room for the sort arrow at the end of a header.</summary>
+    private const int ArrowWidth = 14;
+
     protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
     {
         e.DrawBackground();
+
+        var bounds = Inset(e.Bounds);
+
+        if (!Ordering.IsDefault && e.Header?.Tag is TaskColumn column && column == Ordering.Column)
+        {
+            // Drawn as a glyph of its own at the end of the header rather than added to the text,
+            // so the narrow priority column shows which way it is sorted instead of ellipsizing
+            // the arrow away.
+            var arrow = bounds with { X = bounds.Right - ArrowWidth, Width = ArrowWidth };
+            TextRenderer.DrawText(
+                e.Graphics,
+                Ordering.Descending ? "▼" : "▲",
+                Font,
+                arrow,
+                Theme.Accent,
+                Flags | TextFormatFlags.Right);
+
+            bounds = bounds with { Width = Math.Max(0, bounds.Width - ArrowWidth) };
+        }
 
         var alignment = e.Header?.TextAlign switch
         {
@@ -219,7 +278,7 @@ internal sealed class OutlineView : ListView
             _ => TextFormatFlags.Left,
         };
 
-        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), Theme.Muted, Flags | alignment);
+        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, bounds, Theme.Muted, Flags | alignment);
     }
 
     /// <summary>

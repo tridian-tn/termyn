@@ -104,6 +104,13 @@ internal sealed record Theme(
                 list.BorderStyle = BorderStyle.FixedSingle;
                 break;
 
+            // The bar itself only. What drops out of it is drawn by the framework's colour mode,
+            // like every other menu here, and painting half of one ourselves would show the join.
+            case MenuStrip bar:
+                bar.BackColor = Panel;
+                bar.ForeColor = Text;
+                break;
+
             case TreeView tree:
                 tree.BackColor = Panel;
                 tree.ForeColor = Text;

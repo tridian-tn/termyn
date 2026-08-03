@@ -27,28 +27,29 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _closeToTray;
     private readonly Label _warning;
 
-    private SettingsForm(AppSettings settings, Theme theme)
+    /// <summary>Internal rather than private so a test can lay one out without a screen to show it on.</summary>
+    internal SettingsForm(AppSettings settings, Theme theme)
     {
         Text = "Termyn — settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(440, 344);
+        ClientSize = new Size(Width_, 404);
 
         var binding = settings.HotkeyBinding;
 
-        _hotkeyEnabled = Check("Global quick-add hotkey", settings.HotkeyEnabled, 14);
-        _ctrl = Check("Ctrl", binding.Modifiers.HasFlag(HotkeyModifiers.Control), 40, 24, 58);
-        _alt = Check("Alt", binding.Modifiers.HasFlag(HotkeyModifiers.Alt), 40, 86, 52);
-        _shift = Check("Shift", binding.Modifiers.HasFlag(HotkeyModifiers.Shift), 40, 142, 60);
-        _win = Check("Win", binding.Modifiers.HasFlag(HotkeyModifiers.Meta), 40, 206, 52);
+        _hotkeyEnabled = Check("Global quick-add hotkey", settings.HotkeyEnabled, 16);
+        _ctrl = Modifier("Ctrl", binding.Modifiers.HasFlag(HotkeyModifiers.Control));
+        _alt = Modifier("Alt", binding.Modifiers.HasFlag(HotkeyModifiers.Alt));
+        _shift = Modifier("Shift", binding.Modifiers.HasFlag(HotkeyModifiers.Shift));
+        _win = Modifier("Win", binding.Modifiers.HasFlag(HotkeyModifiers.Meta));
 
         _key = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(268, 36),
-            Size = new Size(90, 26),
+            Width = 110,
+            Margin = new Padding(8, 0, 0, 0),
         };
         foreach (var name in HotkeyBinding.AllowedKeys)
             _key.Items.Add(name);
@@ -56,41 +57,55 @@ internal sealed class SettingsForm : Form
         if (_key.SelectedIndex < 0)
             _key.SelectedIndex = 0;
 
+        // Flowed rather than placed. The four boxes were positioned and sized to the pixel, which
+        // held only for the font they were measured against — under anything wider "Shift" and
+        // "Win" lost their last letters. Sized to their own text now, and laid end to end, so the
+        // row comes out right whatever the font or the scaling.
+        var modifiers = new FlowLayoutPanel
+        {
+            Location = new Point(38, 46),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = Padding.Empty,
+        };
+        modifiers.Controls.AddRange([_ctrl, _alt, _shift, _win, _key]);
+
         _warning = new Label
         {
-            Location = new Point(14, 66),
-            Size = new Size(410, 20),
+            Location = new Point(16, 88),
+            Size = new Size(Width_ - 32, 22),
             ForeColor = theme.Accent,
         };
 
-        _theme = Choice(typeof(ThemePreference), settings.Theme, 118);
-        _syncMode = Choice(typeof(SyncMode), settings.SyncMode, 158);
+        _theme = Choice(typeof(ThemePreference), settings.Theme, 134);
+        _syncMode = Choice(typeof(SyncMode), settings.SyncMode, 178);
 
         _interval = new NumericUpDown
         {
-            Location = new Point(160, 196),
-            Size = new Size(90, 26),
+            Location = new Point(CaptionWidth + 24, 222),
+            Size = new Size(100, 26),
             Minimum = AppSettings.MinSyncIntervalSeconds,
             Maximum = AppSettings.MaxSyncIntervalSeconds,
             Value = settings.ClampedInterval,
         };
 
-        _launchAtLogin = Check("Start Termyn when I sign in", settings.LaunchAtLogin, 238, width: 300);
+        _launchAtLogin = Check("Start Termyn when I sign in", settings.LaunchAtLogin, 268);
 
-        _closeToTray = Check("Closing the window leaves Termyn in the tray", settings.CloseToTray, 266, width: 400);
+        _closeToTray = Check("Closing the window leaves Termyn in the tray", settings.CloseToTray, 300);
 
-        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(244, 302), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(338, 302), Size = new Size(88, 30) };
+        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 352), Size = new Size(96, 32) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 352), Size = new Size(96, 32) };
 
         AcceptButton = ok;
         CancelButton = cancel;
 
         Controls.AddRange(
         [
-            _hotkeyEnabled, _ctrl, _alt, _shift, _win, _key, _warning,
-            Caption("Theme", 122), _theme,
-            Caption("Background sync", 162), _syncMode,
-            Caption("Every (seconds)", 200), _interval,
+            _hotkeyEnabled, modifiers, _warning,
+            Caption("Theme", 138), _theme,
+            Caption("Background sync", 182), _syncMode,
+            Caption("Every (seconds)", 226), _interval,
             _launchAtLogin, _closeToTray, ok, cancel,
         ]);
 
@@ -156,19 +171,32 @@ internal sealed class SettingsForm : Form
             : string.Empty;
     }
 
-    private static CheckBox Check(string text, bool value, int top, int left = 14, int width = 260)
-        => new() { Text = text, Checked = value, Location = new Point(left, top), Size = new Size(width, 24), AutoSize = false };
+    /// <summary>How wide the dialog is, which the things laid out in it are measured against.</summary>
+    private const int Width_ = 560;
+
+    /// <summary>Room for a caption before the control it labels.</summary>
+    private const int CaptionWidth = 176;
+
+    // Everything below sizes itself to its own text. Only where a control sits is decided here;
+    // how much room its words need is the framework's to work out, and it doesn't get that wrong.
+
+    private static CheckBox Check(string text, bool value, int top)
+        => new() { Text = text, Checked = value, Location = new Point(16, top), AutoSize = true };
+
+    /// <summary>A modifier box, whose place is the flow row's to decide rather than ours.</summary>
+    private static CheckBox Modifier(string text, bool value)
+        => new() { Text = text, Checked = value, AutoSize = true, Margin = new Padding(0, 5, 16, 3) };
 
     private static Label Caption(string text, int top)
-        => new() { Text = text, Location = new Point(14, top), Size = new Size(140, 22) };
+        => new() { Text = text, Location = new Point(16, top), Size = new Size(CaptionWidth, 22), AutoEllipsis = true };
 
     private static ComboBox Choice(Type enumType, object selected, int top)
     {
         var combo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(160, top),
-            Size = new Size(160, 26),
+            Location = new Point(CaptionWidth + 24, top),
+            Size = new Size(200, 26),
         };
         foreach (var value in Enum.GetValues(enumType))
             combo.Items.Add(value);

@@ -138,6 +138,7 @@ internal sealed class MainForm : Form
         _outline.KeyDown += OnOutlineKeyDown;
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
+        _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
 
         // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
         // also what makes Shift+F10 and the menu key reach it, without either being handled.
@@ -179,6 +180,12 @@ internal sealed class MainForm : Form
         Controls.Add(_search);
         Controls.Add(_preview);
         Controls.Add(_capture);
+
+        // Last, so it docks outermost and sits above the capture box where a menu bar belongs.
+        // Built after the outline and the sidebar exist: filling it asks both what is selected.
+        var bar = BuildMenuBar();
+        MainMenuStrip = bar;
+        Controls.Add(bar);
 
         _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
 
@@ -608,6 +615,9 @@ internal sealed class MainForm : Form
             return;
 
         RenderSidebar();
+
+        // Before the rows, so the header's arrow and the order beneath it are put up together.
+        _outline.Ordering = _presenter.Sort;
         _outline.Rows = _presenter.Rows;
         RenderStatus();
         RenderUnsupported();
@@ -854,38 +864,27 @@ internal sealed class MainForm : Form
 
     private void OnSidebarKeyDown(object? sender, KeyEventArgs e)
     {
-        if (_sidebar.SelectedNode?.Tag is not SidebarNode node)
+        var command = CommandFor(e.KeyData, Scope.Sidebar);
+        if (command == AppCommand.None)
             return;
 
-        switch (e.KeyCode)
-        {
-            case Keys.F2 when node.Kind is SidebarKind.Project or SidebarKind.Section or SidebarKind.Label:
-                RenameStructure(node);
-                break;
-            case Keys.Delete when node.Kind is SidebarKind.Project or SidebarKind.Section or SidebarKind.Label:
-                DeleteStructure(node);
-                break;
-            // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
-            case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Project:
-                Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
-                break;
-            case Keys.F when e.Control && e.Shift && node.Kind == SidebarKind.Label:
-                Guarded(() => _presenter.ToggleLabelFavorite(node.Id));
-                break;
-            default:
-                return;
-        }
+        // The same rule the Organise menu greys by, asked of the same place: a smart view isn't
+        // ours to rename, and a section has no star to take off.
+        var node = _sidebar.SelectedNode?.Tag as SidebarNode;
+        if (!Presentation.Commands.StateOf(command, new CommandContext(Selection: node)).Enabled)
+            return;
 
         e.Handled = true;
         e.SuppressKeyPress = true;
-        _scheduler.NotifyWrite();
+        Run(command);
     }
 
-    private void RenameStructure(SidebarNode node)
+    /// <returns>True when the rename went ahead</returns>
+    private bool RenameStructure(SidebarNode node)
     {
         var name = InputDialog.Ask(this, "Rename", "New name:", node.Label);
         if (string.IsNullOrWhiteSpace(name))
-            return;
+            return false;
 
         Guarded(() =>
         {
@@ -902,9 +901,12 @@ internal sealed class MainForm : Form
                     break;
             }
         });
+
+        return true;
     }
 
-    private void DeleteStructure(SidebarNode node)
+    /// <returns>True when the delete went ahead</returns>
+    private bool DeleteStructure(SidebarNode node)
     {
         // A label delete takes the label off its tasks; the other two take the tasks with them.
         var question = node.Kind == SidebarKind.Label
@@ -913,7 +915,7 @@ internal sealed class MainForm : Form
 
         var answer = MessageBox.Show(this, question, "Termyn", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
         if (answer != DialogResult.OK)
-            return;
+            return false;
 
         Guarded(() =>
         {
@@ -930,6 +932,8 @@ internal sealed class MainForm : Form
                     break;
             }
         });
+
+        return true;
     }
 
     // ---- Capture -------------------------------------------------------------------------------
@@ -961,48 +965,89 @@ internal sealed class MainForm : Form
 
     private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 
-    // ---- Task actions --------------------------------------------------------------------------
+    // ---- Commands ------------------------------------------------------------------------------
+
+    /// <summary>Where a keystroke has to be pressed for it to mean what the table says.</summary>
+    internal enum Scope
+    {
+        /// <summary>Anywhere in the window, whatever has the focus.</summary>
+        Window,
+
+        /// <summary>With the task outline focused.</summary>
+        Outline,
+
+        /// <summary>With the sidebar focused.</summary>
+        Sidebar,
+    }
 
     /// <summary>
-    /// The keys that reach each action on a task. One table, read from both directions: the outline
-    /// matches a keystroke against it, and the menu prints from it — so a menu can't advertise a
-    /// shortcut that nothing is bound to. Where an action answers to two keystrokes the first is
-    /// the one written down. Internal so a test can walk it.
+    /// Every keystroke the app answers to, and what it asks for.
     /// </summary>
-    internal static readonly (Keys Keys, TaskCommand Command)[] TaskShortcuts =
+    /// <remarks>
+    /// One table, read from both directions: the key handlers match against it, and the menus print
+    /// from it — so a menu can't advertise a shortcut nothing is bound to. Where a command answers
+    /// to two keystrokes the first is the one written down. Internal so a test can walk it.
+    /// </remarks>
+    internal static readonly (Keys Keys, AppCommand Command, Scope Scope)[] Shortcuts =
     [
-        (Keys.Space, TaskCommand.ToggleComplete),
-        (Keys.Control | Keys.Enter, TaskCommand.ToggleComplete),
-        (Keys.F2, TaskCommand.Rename),
-        (Keys.Control | Keys.D, TaskCommand.Due),
-        (Keys.Control | Keys.D1, TaskCommand.Priority1),
-        (Keys.Control | Keys.D2, TaskCommand.Priority2),
-        (Keys.Control | Keys.D3, TaskCommand.Priority3),
-        (Keys.Control | Keys.D4, TaskCommand.Priority4),
-        (Keys.Control | Keys.L, TaskCommand.Labels),
-        (Keys.Control | Keys.R, TaskCommand.Reminders),
-        (Keys.Tab, TaskCommand.Indent),
-        (Keys.Shift | Keys.Tab, TaskCommand.Outdent),
-        (Keys.Alt | Keys.Up, TaskCommand.MoveUp),
-        (Keys.Alt | Keys.Down, TaskCommand.MoveDown),
-        (Keys.Delete, TaskCommand.Delete),
+        // On a row of the outline.
+        (Keys.Space, AppCommand.ToggleComplete, Scope.Outline),
+        (Keys.Control | Keys.Enter, AppCommand.ToggleComplete, Scope.Outline),
+        (Keys.F2, AppCommand.Rename, Scope.Outline),
+        (Keys.Control | Keys.D, AppCommand.Due, Scope.Outline),
+        (Keys.Control | Keys.D1, AppCommand.Priority1, Scope.Outline),
+        (Keys.Control | Keys.D2, AppCommand.Priority2, Scope.Outline),
+        (Keys.Control | Keys.D3, AppCommand.Priority3, Scope.Outline),
+        (Keys.Control | Keys.D4, AppCommand.Priority4, Scope.Outline),
+        (Keys.Control | Keys.L, AppCommand.Labels, Scope.Outline),
+        (Keys.Control | Keys.R, AppCommand.Reminders, Scope.Outline),
+        (Keys.Tab, AppCommand.Indent, Scope.Outline),
+        (Keys.Shift | Keys.Tab, AppCommand.Outdent, Scope.Outline),
+        (Keys.Alt | Keys.Up, AppCommand.MoveUp, Scope.Outline),
+        (Keys.Alt | Keys.Down, AppCommand.MoveDown, Scope.Outline),
+        (Keys.Delete, AppCommand.Delete, Scope.Outline),
+
+        // Kept off the window, where it would take Ctrl+Z away from every text box in it — undoing
+        // a queued write instead of the word the user has just typed.
+        (Keys.Control | Keys.Z, AppCommand.Undo, Scope.Outline),
+
+        // On a row of the sidebar. F2 and Delete belong to the outline as well, which is what the
+        // scope is for: the same key acts on whichever list the user is actually in.
+        (Keys.F2, AppCommand.RenameSelection, Scope.Sidebar),
+        (Keys.Delete, AppCommand.DeleteSelection, Scope.Sidebar),
+
+        // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
+        (Keys.Control | Keys.Shift | Keys.F, AppCommand.ToggleFavourite, Scope.Sidebar),
+
+        // Anywhere in the window.
+        (Keys.Control | Keys.N, AppCommand.NewTask, Scope.Window),
+        (Keys.Insert, AppCommand.NewTask, Scope.Window),
+        (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
+        (Keys.F5, AppCommand.SyncNow, Scope.Window),
+        (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
+        (Keys.Control | Keys.F, AppCommand.Search, Scope.Window),
+        (Keys.Control | Keys.K, AppCommand.Palette, Scope.Window),
+        (Keys.Control | Keys.Up, AppCommand.PreviousView, Scope.Window),
+        (Keys.Control | Keys.Down, AppCommand.NextView, Scope.Window),
+        (Keys.Control | Keys.Oemcomma, AppCommand.Settings, Scope.Window),
     ];
 
     /// <summary>
-    /// The action a keystroke asks for, or <see cref="TaskCommand.None"/> when it asks for none.
-    /// Internal so a test can check what the outline answers to without a window to type into.
+    /// What a keystroke asks for where it was pressed, or <see cref="AppCommand.None"/> when it
+    /// asks for nothing there. Internal so a test can check what each surface answers to without a
+    /// window to type into.
     /// </summary>
-    internal static TaskCommand CommandFor(Keys keys)
-        => TaskShortcuts.FirstOrDefault(s => s.Keys == keys).Command;
+    internal static AppCommand CommandFor(Keys keys, Scope scope)
+        => Shortcuts.FirstOrDefault(s => s.Keys == keys && s.Scope == scope).Command;
 
     /// <summary>
-    /// How an action's shortcut is written in a menu, or empty when it has none. Internal for the
+    /// How a command's shortcut is written in a menu, or empty when it has none. Internal for the
     /// same reason: a menu that prints a shortcut nothing is bound to is the failure worth catching.
     /// </summary>
-    internal static string ShortcutFor(TaskCommand command)
+    internal static string ShortcutFor(AppCommand command)
     {
-        var bound = TaskShortcuts.FirstOrDefault(s => s.Command == command);
-        return bound.Command == TaskCommand.None ? string.Empty : ShortcutText(bound.Keys);
+        var bound = Shortcuts.FirstOrDefault(s => s.Command == command);
+        return bound.Command == AppCommand.None ? string.Empty : ShortcutText(bound.Keys);
     }
 
     /// <summary>
@@ -1028,6 +1073,7 @@ internal sealed class MainForm : Form
             Keys.Up => "↑",
             Keys.Down => "↓",
             Keys.Delete => "Del",
+            Keys.Oemcomma => ",",
             // The enum's own name for this one is Return, which is not what the key says on it.
             Keys.Return => "Enter",
             _ => code.ToString(),
@@ -1037,99 +1083,288 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Rebuilds the menu for the row it is about to open over. Built per open rather than once:
-    /// what it says depends on the task — whether it offers Complete or Reopen, and which priority
-    /// is already ticked — and a right-click is not a moment where fifteen menu items cost anything.
+    /// What the menus should be reading from right now — what is selected where, and what can be
+    /// done to it. Gathered per open, so nothing has to be kept in step between times.
     /// </summary>
-    private void OnTaskMenuOpening(object? sender, CancelEventArgs e)
-    {
-        // The outline turns away a right-click that missed every row, so what's left to catch here
-        // is the keyboard asking for a menu with nothing selected — an empty list, most likely.
-        if (_outline.SelectedRow is not { } row)
-        {
-            e.Cancel = true;
-            return;
-        }
-
-        // Disposed rather than dropped: the strip stops owning what it no longer holds, and a menu
-        // rebuilt on every right-click would leak an item's worth of handles each time.
-        var stale = _taskMenu.Items.Cast<ToolStripItem>().ToList();
-        _taskMenu.Items.Clear();
-        foreach (var item in stale)
-            item.Dispose();
-
-        FillTaskMenu(_taskMenu.Items, TaskMenu.For(row), RunFromTaskMenu);
-    }
+    private CommandContext Context() => new(
+        _outline.SelectedRow,
+        _presenter.AbilitiesFor(_outline.SelectedId),
+        _sidebar.SelectedNode?.Tag as SidebarNode,
+        _presenter.ShowingCompleted,
+        _presenter.CanUndo,
+        _presenter.Sort);
 
     /// <summary>
-    /// Renders menu entries into a strip, hanging <paramref name="run"/> off each one that acts.
+    /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
+    /// global hotkey, which the user picks and can switch off, so it is read from the settings
+    /// rather than from the table.
+    /// </summary>
+    private string MenuShortcut(AppCommand command)
+        => command != AppCommand.QuickAdd
+            ? ShortcutFor(command)
+            : _settings.HotkeyEnabled ? _settings.HotkeyBinding.ToString() : string.Empty;
+
+    /// <summary>
+    /// Renders menu entries into a strip, naming and greying each from <paramref name="context"/>.
     /// </summary>
     /// <remarks>
-    /// Static, and taking what to run rather than reaching for the window's own dispatch, so a test
-    /// can build the menu and click it without a window to hang it on.
+    /// Static, and given what to run and how to write a shortcut rather than reaching into the
+    /// window for either, so a test can build a menu and click it with no window to hang it on.
     /// </remarks>
     /// <param name="items">The strip, or a submenu of one, to add to</param>
     /// <param name="entries">What to render, in order</param>
+    /// <param name="context">What is selected, which decides the wording and what is greyed</param>
+    /// <param name="shortcut">How to write a command's keystroke</param>
     /// <param name="run">Called with the command of whichever entry is clicked</param>
-    internal static void FillTaskMenu(
+    internal static void FillMenu(
         ToolStripItemCollection items,
-        IReadOnlyList<TaskMenuEntry> entries,
-        Action<TaskCommand> run)
+        IReadOnlyList<MenuEntry> entries,
+        CommandContext context,
+        Func<AppCommand, string> shortcut,
+        Action<AppCommand> run)
     {
         foreach (var entry in entries)
         {
             if (entry.SeparatorBefore && items.Count > 0)
                 items.Add(new ToolStripSeparator());
 
-            var item = new ToolStripMenuItem(entry.Label) { Checked = entry.Checked };
-
             if (entry.Children is { Count: > 0 } children)
             {
-                FillTaskMenu(item.DropDownItems, children, run);
+                var heading = new ToolStripMenuItem(entry.Heading);
+                FillMenu(heading.DropDownItems, children, context, shortcut, run);
+
+                // A submenu with nothing runnable in it is greyed, so Priority reads the same way
+                // as everything beside it when no task is selected — rather than opening onto four
+                // greyed priorities, which is a longer way of saying the same thing. The bar's own
+                // headings never come through here: they stay open whatever is selected, because a
+                // menu you can't look inside teaches nothing, and being able to look is the point.
+                heading.Enabled = heading.DropDownItems.OfType<ToolStripMenuItem>().Any(i => i.Enabled);
+
+                items.Add(heading);
+                continue;
             }
-            else
+
+            var state = Presentation.Commands.StateOf(entry.Command, context);
+            var item = new ToolStripMenuItem(state.Label)
             {
-                // Written on, not bound to. Setting ShortcutKeys would register the keystroke on the
-                // strip as well as the outline, and which of the two answered would stop being ours
-                // to say.
-                item.ShortcutKeyDisplayString = ShortcutFor(entry.Command);
+                Enabled = state.Enabled,
+                Checked = state.Checked,
 
-                item.Click += (_, _) => run(entry.Command);
-            }
+                // Written on, not bound to. Setting ShortcutKeys would register the keystroke on
+                // the strip as well as the control it belongs to, and which of the two answered
+                // would stop being ours to say.
+                ShortcutKeyDisplayString = shortcut(entry.Command),
+            };
 
+            item.Click += (_, _) => run(entry.Command);
             items.Add(item);
         }
     }
 
-    /// <summary>Runs an action chosen from the menu, on the row the menu was opened over.</summary>
-    private void RunFromTaskMenu(TaskCommand command)
+    /// <summary>Empties a strip and builds it again for what is selected now.</summary>
+    private void Refill(ToolStripItemCollection items, IReadOnlyList<MenuEntry> entries)
     {
-        if (_outline.SelectedId is not { } id)
+        // Disposed rather than dropped: the strip stops owning what it no longer holds, and a menu
+        // rebuilt every time it opens would leak an item's worth of handles on each one.
+        var stale = items.Cast<ToolStripItem>().ToList();
+        items.Clear();
+        foreach (var item in stale)
+            item.Dispose();
+
+        FillMenu(items, entries, Context(), MenuShortcut, Run);
+    }
+
+    /// <summary>
+    /// Rebuilds the menu for the row it is about to open over. Built per open rather than once:
+    /// what it says depends on the task — Complete or Reopen, which priority is ticked, whether
+    /// there is anywhere left to move it — and a right-click is not a moment where fifteen menu
+    /// items cost anything.
+    /// </summary>
+    private void OnTaskMenuOpening(object? sender, CancelEventArgs e)
+    {
+        // The outline turns away a right-click that missed every row, so what's left to catch here
+        // is the keyboard asking for a menu with nothing selected — an empty list, most likely.
+        if (_outline.SelectedRow is null)
+        {
+            e.Cancel = true;
             return;
+        }
 
-        // Handed back before the action runs: a rename opens an editor on the row, which needs the
-        // outline to have the focus the menu has just taken off it.
-        _outline.Focus();
+        Refill(_taskMenu.Items, Menus.TaskContext);
+    }
 
-        if (RunTaskCommand(command, id))
+    /// <summary>The menu bar, one top-level heading per group, each refilled as it opens.</summary>
+    private MenuStrip BuildMenuBar()
+    {
+        var bar = new MenuStrip();
+
+        foreach (var group in Menus.Bar)
+        {
+            var heading = new ToolStripMenuItem(group.Heading) { Tag = group };
+
+            // Filled now as well as on opening: a heading with nothing under it has no dropdown to
+            // open, so it would never get the chance to ask for one.
+            Refill(heading.DropDownItems, group.Children ?? []);
+            heading.DropDownOpening += OnMenuOpening;
+
+            bar.Items.Add(heading);
+        }
+
+        return bar;
+    }
+
+    private void OnMenuOpening(object? sender, EventArgs e)
+    {
+        if (sender is ToolStripMenuItem { Tag: MenuEntry { Children: { } children } } heading)
+            Refill(heading.DropDownItems, children);
+    }
+
+    /// <summary>Runs a command from wherever it was asked for, and tells the sync loop if it wrote.</summary>
+    private void Run(AppCommand command)
+    {
+        if (Dispatch(command))
             _scheduler.NotifyWrite();
     }
 
     /// <summary>
-    /// Runs an action on a task, however it was asked for — a keystroke or the menu — so the two
-    /// can't come to mean different things.
+    /// Carries out a command, whichever surface asked for it — a keystroke, a menu, or the palette
+    /// — so the three can't come to mean different things.
+    /// </summary>
+    /// <param name="command">The command to run</param>
+    /// <returns>True when it changed something the server has yet to hear about</returns>
+    private bool Dispatch(AppCommand command)
+    {
+        if (Presentation.Commands.IsTaskCommand(command))
+            return _outline.SelectedId is { } id && RunTaskCommand(command, id);
+
+        if (Presentation.Commands.IsSelectionCommand(command))
+            return RunSelectionCommand(command);
+
+        switch (command)
+        {
+            case AppCommand.NewTask:
+                _capture.Focus();
+                return false;
+
+            case AppCommand.NewProject:
+                return AddProject();
+
+            case AppCommand.NewSection:
+                return AddSection();
+
+            case AppCommand.QuickAdd:
+                Guarded(QuickAdd.Summon);
+                return false;
+
+            case AppCommand.SyncNow:
+                _scheduler.RequestNow();
+                return false;
+
+            case AppCommand.ToggleCompleted:
+                _ = ToggleCompletedAsync();
+                return false;
+
+            case AppCommand.SortDefault:
+                Guarded(() => _presenter.ClearSort());
+                return false;
+
+            case AppCommand.Undo:
+                var undone = false;
+                Guarded(() =>
+                {
+                    undone = _presenter.Undo();
+                    if (!undone)
+                        _status.Text = "Nothing to undo.";
+                });
+                return undone;
+
+            case AppCommand.Search:
+                _search.Focus();
+                _search.SelectAll();
+                return false;
+
+            case AppCommand.Palette:
+                Guarded(OpenPalette);
+                return false;
+
+            case AppCommand.PreviousView:
+                SwitchView(-1);
+                return false;
+
+            case AppCommand.NextView:
+                SwitchView(1);
+                return false;
+
+            case AppCommand.Settings:
+                Guarded(OpenSettings);
+                return false;
+
+            case AppCommand.CheckForUpdates:
+                _ = CheckForUpdatesAsync();
+                return false;
+
+            case AppCommand.About:
+                ShowAbout();
+                return false;
+
+            case AppCommand.Exit:
+                Exit();
+                return false;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Carries out a command on whichever sidebar row is selected.</summary>
+    /// <returns>True when it wrote</returns>
+    private bool RunSelectionCommand(AppCommand command)
+    {
+        if (_sidebar.SelectedNode?.Tag is not SidebarNode node)
+            return false;
+
+        return command switch
+        {
+            AppCommand.RenameSelection => RenameStructure(node),
+            AppCommand.DeleteSelection => DeleteStructure(node),
+            AppCommand.ToggleFavourite => ToggleFavourite(node),
+            _ => false,
+        };
+    }
+
+    /// <summary>Stars a project or a label, or takes the star off.</summary>
+    /// <returns>True when it wrote — false over a row that has no star of its own</returns>
+    private bool ToggleFavourite(SidebarNode node)
+    {
+        switch (node.Kind)
+        {
+            case SidebarKind.Project:
+                Guarded(() => _presenter.ToggleProjectFavorite(node.Id));
+                return true;
+
+            case SidebarKind.Label:
+                Guarded(() => _presenter.ToggleLabelFavorite(node.Id));
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Runs an action on a task, however it was asked for — a keystroke, a menu, or the palette.
     /// </summary>
     /// <param name="command">The action to run</param>
     /// <param name="id">The task to run it on</param>
     /// <returns>True when it changed something the server has yet to hear about</returns>
-    private bool RunTaskCommand(TaskCommand command, string id)
+    private bool RunTaskCommand(AppCommand command, string id)
     {
         var wrote = false;
 
         switch (command)
         {
             // Ticking off a task that is already done means putting it back.
-            case TaskCommand.ToggleComplete:
+            case AppCommand.ToggleComplete:
                 Guarded(() =>
                 {
                     if (_outline.SelectedRow is { Completed: true })
@@ -1140,51 +1375,57 @@ internal sealed class MainForm : Form
                 return true;
 
             // Nothing is written here: the editor commits when it closes, and that path syncs.
-            case TaskCommand.Rename:
+            case AppCommand.Rename:
+                // Focused first, because this can come from a menu, and a menu has just taken the
+                // focus off the outline — where the editor is about to open, on the row itself.
+                _outline.Focus();
                 BeginRename();
                 return false;
 
-            case TaskCommand.Due:
+            case AppCommand.Due:
                 Guarded(() => wrote = PromptForDue(id));
                 return wrote;
 
-            case TaskCommand.Labels:
+            case AppCommand.Labels:
                 Guarded(() => wrote = PickLabels(id));
                 return wrote;
 
-            case TaskCommand.Reminders:
+            case AppCommand.Reminders:
                 Guarded(() => wrote = ShowReminders(id));
                 return wrote;
 
-            case TaskCommand.Priority1:
-            case TaskCommand.Priority2:
-            case TaskCommand.Priority3:
-            case TaskCommand.Priority4:
-                Guarded(() => _presenter.SetPriority(id, PriorityOf(command)));
+            case AppCommand.Priority1:
+            case AppCommand.Priority2:
+            case AppCommand.Priority3:
+            case AppCommand.Priority4:
+                Guarded(() => _presenter.SetPriority(id, Presentation.Commands.PriorityOf(command) ?? Priority.P4));
                 return true;
 
-            case TaskCommand.Indent:
-            case TaskCommand.Outdent:
+            case AppCommand.Indent:
+            case AppCommand.Outdent:
                 Guarded(() =>
                 {
-                    var outdent = command == TaskCommand.Outdent;
+                    var outdent = command == AppCommand.Outdent;
                     wrote = outdent ? _presenter.Outdent(id) : _presenter.Indent(id);
+
+                    // Still said, though the menus now grey these out: the keyboard reaches them
+                    // without a menu having opened to grey anything.
                     if (!wrote)
                         _status.Text = outdent ? "Already at the top level." : "Nothing above it to indent under.";
                 });
                 return wrote;
 
-            case TaskCommand.MoveUp:
-            case TaskCommand.MoveDown:
+            case AppCommand.MoveUp:
+            case AppCommand.MoveDown:
                 Guarded(() =>
                 {
-                    wrote = _presenter.Move(id, command == TaskCommand.MoveUp ? -1 : 1);
+                    wrote = _presenter.Move(id, command == AppCommand.MoveUp ? -1 : 1);
                     if (!wrote)
                         _status.Text = "Already at the end of its list.";
                 });
                 return wrote;
 
-            case TaskCommand.Delete:
+            case AppCommand.Delete:
                 Guarded(() => _presenter.Delete(id));
                 return true;
 
@@ -1193,46 +1434,22 @@ internal sealed class MainForm : Form
         }
     }
 
-    private static Priority PriorityOf(TaskCommand command) => command switch
-    {
-        TaskCommand.Priority1 => Priority.P1,
-        TaskCommand.Priority2 => Priority.P2,
-        TaskCommand.Priority3 => Priority.P3,
-        _ => Priority.P4,
-    };
-
     // ---- Outline keys --------------------------------------------------------------------------
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
-        // Neither of these acts on a task: one refreshes the lot, and the other takes back whatever
-        // was last done, with or without a row under the cursor.
-        switch (e.KeyData)
-        {
-            case Keys.F5:
-                _scheduler.RequestNow();
-                return;
+        var command = CommandFor(e.KeyData, Scope.Outline);
+        if (command == AppCommand.None)
+            return;
 
-            case Keys.Control | Keys.Z:
-                Guarded(() =>
-                {
-                    if (_presenter.Undo())
-                        _scheduler.NotifyWrite();
-                    else
-                        _status.Text = "Nothing to undo.";
-                });
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                return;
-        }
-
-        var command = CommandFor(e.KeyData);
-        if (command == TaskCommand.None || _outline.SelectedId is not { } id)
+        // A task command with no row under the cursor was never handled here, and letting the key
+        // through is what keeps Tab moving the focus on out of an empty list.
+        if (Presentation.Commands.IsTaskCommand(command) && _outline.SelectedId is null)
             return;
 
         // Left unhandled deliberately: the editor is open by the time the control sees its own F2,
         // and suppressing the key would stop the two agreeing about what is being edited.
-        if (command == TaskCommand.Rename)
+        if (command == AppCommand.Rename)
         {
             BeginRename();
             return;
@@ -1240,48 +1457,26 @@ internal sealed class MainForm : Form
 
         e.Handled = true;
         e.SuppressKeyPress = true;
-
-        if (RunTaskCommand(command, id))
-            _scheduler.NotifyWrite();
+        Run(command);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        switch (keyData)
+        // Ahead of the table, because this runs before any control's own key handling and so the
+        // sidebar can't claim Ctrl+N for itself: with a project under its cursor, Ctrl+N means a
+        // section in that project rather than a task.
+        if (keyData == (Keys.Control | Keys.N) && FocusedProject() is not null)
         {
-            case Keys.Control | Keys.F:
-                _search.Focus();
-                _search.SelectAll();
-                return true;
-            case Keys.Control | Keys.K:
-                Guarded(OpenPalette);
-                return true;
-            case Keys.Control | Keys.H:
-                _ = ToggleCompletedAsync();
-                return true;
-            case Keys.Control | Keys.Oemcomma:
-                Guarded(OpenSettings);
-                return true;
-            case Keys.Control | Keys.Up:
-                SwitchView(-1);
-                return true;
-            case Keys.Control | Keys.Down:
-                SwitchView(1);
-                return true;
-            // This runs ahead of every control's own key handling, so the sidebar can't claim
-            // Ctrl+N for itself — the choice between a section and a task has to be made here.
-            case Keys.Control | Keys.N when FocusedProject() is { } project:
-                AddSection(project.Id);
-                return true;
-            case Keys.Insert:
-            case Keys.Control | Keys.N:
-                _capture.Focus();
-                return true;
-            case Keys.Control | Keys.Shift | Keys.N:
-                AddProject();
-                return true;
+            Run(AppCommand.NewSection);
+            return true;
         }
-        return base.ProcessCmdKey(ref msg, keyData);
+
+        var command = CommandFor(keyData, Scope.Window);
+        if (command == AppCommand.None)
+            return base.ProcessCmdKey(ref msg, keyData);
+
+        Run(command);
+        return true;
     }
 
     /// <summary>Shows or hides completed tasks, fetching them the first time they're asked for.</summary>
@@ -1311,46 +1506,9 @@ internal sealed class MainForm : Form
             return;
         }
 
-        switch (chosen.Command)
-        {
-            case PaletteCommand.NewTask:
-                _capture.Focus();
-                break;
-            case PaletteCommand.NewProject:
-                AddProject();
-                break;
-            // Whatever the sidebar is sitting on, since the palette is what has the focus here.
-            case PaletteCommand.NewSection when SelectedProject() is { } project:
-                AddSection(project.Id);
-                break;
-            case PaletteCommand.NewSection:
-                _status.Text = "Pick a project first — a section belongs to one.";
-                break;
-            case PaletteCommand.SyncNow:
-                _scheduler.RequestNow();
-                break;
-            case PaletteCommand.ToggleCompleted:
-                _ = ToggleCompletedAsync();
-                break;
-            case PaletteCommand.Undo:
-                Guarded(() =>
-                {
-                    if (!_presenter.Undo())
-                        _status.Text = "Nothing to undo.";
-                    else
-                        _scheduler.NotifyWrite();
-                });
-                break;
-            case PaletteCommand.Settings:
-                OpenSettings();
-                break;
-            case PaletteCommand.CheckForUpdates:
-                _ = CheckForUpdatesAsync();
-                break;
-            case PaletteCommand.About:
-                ShowAbout();
-                break;
-        }
+        // Through the same dispatch as a menu entry or a keystroke, so the palette can't be the
+        // one surface where an action means something slightly different.
+        Run(chosen.Command);
     }
 
     /// <summary>The project the sidebar is sitting on, when the sidebar is the one with focus.</summary>
@@ -1363,24 +1521,35 @@ internal sealed class MainForm : Form
     private SidebarNode? SelectedProject()
         => _sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } node ? node : null;
 
-    private void AddProject()
+    /// <returns>True when a project was created</returns>
+    private bool AddProject()
     {
         var name = InputDialog.Ask(this, "New project", "Project name:");
         if (string.IsNullOrWhiteSpace(name))
-            return;
+            return false;
 
         Guarded(() => _presenter.AddProject(name));
-        _scheduler.NotifyWrite();
+        return true;
     }
 
-    private void AddSection(string projectId)
+    /// <summary>Adds a section to whichever project the sidebar is sitting on.</summary>
+    /// <returns>True when a section was created</returns>
+    private bool AddSection()
     {
+        // Greyed in the menus, but the palette and Ctrl+N both reach this without one having been
+        // opened, so the reason still has to be said out loud somewhere.
+        if (SelectedProject() is not { } project)
+        {
+            _status.Text = "Pick a project first — a section belongs to one.";
+            return false;
+        }
+
         var name = InputDialog.Ask(this, "New section", "Section name:");
         if (string.IsNullOrWhiteSpace(name))
-            return;
+            return false;
 
-        Guarded(() => _presenter.AddSection(name, projectId));
-        _scheduler.NotifyWrite();
+        Guarded(() => _presenter.AddSection(name, project.Id));
+        return true;
     }
 
     // ---- Inline rename -------------------------------------------------------------------------

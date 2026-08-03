@@ -18,7 +18,8 @@ internal sealed class CommandPaletteForm : Form
 
     private IReadOnlyList<PaletteEntry> _entries = [];
 
-    private CommandPaletteForm(Func<string, IReadOnlyList<PaletteEntry>> search, Theme theme)
+    /// <summary>Internal rather than private so a test can open one without a screen to show it on.</summary>
+    internal CommandPaletteForm(Func<string, IReadOnlyList<PaletteEntry>> search, Theme theme)
     {
         _search = search;
         _theme = theme;
@@ -47,6 +48,12 @@ internal sealed class CommandPaletteForm : Form
 
         Controls.Add(_results);
         Controls.Add(_query);
+
+        // The caret starts in the box, which is the whole point of the palette: it opens to be
+        // typed at. Without this the focus lands on the results list — first in the collection,
+        // because the box is added after it so as to dock above it — and the first few letters
+        // went to the list's own type-ahead instead of the query.
+        ActiveControl = _query;
 
         theme.Apply(this);
         Refresh(string.Empty);

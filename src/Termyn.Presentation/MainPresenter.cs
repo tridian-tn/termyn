@@ -9,6 +9,11 @@ using Termyn.Core.Sync;
 namespace Termyn.Presentation;
 
 /// <summary>A single row rendered in the outline. <paramref name="Depth"/> is its indent level.</summary>
+/// <param name="Due">The due date as the row shows it, which for a repeat is the words it was set with.</param>
+/// <param name="DueOn">
+/// The day it actually falls on, for ordering by it. The shown text can't be sorted: a repeat reads
+/// "every Monday", and that lands nowhere near Monday among a column of dates.
+/// </param>
 public sealed record TaskRow(
     string Id,
     string Content,
@@ -19,7 +24,8 @@ public sealed record TaskRow(
     int Depth = 0,
     bool IsRecurring = false,
     int ReminderCount = 0,
-    bool Completed = false);
+    bool Completed = false,
+    DateOnly? DueOn = null);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -497,6 +503,24 @@ public sealed class MainPresenter
             Publish();
         return undone;
     }
+
+    /// <summary>
+    /// What can be done to a task from where it sits, so a menu can grey out the rest.
+    /// </summary>
+    /// <remarks>
+    /// Asked of the engine, which owns the sibling ordering these answers come from, and asked only
+    /// when a menu opens rather than on every publish — four questions per open costs nothing, and
+    /// four more fields on every row of a five-thousand-row outline would.
+    /// </remarks>
+    /// <param name="id">The task in question, or null when there is none</param>
+    public TaskAbilities AbilitiesFor(string? id)
+        => id is null
+            ? TaskAbilities.None
+            : new TaskAbilities(
+                _engine.CanIndentItem(id),
+                _engine.CanOutdentItem(id),
+                _engine.CanMoveItem(id, -1),
+                _engine.CanMoveItem(id, 1));
 
     /// <summary>Moves a task one place up or down among its siblings.</summary>
     /// <returns>False when it was already at that end, so the caller can skip a needless sync.</returns>
@@ -1088,7 +1112,8 @@ public sealed class MainPresenter
             depth,
             item.IsRecurring,
             reminderCounts.GetValueOrDefault(item.Id),
-            item.Completed);
+            item.Completed,
+            SmartViews.DueOn(item, snapshot.TimeZone));
     }
 
     /// <summary>
@@ -1184,16 +1209,18 @@ public sealed class MainPresenter
 
     private void ApplyFilter(int pending, int failed)
     {
+        IReadOnlyList<TaskRow> rows;
+
         if (string.IsNullOrWhiteSpace(SearchQuery))
         {
-            Rows = _allRows;
+            rows = _allRows;
         }
         else
         {
             // Matches rarely share a parent, so a filtered result is a flat list rather than a
             // tree with most of its structure missing.
             var q = SearchQuery.Trim();
-            Rows = Searchable()
+            rows = Searchable()
                 .Where(r =>
                     r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -1202,7 +1229,159 @@ public sealed class MainPresenter
                 .ToList();
         }
 
+        Rows = Ordered(rows);
         Status = ComposeStatus(pending, failed);
+    }
+
+    /// <summary>How the outline is ordered. The account's own order until a column is clicked.</summary>
+    public TaskSort Sort { get; private set; } = TaskSort.Default;
+
+    /// <summary>
+    /// Orders the outline by a column, turning it round if it is already the one in use.
+    /// </summary>
+    /// <remarks>
+    /// Republished rather than rebuilt: the rows are the same rows, only in a different order, and
+    /// a click on a header has no business going back to the model for them.
+    /// </remarks>
+    public void SortBy(TaskColumn column)
+    {
+        Sort = Sort.Clicked(column);
+        Republish();
+    }
+
+    /// <summary>Puts the outline back into the account's own order.</summary>
+    /// <returns>False when it was already in it, so the caller can leave things be.</returns>
+    public bool ClearSort()
+    {
+        if (Sort.IsDefault)
+            return false;
+
+        Sort = TaskSort.Default;
+        Republish();
+        return true;
+    }
+
+    /// <summary>
+    /// Puts the rows in the order the user asked for.
+    /// </summary>
+    /// <remarks>
+    /// A sort reorders each set of siblings and leaves the nesting alone: the top level is put in
+    /// order, and the tasks under each of those are put in order beneath it. A sub-task belongs to
+    /// the task above it whatever column the list is sorted by, so it travels with its parent
+    /// rather than being ranked against the whole account.
+    /// </remarks>
+    private IReadOnlyList<TaskRow> Ordered(IReadOnlyList<TaskRow> rows)
+    {
+        if (Sort.IsDefault)
+            return rows;
+
+        var ordered = new List<TaskRow>(rows.Count);
+        Emit(Nest(rows));
+        return ordered;
+
+        void Emit(List<Node> siblings)
+        {
+            siblings.Sort((a, b) => Compare(a.Row, b.Row));
+
+            foreach (var node in siblings)
+            {
+                ordered.Add(node.Row);
+                Emit(node.Children);
+            }
+        }
+
+        int Compare(TaskRow a, TaskRow b)
+        {
+            // Completed rows keep to the bottom whatever the column. Their place stopped meaning
+            // anything when they were ticked off, and sorting by priority is not a request to have
+            // last month's finished work back among this week's.
+            if (a.Completed != b.Completed)
+                return a.Completed ? 1 : -1;
+
+            // An empty cell goes to the bottom whichever way the column points: blank is not the
+            // smallest value in the column, it is the absence of one.
+            if (Blank(a) != Blank(b))
+                return Blank(a) ? 1 : -1;
+
+            var order = Sort.Descending ? -Key(a, b) : Key(a, b);
+            if (order != 0)
+                return order;
+
+            // Ties read alphabetically, then by id so the same list comes out the same way twice.
+            var content = string.Compare(a.Content, b.Content, StringComparison.CurrentCultureIgnoreCase);
+            return content != 0 ? content : string.CompareOrdinal(a.Id, b.Id);
+        }
+
+        int Key(TaskRow a, TaskRow b) => Sort.Column switch
+        {
+            TaskColumn.Content => string.Compare(a.Content, b.Content, StringComparison.CurrentCultureIgnoreCase),
+            TaskColumn.Priority => a.Priority.CompareTo(b.Priority),
+            TaskColumn.Project => string.Compare(a.Project, b.Project, StringComparison.CurrentCultureIgnoreCase),
+            TaskColumn.Due => Nullable.Compare(a.DueOn, b.DueOn),
+            TaskColumn.Labels => string.Compare(LabelKey(a), LabelKey(b), StringComparison.CurrentCultureIgnoreCase),
+            _ => 0,
+        };
+
+        bool Blank(TaskRow row) => Sort.Column switch
+        {
+            TaskColumn.Project => row.Project.Length == 0,
+
+            // Undated is not "furthest away" — it isn't on the calendar at all.
+            TaskColumn.Due => row.DueOn is null,
+
+            TaskColumn.Labels => row.Labels.Count == 0,
+            _ => false,
+        };
+
+        // Ordered by the first label it wears, which is the one the column leads with.
+        static string LabelKey(TaskRow row) => row.Labels.Count == 0 ? string.Empty : row.Labels[0];
+    }
+
+    /// <summary>A row with the rows nested under it, while an order is worked out for both.</summary>
+    private sealed record Node(TaskRow Row)
+    {
+        public List<Node> Children { get; } = [];
+    }
+
+    /// <summary>
+    /// Reads the flattened outline back into the tree it was flattened from.
+    /// </summary>
+    /// <remarks>
+    /// The rows arrive depth-first with an indent level apiece, which is enough to put the nesting
+    /// back: a row belongs to the last row above it sitting one level shallower. Done from the rows
+    /// rather than by asking the model again, so ordering the list stays a rearrangement of what is
+    /// already on screen — a click on a column header has no business going back to the account.
+    /// </remarks>
+    /// <returns>The top-level rows, each carrying whatever is nested under it</returns>
+    private static List<Node> Nest(IReadOnlyList<TaskRow> rows)
+    {
+        var roots = new List<Node>();
+
+        // The row currently open at each level, so a row can find the one it belongs to.
+        var open = new List<Node>();
+
+        foreach (var row in rows)
+        {
+            var node = new Node(row);
+            var depth = row.Depth;
+
+            if (depth > 0 && depth <= open.Count)
+            {
+                open[depth - 1].Children.Add(node);
+            }
+            else
+            {
+                // Nothing above it to belong to — an indent the projection wouldn't produce, and a
+                // row of its own if it ever did.
+                roots.Add(node);
+                depth = 0;
+            }
+
+            open.RemoveRange(depth, open.Count - depth);
+            open.Add(node);
+        }
+
+        return roots;
     }
 
     /// <summary>
@@ -1272,21 +1451,32 @@ public sealed class MainPresenter
     public IReadOnlyList<PaletteEntry> Palette(string? query)
         => Fuzzy.Rank(PaletteEntries(), query);
 
+    /// <summary>
+    /// The actions the palette offers, named by the same catalogue the menus read from — so an
+    /// action renamed in one place is renamed in all of them.
+    /// </summary>
+    private static readonly AppCommand[] PaletteActions =
+    [
+        AppCommand.NewTask,
+        AppCommand.NewProject,
+        AppCommand.NewSection,
+        AppCommand.SyncNow,
+        AppCommand.ToggleCompleted,
+        AppCommand.Undo,
+        AppCommand.Settings,
+        AppCommand.CheckForUpdates,
+        AppCommand.About,
+    ];
+
     private IEnumerable<PaletteEntry> PaletteEntries()
     {
-        yield return new PaletteEntry(PaletteKind.Action, "New task", "action", Command: PaletteCommand.NewTask);
-        yield return new PaletteEntry(PaletteKind.Action, "New project", "action", Command: PaletteCommand.NewProject);
-        yield return new PaletteEntry(PaletteKind.Action, "New section", "action", Command: PaletteCommand.NewSection);
-        yield return new PaletteEntry(PaletteKind.Action, "Sync now", "action", Command: PaletteCommand.SyncNow);
-        yield return new PaletteEntry(
-            PaletteKind.Action,
-            ShowingCompleted ? "Hide completed tasks" : "Show completed tasks",
-            "action",
-            Command: PaletteCommand.ToggleCompleted);
-        yield return new PaletteEntry(PaletteKind.Action, "Undo", "action", Command: PaletteCommand.Undo);
-        yield return new PaletteEntry(PaletteKind.Action, "Settings", "action", Command: PaletteCommand.Settings);
-        yield return new PaletteEntry(PaletteKind.Action, "Check for updates", "action", Command: PaletteCommand.CheckForUpdates);
-        yield return new PaletteEntry(PaletteKind.Action, "About Termyn", "action", Command: PaletteCommand.About);
+        // Only what the presenter itself knows. The palette lists an action whether or not it can
+        // be run right now — typing "undo" and finding nothing there reads as a missing feature,
+        // where running it and being told there is nothing to undo does not.
+        var context = new CommandContext(ShowingCompleted: ShowingCompleted, CanUndo: CanUndo);
+
+        foreach (var command in PaletteActions)
+            yield return new PaletteEntry(PaletteKind.Action, Presentation.Commands.StateOf(command, context).Label, "action", Command: command);
 
         // Built from the sidebar rather than the model, so the palette reaches exactly what the tree
         // does — same names, same order, and nothing archived or unaddressable.

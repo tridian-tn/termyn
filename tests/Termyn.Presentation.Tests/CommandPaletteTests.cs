@@ -111,8 +111,8 @@ public class CommandPaletteTests
 
         var palette = presenter.Palette("");
 
-        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: PaletteCommand.NewProject });
-        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: PaletteCommand.SyncNow });
+        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: AppCommand.NewProject });
+        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: AppCommand.SyncNow });
         Assert.Contains(palette, e => e is { Kind: PaletteKind.SmartView, Label: "Today" });
         Assert.Contains(palette, e => e is { Kind: PaletteKind.Project, Label: "Work" });
         Assert.Contains(palette, e => e is { Kind: PaletteKind.Section, Label: "Later" });
@@ -124,15 +124,41 @@ public class CommandPaletteTests
     }
 
     [Fact]
-    public async Task Every_command_the_palette_can_run_is_reachable_from_it()
+    public async Task Every_action_the_palette_offers_is_listed_once()
     {
-        // Enum-driven rather than spot-checked by name: adding a command without an entry, or with
-        // two, then fails here instead of shipping a palette that can't reach it.
+        // Spelt out rather than derived: the palette offers some of the app's commands, not all of
+        // them, so the list is the specification. An action added twice, or dropped, fails here.
         var presenter = await Loaded();
-        var palette = presenter.Palette("");
 
-        foreach (var command in Enum.GetValues<PaletteCommand>().Where(c => c != PaletteCommand.None))
-            Assert.Single(palette, e => e.Command == command);
+        var actions = presenter.Palette("").Where(e => e.Kind == PaletteKind.Action).ToList();
+
+        Assert.Equal(
+            [
+                AppCommand.NewTask,
+                AppCommand.NewProject,
+                AppCommand.NewSection,
+                AppCommand.SyncNow,
+                AppCommand.ToggleCompleted,
+                AppCommand.Undo,
+                AppCommand.Settings,
+                AppCommand.CheckForUpdates,
+                AppCommand.About,
+            ],
+            actions.Select(e => e.Command).ToArray());
+    }
+
+    [Fact]
+    public async Task The_palette_calls_an_action_what_the_menus_call_it()
+    {
+        // One catalogue behind all three surfaces, so renaming an action in it renames it in the
+        // menu bar, the right-click menu and here — rather than in two of the three.
+        var presenter = await Loaded();
+
+        var actions = presenter.Palette("").Where(e => e.Kind == PaletteKind.Action);
+
+        Assert.All(actions, e => Assert.Equal(
+            Presentation.Commands.StateOf(e.Command, CommandContext.Empty).Label,
+            e.Label));
     }
 
     [Fact]
