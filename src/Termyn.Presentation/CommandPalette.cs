@@ -1,22 +1,5 @@
 namespace Termyn.Presentation;
 
-/// <summary>What a palette entry does when it is chosen.</summary>
-public enum PaletteCommand
-{
-    /// <summary>Nothing of its own — the entry navigates instead.</summary>
-    None,
-
-    NewTask,
-    NewProject,
-    NewSection,
-    SyncNow,
-    ToggleCompleted,
-    Undo,
-    Settings,
-    CheckForUpdates,
-    About,
-}
-
 /// <summary>Which list an entry came from, so the view can group or icon them.</summary>
 public enum PaletteKind
 {
@@ -32,12 +15,16 @@ public enum PaletteKind
 /// One row of the command palette. Either it navigates (<paramref name="Selection"/>) or it runs a
 /// command (<paramref name="Command"/>) — the view dispatches, because most commands end in a dialog.
 /// </summary>
+/// <remarks>
+/// The command is an <see cref="AppCommand"/>, the same one the menus raise, so a palette entry and
+/// a menu entry for the same action are the same action rather than two spellings of it.
+/// </remarks>
 public sealed record PaletteEntry(
     PaletteKind Kind,
     string Label,
     string Hint,
     ViewSelection? Selection = null,
-    PaletteCommand Command = PaletteCommand.None);
+    AppCommand Command = AppCommand.None);
 
 /// <summary>
 /// Ranks palette entries against what the user has typed. Matching is a subsequence — "npr" finds

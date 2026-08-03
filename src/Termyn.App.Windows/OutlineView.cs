@@ -41,14 +41,51 @@ internal sealed class OutlineView : ListView
         HoverSelection = false;
         HotTracking = false;
         LabelEdit = true;
-        HeaderStyle = ColumnHeaderStyle.Nonclickable;
+        HeaderStyle = ColumnHeaderStyle.Clickable;
         DoubleBuffered = true;
 
-        Columns.Add("Task", 360);
-        Columns.Add("!", 34, HorizontalAlignment.Center);
-        Columns.Add("Project", 140);
-        Columns.Add("Due", 120);
-        Columns.Add("Labels", 140);
+        // Each header carries the column it stands for, so a click has something to name without a
+        // second table of indices to keep in step with this one.
+        Columns.Add("Task", 360).Tag = TaskColumn.Content;
+        Columns.Add("!", 46, HorizontalAlignment.Center).Tag = TaskColumn.Priority;
+        Columns.Add("Project", 140).Tag = TaskColumn.Project;
+        Columns.Add("Due", 120).Tag = TaskColumn.Due;
+        Columns.Add("Labels", 140).Tag = TaskColumn.Labels;
+    }
+
+    /// <summary>Raised when a header is clicked, with the column it stands for.</summary>
+    public event Action<TaskColumn>? SortRequested;
+
+    private TaskSort _sort = TaskSort.Default;
+
+    /// <summary>
+    /// Which column the rows are ordered by, marked with an arrow on that header. Named apart from
+    /// ListView.Sort, which sorts a list this one never lets the control own.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public TaskSort Ordering
+    {
+        get => _sort;
+        set
+        {
+            if (_sort == value)
+                return;
+
+            _sort = value;
+
+            // Children as well: the header is a window of its own, and invalidating only the list
+            // would leave the arrow on whichever column had it last.
+            Invalidate(invalidateChildren: true);
+        }
+    }
+
+    protected override void OnColumnClick(ColumnClickEventArgs e)
+    {
+        if (e.Column >= 0 && e.Column < Columns.Count && Columns[e.Column].Tag is TaskColumn column)
+            SortRequested?.Invoke(column);
+
+        base.OnColumnClick(e);
     }
 
     /// <summary>
@@ -141,6 +178,33 @@ internal sealed class OutlineView : ListView
         base.OnSelectedIndexChanged(e);
     }
 
+    /// <summary>
+    /// A right-click moves the selection to the row under the pointer, so the menu that follows is
+    /// about the task being pointed at rather than whichever one was selected beforehand. Done on
+    /// the press, because the menu is raised from the release and the selection has to have moved
+    /// by then. A click past the last row leaves the selection alone — there is nothing to act on,
+    /// and the menu declines to open.
+    /// </summary>
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right
+            && HitTest(e.Location).Item?.Index is { } index
+            && index >= 0
+            && index < _rows.Count)
+        {
+            if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+            {
+                SelectedIndices.Clear();
+                SelectedIndices.Add(index);
+            }
+
+            // Keyboard navigation carries on from the focused row, as it does everywhere else here.
+            Items[index].Focused = true;
+        }
+
+        base.OnMouseDown(e);
+    }
+
     private bool IsSelected(int index) => _selectedIndex == index;
 
     private int IndexOf(string id)
@@ -181,9 +245,31 @@ internal sealed class OutlineView : ListView
         e.Item = cached;
     }
 
+    /// <summary>Room for the sort arrow at the end of a header.</summary>
+    private const int ArrowWidth = 14;
+
     protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
     {
         e.DrawBackground();
+
+        var bounds = Inset(e.Bounds);
+
+        if (!Ordering.IsDefault && e.Header?.Tag is TaskColumn column && column == Ordering.Column)
+        {
+            // Drawn as a glyph of its own at the end of the header rather than added to the text,
+            // so the narrow priority column shows which way it is sorted instead of ellipsizing
+            // the arrow away.
+            var arrow = bounds with { X = bounds.Right - ArrowWidth, Width = ArrowWidth };
+            TextRenderer.DrawText(
+                e.Graphics,
+                Ordering.Descending ? "▼" : "▲",
+                Font,
+                arrow,
+                Theme.Accent,
+                Flags | TextFormatFlags.Right);
+
+            bounds = bounds with { Width = Math.Max(0, bounds.Width - ArrowWidth) };
+        }
 
         var alignment = e.Header?.TextAlign switch
         {
@@ -192,7 +278,7 @@ internal sealed class OutlineView : ListView
             _ => TextFormatFlags.Left,
         };
 
-        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, Inset(e.Bounds), Theme.Muted, Flags | alignment);
+        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, bounds, Theme.Muted, Flags | alignment);
     }
 
     /// <summary>
@@ -215,13 +301,18 @@ internal sealed class OutlineView : ListView
     }
 
     /// <summary>
-    /// Swallows the background erase. The control repaints a row as the pointer crosses it, and
-    /// erasing first leaves it blank for a frame — the flicker under the mouse. Everything is
-    /// painted by the draw handlers, so there is nothing the erase needs to do.
+    /// Swallows the background erase, and the request for a menu where there is no task to put one
+    /// on.
     /// </summary>
+    /// <remarks>
+    /// The control repaints a row as the pointer crosses it, and erasing first leaves it blank for a
+    /// frame — the flicker under the mouse. Everything is painted by the draw handlers, so there is
+    /// nothing the erase needs to do.
+    /// </remarks>
     protected override void WndProc(ref Message m)
     {
         const int WmEraseBackground = 0x0014;
+        const int WmContextMenu = 0x007B;
 
         if (m.Msg == WmEraseBackground)
         {
@@ -229,7 +320,23 @@ internal sealed class OutlineView : ListView
             return;
         }
 
+        // A menu asked for with the keyboard is about the selected row, wherever that has got to on
+        // screen. One asked for with the mouse is about the row under the pointer — and below the
+        // last task there is no row for it to be about, so the click gets nothing rather than a menu
+        // aimed at whichever row was selected somewhere else. The two are told apart by lParam,
+        // which the keyboard sends as -1.
+        if (m.Msg == WmContextMenu && m.LParam != -1 && !PointsAtRow(m.LParam))
+            return;
+
         base.WndProc(ref m);
+    }
+
+    /// <summary>Whether a screen position packed into an lParam is over a row.</summary>
+    private bool PointsAtRow(nint lParam)
+    {
+        // Signed: a second monitor to the left of the main one puts the pointer at a negative x.
+        var screen = new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF));
+        return HitTest(PointToClient(screen)).Item?.Index is { } index && index >= 0 && index < _rows.Count;
     }
 
     protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)

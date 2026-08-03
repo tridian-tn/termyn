@@ -26,7 +26,8 @@ The solution is split so a future native Linux/macOS client can reuse everything
 | `src/Termyn.Platform.Windows` | `net10.0-windows` | Windows platform services (DPAPI token store, paths) |
 | `src/Termyn.App.Windows` | `net10.0-windows` | WinForms UI + composition root |
 | `tests/Termyn.TestSupport` | `net10.0` | Shared test doubles |
-| `tests/*.Tests` | `net10.0` | xUnit tests over Core and Presentation |
+| `tests/Termyn.Core.Tests`, `tests/Termyn.Presentation.Tests`, `tests/Termyn.Perf.Tests` | `net10.0` | xUnit tests over the portable core |
+| `tests/Termyn.Platform.Windows.Tests`, `tests/Termyn.App.Windows.Tests` | `net10.0-windows` | xUnit tests over the Windows layers |
 
 `Core` and `Presentation` target `net10.0` (not `-windows`), so the compiler prevents any
 Windows-only API leaking into the portable core.

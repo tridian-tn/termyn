@@ -701,31 +701,12 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (Model.Get(ResourceType.Items, id) is not { } json)
+            if (Placement(id) is not { } placement)
                 return false;
 
-            var item = Projections.ToTaskItem(json);
-            var siblings = SiblingsOf(item);
-
-            var from = siblings.FindIndex(i => i.Id == id);
-            if (from < 0)
+            var (_, siblings, from) = placement;
+            if (MoveTarget(siblings, from, offset) is not { } to)
                 return false;
-
-            // Step over completed siblings: they aren't on screen, so swapping with one would look
-            // like the keypress did nothing.
-            var step = Math.Sign(offset);
-            var to = from;
-            for (var moved = 0; moved < Math.Abs(offset); moved++)
-            {
-                do
-                {
-                    to += step;
-                }
-                while (to >= 0 && to < siblings.Count && siblings[to].Completed);
-
-                if (to < 0 || to >= siblings.Count)
-                    return false;
-            }
 
             var ids = siblings.Select(i => i.Id).ToList();
             ids.RemoveAt(from);
@@ -733,6 +714,40 @@ public sealed class SyncEngine
             ReorderLocked(ids);
             return true;
         }
+    }
+
+    /// <summary>Whether <see cref="MoveItem"/> would move it, so a menu can grey out what it can't do.</summary>
+    public bool CanMoveItem(string id, int offset)
+    {
+        lock (_gate)
+            return Placement(id) is { } p && MoveTarget(p.Siblings, p.Index, offset) is not null;
+    }
+
+    /// <summary>
+    /// Where a move of <paramref name="offset"/> places would land, or null when it would fall off
+    /// the end. Asked by both the move and the question of whether there is one to make, so the
+    /// answer and the act can't come apart.
+    /// </summary>
+    private static int? MoveTarget(List<TaskItem> siblings, int from, int offset)
+    {
+        // Step over completed siblings: they aren't on screen, so swapping with one would look
+        // like the keypress did nothing.
+        var step = Math.Sign(offset);
+        var to = from;
+
+        for (var moved = 0; moved < Math.Abs(offset); moved++)
+        {
+            do
+            {
+                to += step;
+            }
+            while (to >= 0 && to < siblings.Count && siblings[to].Completed);
+
+            if (to < 0 || to >= siblings.Count)
+                return null;
+        }
+
+        return to;
     }
 
     /// <summary>
@@ -744,20 +759,55 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (Model.Get(ResourceType.Items, id) is not { } json)
+            if (Placement(id) is not { } placement)
                 return false;
 
-            var item = Projections.ToTaskItem(json);
-            var siblings = SiblingsOf(item);
-            var index = siblings.FindIndex(i => i.Id == id);
-            if (index <= 0)
-                return false;
-
-            // Adopting a completed task would be invisible: it isn't in the outline, so the row
-            // wouldn't appear to move at all.
-            var adopter = siblings.Take(index).LastOrDefault(i => !i.Completed);
-            return adopter is not null && MoveTo(id, parentId: adopter.Id);
+            return AdopterFor(placement.Siblings, placement.Index) is { } adopter
+                   && MoveTo(id, parentId: adopter.Id);
         }
+    }
+
+    /// <summary>Whether <see cref="IndentItem"/> would find something above to indent under.</summary>
+    public bool CanIndentItem(string id)
+    {
+        lock (_gate)
+            return Placement(id) is { } p && AdopterFor(p.Siblings, p.Index) is not null;
+    }
+
+    /// <summary>
+    /// The sibling that would take this one in, or null when there is none. Adopting a completed
+    /// task would be invisible: it isn't in the outline, so the row wouldn't appear to move at all.
+    /// </summary>
+    private static TaskItem? AdopterFor(List<TaskItem> siblings, int index)
+        => index <= 0 ? null : siblings.Take(index).LastOrDefault(i => !i.Completed);
+
+    /// <summary>Whether <see cref="OutdentItem"/> has a level to promote to.</summary>
+    /// <remarks>
+    /// Having a parent is the whole of the question here, where the outdent itself then works out
+    /// where alongside that parent to land. A model holding a task whose parent it has never seen
+    /// would answer yes and then fail — rare enough, and reported the same way as before, that the
+    /// alternative of tracing the landing twice isn't worth what it costs to keep in step.
+    /// </remarks>
+    public bool CanOutdentItem(string id)
+    {
+        lock (_gate)
+        {
+            return Model.Get(ResourceType.Items, id) is { } json
+                   && Projections.ToTaskItem(json).ParentId is not null;
+        }
+    }
+
+    /// <summary>A task with the siblings it is ordered among, or null when the model doesn't hold it.</summary>
+    private (TaskItem Item, List<TaskItem> Siblings, int Index)? Placement(string id)
+    {
+        if (Model.Get(ResourceType.Items, id) is not { } json)
+            return null;
+
+        var item = Projections.ToTaskItem(json);
+        var siblings = SiblingsOf(item);
+        var index = siblings.FindIndex(i => i.Id == id);
+
+        return index < 0 ? null : (item, siblings, index);
     }
 
     /// <summary>Promotes a sub-task to sit alongside its parent, and queues an <c>item_move</c>.</summary>

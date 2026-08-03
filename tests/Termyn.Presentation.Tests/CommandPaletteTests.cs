@@ -111,8 +111,8 @@ public class CommandPaletteTests
 
         var palette = presenter.Palette("");
 
-        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: PaletteCommand.NewProject });
-        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: PaletteCommand.SyncNow });
+        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: AppCommand.NewProject });
+        Assert.Contains(palette, e => e is { Kind: PaletteKind.Action, Command: AppCommand.SyncNow });
         Assert.Contains(palette, e => e is { Kind: PaletteKind.SmartView, Label: "Today" });
         Assert.Contains(palette, e => e is { Kind: PaletteKind.Project, Label: "Work" });
         Assert.Contains(palette, e => e is { Kind: PaletteKind.Section, Label: "Later" });
@@ -124,16 +124,76 @@ public class CommandPaletteTests
     }
 
     [Fact]
-    public async Task Every_command_the_palette_can_run_is_reachable_from_it()
+    public async Task Every_action_the_palette_offers_is_listed_once()
     {
-        // Enum-driven rather than spot-checked by name: adding a command without an entry, or with
-        // two, then fails here instead of shipping a palette that can't reach it.
+        // Spelt out rather than derived: the palette offers some of the app's commands, not all of
+        // them, so the list is the specification. An action added twice, or dropped, fails here.
         var presenter = await Loaded();
-        var palette = presenter.Palette("");
 
-        foreach (var command in Enum.GetValues<PaletteCommand>().Where(c => c != PaletteCommand.None))
-            Assert.Single(palette, e => e.Command == command);
+        var actions = presenter.Palette("").Where(e => e.Kind == PaletteKind.Action).ToList();
+
+        Assert.Equal(
+            [
+                AppCommand.NewTask,
+                AppCommand.NewProject,
+                AppCommand.NewSection,
+                AppCommand.SyncNow,
+                AppCommand.ToggleCompleted,
+                AppCommand.Undo,
+                AppCommand.Settings,
+                AppCommand.CheckForUpdates,
+                AppCommand.About,
+            ],
+            actions.Select(e => e.Command).ToArray());
     }
+
+    [Fact]
+    public async Task The_palette_calls_an_action_what_the_menus_call_it()
+    {
+        // One catalogue behind all three surfaces, so renaming an action in it renames it in the
+        // menu bar, the right-click menu and here — rather than in two of the three.
+        var presenter = await Loaded();
+
+        Assert.All(Actions(presenter), e => Assert.Equal(Expected(presenter, e.Command), e.Label));
+    }
+
+    [Fact]
+    public async Task An_action_the_palette_names_for_the_state_follows_it()
+    {
+        // The label the catalogue gives back depends on what the presenter is doing — showing
+        // completed tasks means the entry offers to hide them. Checking only the resting state
+        // would pass just as well if the palette asked the catalogue about nobody in particular.
+        var api = new FakeApi
+        {
+            Response = new SyncResponse { SyncToken = "s1" },
+            Completed = _ => new CompletedPage([], null),
+        };
+        var presenter = await Loaded(api);
+
+        Assert.Equal("Show completed tasks", LabelOf(presenter, AppCommand.ToggleCompleted));
+
+        Assert.True(await presenter.ToggleCompletedAsync());
+
+        Assert.Equal("Hide completed tasks", LabelOf(presenter, AppCommand.ToggleCompleted));
+
+        // And still whatever the catalogue would say for the state it is actually in.
+        Assert.All(Actions(presenter), e => Assert.Equal(Expected(presenter, e.Command), e.Label));
+    }
+
+    private static IEnumerable<PaletteEntry> Actions(MainPresenter presenter)
+        => presenter.Palette("").Where(e => e.Kind == PaletteKind.Action);
+
+    private static string LabelOf(MainPresenter presenter, AppCommand command)
+        => Actions(presenter).Single(e => e.Command == command).Label;
+
+    /// <summary>
+    /// What the catalogue calls a command for the state the presenter is in — the same question the
+    /// menus ask of it, rather than one asked about nothing in particular.
+    /// </summary>
+    private static string Expected(MainPresenter presenter, AppCommand command)
+        => Presentation.Commands.StateOf(
+            command,
+            new CommandContext(ShowingCompleted: presenter.ShowingCompleted, CanUndo: presenter.CanUndo)).Label;
 
     [Fact]
     public async Task A_favourited_project_is_listed_once()
