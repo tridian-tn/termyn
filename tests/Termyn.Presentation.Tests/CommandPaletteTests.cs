@@ -154,12 +154,46 @@ public class CommandPaletteTests
         // menu bar, the right-click menu and here — rather than in two of the three.
         var presenter = await Loaded();
 
-        var actions = presenter.Palette("").Where(e => e.Kind == PaletteKind.Action);
-
-        Assert.All(actions, e => Assert.Equal(
-            Presentation.Commands.StateOf(e.Command, CommandContext.Empty).Label,
-            e.Label));
+        Assert.All(Actions(presenter), e => Assert.Equal(Expected(presenter, e.Command), e.Label));
     }
+
+    [Fact]
+    public async Task An_action_the_palette_names_for_the_state_follows_it()
+    {
+        // The label the catalogue gives back depends on what the presenter is doing — showing
+        // completed tasks means the entry offers to hide them. Checking only the resting state
+        // would pass just as well if the palette asked the catalogue about nobody in particular.
+        var api = new FakeApi
+        {
+            Response = new SyncResponse { SyncToken = "s1" },
+            Completed = _ => new CompletedPage([], null),
+        };
+        var presenter = await Loaded(api);
+
+        Assert.Equal("Show completed tasks", LabelOf(presenter, AppCommand.ToggleCompleted));
+
+        Assert.True(await presenter.ToggleCompletedAsync());
+
+        Assert.Equal("Hide completed tasks", LabelOf(presenter, AppCommand.ToggleCompleted));
+
+        // And still whatever the catalogue would say for the state it is actually in.
+        Assert.All(Actions(presenter), e => Assert.Equal(Expected(presenter, e.Command), e.Label));
+    }
+
+    private static IEnumerable<PaletteEntry> Actions(MainPresenter presenter)
+        => presenter.Palette("").Where(e => e.Kind == PaletteKind.Action);
+
+    private static string LabelOf(MainPresenter presenter, AppCommand command)
+        => Actions(presenter).Single(e => e.Command == command).Label;
+
+    /// <summary>
+    /// What the catalogue calls a command for the state the presenter is in — the same question the
+    /// menus ask of it, rather than one asked about nothing in particular.
+    /// </summary>
+    private static string Expected(MainPresenter presenter, AppCommand command)
+        => Presentation.Commands.StateOf(
+            command,
+            new CommandContext(ShowingCompleted: presenter.ShowingCompleted, CanUndo: presenter.CanUndo)).Label;
 
     [Fact]
     public async Task A_favourited_project_is_listed_once()
