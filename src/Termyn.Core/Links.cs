@@ -81,6 +81,14 @@ public static class Links
         if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
             return null;
 
+        // A host that isn't the host it reads as. "https://app.todoist.com@evil.example/x" goes to
+        // evil.example while reading as Todoist to anyone who doesn't parse URLs for a living, and
+        // the notes this comes from are written by whoever shares the project. Credentials get
+        // refused with it, which is the other thing this component is used for and not something to
+        // hand to a browser's address bar and history.
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+            return null;
+
         return uri.AbsoluteUri;
     }
 }

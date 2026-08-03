@@ -219,9 +219,92 @@ public class MarkdownViewTests
         using var view = Render("See https://example.com for more");
 
         Assert.Contains("https://example.com", view.Text);
+
+        // Asserted as a link, not just as text: Markdig writes the URL out either way, so without
+        // this the test passes with the autolink extension taken out of the pipeline.
+        Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("https://example.com", StringComparison.Ordinal)));
     }
 
     // ---- Not falling over ----------------------------------------------------------------------
+
+    // ---- What used to vanish, and what used to throw -------------------------------------------
+
+    [Fact]
+    public void Markdown_nested_past_what_the_parser_will_take_still_shows_its_words()
+    {
+        // The parser refuses this by throwing, and a description arrives by sync — so a note
+        // written on another device could take the window down on the next publish, with the box
+        // that would let you fix it being the thing that threw.
+        using var view = Render(new string('>', 200) + " still here");
+
+        Assert.Contains("still here", view.Text);
+    }
+
+    [Fact]
+    public void A_list_nested_past_what_the_parser_will_take_still_shows_its_words()
+    {
+        // Lists give out sooner than quotes do — depth sixty-four rather than a hundred and
+        // twenty-eight — so this is the one a pasted outline reaches first.
+        var deep = string.Concat(Enumerable.Range(0, 80).Select(i => new string(' ', i * 2) + "- level" + Environment.NewLine));
+
+        using var view = Render(deep);
+
+        Assert.Contains("level", view.Text);
+    }
+
+    [Fact]
+    public void A_pasted_block_of_html_shows_its_words_rather_than_disappearing()
+    {
+        // A leaf rather than a container, so it matched nothing and its text was dropped whole —
+        // and a blank preview reads as a task with no notes on it.
+        using var view = Render("<div class=\"x\">something worth reading</div>\n\nand after it");
+
+        Assert.Contains("something worth reading", view.Text);
+        Assert.Contains("and after it", view.Text);
+    }
+
+    [Fact]
+    public void An_angle_bracketed_link_is_shown_and_can_be_followed()
+    {
+        // The form markdown copied out of docs and READMEs uses. It was rendering as nothing at
+        // all: no words, no link, no sign there had been a URL there.
+        using var view = Render("See <https://example.com/x> for more");
+
+        Assert.Contains("https://example.com/x", view.Text);
+        Assert.Equal("https://example.com/x", view.LinkAt(view.Text.IndexOf("https://example.com/x", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void An_email_in_angle_brackets_is_shown_but_not_offered_as_a_link()
+    {
+        using var view = Render("Mail <bob@example.com> about it");
+
+        Assert.Contains("bob@example.com", view.Text);
+        Assert.Null(view.LinkAt(view.Text.IndexOf("bob@example.com", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void An_escaped_character_is_shown_as_the_character()
+    {
+        // Anything that generates markdown out of HTML writes ampersands this way, and they were
+        // going missing mid-sentence.
+        using var view = Render("Tom &amp; Jerry");
+
+        Assert.Contains("Tom & Jerry", view.Text);
+        Assert.DoesNotContain("&amp;", view.Text);
+    }
+
+    [Fact]
+    public void A_link_that_is_not_a_web_address_is_not_coloured_as_one_either()
+    {
+        // It isn't clickable, so it shouldn't look clickable. Drawn in the link colour it invites
+        // a click that then does nothing at all.
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("[a file](file:///C:/Windows/System32/cmd.exe)");
+
+        Assert.Equal("a file", view.Text.Trim());
+        Assert.NotEqual(theme.Accent, ColourAt(view, "a file"));
+    }
 
     [Fact]
     public void Nothing_at_all_renders_to_nothing_at_all()
@@ -273,6 +356,111 @@ public class MarkdownViewTests
 
         Assert.DoesNotContain("first", view.Text);
         Assert.Contains("second", view.Text);
+    }
+
+    // ---- The rest of the grammar ---------------------------------------------------------------
+
+    [Fact]
+    public void A_checklist_keeps_its_boxes_ticked_and_unticked()
+    {
+        // The description shape Todoist users write most.
+        using var view = Render("- [x] done\n- [ ] still to do");
+
+        Assert.Contains("[x]", view.Text);
+        Assert.Contains("[ ]", view.Text);
+        Assert.Contains("still to do", view.Text);
+    }
+
+    [Fact]
+    public void One_newline_joins_its_lines_and_two_spaces_break_them()
+    {
+        // The commonest shape of a real description — people press Enter once — so whichever way
+        // it goes is worth writing down.
+        using var joined = Render("line one\nline two");
+        using var broken = Render("line one  \nline two");
+
+        Assert.Equal("line one line two", joined.Text.Trim());
+        Assert.Equal(2, broken.Text.Trim().Split('\n').Length);
+    }
+
+    [Fact]
+    public void Each_heading_level_is_smaller_than_the_one_above_it()
+    {
+        using var view = Render("# one\n\n## two\n\n### three\n\nbody");
+
+        var one = FontAt(view, "one").Size;
+        var two = FontAt(view, "two").Size;
+        var three = FontAt(view, "three").Size;
+        var body = FontAt(view, "body").Size;
+
+        Assert.True(one > two, $"h1 {one} should beat h2 {two}");
+        Assert.True(two > three, $"h2 {two} should beat h3 {three}");
+        Assert.True(three > body, $"h3 {three} should beat body {body}");
+    }
+
+    [Fact]
+    public void A_nested_list_sits_in_from_the_one_it_belongs_to()
+    {
+        using var view = Render("- outer\n    - inner");
+
+        FontAt(view, "outer");
+        var outer = view.SelectionIndent;
+        FontAt(view, "inner");
+
+        Assert.True(view.SelectionIndent > outer, $"inner {view.SelectionIndent} should sit in from outer {outer}");
+    }
+
+    [Fact]
+    public void A_quote_sits_in_from_the_text_around_it()
+    {
+        // Its marker is dropped, so the indent is the only thing that says it is a quotation.
+        using var view = Render("before\n\n> quoted\n\nafter");
+
+        FontAt(view, "before");
+        var body = view.SelectionIndent;
+        FontAt(view, "quoted");
+
+        Assert.True(view.SelectionIndent > body, $"quote {view.SelectionIndent} should sit in from body {body}");
+    }
+
+    [Fact]
+    public void A_numbered_list_starts_where_it_says_it_does()
+    {
+        using var view = Render("3. third\n4. fourth");
+
+        Assert.Contains("3.", view.Text);
+        Assert.Contains("4.", view.Text);
+    }
+
+    [Fact]
+    public void A_link_with_no_words_is_not_a_link_at_all()
+    {
+        // A zero-width span would make whatever follows it clickable.
+        using var view = Render("[](https://example.com) after");
+
+        Assert.Null(view.LinkAt(0));
+    }
+
+    [Fact]
+    public void A_rule_is_drawn_between_what_it_divides()
+    {
+        using var view = Render("above\n\n---\n\nbelow");
+
+        Assert.Contains("above", view.Text);
+        Assert.Contains("below", view.Text);
+        Assert.Contains('—', view.Text);
+    }
+
+    [Fact]
+    public void Changing_the_theme_redraws_what_is_already_on_screen()
+    {
+        // The only thing that recolours the panel when the app switches theme.
+        using var view = Render("See [the docs](https://example.com) now");
+
+        view.Theme = Theme.Resolve(ThemePreference.Dark);
+
+        Assert.Equal(Theme.Resolve(ThemePreference.Dark).Accent, ColourAt(view, "the docs"));
+        Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("the docs", StringComparison.Ordinal)));
     }
 
     [Fact]

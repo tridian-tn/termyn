@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
@@ -46,6 +47,30 @@ public class DescriptionTests
         presenter.SetDescription("i1", "After");
 
         Assert.Equal("After", presenter.DescriptionOf("i1"));
+    }
+
+    [Fact]
+    public void Writing_the_notes_queues_one_field_and_no_others()
+    {
+        // The name of the test above claims a queued command; reading the description back only
+        // proves the local copy moved. This is the half that reaches the account — and a command
+        // carrying more than the one field would put a stale copy of everything else with it.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Write it up","project_id":"p","description":"Before"}""");
+
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
+
+        presenter.SetDescription("i1", "After");
+
+        var queued = Assert.Single(engine.Outbox);
+        Assert.Equal("item_update", queued.Type);
+
+        var args = System.Text.Json.Nodes.JsonNode.Parse(queued.ArgsJson)!.AsObject();
+        Assert.Equal("After", args["description"]!.ToString());
+        Assert.Equal("i1", args["id"]!.ToString());
+        Assert.Equal(["description", "id"], args.Select(a => a.Key).Order().ToArray());
     }
 
     [Fact]
@@ -122,6 +147,53 @@ public class DescriptionTests
     }
 
     [Fact]
+    public async Task A_completed_task_pulled_out_of_the_archive_still_shows_its_notes()
+    {
+        // Those are held apart from the live model, which is all the lookup used to consult — so a
+        // completed task with notes on it showed a blank box, which reads as having none.
+        var done = Json.Change(
+            "items",
+            "c1",
+            """{"id":"c1","content":"Booked","project_id":"p","checked":true,"description":"what was agreed","completed_at":"2026-07-30T09:00:00Z"}""");
+
+        var presenter = await WithCompleted(done);
+
+        Assert.Contains(presenter.Rows, r => r.Id == "c1");
+        Assert.Equal("what was agreed", presenter.DescriptionOf("c1"));
+    }
+
+    [Fact]
+    public async Task A_completed_task_out_of_the_archive_is_not_one_the_account_still_holds()
+    {
+        // Which is what the view asks before it lets the box be typed into: an edit to one of these
+        // is declined rather than queued, and a box that took the typing and dropped it on the
+        // floor would be worse than one that never took it.
+        var done = Json.Change(
+            "items",
+            "c1",
+            """{"id":"c1","content":"Booked","project_id":"p","checked":true,"description":"what was agreed"}""");
+
+        var presenter = await WithCompleted(done);
+
+        Assert.False(presenter.HasTask("c1"));
+        Assert.True(presenter.HasTask("i1"));
+        Assert.False(presenter.HasTask(null));
+    }
+
+    [Fact]
+    public void Writing_notes_to_a_task_the_account_no_longer_holds_queues_nothing()
+    {
+        // The path taken when the selected row disappears mid-edit: the save runs before the box is
+        // reopened on whatever is selected now.
+        var presenter = Seeded("Before");
+
+        presenter.SetDescription("gone", "typed after it vanished");
+
+        Assert.False(presenter.CanUndo);
+        Assert.Equal(string.Empty, presenter.DescriptionOf("gone"));
+    }
+
+    [Fact]
     public void Notes_are_not_carried_on_every_row()
     {
         // Deliberate: a description runs to thousands of characters, only the selected task's is
@@ -129,6 +201,27 @@ public class DescriptionTests
         Assert.DoesNotContain(
             typeof(TaskRow).GetProperties(),
             p => p.Name.Contains("escription", StringComparison.Ordinal));
+    }
+
+    /// <summary>The seeded task, plus a completed one the archive hands back.</summary>
+    private static async Task<MainPresenter> WithCompleted(ResourceChange done)
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Live","project_id":"p"}""");
+
+        var api = new FakeApi
+        {
+            Response = new SyncResponse { SyncToken = "s1" },
+            Completed = _ => new CompletedPage([done], null),
+        };
+
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        await presenter.ToggleCompletedAsync();
+        return presenter;
     }
 
     private static MainPresenter Seeded(string description)

@@ -47,6 +47,15 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     private readonly List<(int Start, int End, string Url)> _links = [];
 
+    /// <summary>Shows where a link goes before it is followed.</summary>
+    private readonly ToolTip _tip = new();
+
+    /// <summary>What the tip currently says, so it isn't reset on every pixel of movement.</summary>
+    private string? _shownTip;
+
+    /// <summary>The link the left button went down on, so a drag can't end by following one.</summary>
+    private string? _pressedOn;
+
     /// <summary>Raised when a link in the notes is clicked, with the address it points at.</summary>
     public event Action<string>? LinkOpened;
 
@@ -112,18 +121,53 @@ internal sealed class MarkdownView : RichTextBox
         if (!IsHandleCreated)
             return;
 
-        Clear();
-        _links.Clear();
+        // Drawing is switched off for the duration. Every run sets a selection and pushes text at
+        // the control, and each of those repaints on its own — which is nearly all of the time a
+        // long description takes to render, and the render happens where the user is typing.
+        SendMessage(Handle, WmSetRedraw, 0, 0);
+        try
+        {
+            Clear();
+            _links.Clear();
 
-        var document = Markdig.Markdown.Parse(_markdown, Pipeline);
-        foreach (var block in document)
-            WriteBlock(block, indent: 0);
+            foreach (var block in Parse())
+                WriteBlock(block, indent: 0);
 
-        // Back to the top, so switching task doesn't leave the box scrolled to where the last one
-        // happened to end.
-        SelectionStart = 0;
-        SelectionLength = 0;
-        ScrollToCaret();
+            // Back to the top, so switching task doesn't leave the box scrolled to where the last
+            // one happened to end.
+            SelectionStart = 0;
+            SelectionLength = 0;
+            ScrollToCaret();
+        }
+        finally
+        {
+            SendMessage(Handle, WmSetRedraw, 1, 0);
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// The markdown as blocks, or the whole thing as one plain run when it can't be read.
+    /// </summary>
+    /// <remarks>
+    /// Markdig refuses input nested past its own limit — a hundred and twenty-eight quote markers,
+    /// or sixty-four list levels — by throwing. A description is account data: it arrives by sync
+    /// from the web app or another device, so this is not only reachable by typing, and letting it
+    /// out would take down the window on the next publish with the offending task selected. Worse,
+    /// the box that would let the user fix the text is the one that throws. The raw text is a
+    /// truthful thing to show and always readable.
+    /// </remarks>
+    private IEnumerable<Block> Parse()
+    {
+        try
+        {
+            return Markdig.Markdown.Parse(_markdown, Pipeline);
+        }
+        catch (ArgumentException)
+        {
+            Write(_markdown, Style.Plain);
+            return [];
+        }
     }
 
     private void WriteBlock(Block block, int indent)
@@ -152,6 +196,12 @@ internal sealed class MarkdownView : RichTextBox
 
             case CodeBlock code:
                 WriteCode(code, indent);
+                break;
+
+            // Not a container, so the fallback below never sees it, and its words vanished
+            // entirely. A pasted snippet is worth showing as what it is rather than not at all.
+            case HtmlBlock html:
+                WriteLines(html, new Style(Fixed: true, Muted: true, Indent: indent + 1));
                 break;
 
             case ThematicBreakBlock:
@@ -198,9 +248,13 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     private void WriteCode(CodeBlock code, int indent)
+        => WriteLines(code, new Style(Fixed: true, Muted: true, Indent: indent + 1));
+
+    /// <summary>Writes a block that carries its text as raw lines rather than as inlines.</summary>
+    private void WriteLines(LeafBlock block, Style style)
     {
         var text = new StringBuilder();
-        foreach (var line in code.Lines.Lines)
+        foreach (var line in block.Lines.Lines)
         {
             if (line.Slice.Text is null)
                 continue;
@@ -208,7 +262,7 @@ internal sealed class MarkdownView : RichTextBox
             text.AppendLine(line.Slice.ToString());
         }
 
-        Write(text.ToString().TrimEnd(), new Style(Fixed: true, Muted: true, Indent: indent + 1));
+        Write(text.ToString().TrimEnd(), style);
     }
 
     private void WriteParagraph(ContainerInline? inlines, Style style)
@@ -253,13 +307,37 @@ internal sealed class MarkdownView : RichTextBox
             case LinkInline link:
                 // The words, coloured as a link. Not the URL: a description pasted from a web page
                 // is mostly link text, and printing every target would drown it. Where it points is
-                // noted against the span instead, for the click to find.
+                // noted against the span instead, for the click and the hover to find.
+                //
+                // Coloured only when it is somewhere we would actually go. A file: or javascript:
+                // link drawn in the link colour looks like something to click and then isn't, which
+                // is a worse answer than reading as the plain text it is.
+                var target = Links.External(link.Url);
                 var from = TextLength;
-                foreach (var child in link)
-                    WriteInline(child, style with { Link = true });
 
-                if (Links.External(link.Url) is { } target && TextLength > from)
+                foreach (var child in link)
+                    WriteInline(child, target is null ? style : style with { Link = true });
+
+                if (target is not null && TextLength > from)
                     _links.Add((from, TextLength, target));
+                break;
+
+            // The angle-bracket form, which is a leaf rather than a link and so used to render as
+            // nothing at all — the whole URL gone from the preview with no sign it was there.
+            case AutolinkInline auto:
+                var bare = auto.IsEmail ? null : Links.External(auto.Url);
+                var opened = TextLength;
+
+                Write(auto.Url, bare is null ? style : style with { Link = true }, newLine: false);
+
+                if (bare is not null && TextLength > opened)
+                    _links.Add((opened, TextLength, bare));
+                break;
+
+            // Also a leaf. "&amp;" is written this way by anything that generates markdown from
+            // HTML, and it was disappearing mid-sentence.
+            case HtmlEntityInline entity:
+                Write(entity.Transcoded.ToString(), style, newLine: false);
                 break;
 
             case TaskList task:
@@ -333,17 +411,39 @@ internal sealed class MarkdownView : RichTextBox
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
+        var url = LinkUnder(e.Location);
+
         // The pointer says what is clickable, since nothing else about a link does — the words are
         // coloured, but so is anything else the theme decides to colour.
-        Cursor = LinkUnder(e.Location) is null ? Cursors.Default : Cursors.Hand;
+        Cursor = url is null ? Cursors.Default : Cursors.Hand;
+
+        // And the tip says where it goes. The rendering shows a link's words rather than its
+        // address, so nothing on screen otherwise contradicts words that claim to be one address
+        // while pointing at another — which is a thing notes shared through an account can do.
+        if (url != _shownTip)
+        {
+            _shownTip = url;
+            _tip.SetToolTip(this, url ?? string.Empty);
+        }
+
         base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        _pressedOn = e.Button == MouseButtons.Left ? LinkUnder(e.Location) : null;
+        base.OnMouseDown(e);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && LinkUnder(e.Location) is { } url)
+        // The same link the press landed on. The box is read-only but still selectable, so dragging
+        // a passage out of the notes ends on a mouse-up that would otherwise open whatever it
+        // finished over — copying a quotation would launch a browser.
+        if (e.Button == MouseButtons.Left && _pressedOn is { } url && LinkUnder(e.Location) == url)
             LinkOpened?.Invoke(url);
 
+        _pressedOn = null;
         base.OnMouseUp(e);
     }
 
@@ -375,6 +475,12 @@ internal sealed class MarkdownView : RichTextBox
     // for the latter wants unsafe code for a struct passed by reference.
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern nint SendMessage(nint window, int message, int flags, ref ParaFormat2 format);
+
+    /// <summary>Turns drawing off and on around a rebuild.</summary>
+    private const int WmSetRedraw = 0x000B;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, int wParam, nint lParam);
 
     /// <summary>
     /// The rich edit control's paragraph format, laid out as the control expects to find it.

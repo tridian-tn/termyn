@@ -28,6 +28,19 @@ public class ExternalLinkTests
     public void Anything_that_is_not_a_web_address_is_refused(string? url)
         => Assert.Null(Links.External(url));
 
+    [Theory]
+    [InlineData("https://app.todoist.com@evil.example/x")]
+    [InlineData("http://www.microsoft.com@203.0.113.4/")]
+    [InlineData("https://user:hunter2@example.com/x")]
+    public void A_host_that_is_not_the_host_it_reads_as_is_refused(string url)
+    {
+        // Everything before the @ is discarded by the browser, so the address goes to what follows
+        // it while reading as what precedes it — and the notes this comes out of are written by
+        // whoever shares the project. The credentials form is refused with it: those have no
+        // business in a browser's history, and nothing legitimate in a note needs them.
+        Assert.Null(Links.External(url));
+    }
+
     [Fact]
     public void A_bare_network_path_is_refused()
     {

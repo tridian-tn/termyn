@@ -88,6 +88,13 @@ internal sealed class MainForm : Form
 
     private int _previewWidth;
 
+    /// <summary>
+    /// True while the panels are being sized by us rather than dragged by the user, so the layout
+    /// settling doesn't get recorded as a size anybody chose. Starts true: everything up to the
+    /// first apply is the window arranging itself.
+    /// </summary>
+    private bool _adjustingPanels = true;
+
     /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
     private readonly LinkLabel _unsupported;
 
@@ -196,6 +203,10 @@ internal sealed class MainForm : Form
             WordWrap = true,
             ScrollBars = ScrollBars.Vertical,
             PlaceholderText = "Notes…  **bold**  *italic*  - a list",
+
+            // Until a task is selected there is nowhere for anything typed here to go. Set on the
+            // way in because the selection has never changed at this point, so nothing else does.
+            ReadOnly = true,
 
             // Fixed-width, so the half you write in doesn't read as the half you read from. With
             // both in the same face a description with no formatting in it is the same text twice,
@@ -608,6 +619,9 @@ internal sealed class MainForm : Form
         // against its own default and quietly sticks there.
         _notesHeight = state.DescriptionHeight;
         _previewWidth = state.PreviewWidth;
+
+        // _adjustingPanels is still true here, so the layout these two set off doesn't record the
+        // containers' unparented defaults over what has just been read.
         _detail.Panel2Collapsed = !state.ShowDescription;
         _notesSplit.Panel2Collapsed = !state.ShowPreview;
 
@@ -1109,7 +1123,15 @@ internal sealed class MainForm : Form
 
         _draft.Open(id, _presenter.DescriptionOf(id));
         ShowNotes(_draft.Opened);
-        _notes.Enabled = id is not null;
+
+        // ReadOnly rather than Enabled: disabling a control that has the focus hands the focus to
+        // the next one and never gives it back, so a sync arriving mid-sentence used to leave the
+        // user typing into the outline — where space ticks a task off and delete removes it.
+        //
+        // And read-only for a completed task pulled out of the archive: those are held apart from
+        // the live model, so an edit to one is declined rather than queued, and a box that took the
+        // typing and dropped it would be worse than one that doesn't take it.
+        _notes.ReadOnly = !_presenter.HasTask(id);
     }
 
     /// <summary>
@@ -1164,15 +1186,14 @@ internal sealed class MainForm : Form
             _rendered.Markdown = _notes.Text;
     }
 
-    /// <summary>Follows a link out of the notes, if it is one worth following.</summary>
-    private void OnNotesLinkOpened(string url) => Guarded(() =>
-    {
-        // Refused rather than passed to the shell: a description is text that syncs from an
-        // account and gets pasted into from anywhere, and a scheme other than the two that mean
-        // "a page" is an instruction rather than a link.
-        if (!AppVersion.OpenExternal(url))
-            _status.Text = "That link doesn't go anywhere Termyn will open.";
-    });
+    /// <summary>Follows a link out of the notes.</summary>
+    /// <remarks>
+    /// Whether it is worth following was settled when it was drawn: a link the shell has no
+    /// business being handed isn't coloured as one, isn't given a pointer, and never reaches here.
+    /// The check inside <see cref="AppVersion.OpenExternal"/> is the one that decides, and this is
+    /// downstream of it rather than a second opinion.
+    /// </remarks>
+    private void OnNotesLinkOpened(string url) => Guarded(() => AppVersion.OpenExternal(url));
 
     private void OnNotesChanged(object? sender, EventArgs e)
     {
@@ -1210,7 +1231,15 @@ internal sealed class MainForm : Form
         if (!shown)
             SaveNotes();
 
-        _detail.Panel2Collapsed = !shown;
+        _adjustingPanels = true;
+        try
+        {
+            _detail.Panel2Collapsed = !shown;
+        }
+        finally
+        {
+            _adjustingPanels = false;
+        }
 
         if (!shown)
         {
@@ -1227,29 +1256,83 @@ internal sealed class MainForm : Form
     /// <summary>Puts the panels back to the sizes the user left them at.</summary>
     private void ApplyPanelSizes()
     {
-        // Clamped, because the window may have been resized — or moved to a smaller screen — since
-        // the sizes were saved, and a splitter set beyond its own container throws.
-        if (!_detail.Panel2Collapsed && _detail.Height > 0)
+        _adjustingPanels = true;
+        try
         {
-            var room = _detail.Height - _detail.SplitterWidth;
-            _detail.SplitterDistance = Math.Clamp(room - _notesHeight, 60, Math.Max(60, room - 60));
+            Restore();
         }
-
-        if (!_notesSplit.Panel2Collapsed && _notesSplit.Width > 0)
+        finally
         {
-            var room = _notesSplit.Width - _notesSplit.SplitterWidth;
-            _notesSplit.SplitterDistance = Math.Clamp(room - _previewWidth, 120, Math.Max(120, room - 120));
+            _adjustingPanels = false;
+        }
+    }
+
+    private void Restore()
+    {
+        // Clamped against what the container can actually take, not against a figure of ours. The
+        // sidebar splitter can be dragged until the outline is its own minimum width, and asking a
+        // panel for more room than exists throws rather than settling for what there is.
+        Restore(_detail, _detail.Height, _notesHeight, 60);
+        Restore(_notesSplit, _notesSplit.Width, _previewWidth, 120);
+
+        static void Restore(SplitContainer split, int across, int wanted, int preferred)
+        {
+            if (split.Panel2Collapsed || across <= 0)
+                return;
+
+            var room = across - split.SplitterWidth;
+            var least = Math.Max(preferred, split.Panel1MinSize);
+            var most = room - Math.Max(preferred, split.Panel2MinSize);
+
+            // No room for both halves at the sizes they each insist on. Left as it is rather than
+            // set to something the control would refuse.
+            if (most < least)
+                return;
+
+            split.SplitterDistance = Math.Clamp(room - wanted, least, most);
         }
     }
 
     /// <summary>Notes what the user has dragged the splitters to, for the next start.</summary>
+    /// <remarks>
+    /// Only a drag. SplitterMoved fires for every distance the layout settles on as well, and the
+    /// window is laid out several times before it is on screen — each of those firing here wrote
+    /// the container's unparented default over the size read out of the settings, so the saved
+    /// height never survived to be applied and the collapsed figure was then saved back in its
+    /// place.
+    /// </remarks>
     private void RememberPanelSizes()
     {
+        if (_adjustingPanels)
+            return;
+
         if (!_detail.Panel2Collapsed)
             _notesHeight = _detail.Panel2.Height;
 
         if (!_notesSplit.Panel2Collapsed)
             _previewWidth = _notesSplit.Panel2.Width;
+    }
+
+    /// <summary>Opens or closes the rendered half of the notes panel.</summary>
+    private void ShowPreviewPanel(bool shown)
+    {
+        RememberPanelSizes();
+
+        _adjustingPanels = true;
+        try
+        {
+            _notesSplit.Panel2Collapsed = !shown;
+        }
+        finally
+        {
+            _adjustingPanels = false;
+        }
+
+        ApplyPanelSizes();
+
+        // Uncollapsing is one of the ways the rendering can be out of date, since nothing was drawn
+        // while there was nowhere to draw it.
+        RenderNotes();
     }
 
     // ---- Commands ------------------------------------------------------------------------------
@@ -1558,17 +1641,11 @@ internal sealed class MainForm : Form
                 return false;
 
             case AppCommand.ToggleDescription:
-                ShowDescriptionPanel(_detail.Panel2Collapsed);
+                Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
             case AppCommand.TogglePreview:
-                RememberPanelSizes();
-                _notesSplit.Panel2Collapsed = !_notesSplit.Panel2Collapsed;
-                ApplyPanelSizes();
-
-                // Uncollapsing is one of the ways the rendering can be out of date, since nothing
-                // was drawn while there was nowhere to draw it.
-                RenderNotes();
+                Guarded(() => ShowPreviewPanel(_notesSplit.Panel2Collapsed));
                 return false;
 
             case AppCommand.Undo:
