@@ -434,6 +434,39 @@ public class SingleInstanceTests
     }
 
     [Fact]
+    public void The_pipe_is_listening_by_the_time_the_instance_is_reported_as_taken()
+    {
+        // Returning true is what tells the rest of startup that this process is the instance, and a
+        // second launch can arrive the moment it does. Opened on a queued task, the pipe didn't
+        // exist until the pool got round to it, and a launch landing in that gap was lost — it
+        // waited two seconds for something to connect to and then exited having done nothing.
+        //
+        // Asked of the pipe namespace rather than by signalling, so the answer doesn't depend on
+        // how quickly anything else runs: this is checked in the statement after the acquire.
+        using var holder = new WindowsSingleInstance(Scope());
+
+        Assert.True(holder.TryAcquire());
+
+        Assert.Contains(
+            holder.PipeName,
+            Directory.GetFiles(@"\\.\pipe\").Select(Path.GetFileName));
+    }
+
+    [Fact]
+    public void A_launch_arriving_the_instant_the_instance_is_taken_is_still_heard()
+    {
+        // The same thing from the other end, and the shape the app actually takes: no sleep between
+        // the two, because a second launch doesn't wait either.
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope);
+        Assert.True(holder.TryAcquire());
+
+        using var launcher = new WindowsSingleInstance(scope);
+
+        Assert.True(launcher.TrySignal(InstanceSignals.Show));
+    }
+
+    [Fact]
     public void Acquiring_twice_from_the_same_instance_is_idempotent()
     {
         using var instance = new WindowsSingleInstance(Scope());
