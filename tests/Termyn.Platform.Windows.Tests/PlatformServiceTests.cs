@@ -441,15 +441,35 @@ public class SingleInstanceTests
         // exist until the pool got round to it, and a launch landing in that gap was lost — it
         // waited two seconds for something to connect to and then exited having done nothing.
         //
-        // Asked of the pipe namespace rather than by signalling, so the answer doesn't depend on
-        // how quickly anything else runs: this is checked in the statement after the acquire.
-        using var holder = new WindowsSingleInstance(Scope());
+        // The pool is held busy for the duration, which is what makes this a test rather than a
+        // race the fast machine always wins. Beyond the threads it already has the pool injects
+        // more, but slowly — so anything queued here waits, and a pipe that is only opened by the
+        // queued listener is not there to be found. Asked of the pipe namespace rather than by
+        // signalling, so nothing about the answer depends on timing.
+        using var release = new ManualResetEventSlim(false);
+        var busy = new List<Task>();
 
-        Assert.True(holder.TryAcquire());
+        try
+        {
+            for (var i = 0; i < Environment.ProcessorCount * 2; i++)
+                busy.Add(Task.Run(() => release.Wait(TimeSpan.FromSeconds(20))));
 
-        Assert.Contains(
-            holder.PipeName,
-            Directory.GetFiles(@"\\.\pipe\").Select(Path.GetFileName));
+            // Long enough for those to have taken the threads they are going to take.
+            Thread.Sleep(50);
+
+            using var holder = new WindowsSingleInstance(Scope());
+
+            Assert.True(holder.TryAcquire());
+
+            Assert.Contains(
+                holder.PipeName,
+                Directory.GetFiles(@"\\.\pipe\").Select(Path.GetFileName));
+        }
+        finally
+        {
+            release.Set();
+            Task.WaitAll([.. busy], TimeSpan.FromSeconds(20));
+        }
     }
 
     [Fact]

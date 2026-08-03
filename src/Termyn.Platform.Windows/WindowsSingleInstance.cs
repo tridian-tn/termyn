@@ -148,7 +148,13 @@ public sealed class WindowsSingleInstance : ISingleInstance
         // where a launch-at-login entry is competing with everything else for the same pool.
         //
         // Opening it takes well under a millisecond, so nothing is being traded for the certainty.
-        _listener = Task.Run(() => ListenAsync(TryOpenPipe(), _stopping.Token));
+        //
+        // Opened into a local first. Called inside the lambda it would be evaluated when the task
+        // runs, which is the very thing being avoided — and on a machine whose pool answers quickly
+        // that reads as working.
+        var pipe = TryOpenPipe();
+
+        _listener = Task.Run(() => ListenAsync(pipe, _stopping.Token));
         return true;
     }
 
