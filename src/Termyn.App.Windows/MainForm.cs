@@ -646,10 +646,22 @@ internal sealed class MainForm : Form
 
     private void RenderSidebar()
     {
-        // Nothing structural changed — a search keystroke, say — so leave the tree alone rather
-        // than rebuilding it and losing what the user has collapsed.
-        if (ReferenceEquals(_renderedSidebar, _presenter.Sidebar))
+        // Nothing the tree shows has changed — a search keystroke, or a click, which republishes
+        // the same rows because nothing in the sidebar depends on which one is selected. Identity
+        // only answers the cheapest case: a publish builds a fresh list every time, so the contents
+        // are what has to be compared. Rebuilding a tree that already matches is what made clicking
+        // a row jump the scroll — clearing the nodes drops the view to the top, and the selection
+        // that follows scrolls back down to the row that was clicked.
+        if (_renderedSidebar is { } rendered
+            && (ReferenceEquals(rendered, _presenter.Sidebar) || rendered.SequenceEqual(_presenter.Sidebar)))
+        {
             return;
+        }
+
+        // Where the tree is scrolled to and what it's sitting on, so a rebuild that doesn't move
+        // the selection — a sync changing a count, say — doesn't move the viewport either.
+        var top = SidebarKeyOf(_sidebar.TopNode);
+        var selected = SidebarKeyOf(_sidebar.SelectedNode);
 
         _renderedSidebar = _presenter.Sidebar;
         _syncingSidebar = true;
@@ -704,7 +716,19 @@ internal sealed class MainForm : Form
             _sidebar.EndUpdate();
             _syncingSidebar = false;
         }
+
+        // After EndUpdate, not inside it: with redraw suppressed the control doesn't scroll where
+        // it's told. Only when the selection stayed put — if it moved, it has already scrolled
+        // itself into view and that is where the user should be looking.
+        if (top is not null
+            && selected == SidebarKeyOf(_sidebar.SelectedNode)
+            && FindByKey(_sidebar.Nodes, top) is { } was)
+        {
+            _sidebar.TopNode = was;
+        }
     }
+
+    private static string? SidebarKeyOf(TreeNode? node) => (node?.Tag as SidebarNode)?.Key;
 
     private HashSet<string> CollapsedKeys()
     {

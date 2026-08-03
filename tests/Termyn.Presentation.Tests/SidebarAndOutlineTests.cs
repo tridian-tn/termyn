@@ -119,6 +119,26 @@ public class SidebarAndOutlineTests
     // ---- Selection -----------------------------------------------------------------------------
 
     [Fact]
+    public void Selecting_a_row_republishes_a_sidebar_equal_to_the_last_one()
+    {
+        // The tree is rebuilt only when the rows it shows have changed, because a rebuild drops the
+        // scroll to the top. Nothing in the sidebar depends on the selection, so opening a view has
+        // to leave the rows equal — a count or a label that started following the selection would
+        // put the jump back without touching the view at all.
+        var presenter = NewPresenter(Seeded());
+
+        // Copied, so the rows are compared whether the presenter hands back a fresh list or the
+        // one it already had. Which of those it does is its own business — reusing the list would
+        // only mean the view could tell even more cheaply that nothing had moved.
+        var before = presenter.Sidebar.ToList();
+
+        Assert.True(presenter.SelectByKey(SidebarKeys.For(SidebarKind.Project, "p1")));
+
+        Assert.Equal("p1", presenter.Selection.ProjectId); // the view really did move
+        Assert.Equal(before, presenter.Sidebar);
+    }
+
+    [Fact]
     public void The_app_lands_on_Today()
     {
         var presenter = NewPresenter(Seeded());
