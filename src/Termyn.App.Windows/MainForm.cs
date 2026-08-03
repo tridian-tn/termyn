@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using Termyn.Core;
 using Termyn.Core.Api;
@@ -51,6 +52,9 @@ internal sealed class MainForm : Form
     private readonly OutlineView _outline;
     private readonly Label _status;
     private readonly SplitContainer _split;
+
+    /// <summary>The right-click menu on a task, refilled for whichever row it opens over.</summary>
+    private readonly ContextMenuStrip _taskMenu;
 
     /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
     private readonly LinkLabel _unsupported;
@@ -135,6 +139,12 @@ internal sealed class MainForm : Form
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
 
+        // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
+        // also what makes Shift+F10 and the menu key reach it, without either being handled.
+        _taskMenu = new ContextMenuStrip();
+        _taskMenu.Opening += OnTaskMenuOpening;
+        _outline.ContextMenuStrip = _taskMenu;
+
         _unsupported = new LinkLabel
         {
             Dock = DockStyle.Top,
@@ -203,6 +213,7 @@ internal sealed class MainForm : Form
             _quickAdd?.AllowClose();
             _quickAdd?.Dispose();
             _headerFont?.Dispose();
+            _taskMenu.Dispose();
             _cts.Dispose();
         };
     }
@@ -950,85 +961,287 @@ internal sealed class MainForm : Form
 
     private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 
+    // ---- Task actions --------------------------------------------------------------------------
+
+    /// <summary>
+    /// The keys that reach each action on a task. One table, read from both directions: the outline
+    /// matches a keystroke against it, and the menu prints from it — so a menu can't advertise a
+    /// shortcut that nothing is bound to. Where an action answers to two keystrokes the first is
+    /// the one written down. Internal so a test can walk it.
+    /// </summary>
+    internal static readonly (Keys Keys, TaskCommand Command)[] TaskShortcuts =
+    [
+        (Keys.Space, TaskCommand.ToggleComplete),
+        (Keys.Control | Keys.Enter, TaskCommand.ToggleComplete),
+        (Keys.F2, TaskCommand.Rename),
+        (Keys.Control | Keys.D, TaskCommand.Due),
+        (Keys.Control | Keys.D1, TaskCommand.Priority1),
+        (Keys.Control | Keys.D2, TaskCommand.Priority2),
+        (Keys.Control | Keys.D3, TaskCommand.Priority3),
+        (Keys.Control | Keys.D4, TaskCommand.Priority4),
+        (Keys.Control | Keys.L, TaskCommand.Labels),
+        (Keys.Control | Keys.R, TaskCommand.Reminders),
+        (Keys.Tab, TaskCommand.Indent),
+        (Keys.Shift | Keys.Tab, TaskCommand.Outdent),
+        (Keys.Alt | Keys.Up, TaskCommand.MoveUp),
+        (Keys.Alt | Keys.Down, TaskCommand.MoveDown),
+        (Keys.Delete, TaskCommand.Delete),
+    ];
+
+    /// <summary>
+    /// The action a keystroke asks for, or <see cref="TaskCommand.None"/> when it asks for none.
+    /// Internal so a test can check what the outline answers to without a window to type into.
+    /// </summary>
+    internal static TaskCommand CommandFor(Keys keys)
+        => TaskShortcuts.FirstOrDefault(s => s.Keys == keys).Command;
+
+    /// <summary>
+    /// How an action's shortcut is written in a menu, or empty when it has none. Internal for the
+    /// same reason: a menu that prints a shortcut nothing is bound to is the failure worth catching.
+    /// </summary>
+    internal static string ShortcutFor(TaskCommand command)
+    {
+        var bound = TaskShortcuts.FirstOrDefault(s => s.Command == command);
+        return bound.Command == TaskCommand.None ? string.Empty : ShortcutText(bound.Keys);
+    }
+
+    /// <summary>
+    /// A keystroke as a menu writes it — "Ctrl+1", "Shift+Tab", "Alt+↑". The framework's own
+    /// converter is no use for the digits: it names them after the enum, so Ctrl+1 comes out
+    /// "Ctrl+D1". Internal so a test can read what the menu will say.
+    /// </summary>
+    internal static string ShortcutText(Keys keys)
+    {
+        var parts = new List<string>(4);
+
+        if (keys.HasFlag(Keys.Control))
+            parts.Add("Ctrl");
+        if (keys.HasFlag(Keys.Shift))
+            parts.Add("Shift");
+        if (keys.HasFlag(Keys.Alt))
+            parts.Add("Alt");
+
+        var code = keys & Keys.KeyCode;
+        parts.Add(code switch
+        {
+            >= Keys.D0 and <= Keys.D9 => ((char)('0' + (code - Keys.D0))).ToString(),
+            Keys.Up => "↑",
+            Keys.Down => "↓",
+            Keys.Delete => "Del",
+            // The enum's own name for this one is Return, which is not what the key says on it.
+            Keys.Return => "Enter",
+            _ => code.ToString(),
+        });
+
+        return string.Join("+", parts);
+    }
+
+    /// <summary>
+    /// Rebuilds the menu for the row it is about to open over. Built per open rather than once:
+    /// what it says depends on the task — whether it offers Complete or Reopen, and which priority
+    /// is already ticked — and a right-click is not a moment where fifteen menu items cost anything.
+    /// </summary>
+    private void OnTaskMenuOpening(object? sender, CancelEventArgs e)
+    {
+        // The outline turns away a right-click that missed every row, so what's left to catch here
+        // is the keyboard asking for a menu with nothing selected — an empty list, most likely.
+        if (_outline.SelectedRow is not { } row)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        // Disposed rather than dropped: the strip stops owning what it no longer holds, and a menu
+        // rebuilt on every right-click would leak an item's worth of handles each time.
+        var stale = _taskMenu.Items.Cast<ToolStripItem>().ToList();
+        _taskMenu.Items.Clear();
+        foreach (var item in stale)
+            item.Dispose();
+
+        FillTaskMenu(_taskMenu.Items, TaskMenu.For(row), RunFromTaskMenu);
+    }
+
+    /// <summary>
+    /// Renders menu entries into a strip, hanging <paramref name="run"/> off each one that acts.
+    /// </summary>
+    /// <remarks>
+    /// Static, and taking what to run rather than reaching for the window's own dispatch, so a test
+    /// can build the menu and click it without a window to hang it on.
+    /// </remarks>
+    /// <param name="items">The strip, or a submenu of one, to add to</param>
+    /// <param name="entries">What to render, in order</param>
+    /// <param name="run">Called with the command of whichever entry is clicked</param>
+    internal static void FillTaskMenu(
+        ToolStripItemCollection items,
+        IReadOnlyList<TaskMenuEntry> entries,
+        Action<TaskCommand> run)
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.SeparatorBefore && items.Count > 0)
+                items.Add(new ToolStripSeparator());
+
+            var item = new ToolStripMenuItem(entry.Label) { Checked = entry.Checked };
+
+            if (entry.Children is { Count: > 0 } children)
+            {
+                FillTaskMenu(item.DropDownItems, children, run);
+            }
+            else
+            {
+                // Written on, not bound to. Setting ShortcutKeys would register the keystroke on the
+                // strip as well as the outline, and which of the two answered would stop being ours
+                // to say.
+                item.ShortcutKeyDisplayString = ShortcutFor(entry.Command);
+
+                item.Click += (_, _) => run(entry.Command);
+            }
+
+            items.Add(item);
+        }
+    }
+
+    /// <summary>Runs an action chosen from the menu, on the row the menu was opened over.</summary>
+    private void RunFromTaskMenu(TaskCommand command)
+    {
+        if (_outline.SelectedId is not { } id)
+            return;
+
+        // Handed back before the action runs: a rename opens an editor on the row, which needs the
+        // outline to have the focus the menu has just taken off it.
+        _outline.Focus();
+
+        if (RunTaskCommand(command, id))
+            _scheduler.NotifyWrite();
+    }
+
+    /// <summary>
+    /// Runs an action on a task, however it was asked for — a keystroke or the menu — so the two
+    /// can't come to mean different things.
+    /// </summary>
+    /// <param name="command">The action to run</param>
+    /// <param name="id">The task to run it on</param>
+    /// <returns>True when it changed something the server has yet to hear about</returns>
+    private bool RunTaskCommand(TaskCommand command, string id)
+    {
+        var wrote = false;
+
+        switch (command)
+        {
+            // Ticking off a task that is already done means putting it back.
+            case TaskCommand.ToggleComplete:
+                Guarded(() =>
+                {
+                    if (_outline.SelectedRow is { Completed: true })
+                        _presenter.Reopen(id);
+                    else
+                        _presenter.Complete(id);
+                });
+                return true;
+
+            // Nothing is written here: the editor commits when it closes, and that path syncs.
+            case TaskCommand.Rename:
+                BeginRename();
+                return false;
+
+            case TaskCommand.Due:
+                Guarded(() => wrote = PromptForDue(id));
+                return wrote;
+
+            case TaskCommand.Labels:
+                Guarded(() => wrote = PickLabels(id));
+                return wrote;
+
+            case TaskCommand.Reminders:
+                Guarded(() => wrote = ShowReminders(id));
+                return wrote;
+
+            case TaskCommand.Priority1:
+            case TaskCommand.Priority2:
+            case TaskCommand.Priority3:
+            case TaskCommand.Priority4:
+                Guarded(() => _presenter.SetPriority(id, PriorityOf(command)));
+                return true;
+
+            case TaskCommand.Indent:
+            case TaskCommand.Outdent:
+                Guarded(() =>
+                {
+                    var outdent = command == TaskCommand.Outdent;
+                    wrote = outdent ? _presenter.Outdent(id) : _presenter.Indent(id);
+                    if (!wrote)
+                        _status.Text = outdent ? "Already at the top level." : "Nothing above it to indent under.";
+                });
+                return wrote;
+
+            case TaskCommand.MoveUp:
+            case TaskCommand.MoveDown:
+                Guarded(() =>
+                {
+                    wrote = _presenter.Move(id, command == TaskCommand.MoveUp ? -1 : 1);
+                    if (!wrote)
+                        _status.Text = "Already at the end of its list.";
+                });
+                return wrote;
+
+            case TaskCommand.Delete:
+                Guarded(() => _presenter.Delete(id));
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private static Priority PriorityOf(TaskCommand command) => command switch
+    {
+        TaskCommand.Priority1 => Priority.P1,
+        TaskCommand.Priority2 => Priority.P2,
+        TaskCommand.Priority3 => Priority.P3,
+        _ => Priority.P4,
+    };
+
     // ---- Outline keys --------------------------------------------------------------------------
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
-        var id = _outline.SelectedId;
-        var wrote = true;
-
-        switch (e.KeyCode)
+        // Neither of these acts on a task: one refreshes the lot, and the other takes back whatever
+        // was last done, with or without a row under the cursor.
+        switch (e.KeyData)
         {
-            // Ticking off a task that is already done means putting it back.
-            case Keys.Space when id is not null:
-            case Keys.Enter when e.Control && id is not null:
-                Guarded(() =>
-                {
-                    if (_outline.SelectedRow is { Completed: true })
-                        _presenter.Reopen(id!);
-                    else
-                        _presenter.Complete(id!);
-                });
-                break;
-            case Keys.Delete when id is not null:
-                Guarded(() => _presenter.Delete(id!));
-                break;
-            case Keys.F2 when id is not null:
-                BeginRename();
-                return;
-            case Keys.Tab when id is not null:
-                wrote = false;
-                Guarded(() =>
-                {
-                    wrote = e.Shift ? _presenter.Outdent(id!) : _presenter.Indent(id!);
-                    if (!wrote)
-                        _status.Text = e.Shift ? "Already at the top level." : "Nothing above it to indent under.";
-                });
-                break;
-            case Keys.D when e.Control && id is not null:
-                wrote = false;
-                Guarded(() => wrote = PromptForDue(id!));
-                break;
-            case Keys.L when e.Control && id is not null:
-                wrote = false;
-                Guarded(() => wrote = PickLabels(id!));
-                break;
-            case Keys.R when e.Control && id is not null:
-                wrote = false;
-                Guarded(() => wrote = ShowReminders(id!));
-                break;
-            case Keys.Z when e.Control:
-                wrote = false;
-                Guarded(() =>
-                {
-                    wrote = _presenter.Undo();
-                    if (!wrote)
-                        _status.Text = "Nothing to undo.";
-                });
-                break;
-            case Keys.D1 or Keys.D2 or Keys.D3 or Keys.D4 when e.Control && id is not null:
-                Guarded(() => _presenter.SetPriority(id!, (Priority)(e.KeyCode - Keys.D0)));
-                break;
-            case Keys.Up when e.Alt && id is not null:
-            case Keys.Down when e.Alt && id is not null:
-                wrote = false;
-                Guarded(() =>
-                {
-                    wrote = _presenter.Move(id!, e.KeyCode == Keys.Up ? -1 : 1);
-                    if (!wrote)
-                        _status.Text = "Already at the end of its list.";
-                });
-                break;
             case Keys.F5:
                 _scheduler.RequestNow();
                 return;
-            default:
+
+            case Keys.Control | Keys.Z:
+                Guarded(() =>
+                {
+                    if (_presenter.Undo())
+                        _scheduler.NotifyWrite();
+                    else
+                        _status.Text = "Nothing to undo.";
+                });
+                e.Handled = true;
+                e.SuppressKeyPress = true;
                 return;
+        }
+
+        var command = CommandFor(e.KeyData);
+        if (command == TaskCommand.None || _outline.SelectedId is not { } id)
+            return;
+
+        // Left unhandled deliberately: the editor is open by the time the control sees its own F2,
+        // and suppressing the key would stop the two agreeing about what is being edited.
+        if (command == TaskCommand.Rename)
+        {
+            BeginRename();
+            return;
         }
 
         e.Handled = true;
         e.SuppressKeyPress = true;
-        if (wrote)
+
+        if (RunTaskCommand(command, id))
             _scheduler.NotifyWrite();
     }
 

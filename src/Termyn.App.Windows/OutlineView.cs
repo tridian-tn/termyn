@@ -141,6 +141,33 @@ internal sealed class OutlineView : ListView
         base.OnSelectedIndexChanged(e);
     }
 
+    /// <summary>
+    /// A right-click moves the selection to the row under the pointer, so the menu that follows is
+    /// about the task being pointed at rather than whichever one was selected beforehand. Done on
+    /// the press, because the menu is raised from the release and the selection has to have moved
+    /// by then. A click past the last row leaves the selection alone — there is nothing to act on,
+    /// and the menu declines to open.
+    /// </summary>
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right
+            && HitTest(e.Location).Item?.Index is { } index
+            && index >= 0
+            && index < _rows.Count)
+        {
+            if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+            {
+                SelectedIndices.Clear();
+                SelectedIndices.Add(index);
+            }
+
+            // Keyboard navigation carries on from the focused row, as it does everywhere else here.
+            Items[index].Focused = true;
+        }
+
+        base.OnMouseDown(e);
+    }
+
     private bool IsSelected(int index) => _selectedIndex == index;
 
     private int IndexOf(string id)
@@ -215,13 +242,18 @@ internal sealed class OutlineView : ListView
     }
 
     /// <summary>
-    /// Swallows the background erase. The control repaints a row as the pointer crosses it, and
-    /// erasing first leaves it blank for a frame — the flicker under the mouse. Everything is
-    /// painted by the draw handlers, so there is nothing the erase needs to do.
+    /// Swallows the background erase, and the request for a menu where there is no task to put one
+    /// on.
     /// </summary>
+    /// <remarks>
+    /// The control repaints a row as the pointer crosses it, and erasing first leaves it blank for a
+    /// frame — the flicker under the mouse. Everything is painted by the draw handlers, so there is
+    /// nothing the erase needs to do.
+    /// </remarks>
     protected override void WndProc(ref Message m)
     {
         const int WmEraseBackground = 0x0014;
+        const int WmContextMenu = 0x007B;
 
         if (m.Msg == WmEraseBackground)
         {
@@ -229,7 +261,23 @@ internal sealed class OutlineView : ListView
             return;
         }
 
+        // A menu asked for with the keyboard is about the selected row, wherever that has got to on
+        // screen. One asked for with the mouse is about the row under the pointer — and below the
+        // last task there is no row for it to be about, so the click gets nothing rather than a menu
+        // aimed at whichever row was selected somewhere else. The two are told apart by lParam,
+        // which the keyboard sends as -1.
+        if (m.Msg == WmContextMenu && m.LParam != -1 && !PointsAtRow(m.LParam))
+            return;
+
         base.WndProc(ref m);
+    }
+
+    /// <summary>Whether a screen position packed into an lParam is over a row.</summary>
+    private bool PointsAtRow(nint lParam)
+    {
+        // Signed: a second monitor to the left of the main one puts the pointer at a negative x.
+        var screen = new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF));
+        return HitTest(PointToClient(screen)).Item?.Index is { } index && index >= 0 && index < _rows.Count;
     }
 
     protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
