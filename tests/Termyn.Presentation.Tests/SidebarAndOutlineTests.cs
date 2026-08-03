@@ -126,11 +126,15 @@ public class SidebarAndOutlineTests
         // to leave the rows equal — a count or a label that started following the selection would
         // put the jump back without touching the view at all.
         var presenter = NewPresenter(Seeded());
-        var before = presenter.Sidebar;
+
+        // Copied, so the rows are compared whether the presenter hands back a fresh list or the
+        // one it already had. Which of those it does is its own business — reusing the list would
+        // only mean the view could tell even more cheaply that nothing had moved.
+        var before = presenter.Sidebar.ToList();
 
         Assert.True(presenter.SelectByKey(SidebarKeys.For(SidebarKind.Project, "p1")));
 
-        Assert.NotSame(before, presenter.Sidebar); // a fresh list, so identity can't be the test
+        Assert.Equal("p1", presenter.Selection.ProjectId); // the view really did move
         Assert.Equal(before, presenter.Sidebar);
     }
 
