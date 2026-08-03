@@ -233,7 +233,7 @@ internal sealed class MainForm : Form
         _renderIdle.Tick += (_, _) =>
         {
             _renderIdle.Stop();
-            _rendered.Markdown = _notes.Text;
+            RenderNotes();
         };
 
         // Long enough that it isn't saving mid-sentence, short enough that walking away from a
@@ -1146,7 +1146,22 @@ internal sealed class MainForm : Form
 
         _renderIdle.Stop();
         _saveIdle.Stop();
-        _rendered.Markdown = text;
+        RenderNotes();
+    }
+
+    /// <summary>
+    /// Draws the notes as they read, if there is anywhere to draw them.
+    /// </summary>
+    /// <remarks>
+    /// Asked rather than assumed, because the wait for the typing to stop outlives the panel: close
+    /// it a moment after typing and the tick still arrives, to parse and style a description into a
+    /// control nobody can see. Everything that puts the panel back on screen renders as it does so,
+    /// which is what keeps skipping it here from leaving a stale rendering behind.
+    /// </remarks>
+    private void RenderNotes()
+    {
+        if (!_detail.Panel2Collapsed && !_notesSplit.Panel2Collapsed)
+            _rendered.Markdown = _notes.Text;
     }
 
     /// <summary>Follows a link out of the notes, if it is one worth following.</summary>
@@ -1198,10 +1213,15 @@ internal sealed class MainForm : Form
         _detail.Panel2Collapsed = !shown;
 
         if (!shown)
+        {
+            // Nothing left to draw on, so the wait for the typing to stop has nothing to wait for.
+            _renderIdle.Stop();
             return;
+        }
 
         ApplyPanelSizes();
         FollowSelection();
+        RenderNotes();
     }
 
     /// <summary>Puts the panels back to the sizes the user left them at.</summary>
@@ -1545,6 +1565,10 @@ internal sealed class MainForm : Form
                 RememberPanelSizes();
                 _notesSplit.Panel2Collapsed = !_notesSplit.Panel2Collapsed;
                 ApplyPanelSizes();
+
+                // Uncollapsing is one of the ways the rendering can be out of date, since nothing
+                // was drawn while there was nowhere to draw it.
+                RenderNotes();
                 return false;
 
             case AppCommand.Undo:

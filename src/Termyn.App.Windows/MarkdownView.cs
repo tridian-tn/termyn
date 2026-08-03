@@ -222,7 +222,10 @@ internal sealed class MarkdownView : RichTextBox
         foreach (var inline in inlines)
             WriteInline(inline, style);
 
-        AppendText(Environment.NewLine);
+        // Ended in the paragraph's own style rather than in whatever the last run left behind. A
+        // newline draws nothing, so a link-coloured one is invisible here — but it is still carried
+        // out with the text when a selection spanning it is copied somewhere that keeps formatting.
+        Write(string.Empty, style);
     }
 
     private void WriteInline(Inline inline, Style style)
@@ -265,7 +268,7 @@ internal sealed class MarkdownView : RichTextBox
 
             case LineBreakInline lineBreak:
                 if (lineBreak.IsHard)
-                    AppendText(Environment.NewLine);
+                    Write(string.Empty, style);
                 else
                     Write(" ", style, newLine: false);
                 break;

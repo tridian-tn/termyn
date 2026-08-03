@@ -179,6 +179,21 @@ public class MarkdownViewTests
     }
 
     [Fact]
+    public void A_links_colour_stops_where_its_words_do()
+    {
+        // The line ending after a link draws nothing, so a link-coloured one is invisible here —
+        // but it goes out with the text when a selection spanning it is copied somewhere that
+        // keeps formatting, and it makes a nonsense of asking what colour the line is.
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("A line ending in [a link](https://example.com)");
+
+        view.SelectionStart = view.Text.IndexOf("a link", StringComparison.Ordinal) + "a link".Length;
+        view.SelectionLength = view.TextLength - view.SelectionStart;
+
+        Assert.NotEqual(theme.Accent, view.SelectionColor);
+    }
+
+    [Fact]
     public void Code_is_set_in_a_fixed_width_face()
     {
         using var view = Render("Run `dotnet build` first");
