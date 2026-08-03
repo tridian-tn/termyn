@@ -12,12 +12,19 @@ public class SyncSchedulerTests
     {
         var syncs = 0;
         var settled = new TaskCompletionSource();
+
+        // Half a second to a burst spread over a tenth of one. The debounce rolls forward on each
+        // write, so what has to hold is that no single gap outlasts it — and a gap asked for as ten
+        // milliseconds is not ten milliseconds. Windows wakes a timer on a fifteen-millisecond tick
+        // and a loaded machine misses ticks, so at the eighty this was written with, one stretched
+        // gap ended the burst early and the sync it triggered was a second one. The margin is the
+        // point of the number, not the number.
         await using var scheduler = new SyncScheduler(_ =>
         {
             if (Interlocked.Increment(ref syncs) == 1)
                 settled.TrySetResult();
             return Task.CompletedTask;
-        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(80)));
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(500)));
 
         scheduler.Start();
         for (var i = 0; i < 10; i++)
