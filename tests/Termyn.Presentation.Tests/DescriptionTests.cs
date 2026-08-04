@@ -130,20 +130,19 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Undoing_a_completion_takes_the_task_back_whole_notes_and_all()
+    public void Undoing_a_completion_undoes_the_completion_and_not_the_afternoon()
     {
-        // Recorded because it surprised me, not because it is new: undo restores the task as it
-        // stood before the completion, so anything changed after it goes back too. True of every
-        // field rather than of notes in particular — priority and due date behave the same way —
-        // and the sequence is an odd one. Left alone here; changing it means changing what undo
-        // means, which is a good deal more than a notes panel.
+        // Ctrl+Z after ticking a task off means "I didn't mean to tick that off", not "put the
+        // task back to whatever it was at that moment". Notes written after the tick are a later
+        // intention with nothing to do with it, and undo used to take them with it.
         var presenter = Seeded("Before");
         presenter.Complete("i1");
         presenter.SetDescription("i1", "Written after it was ticked off");
 
-        presenter.Undo();
+        Assert.True(presenter.Undo());
 
-        Assert.Equal("Before", presenter.DescriptionOf("i1"));
+        Assert.Equal("Written after it was ticked off", presenter.DescriptionOf("i1"));
+        Assert.Contains(presenter.Rows, r => r.Id == "i1" && !r.Completed);
     }
 
     [Fact]
