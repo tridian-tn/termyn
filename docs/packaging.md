@@ -18,11 +18,31 @@ Runs the tests, publishes, and writes both artefacts to `artifacts/`:
 
 `-SkipTests` skips the suite when iterating on the packaging itself. Building the installer needs
 Inno Setup 6 (`winget install JRSoftware.InnoSetup`); without it the script builds the zip and says
-so rather than failing.
+so rather than failing. `-RequireInstaller` turns that fallback into a failure, which is what you
+want anywhere a release comes from: shipping half of what was asked for, announced in a warning
+nobody reads, is worse than stopping.
 
 **The version lives in one place** — `<Version>` in `Directory.Build.props`. It stamps the
 executable, names both artefacts, and is what the update check compares against, so the installer,
 the binary and the release tag cannot disagree. Release tags are that number with a leading `v`.
+
+## Releasing
+
+CI builds both artefacts on every pull request, with `-RequireInstaller`, and keeps them as a build
+artefact. So the packaging is exercised by the same change that might break it, rather than
+discovered to be broken later by whoever is trying to cut a release.
+
+Pushing a `v*` tag does that and then attaches both files to the GitHub release for that tag,
+creating it as a **draft** if it isn't there already. Draft rather than published because nothing is
+signed yet: somebody should look before these are downloadable. Press publish to make the release
+real, or delete the draft to abandon it.
+
+The tag has to be the version that was built — `v1.2.0` against a `Directory.Build.props` still
+saying `1.1.0` fails the job rather than attaching the previous version's installer to this
+version's release. Bump `<Version>`, merge it, then tag.
+
+What this doesn't do is tell you the installer *works*. A runner has the .NET Desktop Runtime
+installed, so the missing-runtime path can't be exercised there; that one still wants a clean VM.
 
 ## What the installer does
 

@@ -13,6 +13,10 @@
 .PARAMETER SkipTests
     Package without running the test suite first. For iterating on the packaging itself.
 
+.PARAMETER RequireInstaller
+    Fail rather than fall back to the zip alone when Inno Setup isn't installed. For CI and for
+    building a release, where half the artefacts quietly going missing is worse than stopping.
+
 .PARAMETER RegenerateIcon
     Redraw assets/termyn.ico from BrandIcon and exit, packaging nothing. Run this after changing the
     mark; the test that compares the committed file against the drawing will tell you when.
@@ -23,6 +27,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipTests,
+    [switch]$RequireInstaller,
     [switch]$RegenerateIcon
 )
 
@@ -100,6 +105,13 @@ Write-Host "  portable  $zip" -ForegroundColor Green
 
 $iscc = Find-InnoSetup
 if (-not $iscc) {
+    # Fine on a laptop, where the zip is usually what you were after. Not fine anywhere a release
+    # comes from: a build that ships half of what it was asked for, and says so only in a warning
+    # nobody reads, is worse than one that stops.
+    if ($RequireInstaller) {
+        throw 'Inno Setup 6 not found and -RequireInstaller was given. Looked in Program Files, Program Files (x86) and LocalAppData.'
+    }
+
     Write-Warning 'Inno Setup 6 not found, so only the portable zip was built.'
     Write-Warning 'Install it with:  winget install JRSoftware.InnoSetup'
     return
@@ -112,7 +124,13 @@ Write-Host 'Building the installer...' -ForegroundColor Cyan
     Where-Object { $_ -match 'error|warning' } | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
 
+# Asked for rather than assumed. A compiler that returns nought having written the installer
+# somewhere else leaves an empty artefact upload and a release with a zip in it.
 $setup = Join-Path $artifacts "Termyn-$version-setup.exe"
+if (-not (Test-Path $setup)) {
+    throw "The installer compiled but $setup is not there."
+}
+
 Write-Host "  installer $setup" -ForegroundColor Green
 
 Get-Item $zip, $setup | ForEach-Object {
