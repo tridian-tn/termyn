@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
 
 jobs:
@@ -27,3 +28,99 @@ jobs:
 
       - name: Test
         run: dotnet test Termyn.slnx -c Release --no-build --verbosity normal
+
+  package:
+    name: package
+    runs-on: windows-latest
+    needs: build-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # -SkipTests because the job above has just run the suite, and running it twice adds minutes
+      # for nothing. -RequireInstaller because the script falls back to the zip alone when Inno Setup
+      # is missing, which is right on a laptop and wrong here: half a release, announced in a warning
+      # nobody reads, is worse than a failure.
+      #
+      # The runner image ships Inno Setup 6 under Program Files (x86), which is one of the three
+      # places the script looks, so nothing is installed for it. That is the part of this worth
+      # watching on the first run.
+      - name: Build the artefacts
+        run: pwsh -File ./packaging/build.ps1 -SkipTests -RequireInstaller
+
+      # Named rather than globbed at the directory, so the publish folder underneath doesn't come
+      # too — that is the unpackaged app, and it is what both of these are made of.
+      - name: Keep them
+        uses: actions/upload-artifact@v4
+        with:
+          name: termyn-artefacts
+          if-no-files-found: error
+          path: |
+            artifacts/*-setup.exe
+            artifacts/*-portable.zip
+
+  release:
+    name: release
+    runs-on: windows-latest
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    # Only this job, and only on a tag. The packaging above runs on every pull request, including
+    # ones from forks, and has no business being able to write to the repository.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Take the artefacts the packaging job built
+        uses: actions/download-artifact@v4
+        with:
+          name: termyn-artefacts
+          path: artifacts
+
+      # The version lives in Directory.Build.props and names both files; the tag is that number with
+      # a leading v. Asking for the files by the tag's name is what holds the two together — a tag
+      # that has run ahead of the version finds nothing here, rather than quietly attaching the last
+      # version's installer to this version's release.
+      - name: Check the tag is the version that was built
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $missing = @('setup.exe', 'portable.zip') |
+            ForEach-Object { Join-Path 'artifacts' "Termyn-$version-$_" } |
+            Where-Object { -not (Test-Path $_) }
+
+          if ($missing) {
+            $built = (Get-ChildItem artifacts | ForEach-Object Name) -join ', '
+            throw "Tag ${{ github.ref_name }} wants $($missing -join ', '), but the build produced: $built"
+          }
+
+      # Drafted rather than published: these are unsigned, so somebody should look before they are
+      # downloadable. Delete the draft to abandon a release, or press the button to make it real. A
+      # release that already exists for this tag is attached to as it stands.
+      - name: Attach them to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+
+          # gh exits non-zero when there's no release yet, which is the ordinary case here rather
+          # than a failure. Whether a non-zero native command becomes a terminating error under
+          # this shell's ErrorActionPreference has changed between PowerShell versions, so the
+          # answer is taken from what gh printed instead of from how it exited — that reads the
+          # same either way. Anything else going wrong leaves this empty too, and the create
+          # below then fails loudly, which is the right end for it.
+          $existing = $null
+          try { $existing = gh release view $tag --json tagName 2>$null } catch { }
+
+          if (-not $existing) {
+            gh release create $tag --draft --title "Termyn $tag" --generate-notes
+          }
+
+          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip) --clobber
