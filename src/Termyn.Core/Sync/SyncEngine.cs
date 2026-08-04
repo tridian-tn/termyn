@@ -1433,10 +1433,62 @@ public sealed class SyncEngine
                 continue;
 
             var id = idValue.ToString();
-            var copy = resource.DeepClone().AsObject();
+
+            // An update puts back only what it wrote. Its prior is the whole resource as it stood
+            // when the command was queued, and restoring all of it takes away every change made
+            // since — including ones nothing here has any quarrel with. A close queued before an
+            // edit is the case that made this visible: the edit's prior carries the tick, so a
+            // failed edit re-completed a task whose completion the user had already undone, and
+            // left the client disagreeing with the server about whether it was done.
+            //
+            // Only where the resource is still here. Gone, there is nothing to rewind and the whole
+            // prior goes back as it always did, which is what puts a resource back after a delete.
+            var copy = WritesNamedFields(cmd) && Model.Get(type, id) is { } current
+                ? Rewound(current, resource, ParseArgs(cmd))
+                : resource.DeepClone().AsObject();
+
             _store.PutResource(type, id, copy.ToJsonString());
             Model.Upsert(type, id, copy);
         }
+    }
+
+    /// <summary>
+    /// Whether a command's arguments name the fields it writes, so a rollback can put back those
+    /// and leave the rest alone.
+    /// </summary>
+    /// <remarks>
+    /// True of the updates and of nothing else. A close or a move carries only an id and would
+    /// rewind nothing at all; a delete has no resource left to rewind into; a reorder writes an
+    /// order across a whole set of siblings rather than fields on one of them.
+    /// </remarks>
+    private static bool WritesNamedFields(OutboxCommand cmd)
+        => cmd.Type.EndsWith("_update", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The resource as it stands now, with the fields a command named put back to what they were.
+    /// </summary>
+    /// <param name="current">The resource as it is</param>
+    /// <param name="prior">The resource as it stood when the command was queued</param>
+    /// <param name="args">What the command was sent with, whose keys are the fields it wrote</param>
+    private static JsonObject Rewound(JsonObject current, JsonObject prior, JsonObject args)
+    {
+        var rewound = current.DeepClone().AsObject();
+
+        foreach (var (field, _) in args)
+        {
+            // Names the resource rather than changing it.
+            if (field == "id")
+                continue;
+
+            // Absent from the prior means the command added it, so putting it back means taking it
+            // off again rather than writing a null over it.
+            if (prior[field] is { } was)
+                rewound[field] = was.DeepClone();
+            else
+                rewound.Remove(field);
+        }
+
+        return rewound;
     }
 
     // ---- Reconciliation --------------------------------------------------------------------------
