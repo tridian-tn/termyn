@@ -1313,7 +1313,9 @@ public sealed class SyncEngine
                 // task, which is why it went unnoticed.
                 if (record?.Type == "item_close" && queued is { InFlight: false })
                 {
-                    DropCommand(queued);
+                    // Its undo entry has already been taken off the stack above, so removing the
+                    // command is all that is left to forget.
+                    RemoveCommand(queued);
                     Uncheck(record.Id);
                     return true;
                 }
@@ -1368,21 +1370,6 @@ public sealed class SyncEngine
             if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } cmd)
                 RevertLocked(cmd);
         }
-    }
-
-    /// <summary>
-    /// Takes a queued command out of the outbox without touching what it wrote.
-    /// </summary>
-    /// <remarks>
-    /// For a caller that has already put the resource where it wants it, or is about to. Reverting
-    /// a command is the usual thing to want and restores its prior with it; this is the half of
-    /// that for when the prior is not what should be on screen.
-    /// </remarks>
-    private void DropCommand(OutboxCommand cmd)
-    {
-        _outbox.Remove(cmd);
-        _store.DeleteCommands([cmd.Uuid]);
-        ForgetUndoable(cmd.Uuid);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
+using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
@@ -58,6 +59,36 @@ public class SyncEngineUndoScopeTests
         Assert.True(engine.Undo());
 
         Assert.Equal(Priority.P1, Item(engine, "i1").Priority);
+    }
+
+    [Fact]
+    public void A_due_date_set_after_an_unsent_close_survives_it_too()
+    {
+        // Worth its own case rather than another row in the theory above: a due date is a nested
+        // object where the others are one value, and it is the field the whole outline is arranged
+        // by — losing one silently moves a task to a different day.
+        var engine = Seeded();
+        engine.CompleteItem("i1");
+        engine.UpdateItem("i1", new JsonObject { ["due"] = ItemFields.Due(new DateOnly(2026, 8, 20), null) });
+
+        Assert.True(engine.Undo());
+
+        var item = Item(engine, "i1");
+        Assert.Equal("2026-08-20", item.DueDate);
+        Assert.False(item.Completed);
+    }
+
+    [Fact]
+    public void A_due_date_cleared_after_an_unsent_close_stays_cleared()
+    {
+        // The other direction, which a restore would put back rather than take away.
+        var engine = Seeded(due: """{"date":"2026-08-01"}""");
+        engine.CompleteItem("i1");
+        engine.UpdateItem("i1", new JsonObject { ["due"] = null });
+
+        Assert.True(engine.Undo());
+
+        Assert.Null(Item(engine, "i1").DueDate);
     }
 
     [Fact]
@@ -166,15 +197,25 @@ public class SyncEngineUndoScopeTests
     private static TaskItem Item(SyncEngine engine, string id)
         => engine.Snapshot().Items.Single(i => i.Id == id);
 
-    private static SyncEngine Seeded() => SeededWithApi().Engine;
+    private static SyncEngine Seeded(string? due = null) => SeededWithApi(due).Engine;
 
-    private static (SyncEngine Engine, FakeApi Api) SeededWithApi()
+    private static (SyncEngine Engine, FakeApi Api) SeededWithApi(string? due = null)
     {
         var store = new InMemorySnapshotStore();
-        store.PutResource(
-            "items",
-            "i1",
-            """{"id":"i1","content":"Write it up","project_id":"p","priority":1,"description":"before"}""");
+
+        var item = new JsonObject
+        {
+            ["id"] = "i1",
+            ["content"] = "Write it up",
+            ["project_id"] = "p",
+            ["priority"] = 1,
+            ["description"] = "before",
+        };
+
+        if (due is not null)
+            item["due"] = JsonNode.Parse(due);
+
+        store.PutResource("items", "i1", item.ToJsonString());
 
         var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)));
