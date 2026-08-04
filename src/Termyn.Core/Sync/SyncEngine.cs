@@ -1300,6 +1300,26 @@ public sealed class SyncEngine
                 _undoable.Remove(uuid);
 
                 var queued = _outbox.FirstOrDefault(c => c.Uuid == uuid);
+
+                // A close that hasn't gone yet is undone by taking the tick off where the task
+                // stands now, rather than by putting back everything it was before the close.
+                //
+                // The general revert below restores a command's whole prior resource, which is
+                // right for dropping a queued write — the local copy goes back to server truth. It
+                // is wrong for this one, because the user has undone a completion and not the
+                // afternoon: a description, priority or due date edited after ticking the task off
+                // is a later intention that has nothing to do with the tick, and restoring the
+                // snapshot took it with it. Silently, and only for someone who edits a completed
+                // task, which is why it went unnoticed.
+                if (record?.Type == "item_close" && queued is { InFlight: false })
+                {
+                    // Its undo entry has already been taken off the stack above, so removing the
+                    // command is all that is left to forget.
+                    RemoveCommand(queued);
+                    Uncheck(record.Id);
+                    return true;
+                }
+
                 if (queued is { InFlight: false })
                 {
                     RevertLocked(queued);
@@ -1350,6 +1370,26 @@ public sealed class SyncEngine
             if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } cmd)
                 RevertLocked(cmd);
         }
+    }
+
+    /// <summary>
+    /// Takes the tick off a task where it currently stands, queuing nothing.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="ReopenItem"/>: that queues an <c>item_uncomplete</c>, which is right when the
+    /// server has been told the task is done and has to be told otherwise. Here the close never
+    /// left, so there is nothing to take back — only a local tick to remove.
+    /// </remarks>
+    private void Uncheck(string id)
+    {
+        if (Model.Get(ResourceType.Items, id) is not { } current)
+            return;
+
+        var active = current.DeepClone().AsObject();
+        active["checked"] = false;
+
+        _store.PutResource(ResourceType.Items, id, active.ToJsonString());
+        Model.Upsert(ResourceType.Items, id, active);
     }
 
     private void RevertLocked(OutboxCommand cmd)
