@@ -107,6 +107,12 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+
+          # Which repository, told rather than worked out. gh otherwise asks git, and this job has
+          # no checkout to ask — only the artefacts the packaging job built. Without this every one
+          # of the commands below fails with "not a git repository", on a tag, which is the worst
+          # place to find it.
+          GH_REPO: ${{ github.repository }}
         run: |
           $tag = '${{ github.ref_name }}'
 
