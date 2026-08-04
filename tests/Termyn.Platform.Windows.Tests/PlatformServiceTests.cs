@@ -434,7 +434,7 @@ public class SingleInstanceTests
     }
 
     [Fact]
-    public void The_pipe_is_listening_by_the_time_the_instance_is_reported_as_taken()
+    public async Task The_pipe_is_listening_by_the_time_the_instance_is_reported_as_taken()
     {
         // Returning true is what tells the rest of startup that this process is the instance, and a
         // second launch can arrive the moment it does. Opened on a queued task, the pipe didn't
@@ -467,8 +467,11 @@ public class SingleInstanceTests
         }
         finally
         {
+            // Awaited rather than waited on. Blocking a test thread on the pool is a deadlock in
+            // waiting — and this test has just spent every thread the pool had, which is exactly
+            // the state where it would happen.
             release.Set();
-            Task.WaitAll([.. busy], TimeSpan.FromSeconds(20));
+            await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(20));
         }
     }
 
