@@ -86,7 +86,7 @@ function Find-InnoSetup {
         "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
     )
     foreach ($c in $candidates) {
-        if (Test-Path $c) { return $c }
+        if (Test-Path -LiteralPath $c) { return $c }
     }
     return $null
 }
@@ -98,7 +98,7 @@ function Assert-Signed {
     # question and depends on their root store — a build machine asking it would fail on a test
     # certificate while telling us nothing about whether the signing step actually ran, which is
     # the thing that can silently not happen.
-    $signature = Get-AuthenticodeSignature -FilePath $Path
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
     if (-not $signature.SignerCertificate) {
         throw "$Path came back from signing with nothing on it (status: $($signature.Status))."
     }
@@ -127,7 +127,11 @@ if (-not $SkipTests) {
 }
 
 # A stale publish directory silently ships whatever the last build left in it.
-if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
+#
+# -LiteralPath throughout: without it a square bracket anywhere in the path above this script makes
+# these paths wildcard patterns that match nothing, and the guard against that stale directory
+# quietly stops guarding.
+if (Test-Path -LiteralPath $publish) { Remove-Item -LiteralPath $publish -Recurse -Force }
 New-Item -ItemType Directory -Path $publish -Force | Out-Null
 
 Write-Host 'Publishing...' -ForegroundColor Cyan
@@ -142,8 +146,13 @@ if ($SignCommand) {
 }
 
 $zip = Join-Path $artifacts "Termyn-$version-portable.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $zip
+if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+
+# Through .NET rather than Compress-Archive, which takes its paths as wildcard patterns and can't be
+# talked out of it — a square bracket anywhere above this checkout and it fails inside itself with a
+# null it won't name. This takes a directory and means the directory.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($publish, $zip)
 Write-Host "  portable  $zip" -ForegroundColor Green
 
 $iscc = Find-InnoSetup
@@ -181,7 +190,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
 # Asked for rather than assumed. A compiler that returns nought having written the installer
 # somewhere else leaves an empty artefact upload and a release with a zip in it.
 $setup = Join-Path $artifacts "Termyn-$version-setup.exe"
-if (-not (Test-Path $setup)) {
+if (-not (Test-Path -LiteralPath $setup)) {
     throw "The installer compiled but $setup is not there."
 }
 
