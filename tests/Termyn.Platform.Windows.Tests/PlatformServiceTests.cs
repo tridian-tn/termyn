@@ -434,6 +434,59 @@ public class SingleInstanceTests
     }
 
     [Fact]
+    public void The_pipe_is_listening_by_the_time_the_instance_is_reported_as_taken()
+    {
+        // Returning true is what tells the rest of startup that this process is the instance, and a
+        // second launch can arrive the moment it does. Opened on a queued task, the pipe didn't
+        // exist until the pool got round to it, and a launch landing in that gap was lost — it
+        // waited two seconds for something to connect to and then exited having done nothing.
+        //
+        // The pool is held busy for the duration, which is what makes this a test rather than a
+        // race the fast machine always wins. Beyond the threads it already has the pool injects
+        // more, but slowly — so anything queued here waits, and a pipe that is only opened by the
+        // queued listener is not there to be found. Asked of the pipe namespace rather than by
+        // signalling, so nothing about the answer depends on timing.
+        using var release = new ManualResetEventSlim(false);
+        var busy = new List<Task>();
+
+        try
+        {
+            for (var i = 0; i < Environment.ProcessorCount * 2; i++)
+                busy.Add(Task.Run(() => release.Wait(TimeSpan.FromSeconds(20))));
+
+            // Long enough for those to have taken the threads they are going to take.
+            Thread.Sleep(50);
+
+            using var holder = new WindowsSingleInstance(Scope());
+
+            Assert.True(holder.TryAcquire());
+
+            Assert.Contains(
+                holder.PipeName,
+                Directory.GetFiles(@"\\.\pipe\").Select(Path.GetFileName));
+        }
+        finally
+        {
+            release.Set();
+            Task.WaitAll([.. busy], TimeSpan.FromSeconds(20));
+        }
+    }
+
+    [Fact]
+    public void A_launch_arriving_the_instant_the_instance_is_taken_is_still_heard()
+    {
+        // The same thing from the other end, and the shape the app actually takes: no sleep between
+        // the two, because a second launch doesn't wait either.
+        var scope = Scope();
+        using var holder = new WindowsSingleInstance(scope);
+        Assert.True(holder.TryAcquire());
+
+        using var launcher = new WindowsSingleInstance(scope);
+
+        Assert.True(launcher.TrySignal(InstanceSignals.Show));
+    }
+
+    [Fact]
     public void Acquiring_twice_from_the_same_instance_is_idempotent()
     {
         using var instance = new WindowsSingleInstance(Scope());

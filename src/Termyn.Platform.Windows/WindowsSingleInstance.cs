@@ -138,9 +138,49 @@ public sealed class WindowsSingleInstance : ISingleInstance
         }
 
         _held = mutex;
-        _listener = Task.Run(() => ListenAsync(_stopping.Token));
+
+        // The pipe is opened here rather than left to the listener. Returning true is what tells the
+        // rest of startup that this process is the instance, and a second launch can arrive the
+        // moment it does — but the listener runs on a queued task, so until the pool got round to
+        // starting it there was nothing on the other end of the pipe to connect to. A launch landing
+        // in that gap waited two seconds, gave up, and exited having done nothing: no window came
+        // forward, no quick-add box opened. Small on an idle machine and much wider on a cold boot,
+        // where a launch-at-login entry is competing with everything else for the same pool.
+        //
+        // Opening it takes well under a millisecond, so nothing is being traded for the certainty.
+        //
+        // Opened into a local first. Called inside the lambda it would be evaluated when the task
+        // runs, which is the very thing being avoided — and on a machine whose pool answers quickly
+        // that reads as working.
+        var pipe = TryOpenPipe();
+
+        _listener = Task.Run(() => ListenAsync(pipe, _stopping.Token));
         return true;
     }
+
+    /// <summary>The pipe, ready for one connection — or null when the name can't be had.</summary>
+    /// <remarks>
+    /// A null is not a failure to report. The name can be squatted by another account or held by a
+    /// process on its way out, and the listener's own retry and backoff is what deals with that.
+    /// </remarks>
+    private NamedPipeServerStream? TryOpenPipe()
+    {
+        try
+        {
+            return OpenPipe();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private NamedPipeServerStream OpenPipe() => new(
+        _pipeName,
+        PipeDirection.In,
+        maxNumberOfServerInstances: 1,
+        PipeTransmissionMode.Byte,
+        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
     /// <inheritdoc />
     public bool TrySignal(string message)
@@ -220,50 +260,61 @@ public sealed class WindowsSingleInstance : ISingleInstance
         }
     }
 
-    private async Task ListenAsync(CancellationToken ct)
+    /// <param name="opened">
+    /// The pipe already opened by <see cref="TryAcquire"/>, used for the first connection so that
+    /// nothing is missed between the instance being taken and this loop starting. Null when opening
+    /// it failed, in which case this begins by trying again like any other round.
+    /// </param>
+    /// <param name="ct">Stops the loop</param>
+    private async Task ListenAsync(NamedPipeServerStream? opened, CancellationToken ct)
     {
         var failures = 0;
 
-        while (!ct.IsCancellationRequested)
+        try
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                using var server = new NamedPipeServerStream(
-                    _pipeName,
-                    PipeDirection.In,
-                    maxNumberOfServerInstances: 1,
-                    PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-
-                await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
-                failures = 0;
-
-                using var reader = new StreamReader(server, new UTF8Encoding(false));
-                if (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { Length: > 0 } message)
-                    Deliver(message.Trim());
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // The name can be permanently unavailable — squatted by another account, or held by
-                // a stale process. Retrying flat out burned a whole core for the life of the process,
-                // silently, so back off and eventually stop: signalling is a convenience, and losing
-                // it must not cost the machine a core.
-                if (++failures >= MaxListenFailures)
-                    return;
-
                 try
                 {
-                    await Task.Delay(_retryDelay, ct).ConfigureAwait(false);
+                    using var server = opened ?? OpenPipe();
+                    opened = null;
+
+                    await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
+                    failures = 0;
+
+                    using var reader = new StreamReader(server, new UTF8Encoding(false));
+                    if (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { Length: > 0 } message)
+                        Deliver(message.Trim());
                 }
                 catch (OperationCanceledException)
                 {
                     return;
                 }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // The name can be permanently unavailable — squatted by another account, or held
+                    // by a stale process. Retrying flat out burned a whole core for the life of the
+                    // process, silently, so back off and eventually stop: signalling is a
+                    // convenience, and losing it must not cost the machine a core.
+                    if (++failures >= MaxListenFailures)
+                        return;
+
+                    try
+                    {
+                        await Task.Delay(_retryDelay, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                }
             }
+        }
+        finally
+        {
+            // Only reachable when the loop never ran — stopped before it started — in which case
+            // the pipe handed in is still ours to close.
+            opened?.Dispose();
         }
     }
 
