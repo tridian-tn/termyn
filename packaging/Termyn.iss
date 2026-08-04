@@ -51,6 +51,17 @@ DisableDirPage=auto
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 
+; Signing, when build.ps1 was given a command to sign with. Absent otherwise, so an unsigned build
+; on a laptop still works — and so this stays one script rather than two that drift.
+#ifdef Sign
+SignTool=termyn
+
+; The uninstaller is generated on the user's machine from a template, so signing the setup binary
+; doesn't cover it. It's also the one they run later, on their own, long after they've forgotten
+; where the program came from — which is exactly when an unsigned binary looks worst.
+SignedUninstaller=yes
+#endif
+
 OutputDir=..\artifacts
 OutputBaseFilename=Termyn-{#AppVersion}-setup
 SetupIconFile=..\assets\termyn.ico
