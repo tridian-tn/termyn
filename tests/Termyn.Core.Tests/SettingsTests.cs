@@ -130,6 +130,42 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void How_the_notes_panel_was_left_comes_back()
+    {
+        // Written by the serialiser and read by hand, so a field added to one and not the other is
+        // a setting that saves and never loads.
+        var store = new SettingsStore(Config);
+        store.Save(new AppSettings
+        {
+            View = new ViewState
+            {
+                ShowDescription = true,
+                DescriptionHeight = 240,
+                ShowPreview = false,
+                PreviewWidth = 400,
+            },
+        });
+
+        var reread = new SettingsStore(Config).Load().View;
+
+        Assert.True(reread.ShowDescription);
+        Assert.Equal(240, reread.DescriptionHeight);
+        Assert.False(reread.ShowPreview);
+        Assert.Equal(400, reread.PreviewWidth);
+    }
+
+    [Fact]
+    public void The_notes_panel_starts_closed_with_the_rendered_half_on()
+    {
+        // Closed, because it is one more thing on screen for someone who doesn't use descriptions;
+        // and rendered when opened, because that is the point of having asked for it.
+        var view = new ViewState();
+
+        Assert.False(view.ShowDescription);
+        Assert.True(view.ShowPreview);
+    }
+
+    [Fact]
     public void Enums_are_written_as_names_so_the_file_can_be_hand_read()
     {
         new SettingsStore(Config).Save(new AppSettings { Theme = ThemePreference.Dark });
@@ -356,6 +392,10 @@ public class SettingsStoreTests : IDisposable
                 SelectedKey = "project:p1",
                 CollapsedKeys = ["Projects", "Labels"],
                 SidebarWidth = 300,
+                ShowDescription = true,
+                DescriptionHeight = 240,
+                ShowPreview = false,
+                PreviewWidth = 400,
                 WindowX = -1200,
                 WindowY = 40,
                 WindowWidth = 1600,

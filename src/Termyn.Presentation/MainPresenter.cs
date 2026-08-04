@@ -419,6 +419,19 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// The notes on a task, as the markdown the account stores. Empty for a task with none, and for
+    /// one the account no longer holds.
+    /// </summary>
+    public string DescriptionOf(string? id) => id is null ? string.Empty : _engine.DescriptionOf(id);
+
+    /// <summary>Writes the notes on a task.</summary>
+    public void SetDescription(string id, string description)
+    {
+        _engine.UpdateItem(id, new JsonObject { ["description"] = description });
+        Publish();
+    }
+
     public void SetPriority(string id, Priority priority)
     {
         _engine.UpdateItem(id, new JsonObject { ["priority"] = PriorityMap.ToApi(priority) });
@@ -562,7 +575,13 @@ public sealed class MainPresenter
     public string PlanName { get; private set; } = string.Empty;
 
     /// <summary>Whether the account still holds this task, whatever the current view happens to show.</summary>
-    public bool HasTask(string id) => _engine.Snapshot().Items.Any(i => i.Id == id);
+    /// <remarks>
+    /// A completed task fetched out of the archive answers false: those are held apart from the
+    /// live model, and an edit to one would be declined rather than queued. Asked of the model
+    /// directly rather than of a snapshot, which projects every task in the account to answer a
+    /// question about one — and this is asked each time the selection moves.
+    /// </remarks>
+    public bool HasTask(string? id) => id is not null && _engine.Holds(id);
 
     /// <summary>
     /// The reminders on a task: the ones tied to its due date first, longest warning to shortest,

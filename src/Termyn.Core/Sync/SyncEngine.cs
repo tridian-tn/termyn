@@ -797,6 +797,41 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>
+    /// The notes on a task, or empty when it has none — and when the model has never heard of it,
+    /// which is the same answer as far as anything showing them is concerned.
+    /// </summary>
+    /// <remarks>
+    /// Asked for one task rather than carried on every row: a description runs to thousands of
+    /// characters, only the selected task's is ever on screen, and the outline projects the lot on
+    /// every publish.
+    /// </remarks>
+    public string DescriptionOf(string id)
+    {
+        lock (_gate)
+        {
+            // The completed ones fetched from the archive are held apart from the live model, and
+            // they are selectable in the outline like anything else — so looking only at the model
+            // showed a blank where a task had notes, which reads as "this task has none".
+            var json = Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id);
+            return json is not null ? Projections.ToTaskItem(json).Description : string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Whether the live model holds this task, and so whether an edit to it would be kept.
+    /// </summary>
+    /// <remarks>
+    /// False for a completed task fetched out of the archive: those are held apart from the model,
+    /// and <see cref="UpdateItem"/> declines to queue against something it can't find — so an edit
+    /// to one goes nowhere, and the view needs to know that before offering to make one.
+    /// </remarks>
+    public bool Holds(string id)
+    {
+        lock (_gate)
+            return Model.Get(ResourceType.Items, id) is not null;
+    }
+
     /// <summary>A task with the siblings it is ordered among, or null when the model doesn't hold it.</summary>
     private (TaskItem Item, List<TaskItem> Siblings, int Index)? Placement(string id)
     {

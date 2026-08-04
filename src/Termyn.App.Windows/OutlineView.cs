@@ -30,6 +30,15 @@ internal sealed class OutlineView : ListView
     /// <summary>Cached so painting doesn't ask the native control once per cell.</summary>
     private int _selectedIndex = -1;
 
+    /// <summary>
+    /// True while the selection is being put back on the task it was already on, so the two native
+    /// events that takes aren't published as the user having chosen something.
+    /// </summary>
+    private bool _reseating;
+
+    /// <summary>The selection last published, so a refresh that lands back where it was is silent.</summary>
+    private int _publishedIndex = -1;
+
     public OutlineView()
     {
         View = View.Details;
@@ -127,30 +136,49 @@ internal sealed class OutlineView : ListView
             _cache = new ListViewItem?[value.Count];
             VirtualListSize = value.Count;
 
-            // Put the selection back on the same task, if it's still here. Deliberately no
-            // scrolling and no fallback selection: a background sync refreshes these rows every
-            // 45 seconds, and it must not move the selection or the viewport under the user.
-            var index = selected is null ? -1 : IndexOf(selected);
-            if (index >= 0)
+            // Bookkeeping, not a choice the user made. Clearing and re-adding an index raises the
+            // selection event twice, and the moment in between has nothing selected — which anything
+            // listening reads as the user having stepped off the task. Held quiet and published once
+            // at the end, when the selection is whatever it is going to be.
+            _reseating = true;
+            try
             {
-                if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+                // Put the selection back on the same task, if it's still here. Deliberately no
+                // scrolling and no fallback selection: a background sync refreshes these rows every
+                // 45 seconds, and it must not move the selection or the viewport under the user.
+                var index = selected is null ? -1 : IndexOf(selected);
+                if (index >= 0)
                 {
+                    if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+                    {
+                        SelectedIndices.Clear();
+                        SelectedIndices.Add(index);
+                    }
+
+                    // Keyboard navigation moves from the focused row, not the selected one, so they
+                    // must not drift apart. Setting focus here does not scroll the viewport.
+                    Items[index].Focused = true;
+                }
+                else
+                {
+                    // The selected task is gone. Leaving the native selection on its old index would
+                    // silently hand the selection to whichever task now occupies that row.
                     SelectedIndices.Clear();
-                    SelectedIndices.Add(index);
                 }
 
-                // Keyboard navigation moves from the focused row, not the selected one, so they
-                // must not drift apart. Setting focus here does not scroll the viewport.
-                Items[index].Focused = true;
+                _selectedIndex = index;
             }
-            else
+            finally
             {
-                // The selected task is gone. Leaving the native selection on its old index would
-                // silently hand the selection to whichever task now occupies that row.
-                SelectedIndices.Clear();
+                _reseating = false;
             }
 
-            _selectedIndex = index;
+            // Once, now that it has settled — and only when it has actually landed somewhere else,
+            // so a refresh that changed nothing stays as quiet as it was before.
+            if (_selectedIndex != _publishedIndex)
+                base.OnSelectedIndexChanged(EventArgs.Empty);
+
+            _publishedIndex = _selectedIndex;
             Invalidate();
         }
     }
@@ -175,6 +203,12 @@ internal sealed class OutlineView : ListView
     protected override void OnSelectedIndexChanged(EventArgs e)
     {
         _selectedIndex = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;
+
+        // Held while the rows are being reassigned; that path publishes once when it is done.
+        if (_reseating)
+            return;
+
+        _publishedIndex = _selectedIndex;
         base.OnSelectedIndexChanged(e);
     }
 

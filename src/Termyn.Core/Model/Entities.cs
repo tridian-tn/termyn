@@ -5,6 +5,14 @@ public sealed class TaskItem
 {
     public required string Id { get; init; }
     public required string Content { get; init; }
+
+    /// <summary>
+    /// The notes under the task. Markdown, as the account stores it — Todoist's own editor is a
+    /// rich-text skin over the same text, so what arrives here is the source and not a rendering
+    /// of it.
+    /// </summary>
+    public string Description { get; init; } = string.Empty;
+
     public string? ProjectId { get; init; }
     public string? SectionId { get; init; }
     public string? ParentId { get; init; }
