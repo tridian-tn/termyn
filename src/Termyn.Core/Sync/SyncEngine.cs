@@ -1482,8 +1482,13 @@ public sealed class SyncEngine
 
             // Absent from the prior means the command added it, so putting it back means taking it
             // off again rather than writing a null over it.
-            if (prior[field] is { } was)
-                rewound[field] = was.DeepClone();
+            //
+            // Asked by key rather than by value: the account writes an explicit null for a task
+            // with no due date, no parent and no section, and reading the value alone can't tell
+            // that from a key that was never there. Restoring one as the other would be the same
+            // mistake in the opposite direction.
+            if (prior.TryGetPropertyValue(field, out var was))
+                rewound[field] = was?.DeepClone();
             else
                 rewound.Remove(field);
         }

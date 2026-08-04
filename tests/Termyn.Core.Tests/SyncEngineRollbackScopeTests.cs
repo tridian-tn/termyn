@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
+using Termyn.Core.Capture;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
 
@@ -82,12 +83,28 @@ public class SyncEngineRollbackScopeTests
         await Reject(engine, api);
 
         Assert.Equal(string.Empty, engine.Snapshot().Items.Single().Description);
-        Assert.DoesNotContain("description", StoredItem(store));
+        Assert.False(StoredItem(store).ContainsKey("description"));
+    }
+
+    [Fact]
+    public async Task A_field_the_account_holds_as_null_goes_back_as_null()
+    {
+        // The same distinction the other way about. The account writes an explicit null for a task
+        // with no due date, and a rollback that took the key off instead would be the same mistake
+        // pointing the other way — the local copy no longer saying what the account says.
+        var (store, engine, api) = Fixture();
+
+        engine.UpdateItem("i1", new JsonObject { ["due"] = ItemFields.Due(new DateOnly(2026, 8, 20), null) });
+        await Reject(engine, api);
+
+        var stored = StoredItem(store);
+        Assert.True(stored.ContainsKey("due"));
+        Assert.Null(stored["due"]);
     }
 
     /// <summary>The task as it is written down, rather than as it is projected.</summary>
-    private static string StoredItem(InMemorySnapshotStore store)
-        => store.Load().Resources.Single(r => r is { Type: "items", Id: "i1" }).Json;
+    private static JsonObject StoredItem(InMemorySnapshotStore store)
+        => JsonNode.Parse(store.Load().Resources.Single(r => r is { Type: "items", Id: "i1" }).Json)!.AsObject();
 
     [Fact]
     public async Task A_failed_rename_leaves_a_project_starred_if_it_was_starred_since()
@@ -181,6 +198,10 @@ public class SyncEngineRollbackScopeTests
             ["id"] = "i1",
             ["content"] = "Task",
             ["project_id"] = "p1",
+
+            // Written out rather than left off, which is how the account sends a task with no due
+            // date — and the two are not the same thing to put back.
+            ["due"] = null,
         };
 
         if (description is not null)
