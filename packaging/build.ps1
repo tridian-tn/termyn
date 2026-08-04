@@ -17,6 +17,15 @@
     Fail rather than fall back to the zip alone when Inno Setup isn't installed. For CI and for
     building a release, where half the artefacts quietly going missing is worse than stopping.
 
+.PARAMETER SignCommand
+    A command line to Authenticode-sign one file with, where $f stands for the file. Given it, the
+    script signs Termyn.exe before packaging — so the zip and the installer both carry a signed
+    executable — and hands the same command to Inno for the installer and the uninstaller.
+
+    Deliberately a command rather than a certificate: a publicly trusted signing key can't live in a
+    file any more, so every real option is some cloud service behind a signtool it ships. Naming the
+    command means changing service is a different string, not a different script.
+
 .PARAMETER RegenerateIcon
     Redraw assets/termyn.ico from BrandIcon and exit, packaging nothing. Run this after changing the
     mark; the test that compares the committed file against the drawing will tell you when.
@@ -28,6 +37,7 @@
 param(
     [switch]$SkipTests,
     [switch]$RequireInstaller,
+    [string]$SignCommand,
     [switch]$RegenerateIcon
 )
 
@@ -81,6 +91,32 @@ function Find-InnoSetup {
     return $null
 }
 
+function Assert-Signed {
+    param([string]$Path)
+
+    # Whether a signature is on it, not whether this machine trusts one. Trust is the verifier's
+    # question and depends on their root store — a build machine asking it would fail on a test
+    # certificate while telling us nothing about whether the signing step actually ran, which is
+    # the thing that can silently not happen.
+    $signature = Get-AuthenticodeSignature -FilePath $Path
+    if (-not $signature.SignerCertificate) {
+        throw "$Path came back from signing with nothing on it (status: $($signature.Status))."
+    }
+}
+
+function Invoke-Sign {
+    param([string]$Path)
+
+    # $f substituted the way Inno substitutes it — quoted — so one template works here and in the
+    # installer compiler rather than needing two spellings of the same command.
+    $line = $SignCommand.Replace('$f', '"' + $Path + '"')
+
+    & $env:ComSpec /c $line
+    if ($LASTEXITCODE -ne 0) { throw "Signing failed for $Path." }
+
+    Assert-Signed $Path
+}
+
 $version = Get-ProductVersion
 Write-Host "Termyn $version" -ForegroundColor Cyan
 
@@ -97,6 +133,13 @@ New-Item -ItemType Directory -Path $publish -Force | Out-Null
 Write-Host 'Publishing...' -ForegroundColor Cyan
 dotnet publish $app -c Release -o $publish --nologo --verbosity quiet -p:DebugType=none
 if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
+
+# Before either package is made, so the zip and the installer both carry a signed executable. The
+# zip has no wrapper of its own to sign, so this is the only signature its users ever see.
+if ($SignCommand) {
+    Write-Host 'Signing the executable...' -ForegroundColor Cyan
+    Invoke-Sign (Join-Path $publish 'Termyn.exe')
+}
 
 $zip = Join-Path $artifacts "Termyn-$version-portable.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
@@ -120,7 +163,18 @@ if (-not $iscc) {
 Write-Host 'Building the installer...' -ForegroundColor Cyan
 # Both facts passed in, so the script has no second home for either. What it publishes and
 # what it packages cannot drift apart.
-& $iscc "/DAppVersion=$version" "/DPublishDir=$publish" (Join-Path $PSScriptRoot 'Termyn.iss') | Out-String -Stream |
+$isccArgs = @("/DAppVersion=$version", "/DPublishDir=$publish")
+
+if ($SignCommand) {
+    # The name matches SignTool=termyn in the .iss, which is also what turns SignedUninstaller on —
+    # so this one flag covers the installer and the uninstaller it will later write.
+    $isccArgs += '/DSign'
+    $isccArgs += "/Stermyn=$SignCommand"
+}
+
+$isccArgs += (Join-Path $PSScriptRoot 'Termyn.iss')
+
+& $iscc $isccArgs | Out-String -Stream |
     Where-Object { $_ -match 'error|warning' } | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
 
@@ -130,6 +184,8 @@ $setup = Join-Path $artifacts "Termyn-$version-setup.exe"
 if (-not (Test-Path $setup)) {
     throw "The installer compiled but $setup is not there."
 }
+
+if ($SignCommand) { Assert-Signed $setup }
 
 Write-Host "  installer $setup" -ForegroundColor Green
 

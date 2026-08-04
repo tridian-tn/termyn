@@ -44,6 +44,43 @@ version's release. Bump `<Version>`, merge it, then tag.
 What this doesn't do is tell you the installer *works*. A runner has the .NET Desktop Runtime
 installed, so the missing-runtime path can't be exercised there; that one still wants a clean VM.
 
+## Signing
+
+Nothing published so far is signed, and Windows says so — SmartScreen's "Windows protected your PC"
+on download, which in every other context means don't. The plumbing is here; the certificate isn't.
+
+```bash
+pwsh ./packaging/build.ps1 -SignCommand '"C:\path\signtool.exe" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $f'
+```
+
+`$f` stands for the file, and is substituted the way Inno substitutes it — quoted — so one command
+works for all three things that need signing:
+
+| What | Signed by | Why it needs saying |
+|---|---|---|
+| `Termyn.exe` | the script, before packaging | So the zip carries a signed binary. The zip has no wrapper of its own, so this is the only signature its users ever see. |
+| `Termyn-<version>-setup.exe` | Inno, via `SignTool` | The download itself. |
+| `unins000.exe` | Inno, via `SignedUninstaller` | Written on the user's machine from a template, so signing the setup binary doesn't cover it. It's also the one they run later, on their own, when they've forgotten where the program came from. |
+
+A command rather than a certificate on purpose: a publicly trusted signing key can't live in a file
+any more, so every real option is a cloud service behind a signtool it ships. Naming the command
+means changing service is a different string, not a different script.
+
+Timestamp with RFC 3161 (`/tr`), or signatures stop verifying the day the certificate expires rather
+than the day it was issued.
+
+Without `-SignCommand` nothing is signed and the build is exactly as it was, so a local build needs
+no certificate and no ceremony.
+
+**What's checked.** After each file is signed the script asks whether a signature is actually on it,
+and fails if not — a sign tool that succeeds while doing nothing is otherwise invisible until a user
+meets the warning. It asks whether a signature is *present*, not whether this machine *trusts* it:
+trust depends on the verifier's root store, and a build machine asking that question would fail on a
+test certificate while proving nothing about whether the step ran.
+
+Signing is not yet wired into CI, because that needs a certificate and a certificate needs a
+decision — see the notes on the issue for what the routes cost and who's eligible.
+
 ## What the installer does
 
 Everything is per-user. It installs to `%LOCALAPPDATA%\Programs\Termyn`, writes only to `HKCU`, and
