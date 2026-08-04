@@ -11,7 +11,7 @@
   <!-- One version for the whole product, read back at runtime by the update check and shown in the
        about box. Release tags are this number with a leading v. -->
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
     <Company>Tridian</Company>
     <Product>Termyn</Product>
     <Copyright>Copyright © Trystan Negus</Copyright>
