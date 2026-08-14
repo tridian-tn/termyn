@@ -40,6 +40,8 @@ internal sealed class MarkdownView : RichTextBox
 
     private string _markdown = string.Empty;
     private Theme _theme = Theme.Resolve(Core.Settings.ThemePreference.System);
+    private string _placeholder = string.Empty;
+    private bool _inert;
 
     /// <summary>
     /// Where each link sits in the rendered text and where it points, built as the text is written.
@@ -101,6 +103,57 @@ internal sealed class MarkdownView : RichTextBox
         }
     }
 
+    /// <summary>
+    /// What to say over an empty pane — why there is nothing here, when that isn't obvious.
+    /// </summary>
+    /// <remarks>
+    /// Drawn by hand for the same reason the editor's is: a rich edit control has no placeholder of
+    /// its own and paints itself.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public string Placeholder
+    {
+        get => _placeholder;
+        set
+        {
+            if (_placeholder == value)
+                return;
+
+            _placeholder = value ?? string.Empty;
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Whether anything here could be typed into, which decides how the pane is drawn.
+    /// </summary>
+    /// <remarks>
+    /// Appearance only — the pane is kept out of use by being read-only rather than by being
+    /// disabled, and this is what says so on screen. Recessed onto the background colour, which is
+    /// the shade sitting behind the panel everywhere else in the window, so an inactive surface
+    /// reads as one without needing a new colour invented for it.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool Inert
+    {
+        get => _inert;
+        set
+        {
+            if (_inert == value)
+                return;
+
+            _inert = value;
+            ApplyColours();
+
+            // The words are drawn from the theme as they are written, so which colour they are is
+            // settled at build time and changing it means building again.
+            Rebuild();
+            Invalidate();
+        }
+    }
+
     /// <summary>The colours to draw with.</summary>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -110,10 +163,15 @@ internal sealed class MarkdownView : RichTextBox
         set
         {
             _theme = value;
-            BackColor = value.Panel;
-            ForeColor = value.Text;
+            ApplyColours();
             Rebuild();
         }
+    }
+
+    private void ApplyColours()
+    {
+        BackColor = _inert ? _theme.Background : _theme.Panel;
+        ForeColor = _theme.Text;
     }
 
     /// <summary>
@@ -419,7 +477,13 @@ internal sealed class MarkdownView : RichTextBox
 
         var family = style.Fixed ? FontFamily.GenericMonospace : Font.FontFamily;
         SelectionFont = new Font(family, Font.Size * (1f + style.Larger), font);
-        SelectionColor = style.Link ? Theme.Accent : style.Muted ? Theme.Muted : Theme.Text;
+        // Muted throughout when the pane can't be typed into, which is the only cue that carries in
+        // both themes: the recessed background is a couple of units in the light one and invisible.
+        // Links keep their colour — a completed task's notes are still worth following out of, and
+        // drawing them dead while they still work is the mirror of the mistake being avoided here.
+        SelectionColor = style.Link ? Theme.Accent
+            : _inert || style.Muted ? Theme.Muted
+            : Theme.Text;
 
         AppendText(newLine ? text + Environment.NewLine : text);
     }
@@ -540,6 +604,27 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>
+    /// Draws the line explaining an empty pane, over the top of what the control has just painted.
+    /// </summary>
+    /// <remarks>
+    /// Only when there is nothing else here: a completed task's notes are shown and can't be
+    /// edited, and there is no room to say so over the top of them. The recessed background is what
+    /// carries it in that case.
+    /// </remarks>
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+
+        if (m.Msg != WmPaint || TextLength > 0 || _placeholder.Length == 0)
+            return;
+
+        using var graphics = Graphics.FromHwnd(Handle);
+        using var brush = new SolidBrush(_theme.Muted);
+
+        graphics.DrawString(_placeholder, Font, brush, 1, 1);
+    }
+
+    /// <summary>
     /// Asks to type into the notes, at the character that was double-clicked.
     /// </summary>
     /// <remarks>
@@ -607,6 +692,9 @@ internal sealed class MarkdownView : RichTextBox
 
     /// <summary>Turns drawing off and on around a rebuild.</summary>
     private const int WmSetRedraw = 0x000B;
+
+    /// <summary>The paint the placeholder is drawn on top of.</summary>
+    private const int WmPaint = 0x000F;
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern nint SendMessage(nint window, int message, int wParam, nint lParam);
