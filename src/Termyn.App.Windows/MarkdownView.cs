@@ -30,6 +30,9 @@ internal sealed class MarkdownView : RichTextBox
         .UseEmphasisExtras()
         .UseAutoLinks()
         .UseTaskLists()
+        // So a click on the rendering knows which character of the markdown it landed on. Without
+        // it the spans are good enough to find a block by and not to put a caret with.
+        .UsePreciseSourceLocation()
         .Build();
 
     /// <summary>How much air goes under a paragraph, in twips — a fifth of a line or so.</summary>
@@ -46,6 +49,20 @@ internal sealed class MarkdownView : RichTextBox
     /// is nothing left in the text to open. This is what a click looks the address up in.
     /// </remarks>
     private readonly List<(int Start, int End, string Url)> _links = [];
+
+    /// <summary>
+    /// Where each run of the rendered text came from in the markdown behind it.
+    /// </summary>
+    /// <remarks>
+    /// The rendering drops the markers and reorders nothing, so a rendered offset has a markdown
+    /// offset under it — but only the writing knows which, since by the time it is on screen the
+    /// syntax it was written with is gone. This is what a click looks that up in, so opening the
+    /// text to type into it lands the caret where the user was pointing rather than at the top.
+    /// </remarks>
+    private readonly List<(int Start, int Length, int Source, int SourceLength)> _sources = [];
+
+    /// <summary>Raised when the user asks to type into the notes, with where in the markdown.</summary>
+    public event Action<int>? EditRequested;
 
     /// <summary>Shows where a link goes before it is followed.</summary>
     private readonly ToolTip _tip = new();
@@ -65,7 +82,6 @@ internal sealed class MarkdownView : RichTextBox
         BorderStyle = BorderStyle.None;
         DetectUrls = false;      // the links are drawn from the markdown, not guessed at afterwards
         ScrollBars = RichTextBoxScrollBars.Vertical;
-        TabStop = false;
     }
 
     /// <summary>The markdown to show. Setting it redraws.</summary>
@@ -129,6 +145,7 @@ internal sealed class MarkdownView : RichTextBox
         {
             Clear();
             _links.Clear();
+            _sources.Clear();
 
             foreach (var block in Parse())
                 WriteBlock(block, indent: 0);
@@ -204,8 +221,8 @@ internal sealed class MarkdownView : RichTextBox
                 WriteLines(html, new Style(Fixed: true, Muted: true, Indent: indent + 1));
                 break;
 
-            case ThematicBreakBlock:
-                Write("————————", new Style(Muted: true, Indent: indent));
+            case ThematicBreakBlock rule:
+                Write("————————", new Style(Muted: true, Indent: indent), from: rule.Span);
                 break;
 
             case ContainerBlock container:
@@ -262,7 +279,7 @@ internal sealed class MarkdownView : RichTextBox
             text.AppendLine(line.Slice.ToString());
         }
 
-        Write(text.ToString().TrimEnd(), style);
+        Write(text.ToString().TrimEnd(), style, from: block.Span);
     }
 
     private void WriteParagraph(ContainerInline? inlines, Style style)
@@ -287,7 +304,7 @@ internal sealed class MarkdownView : RichTextBox
         switch (inline)
         {
             case LiteralInline literal:
-                Write(literal.Content.ToString(), style, newLine: false);
+                Write(literal.Content.ToString(), style, newLine: false, from: literal.Span);
                 break;
 
             case EmphasisInline emphasis:
@@ -301,7 +318,7 @@ internal sealed class MarkdownView : RichTextBox
                 break;
 
             case CodeInline code:
-                Write(code.Content, style with { Fixed = true, Muted = true }, newLine: false);
+                Write(code.Content, style with { Fixed = true, Muted = true }, newLine: false, from: code.Span);
                 break;
 
             case LinkInline link:
@@ -328,7 +345,7 @@ internal sealed class MarkdownView : RichTextBox
                 var bare = auto.IsEmail ? null : Links.External(auto.Url);
                 var opened = TextLength;
 
-                Write(auto.Url, bare is null ? style : style with { Link = true }, newLine: false);
+                Write(auto.Url, bare is null ? style : style with { Link = true }, newLine: false, from: auto.Span);
 
                 if (bare is not null && TextLength > opened)
                     _links.Add((opened, TextLength, bare));
@@ -337,11 +354,11 @@ internal sealed class MarkdownView : RichTextBox
             // Also a leaf. "&amp;" is written this way by anything that generates markdown from
             // HTML, and it was disappearing mid-sentence.
             case HtmlEntityInline entity:
-                Write(entity.Transcoded.ToString(), style, newLine: false);
+                Write(entity.Transcoded.ToString(), style, newLine: false, from: entity.Span);
                 break;
 
             case TaskList task:
-                Write(task.Checked ? "[x] " : "[ ] ", style with { Muted = true }, newLine: false);
+                Write(task.Checked ? "[x] " : "[ ] ", style with { Muted = true }, newLine: false, from: task.Span);
                 break;
 
             case LineBreakInline lineBreak:
@@ -359,8 +376,21 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>Appends a run in the given style.</summary>
-    private void Write(string text, Style style, bool newLine = true)
+    /// <param name="text">The words to append</param>
+    /// <param name="style">How to draw them</param>
+    /// <param name="newLine">Whether the run ends its line</param>
+    /// <param name="from">
+    /// Where in the markdown this run was written, or null for a run that isn't in it — a bullet, a
+    /// rule, the blank run that closes a paragraph
+    /// </param>
+    private void Write(string text, Style style, bool newLine = true, SourceSpan? from = null)
     {
+        // The source length is the span's own, not the run's: a run of code is shorter than the
+        // backticks it was written with, and a rule is longer than the three dashes that made it.
+        // Clamping an offset into the run against the span keeps it inside what it came from.
+        if (from is { Length: > 0 } span && text.Length > 0)
+            _sources.Add((TextLength, text.Length, span.Start, span.Length));
+
         SelectionStart = TextLength;
         SelectionLength = 0;
 
@@ -394,6 +424,41 @@ internal sealed class MarkdownView : RichTextBox
                 return url;
 
         return null;
+    }
+
+    /// <summary>
+    /// Where in the markdown the rendered text at this index was written.
+    /// </summary>
+    /// <remarks>
+    /// An index inside a run maps straight through, since a run is drawn from its source in order.
+    /// An index in something the markdown doesn't contain — a bullet, the gap after a paragraph —
+    /// belongs to no run, and answers with the start of the next one rather than the end of the
+    /// last: the text after a bullet is what a click on the bullet was aiming at.
+    /// Internal so a test can ask without a mouse to point with.
+    /// </remarks>
+    /// <param name="index">An offset into the rendered text</param>
+    /// <returns>The offset into the markdown, or zero when there is nothing to map</returns>
+    internal int SourceAt(int index)
+    {
+        var after = -1;
+
+        foreach (var (start, length, source, sourceLength) in _sources)
+        {
+            if (index >= start && index < start + length)
+                return source + Math.Min(index - start, sourceLength - 1);
+
+            if (start > index && after < 0)
+                after = source;
+        }
+
+        if (after >= 0)
+            return after;
+
+        // Past everything: the end of the last run, so a click below the text lands at the bottom
+        // of the markdown rather than the top of it.
+        return _sources.Count > 0
+            ? _sources[^1].Source + _sources[^1].SourceLength
+            : 0;
     }
 
     /// <summary>The link under a point on screen, or null.</summary>
@@ -445,6 +510,43 @@ internal sealed class MarkdownView : RichTextBox
 
         _pressedOn = null;
         base.OnMouseUp(e);
+    }
+
+    /// <summary>
+    /// Asks to type into the notes, at the character that was double-clicked.
+    /// </summary>
+    /// <remarks>
+    /// Not on a single click. The box is selectable, so one click is how a passage gets picked out
+    /// to copy, and it is also how a link is followed — neither of which is a request to start
+    /// editing. A link is left out of this entirely: the first of the two clicks already opened it,
+    /// and moving the caret as well would make one gesture do two things.
+    /// </remarks>
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && LinkUnder(e.Location) is null)
+            EditRequested?.Invoke(SourceAt(GetCharIndexFromPosition(e.Location)));
+
+        base.OnMouseDoubleClick(e);
+    }
+
+    /// <summary>
+    /// Asks to type into the notes, at wherever the caret is sitting.
+    /// </summary>
+    /// <remarks>
+    /// Enter and F2, which are what the outline already answers to for editing the thing under the
+    /// selection. Suppressed rather than merely handled: the box is read-only, so both keys would
+    /// otherwise reach it and be answered with the system beep.
+    /// </remarks>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Enter or Keys.F2)
+        {
+            EditRequested?.Invoke(SourceAt(SelectionStart));
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        base.OnKeyDown(e);
     }
 
     /// <summary>

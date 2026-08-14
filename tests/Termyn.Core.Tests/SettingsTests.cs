@@ -141,8 +141,6 @@ public class SettingsStoreTests : IDisposable
             {
                 ShowDescription = true,
                 DescriptionHeight = 240,
-                ShowPreview = false,
-                PreviewWidth = 400,
             },
         });
 
@@ -150,19 +148,51 @@ public class SettingsStoreTests : IDisposable
 
         Assert.True(reread.ShowDescription);
         Assert.Equal(240, reread.DescriptionHeight);
-        Assert.False(reread.ShowPreview);
-        Assert.Equal(400, reread.PreviewWidth);
     }
 
     [Fact]
-    public void The_notes_panel_starts_closed_with_the_rendered_half_on()
+    public void The_notes_panel_starts_closed()
     {
-        // Closed, because it is one more thing on screen for someone who doesn't use descriptions;
-        // and rendered when opened, because that is the point of having asked for it.
-        var view = new ViewState();
+        // One more thing on screen for someone who doesn't use descriptions, so it is asked for
+        // rather than arrived at.
+        Assert.False(new ViewState().ShowDescription);
+    }
 
-        Assert.False(view.ShowDescription);
-        Assert.True(view.ShowPreview);
+    [Fact]
+    public void A_config_from_when_the_notes_panel_was_split_still_loads()
+    {
+        // The panel used to be two panes down a splitter, and wrote a flag and a width for the
+        // second of them. Both are gone, and a file still carrying them is a file every existing
+        // user has — so it has to read as the settings it does still have rather than as a fault.
+        File.WriteAllText(Config, """
+            { "schemaVersion": 1,
+              "view": { "showDescription": true, "descriptionHeight": 240,
+                        "showPreview": false, "previewWidth": 400 } }
+            """);
+
+        var view = new SettingsStore(Config).Load().View;
+
+        Assert.True(view.ShowDescription);
+        Assert.Equal(240, view.DescriptionHeight);
+    }
+
+    [Fact]
+    public void The_keys_the_split_notes_panel_wrote_are_kept_rather_than_dropped()
+    {
+        // Unknown keys survive a write, and these are now unknown. Kept for the same reason any
+        // other unrecognised key is: this build is not the only thing that has ever written here,
+        // and a downgrade shouldn't come back to a file we quietly stripped.
+        File.WriteAllText(Config, """
+            { "schemaVersion": 1, "view": { "showPreview": false, "previewWidth": 400 } }
+            """);
+
+        var store = new SettingsStore(Config);
+        store.Save(store.Load() with { Theme = ThemePreference.Dark });
+
+        var written = JsonNode.Parse(File.ReadAllText(Config))!["view"]!;
+
+        Assert.Equal(400, written["previewWidth"]!.GetValue<int>());
+        Assert.False(written["showPreview"]!.GetValue<bool>());
     }
 
     [Fact]
@@ -394,8 +424,6 @@ public class SettingsStoreTests : IDisposable
                 SidebarWidth = 300,
                 ShowDescription = true,
                 DescriptionHeight = 240,
-                ShowPreview = false,
-                PreviewWidth = 400,
                 WindowX = -1200,
                 WindowY = 40,
                 WindowWidth = 1600,

@@ -463,6 +463,110 @@ public class MarkdownViewTests
         Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("the docs", StringComparison.Ordinal)));
     }
 
+    // ---- Finding the way back to the markdown ---------------------------------------------------
+
+    /// <summary>Where the markdown behind the rendered word <paramref name="needle"/> starts.</summary>
+    private static int SourceOf(MarkdownView view, string needle)
+    {
+        var at = view.Text.IndexOf(needle, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"'{needle}' is not in the rendered text: {view.Text}");
+        return view.SourceAt(at);
+    }
+
+    [Fact]
+    public void A_word_in_the_rendering_knows_where_it_was_written()
+    {
+        // What puts the caret where the user was pointing when they ask to type. Without it the
+        // only honest answer is the top of the description, and a click halfway down a note is
+        // then a click that scrolls you away from what you were reading.
+        const string markdown = "Some **bold** text";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("bold", StringComparison.Ordinal), SourceOf(view, "bold"));
+        Assert.Equal(markdown.IndexOf("Some", StringComparison.Ordinal), SourceOf(view, "Some"));
+        Assert.Equal(markdown.IndexOf("text", StringComparison.Ordinal), SourceOf(view, "text"));
+    }
+
+    [Fact]
+    public void An_offset_inside_a_word_maps_through_it_rather_than_to_its_start()
+    {
+        const string markdown = "abcdefgh";
+        using var view = Render(markdown);
+
+        Assert.Equal(0, view.SourceAt(0));
+        Assert.Equal(3, view.SourceAt(3));
+        Assert.Equal(7, view.SourceAt(7));
+    }
+
+    [Fact]
+    public void A_line_below_the_first_maps_past_the_lines_above_it()
+    {
+        // The rendering drops markers, so the two texts drift apart as they go — which is the whole
+        // reason the offset can't just be carried across.
+        const string markdown = "# A heading\n\nThe *body* of it";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("body", StringComparison.Ordinal), SourceOf(view, "body"));
+    }
+
+    [Fact]
+    public void The_words_of_a_link_map_to_the_words_and_not_to_the_address()
+    {
+        // The address isn't drawn at all, so an offset that landed in it would put the caret
+        // somewhere the user never saw.
+        const string markdown = "See [the docs](https://example.com/path) for more";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("the docs", StringComparison.Ordinal), SourceOf(view, "the docs"));
+    }
+
+    [Fact]
+    public void A_bullet_maps_to_the_item_it_marks_rather_than_to_the_line_before_it()
+    {
+        // The marker is drawn rather than written, so it belongs to no run of the markdown. Landing
+        // on the text it introduces is what a click on it was aiming at; landing at the end of the
+        // previous line is the caret going backwards from where the user pointed.
+        const string markdown = "before\n\n- the item";
+        using var view = Render(markdown);
+
+        var bullet = view.Text.IndexOf('•');
+
+        Assert.True(bullet >= 0, $"no bullet in: {view.Text}");
+        Assert.Equal(markdown.IndexOf("the item", StringComparison.Ordinal), view.SourceAt(bullet));
+    }
+
+    [Fact]
+    public void An_offset_past_everything_lands_at_the_end_of_the_markdown()
+    {
+        // Clicking in the empty space below a short description. The end is where a caret goes when
+        // there is nothing under the pointer, since that is where more of it would be written.
+        const string markdown = "a short note";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.Length, view.SourceAt(view.TextLength + 500));
+    }
+
+    [Fact]
+    public void Nothing_at_all_maps_to_the_start()
+    {
+        using var view = Render(string.Empty);
+
+        Assert.Equal(0, view.SourceAt(0));
+        Assert.Equal(0, view.SourceAt(40));
+    }
+
+    [Fact]
+    public void The_offsets_from_the_last_task_do_not_linger()
+    {
+        // Same failure the links had: a map left over from the task before points the caret into a
+        // description that is no longer on screen.
+        using var view = Render("a much longer first description than the one that follows it");
+
+        view.Markdown = "short";
+
+        Assert.Equal("short".Length, view.SourceAt(500));
+    }
+
     [Fact]
     public void The_box_is_read_only()
     {
