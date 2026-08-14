@@ -16,15 +16,31 @@ public class MarkdownViewTests
         return view;
     }
 
-    /// <summary>The font a run of the rendered text is drawn in.</summary>
+    /// <summary>
+    /// The font a run of the rendered text is drawn in.
+    /// </summary>
+    /// <remarks>
+    /// Everything it can answer wrongly says what it saw, because one of these failed once on a
+    /// build agent and could not be made to fail again — and "Assert.True() Failure" with nothing
+    /// after it is a report nobody can act on. A selection spanning more than one font answers null
+    /// rather than a font, which would otherwise arrive as a null reference from somewhere further
+    /// down and say even less.
+    /// </remarks>
     private static Font FontAt(MarkdownView view, string needle)
     {
         var at = view.Text.IndexOf(needle, StringComparison.Ordinal);
-        Assert.True(at >= 0, $"'{needle}' is not in the rendered text: {view.Text}");
+        Assert.True(at >= 0, $"'{needle}' is not in the rendered text: '{view.Text}'");
 
         view.SelectionStart = at;
         view.SelectionLength = needle.Length;
-        return view.SelectionFont!;
+
+        var font = view.SelectionFont;
+        Assert.True(
+            font is not null,
+            $"'{needle}' at {at} is drawn in more than one font, so there is no single answer. "
+            + $"Rendered text: '{view.Text}'");
+
+        return font!;
     }
 
     private static Color ColourAt(MarkdownView view, string needle)
@@ -46,13 +62,24 @@ public class MarkdownViewTests
     [Fact]
     public void Bold_is_bold_and_italic_is_italic()
     {
+        // Every assertion here says what it saw. This is the one that failed on a build agent and
+        // then passed on a re-run of the same commit, reporting nothing but "Assert.True() Failure"
+        // — which narrowed it to one of two lines and told us nothing about either. See #42.
         using var view = Render("Some **bold** and some *italic* here");
 
-        Assert.True(FontAt(view, "bold").Bold);
-        Assert.False(FontAt(view, "bold").Italic);
-        Assert.True(FontAt(view, "italic").Italic);
-        Assert.False(FontAt(view, "italic").Bold);
-        Assert.False(FontAt(view, "Some").Bold);
+        Assert.True(FontAt(view, "bold").Bold, Drawn(view, "bold"));
+        Assert.False(FontAt(view, "bold").Italic, Drawn(view, "bold"));
+        Assert.True(FontAt(view, "italic").Italic, Drawn(view, "italic"));
+        Assert.False(FontAt(view, "italic").Bold, Drawn(view, "italic"));
+        Assert.False(FontAt(view, "Some").Bold, Drawn(view, "Some"));
+    }
+
+    /// <summary>How a word actually came out, for an assertion that is about to say it is wrong.</summary>
+    private static string Drawn(MarkdownView view, string needle)
+    {
+        var font = FontAt(view, needle);
+        return $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. "
+            + $"Rendered text: '{view.Text.Trim()}'";
     }
 
     [Fact]
