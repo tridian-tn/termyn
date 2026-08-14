@@ -101,6 +101,31 @@ public sealed class SyncEngine
     /// <summary>The raw model. Only touch this while holding the gate — readers want <see cref="Snapshot"/>.</summary>
     private TodoistModel Model { get; } = new();
 
+    /// <summary>
+    /// The temporary ids this engine has handed out, and what the server has since called them.
+    /// </summary>
+    /// <remarks>
+    /// A task created here is named by us until a sync gets the server's name for it, and that name
+    /// is what callers are holding in the meantime — the notes box has it, the outline has it, an
+    /// open dialog has it. Renaming the resource and forgetting the old name would leave every one
+    /// of them pointing at nothing, and an edit arriving against one would find no such task and be
+    /// dropped without a word. So the old name goes on answering.
+    /// </remarks>
+    private readonly Dictionary<string, string> _promoted = [];
+
+    /// <summary>The order they were promoted in, so the oldest can go when there are too many.</summary>
+    private readonly Queue<string> _promotedOrder = new();
+
+    /// <summary>
+    /// How many promotions are remembered.
+    /// </summary>
+    /// <remarks>
+    /// Generous, because what is being held is a handful of bytes and what it buys is somebody's
+    /// typing. Bounded all the same: this process lives in the tray for weeks and every task anyone
+    /// creates adds one.
+    /// </remarks>
+    private const int MaxPromoted = 4096;
+
     /// <summary>The token the next incremental sync will use.</summary>
     public string SyncToken
     {
@@ -512,6 +537,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             // Nothing held locally means the task is already gone; sending the edit anyway would
             // queue a command that can only fail until it poisons.
             if (Model.Get(ResourceType.Items, id) is not { } existing)
@@ -540,6 +567,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             var existing = Model.Get(ResourceType.Items, id);
             var recurring = existing is not null && Projections.ToTaskItem(existing).IsRecurring;
 
@@ -609,6 +638,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(ResourceType.Items, id) is not { } existing)
                 return;
 
@@ -641,6 +672,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             var existing = Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id);
             JsonObject? reopened = null;
 
@@ -676,6 +709,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             var existing = Model.Get(ResourceType.Items, id);
             var prior = existing?.ToJsonString();
             ResourceKey[] deletes = existing is not null ? [new ResourceKey(ResourceType.Items, id)] : [];
@@ -701,6 +736,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Placement(id) is not { } placement)
                 return false;
 
@@ -720,7 +757,12 @@ public sealed class SyncEngine
     public bool CanMoveItem(string id, int offset)
     {
         lock (_gate)
+        {
+            id = Promoted(id);
+
             return Placement(id) is { } p && MoveTarget(p.Siblings, p.Index, offset) is not null;
+        }
+
     }
 
     /// <summary>
@@ -759,6 +801,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Placement(id) is not { } placement)
                 return false;
 
@@ -771,7 +815,12 @@ public sealed class SyncEngine
     public bool CanIndentItem(string id)
     {
         lock (_gate)
+        {
+            id = Promoted(id);
+
             return Placement(id) is { } p && AdopterFor(p.Siblings, p.Index) is not null;
+        }
+
     }
 
     /// <summary>
@@ -792,6 +841,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             return Model.Get(ResourceType.Items, id) is { } json
                    && Projections.ToTaskItem(json).ParentId is not null;
         }
@@ -810,6 +861,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             // The completed ones fetched from the archive are held apart from the live model, and
             // they are selectable in the outline like anything else — so looking only at the model
             // showed a blank where a task had notes, which reads as "this task has none".
@@ -829,7 +882,12 @@ public sealed class SyncEngine
     public bool Holds(string id)
     {
         lock (_gate)
+        {
+            id = Promoted(id);
+
             return Model.Get(ResourceType.Items, id) is not null;
+        }
+
     }
 
     /// <summary>A task with the siblings it is ordered among, or null when the model doesn't hold it.</summary>
@@ -851,6 +909,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(ResourceType.Items, id) is not { } json)
                 return false;
 
@@ -880,7 +940,13 @@ public sealed class SyncEngine
     public bool MoveItemToProject(string id, string projectId)
     {
         lock (_gate)
+        {
+            id = Promoted(id);
+            projectId = Promoted(projectId);
+
             return MoveTo(id, projectId: projectId);
+        }
+
     }
 
     /// <summary>
@@ -991,6 +1057,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(ResourceType.Projects, id) is null)
                 return;
 
@@ -1032,6 +1100,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(ResourceType.Sections, id) is null)
                 return;
 
@@ -1070,6 +1140,13 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            // The task this hangs off may have been named by us and renamed by the server since the
+            // caller took its id — and here that id is in the arguments as well as in the lookup,
+            // so both have to be put right or the server is sent a reminder for a task it has never
+            // heard of.
+            itemId = Promoted(itemId);
+            args["item_id"] = itemId;
+
             // A reminder on a task we don't have can only fail until it poisons the outbox.
             if (Model.Get(ResourceType.Items, itemId) is null)
                 return null;
@@ -1088,6 +1165,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(ResourceType.Reminders, id) is null)
                 return;
 
@@ -1150,6 +1229,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(ResourceType.Labels, id) is not { } label)
                 return;
 
@@ -1220,6 +1301,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            id = Promoted(id);
+
             if (Model.Get(type, id) is not { } existing)
                 return;
 
@@ -1498,10 +1581,36 @@ public sealed class SyncEngine
 
     // ---- Reconciliation --------------------------------------------------------------------------
 
+    /// <summary>
+    /// What a resource is called now, given what it may once have been called.
+    /// </summary>
+    /// <remarks>
+    /// Every public method that takes an id starts here, because an id this engine handed out has
+    /// to go on working after the server renames the thing behind it. Anything it doesn't recognise
+    /// comes back untouched — a real id, or one for a task that has genuinely gone.
+    /// </remarks>
+    /// <param name="id">An id a caller is holding, which may be one we minted</param>
+    /// <returns>The id the model knows the resource by</returns>
+    private string Promoted(string id) => _promoted.GetValueOrDefault(id, id);
+
+    /// <summary>Notes what the server has named something, dropping the oldest to stay bounded.</summary>
+    private void Remember(string temp, string real)
+    {
+        if (!_promoted.TryAdd(temp, real))
+            return;
+
+        _promotedOrder.Enqueue(temp);
+
+        while (_promotedOrder.Count > MaxPromoted)
+            _promoted.Remove(_promotedOrder.Dequeue());
+    }
+
     private void ApplyTempIds(IReadOnlyDictionary<string, string> mapping)
     {
         foreach (var (temp, real) in mapping)
         {
+            Remember(temp, real);
+
             if (Model.Find(temp) is { } found)
             {
                 Model.Rename(found.Type, temp, real);
