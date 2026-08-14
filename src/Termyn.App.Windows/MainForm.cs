@@ -281,6 +281,11 @@ internal sealed class MainForm : Form
         // take the focus while nothing on screen showed it had.
         _notes.Visible = false;
 
+        // And for the same reason. Nothing is selected at this point and the selection changing is
+        // what would otherwise settle this — so a window that opens with the panel showing and no
+        // task under it would draw a pane that looks ready to take typing and isn't.
+        ShowNotesEditable(editable: false, anySelected: false);
+
         // One pause, two things that wait for it: the rendering when the panel is reading, and the
         // highlighting and the undo state when it is being typed into.
         _renderIdle = new System.Windows.Forms.Timer { Interval = 300 };
@@ -1198,14 +1203,7 @@ internal sealed class MainForm : Form
         _draft.Open(id, _presenter.DescriptionOf(id));
         ShowNotes(_draft.Opened);
 
-        // ReadOnly rather than Enabled: disabling a control that has the focus hands the focus to
-        // the next one and never gives it back, so a sync arriving mid-sentence used to leave the
-        // user typing into the outline — where space ticks a task off and delete removes it.
-        //
-        // And read-only for a completed task pulled out of the archive: those are held apart from
-        // the live model, so an edit to one is declined rather than queued, and a box that took the
-        // typing and dropped it would be worse than one that doesn't take it.
-        _notes.ReadOnly = !_presenter.HasTask(id);
+        ShowNotesEditable(_presenter.HasTask(id), anySelected: id is not null);
 
         // A task with no notes on it has nothing to read, and a rendering of nothing is a blank
         // panel that gives no sign it would take any typing. So an empty one opens ready to write.
@@ -1267,6 +1265,34 @@ internal sealed class MainForm : Form
     {
         if (!_detail.Panel2Collapsed && !_writingNotes)
             _rendered.Markdown = _notes.Text;
+    }
+
+    /// <summary>
+    /// Says whether the notes can be typed into, and makes the panel look like the answer.
+    /// </summary>
+    /// <remarks>
+    /// Read-only rather than disabled, and deliberately: disabling a control that has the focus
+    /// hands the focus to the next one and never gives it back, so a sync arriving mid-sentence
+    /// used to leave the user typing into the outline — where space ticks a task off and delete
+    /// removes it. So the pane is kept out of use by refusing the text and drawn as inactive, which
+    /// between them do the job that disabling would have done and the job it wouldn't.
+    ///
+    /// Without the drawing it was a blank pane that looked exactly like a blank pane you could type
+    /// into, and the way you found out was to try: Enter, F2 and a double-click all did nothing at
+    /// all, silently.
+    /// </remarks>
+    /// <param name="editable">Whether the account will take an edit to this task's notes</param>
+    /// <param name="anySelected">Whether the outline is on a task at all, which changes what to say</param>
+    private void ShowNotesEditable(bool editable, bool anySelected)
+    {
+        _notes.ReadOnly = !editable;
+        _rendered.Inert = !editable;
+
+        // A completed task's notes are shown and can't be edited, and there is no room to say so
+        // over the top of them — the recessed background carries that one on its own.
+        _rendered.Placeholder = editable ? string.Empty
+            : anySelected ? "This task's notes can't be edited here."
+            : "Select a task to see its notes.";
     }
 
     /// <summary>

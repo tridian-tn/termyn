@@ -630,4 +630,112 @@ public class MarkdownViewTests
 
         Assert.True(view.ReadOnly);
     }
+
+    // ---- Looking like something you can't type into ----------------------------------------------
+
+    [Fact]
+    public void An_inert_pane_is_recessed_onto_the_background()
+    {
+        // The pane is kept out of use by being read-only rather than disabled — disabling a control
+        // that has the focus hands the focus to the outline, where space ticks a task off. So this
+        // is the only thing on screen saying it won't take any typing.
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("some notes");
+
+        Assert.Equal(theme.Panel, view.BackColor);
+
+        view.Inert = true;
+
+        Assert.Equal(theme.Background, view.BackColor);
+        Assert.NotEqual(theme.Panel, theme.Background);
+    }
+
+    [Fact]
+    public void Coming_back_into_use_looks_like_the_pane_it_was()
+    {
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("some notes");
+        view.Inert = true;
+
+        view.Inert = false;
+
+        Assert.Equal(theme.Panel, view.BackColor);
+    }
+
+    [Fact]
+    public void Changing_the_theme_keeps_it_looking_inert()
+    {
+        // The theme pass runs over every control in the window and would otherwise put the pane
+        // back to its ordinary colour while it is still refusing to be typed into.
+        using var view = Render("some notes");
+        view.Inert = true;
+
+        view.Theme = Theme.Resolve(ThemePreference.Dark);
+
+        Assert.Equal(Theme.Resolve(ThemePreference.Dark).Background, view.BackColor);
+    }
+
+    [Fact]
+    public void An_inert_pane_is_still_not_disabled()
+    {
+        // Enabled = false is the thing this must never become: it hands the focus to the next
+        // control and never gives it back, and the next control is the outline.
+        using var view = Render(string.Empty);
+
+        view.Inert = true;
+
+        Assert.True(view.Enabled);
+    }
+
+    [Fact]
+    public void A_line_can_be_shown_over_an_empty_pane()
+    {
+        using var view = Render(string.Empty);
+
+        view.Placeholder = "Select a task to see its notes.";
+
+        Assert.Equal("Select a task to see its notes.", view.Placeholder);
+        Assert.Equal(string.Empty, view.Text.Trim());
+    }
+
+    [Fact]
+    public void An_inert_pane_draws_its_words_muted()
+    {
+        // The cue that actually carries. The recessed background is two units in the light palette
+        // and invisible on screen, so what says "this can't be typed into" is the text itself.
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("some notes here");
+
+        Assert.Equal(theme.Text, ColourAt(view, "some notes"));
+
+        view.Inert = true;
+
+        Assert.Equal(theme.Muted, ColourAt(view, "some notes"));
+    }
+
+    [Fact]
+    public void An_inert_panes_links_keep_their_colour()
+    {
+        // A completed task's notes are still worth following out of, and drawing a link dead while
+        // it still works is the mirror of the mistake this is here to avoid.
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("See [the docs](https://example.com) now");
+
+        view.Inert = true;
+
+        Assert.Equal(theme.Accent, ColourAt(view, "the docs"));
+        Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("the docs", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void Coming_back_into_use_puts_the_words_back()
+    {
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var view = Render("some notes here");
+        view.Inert = true;
+
+        view.Inert = false;
+
+        Assert.Equal(theme.Text, ColourAt(view, "some notes"));
+    }
 }
