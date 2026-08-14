@@ -157,9 +157,18 @@ internal sealed class MainForm : Form
     private string? _hotkeyNotice;
 
     /// <summary>
-    /// Said once the window is up, when the cache had to be rebuilt. Cleared by the first sync that
-    /// works, which is the point at which the account is back on screen and the news is stale.
+    /// Said once the window is up, when the cache had to be rebuilt.
     /// </summary>
+    /// <remarks>
+    /// Held until the user does something, rather than until the next sync. Clearing it on the sync
+    /// was tried and is no use: the sync lands a second or two after the window appears, so the one
+    /// thing this exists to say — that anything queued and unsent went with the old file — was gone
+    /// from the screen before anybody could read it. Measured, not guessed: three seconds after
+    /// launch the status bar already said "Synced just now".
+    ///
+    /// Nothing here can be acted on, so there is nothing to wait for except the user being present.
+    /// Touching anything is proof enough of that.
+    /// </remarks>
     private string? _cacheNotice;
 
     /// <summary>Whether the signal subscription is live, so shutdown doesn't unhook what was never hooked.</summary>
@@ -197,6 +206,7 @@ internal sealed class MainForm : Form
             Indent = 14,
             BorderStyle = BorderStyle.None,
         };
+        _sidebar.MouseDown += (_, _) => Noticed();
         _sidebar.AfterSelect += OnSidebarSelect;
         _sidebar.KeyDown += OnSidebarKeyDown;
 
@@ -207,6 +217,7 @@ internal sealed class MainForm : Form
         _outline.Renamed = _presenter.CurrentIdOf;
 
         _outline.KeyDown += OnOutlineKeyDown;
+        _outline.MouseDown += (_, _) => Noticed();
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
@@ -759,11 +770,6 @@ internal sealed class MainForm : Form
             _status.ForeColor = Theme.ForPriority(Priority.P1);
             return;
         }
-
-        // Dropped once a sync has actually landed: the account is back on screen by then, which is
-        // the moment the news stops being useful and starts being in the way of "Synced 12s ago".
-        if (_presenter.SyncStatus.State == SyncState.Synced)
-            _cacheNotice = null;
 
         // Ahead of the hotkey's notice, and sticky for the same reason: this one says something was
         // lost, and the sync that follows the first render would otherwise replace it unseen.
@@ -1772,8 +1778,28 @@ internal sealed class MainForm : Form
     /// <summary>Runs a command from wherever it was asked for, and tells the sync loop if it wrote.</summary>
     private void Run(AppCommand command)
     {
+        Noticed();
+
         if (Dispatch(command))
             _scheduler.NotifyWrite();
+    }
+
+    /// <summary>
+    /// Drops the cache notice, the user having demonstrably been at the keyboard.
+    /// </summary>
+    /// <remarks>
+    /// Hung off input rather than off the selection, which moves on the first render as the rows
+    /// arrive — that would clear it before the window had finished appearing. A keystroke, a click
+    /// in either list, or a command from a menu are all things only a person does. Sitting and
+    /// reading it leaves it up, which is the point.
+    /// </remarks>
+    private void Noticed()
+    {
+        if (_cacheNotice is null)
+            return;
+
+        _cacheNotice = null;
+        RenderStatus();
     }
 
     /// <summary>
@@ -2026,6 +2052,10 @@ internal sealed class MainForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        // Every key in the window comes through here, which makes it the one place that sees the
+        // user arrive however they arrive.
+        Noticed();
+
         // Ahead of the table, because this runs before any control's own key handling and so the
         // sidebar can't claim Ctrl+N for itself: with a project under its cursor, Ctrl+N means a
         // section in that project rather than a task.
