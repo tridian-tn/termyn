@@ -122,6 +122,14 @@ internal sealed class OutlineView : ListView
     /// <summary>The strike-through font, made on first use so a theme change can't leak one.</summary>
     private Font Struck => _struck ??= new Font(Font, FontStyle.Strikeout);
 
+    /// <summary>
+    /// Asks what a task is called now, for a selected row that has stopped being found by the name
+    /// it had. Null leaves the old behaviour, where any such row is treated as gone.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Func<string, string>? Renamed { get; set; }
+
     /// <summary>The rows to show. Selection is preserved by id where the task is still present.</summary>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -147,6 +155,15 @@ internal sealed class OutlineView : ListView
                 // scrolling and no fallback selection: a background sync refreshes these rows every
                 // 45 seconds, and it must not move the selection or the viewport under the user.
                 var index = selected is null ? -1 : IndexOf(selected);
+
+                // Not here under the name it had, which for a task created a moment ago means the
+                // sync has just been told what the server calls it. Same task, same row, new name —
+                // and indistinguishable from a deletion without something that knows the difference.
+                if (index < 0 && selected is not null && Renamed?.Invoke(selected) is { } now && now != selected)
+                {
+                    index = IndexOf(now);
+                    selected = now;
+                }
                 if (index >= 0)
                 {
                     if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)

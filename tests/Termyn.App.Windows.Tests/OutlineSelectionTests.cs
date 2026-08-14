@@ -108,4 +108,53 @@ public class OutlineSelectionTests
 
         Assert.Equal(["c"], seen);
     }
+
+    // ---- A task the server renames under us -----------------------------------------------------
+
+    [Fact]
+    public void A_task_renamed_by_the_server_keeps_its_selection()
+    {
+        // A task quick-added a moment ago is called t-… until the sync learns the server's name for
+        // it. Without something that knows the two are the same task, the rows come back with the
+        // new name, the old one is nowhere, and the row reads as deleted — the selection is dropped
+        // and the notes panel blanks under whoever is typing into it.
+        using var view = Outline();
+        view.Renamed = id => id == "t-abc" ? "9001" : id;
+        view.Rows = [Row("t-abc"), Row("a"), Row("b")];
+        view.SelectedIndices.Add(0);
+
+        var seen = Watch(view, () => view.Rows = [Row("a"), Row("b"), Row("9001")]);
+
+        Assert.Equal("9001", view.SelectedId);
+        Assert.DoesNotContain(null, seen);
+    }
+
+    [Fact]
+    public void A_task_that_really_went_away_is_still_reported_as_gone()
+    {
+        // The lookup answers with what it was given when nothing renamed it, so this has to stay
+        // telling the difference between a rename and a deletion.
+        using var view = Outline();
+        view.Renamed = id => id;
+        view.Rows = [Row("a"), Row("b"), Row("c")];
+        view.SelectedIndices.Add(1);
+
+        var seen = Watch(view, () => view.Rows = [Row("a"), Row("c")]);
+
+        Assert.Equal([null], seen);
+        Assert.Null(view.SelectedId);
+    }
+
+    [Fact]
+    public void Without_anything_to_ask_a_renamed_task_is_treated_as_gone()
+    {
+        // The callback is optional, and leaving it unset has to keep the behaviour it had.
+        using var view = Outline();
+        view.Rows = [Row("t-abc"), Row("a")];
+        view.SelectedIndices.Add(0);
+
+        view.Rows = [Row("a"), Row("9001")];
+
+        Assert.Null(view.SelectedId);
+    }
 }

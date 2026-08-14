@@ -143,4 +143,38 @@ public class DescriptionDraftTests
 
         Assert.True(draft.IsDirty(Paired + "\r\nThird"));
     }
+
+    // ---- A task the server renames while the box is open on it -----------------------------------
+
+    [Fact]
+    public void Following_a_rename_keeps_what_is_being_typed()
+    {
+        // A task created a moment ago is renamed when the sync learns what the server calls it, and
+        // the box may be part-way through a sentence at the time. Reopening on the new name would
+        // replace what is being typed with what the account holds — which for a task that new is
+        // nothing at all.
+        var draft = new DescriptionDraft();
+        draft.Open("t-abc", "opened with this");
+
+        draft.Retarget("9001");
+
+        Assert.Equal("9001", draft.TaskId);
+        Assert.Equal("opened with this", draft.Opened);
+        Assert.True(draft.IsDirty("and this was typed"));
+        Assert.Equal(("9001", "and this was typed"), draft.Take("and this was typed"));
+    }
+
+    [Fact]
+    public void A_rename_does_not_put_the_box_on_a_task_it_was_never_on()
+    {
+        // With the box on nothing, a rename arriving from anywhere must not give it something to
+        // save to — there is no text of anybody's to save.
+        var draft = new DescriptionDraft();
+        draft.Open(null, string.Empty);
+
+        draft.Retarget("9001");
+
+        Assert.Null(draft.TaskId);
+        Assert.Null(draft.Take("typed into a box on no task"));
+    }
 }

@@ -189,6 +189,11 @@ internal sealed class MainForm : Form
         _sidebar.KeyDown += OnSidebarKeyDown;
 
         _outline = new OutlineView { Dock = DockStyle.Fill };
+
+        // So a row selected while its task still had the name we gave it isn't read as deleted the
+        // moment the sync learns what the server calls it.
+        _outline.Renamed = _presenter.CurrentIdOf;
+
         _outline.KeyDown += OnOutlineKeyDown;
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
@@ -1134,6 +1139,16 @@ internal sealed class MainForm : Form
         var id = _outline.SelectedId;
         if (id == _draft.TaskId)
         {
+            RefreshNotes();
+            return;
+        }
+
+        // The same task under a new name: created here a moment ago, and the sync has just learned
+        // what the server calls it. Followed rather than reopened, because reopening would replace
+        // what is being typed with what the account holds — which for a task that new is nothing.
+        if (id is not null && _draft.TaskId is { } held && _presenter.CurrentIdOf(held) == id)
+        {
+            _draft.Retarget(id);
             RefreshNotes();
             return;
         }
