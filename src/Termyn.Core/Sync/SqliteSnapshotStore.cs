@@ -20,6 +20,18 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
 
     private readonly SqliteConnection _conn;
 
+    /// <summary>
+    /// The two SQLite codes that mean the file will never be readable, whatever we do.
+    /// </summary>
+    /// <remarks>
+    /// Narrow on purpose. Most of what SQLite refuses with is temporary — busy, locked, read-only,
+    /// or the "unable to open" you get when something else has the file — and none of those is a
+    /// reason to throw a cache away. Doing so would lose the outbox to a problem that was about to
+    /// resolve itself, which is a worse failure than the one being recovered from.
+    /// </remarks>
+    private const int Corrupt = 11;       // SQLITE_CORRUPT — "database disk image is malformed"
+    private const int NotADatabase = 26;  // SQLITE_NOTADB  — "file is not a database"
+
     /// <summary>The suffix a cache that couldn't be opened is kept under.</summary>
     /// <remarks>
     /// Kept rather than deleted, because a file that stopped the app starting is the only evidence
@@ -48,7 +60,7 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         {
             _conn = Open(databasePath);
         }
-        catch (SqliteException)
+        catch (SqliteException ex) when (ex.SqliteErrorCode is Corrupt or NotADatabase)
         {
             // A cache is a cache: everything in it can be fetched again, and the one thing that
             // can't — the outbox — is already lost with the file. Refusing to start is the worst of
@@ -101,10 +113,11 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
     /// Moves a cache that couldn't be opened out of the way, sidecars and all.
     /// </summary>
     /// <remarks>
-    /// Every failure here is swallowed. This runs on the way to starting the app, and the point of
-    /// it is that a bad cache doesn't stop that happening — so a file that can't be moved must not
-    /// stop it either. If the move fails the open that follows fails too, and that is what gets
-    /// reported.
+    /// A file that can't be moved is swallowed rather than thrown, because this runs on the way to
+    /// starting the app and the whole point of it is that a bad cache doesn't stop that happening.
+    /// If the move fails then the open that follows fails too, and that is what gets reported —
+    /// which is why only the two failures a locked or unwritable file produces are caught here, and
+    /// anything else still comes out.
     /// </remarks>
     private static void SetAside(string databasePath)
     {
