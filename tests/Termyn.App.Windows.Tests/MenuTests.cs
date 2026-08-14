@@ -272,14 +272,19 @@ public class MenuTests
     }
 
     [Fact]
-    public void The_rendered_half_is_offered_only_while_the_panel_it_lives_in_is_open()
+    public void Editing_the_notes_is_offered_only_while_the_panel_it_happens_in_is_open()
     {
         using var closed = Build(View, CommandContext.Empty);
-        using var open = Build(View, new CommandContext(ShowingDescription: true, ShowingPreview: true));
+        using var reading = Build(View, new CommandContext(ShowingDescription: true));
+        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingNotes: true));
 
-        Assert.False(Find(closed, "Show formatted notes").Enabled);
-        Assert.True(Find(open, "Hide formatted notes").Enabled);
-        Assert.True(Find(open, "Hide formatted notes").Checked);
+        Assert.False(Find(closed, "Edit notes").Enabled);
+        Assert.True(Find(reading, "Edit notes").Enabled);
+        Assert.False(Find(reading, "Edit notes").Checked);
+
+        // Ticked while the markdown is on show, since that is the state you leave rather than the
+        // one the panel rests in.
+        Assert.True(Find(writing, "Done editing notes").Checked);
     }
 
     [Fact]

@@ -6,6 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Reads the markdown a description is written in, so the box you type into can show what it
+         means. Here rather than in the UI project because the answer is the same whatever draws
+         it, and because that is what lets it be tested without a control to look at. -->
+    <PackageReference Include="Markdig" Version="0.42.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Termyn.Core\Termyn.Core.csproj" />
   </ItemGroup>
 
