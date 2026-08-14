@@ -21,6 +21,19 @@ internal static class JsonRead
         return int.TryParse(v.ToString(), out var parsed) ? parsed : 0;
     }
 
+    /// <summary>
+    /// A whole number that may not fit in an int — a file size, which Todoist has sent as both a
+    /// JSON number and a string.
+    /// </summary>
+    public static long Long(JsonObject o, string key)
+    {
+        if (!o.TryGetPropertyValue(key, out var n) || n is not JsonValue v)
+            return 0;
+        if (v.TryGetValue(out long l))
+            return l;
+        return long.TryParse(v.ToString(), out var parsed) ? parsed : 0;
+    }
+
     public static bool Bool(JsonObject o, string key)
     {
         if (!o.TryGetPropertyValue(key, out var n) || n is not JsonValue v)

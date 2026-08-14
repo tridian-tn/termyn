@@ -15,6 +15,7 @@ public sealed class TodoistApiClient : ITodoistApi
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
     private const string QuickAddUrl = "https://api.todoist.com/api/v1/tasks/quick_add";
     private const string CompletedUrl = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date";
+    private const string UploadUrl = "https://api.todoist.com/api/v1/uploads";
 
     private readonly HttpClient _http;
     private readonly TimeSpan _deadline;
@@ -202,6 +203,124 @@ public sealed class TodoistApiClient : ITodoistApi
         }
     }
 
+    // ---- Attachments -------------------------------------------------------------------------------
+
+    /// <inheritdoc />
+    public async Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        using var deadline = Deadline(ct);
+        using var req = new HttpRequestMessage(HttpMethod.Get, fileUrl);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var resp = await SendRawAsync(req, deadline.Token, ct);
+        RejectBadToken(resp);
+        EnsureReachable(resp);
+
+        try
+        {
+            await using var body = await resp.Content.ReadAsStreamAsync(deadline.Token);
+
+            // Copied a block at a time so the running total can be reported and the whole thing is
+            // never resident. 80 KB is the framework's own default for CopyToAsync.
+            var buffer = new byte[81920];
+            long total = 0;
+
+            while (true)
+            {
+                var read = await body.ReadAsync(buffer, deadline.Token);
+                if (read == 0)
+                    break;
+
+                await destination.WriteAsync(buffer.AsMemory(0, read), deadline.Token);
+
+                total += read;
+                progress?.Report(total);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            throw new TodoistNetworkException("The download from Todoist failed part-way.", ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<JsonObject> UploadAsync(string token, Stream content, string fileName, CancellationToken ct = default)
+    {
+        using var deadline = Deadline(ct);
+
+        using var form = new MultipartFormDataContent();
+
+        // Two parts, and the names matter: the bytes go under "file", and the name Todoist should
+        // store it as goes under "file_name" as a field of its own. Putting the bytes under
+        // "file_name" reads as a form with no file part in it at all.
+        var file = new StreamContent(content);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(file, "file", fileName);
+        form.Add(new StringContent(fileName), "file_name");
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, UploadUrl) { Content = form };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var resp = await SendRawAsync(req, deadline.Token, ct);
+        RejectBadToken(resp);
+        EnsureReachable(resp);
+
+        try
+        {
+            await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
+            if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject root)
+                throw new TodoistNetworkException("Todoist returned an unexpected upload response.");
+
+            return root;
+        }
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
+        {
+            throw new TodoistNetworkException("Todoist returned an unreadable upload response.", ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteUploadAsync(string token, string fileUrl, CancellationToken ct = default)
+    {
+        using var deadline = Deadline(ct);
+
+        using var req = new HttpRequestMessage(HttpMethod.Delete, $"{UploadUrl}?file_url={Uri.EscapeDataString(fileUrl)}");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var resp = await SendRawAsync(req, deadline.Token, ct);
+        RejectBadToken(resp);
+
+        // Already gone is the outcome asked for. Todoist answers a second delete with a not-found,
+        // and treating that as a failure would leave a retry that can never succeed.
+        if (resp.StatusCode == HttpStatusCode.NotFound)
+            return;
+
+        EnsureReachable(resp);
+    }
+
+    private static void RejectBadToken(HttpResponseMessage resp)
+    {
+        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            throw new TodoistAuthException("Todoist rejected the API token.");
+    }
+
+    /// <summary>Sends a prepared request, turning transport failures into the exception callers expect.</summary>
+    private async Task<HttpResponseMessage> SendRawAsync(HttpRequestMessage req, CancellationToken ct, CancellationToken caller)
+    {
+        try
+        {
+            return await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+        }
+        catch (TaskCanceledException ex) when (!caller.IsCancellationRequested)
+        {
+            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+        }
+    }
+
     /// <summary>An instant in the form the completed-items endpoint expects.</summary>
     private static string Instant(DateTimeOffset moment)
         => moment.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
@@ -259,7 +378,7 @@ public sealed class TodoistApiClient : ITodoistApi
         if (resp.StatusCode is HttpStatusCode.TooManyRequests)
             throw new TodoistRateLimitException("Todoist is rate-limiting this account.", RetryAfter(resp));
 
-        throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.");
+        throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.", (int)resp.StatusCode);
     }
 
     /// <summary>

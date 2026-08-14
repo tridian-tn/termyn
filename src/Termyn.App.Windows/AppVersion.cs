@@ -60,4 +60,23 @@ internal static class AppVersion
         Process.Start(new ProcessStartInfo(safe) { UseShellExecute = true });
         return true;
     }
+
+    /// <summary>
+    /// Hands a downloaded attachment to whatever the desktop opens that kind of file with.
+    /// </summary>
+    /// <remarks>
+    /// Only ever called with a path this app wrote into its own cache, which is what makes shell
+    /// execution acceptable here: the name came from an account, but the path did not — the cache
+    /// keys files by a hash of their url and allows an extension only after checking it.
+    /// </remarks>
+    /// <param name="path">A file in the attachment cache</param>
+    /// <returns>False when there is no such file, so the caller can say so</returns>
+    public static bool OpenFile(string path)
+    {
+        if (!File.Exists(path))
+            return false;
+
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        return true;
+    }
 }

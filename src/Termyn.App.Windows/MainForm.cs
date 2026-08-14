@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using Termyn.Core;
 using Termyn.Core.Api;
+using Termyn.Core.Attachments;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
@@ -287,6 +288,10 @@ internal sealed class MainForm : Form
         _comments.Posted += OnCommentPosted;
         _comments.Edited += OnCommentEdited;
         _comments.Deleted += OnCommentDeleted;
+        _comments.OpenRequested += OnAttachmentOpened;
+        _comments.DetachRequested += OnAttachmentRemoved;
+        _comments.AttachRequested += OnFileAttached;
+        _comments.CancelRequested += () => _transfer?.Cancel();
 
         // The description goes under the outline rather than beside it: the outline is five columns wide
         // before it is useful, and a panel down the side of it takes that from the task names.
@@ -637,7 +642,7 @@ internal sealed class MainForm : Form
 
     private void OpenSettings()
     {
-        if (SettingsForm.Edit(this, _settings, _theme) is not { } amended)
+        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is not { } amended)
             return;
 
         var themeChanged = amended.Theme != _settings.Theme;
@@ -680,6 +685,11 @@ internal sealed class MainForm : Form
 
         if (cadenceChanged)
             notices.Add("The sync cadence takes effect when Termyn next starts.");
+
+        // Straight away rather than at the next start: tightening the caps and then finding the
+        // cache still over them until tomorrow is not what the setting appears to promise.
+        if (amended.AttachmentCache != _settings.AttachmentCache)
+            _presenter.SetDownloadLimits(amended.AttachmentCache);
 
         // Saved last, so the theme and hotkey are applied even when the file can't be written.
         if (!SaveViewState())
@@ -1463,6 +1473,156 @@ internal sealed class MainForm : Form
         _presenter.DeleteComment(id);
         RefreshComments();
     });
+
+    // ---- Attachments -------------------------------------------------------------------------------
+
+    /// <summary>The transfer currently running, so a second can't start and this one can be called off.</summary>
+    private CancellationTokenSource? _transfer;
+
+    /// <summary>
+    /// Fetches a comment's file if it isn't already here, and hands it to the desktop.
+    /// </summary>
+    /// <remarks>
+    /// The one place in Termyn where the user deliberately waits on the network. Every outcome that
+    /// isn't the file opening is said out loud: not having it offline is the expected state of most
+    /// files most of the time, and a silent nothing would read as the app being broken.
+    /// </remarks>
+    private async void OnAttachmentOpened(string commentId)
+    {
+        if (_transfer is not null)
+            return;
+
+        if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+            return;
+
+        using var transfer = new CancellationTokenSource();
+        _transfer = transfer;
+        _comments.Progress = $"Downloading {file.FileName}…  Esc to stop";
+
+        try
+        {
+            var progress = new Progress<long>(read => _comments.Progress =
+                file.FileSize > 0
+                    ? $"Downloading {file.FileName}… {read * 100 / file.FileSize}%  Esc to stop"
+                    : $"Downloading {file.FileName}… {read / 1024} KB  Esc to stop");
+
+            var result = await _presenter.FetchAttachmentAsync(file, progress, transfer.Token);
+
+            switch (result.Outcome)
+            {
+                case FetchOutcome.Ready when result.Path is { } path:
+                    AppVersion.OpenFile(path);
+                    break;
+
+                case FetchOutcome.Cancelled:
+                    break;
+
+                default:
+                    MessageBox.Show(this, result.Message ?? "The file couldn't be opened.", "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    break;
+            }
+        }
+        finally
+        {
+            _transfer = null;
+            _comments.Progress = null;
+        }
+    }
+
+    /// <summary>
+    /// Puts a file on a new comment, uploading it first.
+    /// </summary>
+    /// <remarks>
+    /// Online only, and the refusals come before the transfer rather than after it: no connection,
+    /// or a file over what the plan takes, are both answered without sending anything.
+    /// </remarks>
+    private async void OnFileAttached()
+    {
+        if (_transfer is not null || _commentsOwner is null)
+            return;
+
+        using var picker = new OpenFileDialog { Title = "Attach a file to this comment", CheckFileExists = true };
+        if (picker.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var file = new FileInfo(picker.FileName);
+
+        if (!_presenter.AllowsUploadOf(file.Length))
+        {
+            MessageBox.Show(
+                this,
+                $"{file.Name} is {file.Length / (1024 * 1024)} MB, and this Todoist plan takes files up to {_presenter.UploadLimitMb} MB.",
+                "Termyn",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        using var transfer = new CancellationTokenSource();
+        _transfer = transfer;
+        _comments.Progress = $"Uploading {file.Name}…  Esc to stop";
+
+        try
+        {
+            await _presenter.AddCommentWithFileAsync(_commentsOwner, _comments.Draft, file.FullName, transfer.Token);
+
+            // Only once it has landed. Clearing the box first would lose what was typed alongside a
+            // file whose upload then failed.
+            _comments.ClearDraft();
+            RefreshComments();
+        }
+        catch (OperationCanceledException)
+        {
+            // Called off from the keyboard. Nothing was posted and the box still holds the words,
+            // which is the state the user asked for — so there is nothing to report.
+        }
+        catch (Exception ex) when (ex is TodoistNetworkException or TodoistAuthException or IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(
+                this,
+                $"{file.Name} couldn't be uploaded, so nothing was posted. What you typed is still in the box.\r\n\r\n{ex.Message}",
+                "Termyn",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _transfer = null;
+            _comments.Progress = null;
+        }
+    }
+
+    /// <summary>
+    /// Takes a file off a comment, leaving what was said.
+    /// </summary>
+    /// <remarks>
+    /// Confirmed first, and the confirmation says what undo can't do: the comment can be brought
+    /// back, but Todoist has no undelete for the upload itself.
+    /// </remarks>
+    private async void OnAttachmentRemoved(string commentId)
+    {
+        if (_transfer is not null)
+            return;
+
+        if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+            return;
+
+        var answer = MessageBox.Show(
+            this,
+            $"Remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone.",
+            "Termyn",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Warning);
+
+        if (answer != DialogResult.OK)
+            return;
+
+        var trouble = await _presenter.DetachFileAsync(commentId);
+        RefreshComments();
+
+        if (trouble is not null)
+            MessageBox.Show(this, trouble, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
 
     /// <summary>
     /// Opens the markdown to type into, with the caret where the reading was pointing.

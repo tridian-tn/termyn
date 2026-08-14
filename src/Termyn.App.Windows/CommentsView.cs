@@ -35,6 +35,12 @@ internal sealed class CommentsView : UserControl
 
     private readonly TextBox _compose;
     private readonly Label _hint;
+    private readonly LinkLabel _attach;
+    private readonly ContextMenuStrip _rowMenu;
+    private readonly ToolStripMenuItem _openItem;
+    private readonly ToolStripMenuItem _detachItem;
+    private readonly ToolStripMenuItem _editItem;
+    private readonly ToolStripMenuItem _deleteItem;
     private readonly Panel _composeArea;
 
     private Theme _theme = Theme.Resolve(ThemePreference.System);
@@ -42,6 +48,9 @@ internal sealed class CommentsView : UserControl
 
     /// <summary>The comment being rewritten, or null when the box would post a new one.</summary>
     private string? _editing;
+
+    /// <summary>What to say while a file is moving, or null when none is.</summary>
+    private string? _progress;
 
     public CommentsView()
     {
@@ -76,6 +85,27 @@ internal sealed class CommentsView : UserControl
             TextAlign = ContentAlignment.MiddleLeft,
         };
 
+        _attach = new LinkLabel
+        {
+            Text = "Attach a file…",
+            AutoSize = false,
+            Width = 110,
+            Height = 18,
+            Dock = DockStyle.Right,
+            TextAlign = ContentAlignment.MiddleRight,
+        };
+        _attach.LinkClicked += (_, _) => AttachRequested?.Invoke();
+        _hint.Controls.Add(_attach);
+
+        _rowMenu = new ContextMenuStrip();
+        _openItem = new ToolStripMenuItem("Open attachment", null, (_, _) => RaiseForSelected(OpenRequested));
+        _detachItem = new ToolStripMenuItem("Remove attachment", null, (_, _) => RaiseForSelected(DetachRequested));
+        _editItem = new ToolStripMenuItem("Edit", null, (_, _) => BeginEdit());
+        _deleteItem = new ToolStripMenuItem("Delete comment", null, (_, _) => RaiseForSelected(Deleted));
+        _rowMenu.Items.AddRange([_openItem, _detachItem, new ToolStripSeparator(), _editItem, _deleteItem]);
+        _rowMenu.Opening += OnRowMenuOpening;
+        _list.ContextMenuStrip = _rowMenu;
+
         _empty = new Label
         {
             Dock = DockStyle.Fill,
@@ -105,6 +135,48 @@ internal sealed class CommentsView : UserControl
 
     /// <summary>Raised when a comment is to be removed, with its id.</summary>
     public event Action<string>? Deleted;
+
+    /// <summary>Raised when a comment's file is to be opened, with the comment's id.</summary>
+    public event Action<string>? OpenRequested;
+
+    /// <summary>Raised when a comment's file is to be taken off it, with the comment's id.</summary>
+    public event Action<string>? DetachRequested;
+
+    /// <summary>Raised when the user asks to put a file on a new comment.</summary>
+    public event Action? AttachRequested;
+
+    /// <summary>Raised when a transfer in progress is called off.</summary>
+    public event Action? CancelRequested;
+
+    /// <summary>
+    /// Escape calls off a transfer, wherever the focus is in the pane.
+    /// </summary>
+    /// <remarks>
+    /// Taken here rather than in either key handler because a download is the one thing in this
+    /// window the user waits on, and the key that stops waiting shouldn't depend on whether the
+    /// list or the box happens to have the focus. Escape means something else when nothing is
+    /// moving, so it's only claimed while something is.
+    /// </remarks>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == Keys.Escape && _progress is not null)
+        {
+            CancelRequested?.Invoke();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    /// <summary>
+    /// Presses Escape at this pane, for a test that has no message loop to press it with.
+    /// </summary>
+    /// <returns>True when the pane took the key, which is what "a transfer was called off" means</returns>
+    internal bool PressEscape()
+    {
+        var message = Message.Create(Handle, 0, 0, 0);
+        return ProcessCmdKey(ref message, Keys.Escape);
+    }
 
     /// <summary>The colours to draw with.</summary>
     [Browsable(false)]
@@ -147,6 +219,7 @@ internal sealed class CommentsView : UserControl
 
             _composeArea.Visible = value;
             _composeArea.Height = value ? ComposeHeight() : 0;
+            _attach.Enabled = value && _progress is null;
 
             if (!value)
                 CancelEdit();
@@ -278,9 +351,77 @@ internal sealed class CommentsView : UserControl
     }
 
     private void SetHint()
-        => _hint.Text = _editing is null
+    {
+        // A transfer in progress owns this line: it's the only thing here the user is waiting on,
+        // and the panel has nowhere else to say so.
+        if (_progress is { } busy)
+        {
+            _hint.Text = busy;
+            return;
+        }
+
+        _hint.Text = _editing is null
             ? "Ctrl+Enter to post"
             : "Editing — Ctrl+Enter to save, Esc to cancel";
+    }
+
+    /// <summary>
+    /// What to say while a file is being transferred, or null when nothing is.
+    /// </summary>
+    /// <remarks>
+    /// Attaching is off while one is running. Two at once in a panel with one line to report them
+    /// in would leave the user unable to tell which had failed.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public string? Progress
+    {
+        get => _progress;
+        set
+        {
+            _progress = value;
+            _attach.Enabled = value is null && CanComment;
+            SetHint();
+        }
+    }
+
+    /// <summary>
+    /// What's in the compose box, for a file being attached alongside it.
+    /// </summary>
+    /// <remarks>
+    /// Read rather than taken: an upload that fails must leave the typing where it was, so the box
+    /// is only cleared once the comment has actually been posted.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public string Draft => _compose.Text.Trim();
+
+    /// <summary>Empties the compose box, once what was in it has been posted.</summary>
+    public void ClearDraft() => CancelEdit();
+
+    /// <summary>Raises an event for whichever comment the list is on, if it's on one.</summary>
+    private void RaiseForSelected(Action<string>? raise)
+    {
+        if (SelectedId is { } id)
+            raise?.Invoke(id);
+    }
+
+    /// <summary>
+    /// Greys what the selected comment can't do, so nothing on the menu only fails.
+    /// </summary>
+    private void OnRowMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        var comment = _list.SelectedItem as CommentRow;
+        var attachment = comment?.Attachment;
+
+        // A file still being processed has no url to fetch from yet, so opening it can't work.
+        _openItem.Enabled = attachment is { Pending: false, CanFetch: true };
+        _detachItem.Enabled = attachment is not null && CanComment;
+        _editItem.Enabled = comment is not null && CanComment;
+        _deleteItem.Enabled = comment is not null && CanComment;
+
+        e.Cancel = comment is null;
+    }
 
     // ---- Drawing --------------------------------------------------------------------------------
 
@@ -350,7 +491,7 @@ internal sealed class CommentsView : UserControl
     private static string MetaOf(CommentRow comment)
     {
         var when = comment.Posted.Length == 0 ? "Not sent yet" : comment.Posted;
-        return comment.AttachmentName is { } file ? $"{when}   📎 {file}" : when;
+        return comment.AttachmentLabel is { } file ? $"{when}   📎 {file}" : when;
     }
 
     /// <summary>
