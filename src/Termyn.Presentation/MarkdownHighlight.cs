@@ -79,7 +79,7 @@ public static class MarkdownHighlight
         .UsePreciseSourceLocation()
         .Build();
 
-    /// <summary>How deep a marker of nested emphasis can be before it stops being worth reading.</summary>
+    /// <summary>The deepest heading there is a style for. Anything below it is drawn as that.</summary>
     private const int MaxHeading = 6;
 
     /// <summary>

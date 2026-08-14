@@ -521,6 +521,27 @@ public class MarkdownViewTests
     }
 
     [Fact]
+    public void Code_maps_to_the_code_and_not_to_the_backtick_in_front_of_it()
+    {
+        // The backticks are written and not drawn, so mapping the whole span would put the first
+        // character of what is on screen onto the marker before it — and every offset into the run
+        // one short of where it was aimed.
+        const string markdown = "Run `dotnet build` first";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("dotnet", StringComparison.Ordinal), SourceOf(view, "dotnet"));
+    }
+
+    [Fact]
+    public void An_angle_bracketed_url_maps_to_the_url_and_not_to_the_bracket()
+    {
+        const string markdown = "See <https://example.com/x> for more";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("https", StringComparison.Ordinal), SourceOf(view, "https"));
+    }
+
+    [Fact]
     public void A_bullet_maps_to_the_item_it_marks_rather_than_to_the_line_before_it()
     {
         // The marker is drawn rather than written, so it belongs to no run of the markdown. Landing

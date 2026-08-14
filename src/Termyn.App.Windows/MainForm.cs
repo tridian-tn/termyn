@@ -240,9 +240,10 @@ internal sealed class MainForm : Form
         };
         _detail.Panel1.Controls.Add(_outline);
 
-        // Both fill the panel and one of them is visible, which is what makes this one pane rather
-        // than two. Added rendering-first so it is the one on top of the z-order and so the one
-        // that shows when the panel is opened.
+        // Both fill the panel and exactly one of them is visible, which is what makes this one pane
+        // rather than two. Which is visible is the only thing deciding what you see — the order
+        // they go in doesn't come into it, since the hidden one draws nothing whichever side of the
+        // other it sits on.
         _detail.Panel2.Controls.Add(_notes);
         _detail.Panel2.Controls.Add(_rendered);
         _detail.SplitterMoved += (_, _) => RememberPanelSizes();

@@ -318,7 +318,13 @@ internal sealed class MarkdownView : RichTextBox
                 break;
 
             case CodeInline code:
-                Write(code.Content, style with { Fixed = true, Muted = true }, newLine: false, from: code.Span);
+                // The span the backticks off it: what is drawn is the content, so an offset into
+                // the drawing has to map to the content and not to the marker in front of it.
+                Write(
+                    code.Content,
+                    style with { Fixed = true, Muted = true },
+                    newLine: false,
+                    from: Inside(code.Span, code.DelimiterCount));
                 break;
 
             case LinkInline link:
@@ -345,7 +351,12 @@ internal sealed class MarkdownView : RichTextBox
                 var bare = auto.IsEmail ? null : Links.External(auto.Url);
                 var opened = TextLength;
 
-                Write(auto.Url, bare is null ? style : style with { Link = true }, newLine: false, from: auto.Span);
+                // Likewise the angle brackets, which are written but not drawn.
+                Write(
+                    auto.Url,
+                    bare is null ? style : style with { Link = true },
+                    newLine: false,
+                    from: Inside(auto.Span, 1));
 
                 if (bare is not null && TextLength > opened)
                     _links.Add((opened, TextLength, bare));
@@ -412,6 +423,22 @@ internal sealed class MarkdownView : RichTextBox
 
         AppendText(newLine ? text + Environment.NewLine : text);
     }
+
+    /// <summary>
+    /// A span with its delimiters taken off each end.
+    /// </summary>
+    /// <remarks>
+    /// For the runs that are drawn without the syntax that produced them — code between backticks,
+    /// a URL between angle brackets. The whole span would map the first character of what is on
+    /// screen to the marker in front of it, so every offset into the run would come out one short.
+    /// </remarks>
+    /// <param name="span">Where the whole thing was written, markers and all</param>
+    /// <param name="delimiter">How many characters of marker sit at each end</param>
+    /// <returns>Where its content was written</returns>
+    private static SourceSpan Inside(SourceSpan span, int delimiter)
+        => span.Length > delimiter * 2
+            ? new SourceSpan(span.Start + delimiter, span.End - delimiter)
+            : span;
 
     /// <summary>The link at a point in the rendered text, or null where there is none.</summary>
     /// <remarks>
