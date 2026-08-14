@@ -159,6 +159,76 @@ public class PromotedIdTests
         Assert.Equal("Renamed", engine.Snapshot().Projects.Single(p => p.Id == "p9").Name);
     }
 
+    // ---- Ids that point at something rather than name it ---------------------------------------
+
+    /// <summary>Creates a project, then lets a sync give it the server's name.</summary>
+    private static async Task<(SyncEngine Engine, string Temp)> PromotedProject(FakeApi api, string real = "p9")
+    {
+        var engine = Engine(api);
+        var temp = engine.AddProject("New project");
+
+        api.Next = cmds => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = real },
+        };
+        await engine.SyncAsync();
+
+        return (engine, temp);
+    }
+
+    [Fact]
+    public async Task A_task_added_to_a_project_by_its_old_name_lands_in_that_project()
+    {
+        // The ids a caller holds are not only the ones it acts on. Make a project, then add a task
+        // to it — the sidebar is still holding the name we gave the project when it was made.
+        var api = new FakeApi();
+        var (engine, temp) = await PromotedProject(api);
+
+        var task = engine.AddItem(new JsonObject { ["content"] = "In the new project", ["project_id"] = temp });
+
+        Assert.Equal("p9", Task(engine, task)?.ProjectId);
+
+        var command = engine.Outbox.Single(c => c.Type == "item_add");
+        Assert.Equal("p9", JsonNode.Parse(command.ArgsJson)!["project_id"]!.ToString());
+    }
+
+    [Fact]
+    public async Task A_section_added_to_a_project_by_its_old_name_lands_in_that_project()
+    {
+        var api = new FakeApi();
+        var (engine, temp) = await PromotedProject(api);
+
+        engine.AddSection("A section", temp);
+
+        var command = engine.Outbox.Single(c => c.Type == "section_add");
+        Assert.Equal("p9", JsonNode.Parse(command.ArgsJson)!["project_id"]!.ToString());
+    }
+
+    [Fact]
+    public async Task A_sub_project_under_a_parent_named_by_us_lands_under_it()
+    {
+        var api = new FakeApi();
+        var (engine, temp) = await PromotedProject(api);
+
+        engine.AddProject("A child", temp);
+
+        var command = engine.Outbox.Single(c => c.Type == "project_add" && JsonNode.Parse(c.ArgsJson)!["parent_id"] is not null);
+        Assert.Equal("p9", JsonNode.Parse(command.ArgsJson)!["parent_id"]!.ToString());
+    }
+
+    [Fact]
+    public async Task Moving_a_task_into_a_project_named_by_us_moves_it_there()
+    {
+        var api = new FakeApi();
+        var (engine, temp) = await PromotedProject(api);
+        var task = engine.AddItem(new JsonObject { ["content"] = "Somewhere else" });
+
+        Assert.True(engine.MoveItemToProject(task, temp));
+        Assert.Equal("p9", Task(engine, task)?.ProjectId);
+    }
+
     // ---- What it still refuses -----------------------------------------------------------------
 
     [Fact]

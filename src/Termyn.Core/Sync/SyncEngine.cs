@@ -522,6 +522,7 @@ public sealed class SyncEngine
             var tempId = "t-" + Guid.NewGuid().ToString("N");
             var args = fields.DeepClone().AsObject();
             args.Remove("id"); // the server assigns the id; temp_id is our handle until it does
+            PromoteReferences(args);
 
             var obj = args.DeepClone().AsObject();
             obj["id"] = tempId;
@@ -956,6 +957,13 @@ public sealed class SyncEngine
     /// </summary>
     private bool MoveTo(string id, string? parentId = null, string? sectionId = null, string? projectId = null)
     {
+        // Where it is going is as likely to have been renamed as the thing going there — indenting
+        // under a task added a moment ago, or moving into a project made in the same session.
+        id = Promoted(id);
+        parentId = parentId is null ? null : Promoted(parentId);
+        sectionId = sectionId is null ? null : Promoted(sectionId);
+        projectId = projectId is null ? null : Promoted(projectId);
+
         if (Model.Get(ResourceType.Items, id) is not { } existing)
             return false;
 
@@ -1034,6 +1042,8 @@ public sealed class SyncEngine
             if (parentId is not null)
                 args["parent_id"] = parentId;
 
+            PromoteReferences(args);
+
             var obj = args.DeepClone().AsObject();
             obj["id"] = tempId;
 
@@ -1082,6 +1092,7 @@ public sealed class SyncEngine
         {
             var tempId = "t-" + Guid.NewGuid().ToString("N");
             var args = new JsonObject { ["name"] = name, ["project_id"] = projectId };
+            PromoteReferences(args);
 
             var obj = args.DeepClone().AsObject();
             obj["id"] = tempId;
@@ -1607,6 +1618,27 @@ public sealed class SyncEngine
     {
         lock (_gate)
             return Promoted(id);
+    }
+
+    /// <summary>
+    /// Puts every reference in some command arguments onto the name its target goes by now.
+    /// </summary>
+    /// <remarks>
+    /// The ids a caller holds aren't only the ones it acts on: creating a task names the project it
+    /// goes in, and creating a section names the project it belongs to. Either can be something
+    /// made here minutes ago and renamed by the server since — and the arguments are cloned into
+    /// the local resource, so a stale one is written down twice and sent once.
+    ///
+    /// Done against the model's own list of reference keys rather than a list of our own, so a
+    /// field added there is covered here without anyone remembering to come back.
+    /// </remarks>
+    private void PromoteReferences(JsonObject args)
+    {
+        foreach (var key in TodoistModel.ReferenceKeys)
+        {
+            if (args[key] is JsonValue value && Promoted(value.ToString()) is var now && now != value.ToString())
+                args[key] = now;
+        }
     }
 
     /// <summary>Notes what the server has named something, dropping the oldest to stay bounded.</summary>
