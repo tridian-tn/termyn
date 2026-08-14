@@ -28,7 +28,6 @@ internal sealed class MarkdownEditor : RichTextBox
     /// <summary>The last text that was styled, so an unchanged one isn't styled again.</summary>
     private string? _styled;
 
-
     /// <summary>True while this control is doing the changing, so it doesn't answer itself.</summary>
     private bool _styling;
 
@@ -247,6 +246,12 @@ internal sealed class MarkdownEditor : RichTextBox
         if (_styling)
             return;
 
+        // Anything else that changed the text took the styling with it — assigning Text replaces
+        // the document with a plain one. So what was last styled is no longer what is on screen,
+        // however alike the two read: two tasks whose descriptions match to the character would
+        // otherwise leave the second one drawn flat.
+        _styled = null;
+
         base.OnTextChanged(e);
     }
 
@@ -278,6 +283,26 @@ internal sealed class MarkdownEditor : RichTextBox
         // Where the caret sits, so the hint reads as text that would be replaced rather than as a
         // label pasted into the corner.
         graphics.DrawString(Placeholder, Font, brush, 1, 1);
+    }
+
+    /// <summary>
+    /// Redraws an empty box when the focus arrives or leaves, since the hint is shown to one of
+    /// those and not the other and the control has no reason of its own to repaint for it.
+    /// </summary>
+    protected override void OnGotFocus(EventArgs e)
+    {
+        base.OnGotFocus(e);
+
+        if (TextLength == 0 && Placeholder.Length > 0)
+            Invalidate();
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        base.OnLostFocus(e);
+
+        if (TextLength == 0 && Placeholder.Length > 0)
+            Invalidate();
     }
 
     /// <summary>Where the box is scrolled to, so styling it can put it back.</summary>

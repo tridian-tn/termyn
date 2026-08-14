@@ -48,6 +48,24 @@ public class MarkdownEditorTests
             SendMessage(editor.Handle, WmChar, c, 0);
     }
 
+
+    [Fact]
+    public void A_task_whose_notes_match_the_last_ones_is_still_drawn()
+    {
+        // Styling is skipped when the text hasn't changed since it was last drawn, which is what
+        // keeps the wait for the typing to stop from restyling a box nobody touched. But assigning
+        // Text replaces the document with a plain one, so "hasn't changed" and "is still styled"
+        // are different questions — and two tasks whose descriptions match to the character used to
+        // leave the second one drawn flat.
+        using var editor = Editing("# A heading");
+        Assert.True(FontAt(editor, "A heading").Bold);
+
+        editor.Text = "# A heading";
+        editor.Restyle();
+
+        Assert.True(FontAt(editor, "A heading").Bold);
+    }
+
     // ---- The text is never touched -------------------------------------------------------------
 
     [Fact]
