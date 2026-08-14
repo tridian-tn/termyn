@@ -1,12 +1,14 @@
 # The notes editor
 
 A task's description is the one place in Termyn where somebody writes more than a line. This records
-what the panel is, why the two-pane arrangement is being taken out, what was considered in its place,
-and what would change the answer.
+what the panel was, why the two-pane arrangement came out, what was tried in its place, and what
+building both candidates showed.
 
-## What it is today
+Both were built rather than reasoned about, and the building changed the answer twice.
 
-The notes panel sits under the outline and is off until you ask for it. Turned on, it splits again:
+## What it was
+
+The notes panel sat under the outline and was off until you asked for it. Turned on, it split again:
 the markdown as it is written on the left, the same markdown rendered on the right.
 
 ```
@@ -19,37 +21,26 @@ the markdown as it is written on the left, the same markdown rendered on the rig
 └───────────────────────────────┴──────────────────────────┘
 ```
 
-- `_notes` — a monospace `TextBox` holding the markdown the account stores.
-- `_rendered` — `MarkdownView`, a read-only `RichTextBox` drawn from the markdown by Markdig. Links
-  are clickable, and hovering one says where it goes.
-- `DescriptionDraft` — which task the box is on and what it was opened with, so a sync arriving
-  mid-sentence can't write over the typing and closing an untouched box can't push a stale copy back.
-- Two idle timers: 300 ms before re-rendering, 5 s before saving.
+## Why it changed
 
-The renderer and the draft are the good parts and are not in question. The arrangement is.
+Four things compounded, and they compounded in the same direction.
 
-## Why it's changing
+**It was the same text twice.** The left half was set in a fixed-width face for no reason except
+that without it the two halves of a description with no formatting in it are identical, and the
+panel looks like it has done nothing. That is a workaround for the arrangement, not a feature of it.
 
-Four things compound, and they compound in the same direction.
+**Both halves were too small.** The panel opens 180 px tall — about nine lines — and the vertical
+split took 320 px off a pane that was already short.
 
-**It's the same text twice.** The left half is set in a fixed-width face for no reason except that
-without it the two halves of a description with no formatting in it are identical, and the panel
-looks like it has done nothing. That is a workaround for the arrangement, not a feature of it.
+**The halves had different powers.** Only the left one took typing. Only the right one had clickable
+links and hover targets. So you worked in one and looked at the other, and the panel was at its
+worst exactly when the notes had something in them worth following.
 
-**Both halves are too small.** The panel opens 180 px tall — about nine lines — and the vertical
-split takes 320 px off a pane that was already short. Neither half is a comfortable place to read,
-and neither is a comfortable place to write.
-
-**The halves have different powers.** Only the left one takes typing. Only the right one has
-clickable links and hover targets. So you work in one and look at the other, and the panel is at its
-worst exactly when the notes have something in them worth following.
-
-**It costs two toggles and no keys.** Show notes and show formatted notes are both menu-only, in an
-app whose whole argument is the keyboard. The second toggle exists only because the first produces a
-split that some people will immediately want back.
+**It cost two toggles and no keys.** Show notes and show formatted notes were both menu-only, in an
+app whose whole argument is the keyboard.
 
 None of this is in the spec. §8 describes the sidebar and the outline and says nothing about a notes
-editor, so nothing here is holding up a written requirement.
+editor.
 
 ## What has to hold
 
@@ -58,102 +49,150 @@ editor, so nothing here is holding up a written requirement.
 | MIT-clean | §8.3 — ObjectListView was rejected over GPLv3 | Any dependency, and everything under it |
 | No third-party UI control library | §3.2 | Taking one is a reversal to be written down, not made quietly |
 | Cold start p95 < 500 ms | §14, and `performance.md` measures 620–760 ms | We're already over. A second native dependency is expensive |
-| Idle working set < 100 MB | §14; measured 17.6 MB | Not the binding constraint — there's room |
 | Edit the source, never a rich model | §6.4 | A rich-text editor serialised back to markdown drops whatever it doesn't model. Styling may be derived; the text may not be |
 | Descriptions cap at 16,383 characters | Todoist | Re-highlighting the whole document is cheap |
 | Core and Presentation stay OS-agnostic | §4.5 | A Windows-only control in `App.Windows` costs nothing portable |
 
-The character limit is the one that quietly decides most of it. At sixteen kilobytes there is no
-incremental-lexing problem to solve, which is most of what an editor engine is for.
+## The thing that decided it
 
-## What was considered
+Both candidates need to know which part of some markdown is a heading, which is a marker, which is
+an address. Writing that **once**, in `Presentation` with no window anywhere near it, turned out to
+be the whole decision — because once the highlighting is shared, the only thing left to compare is
+the control, and the control turns out not to buy much.
 
-**One pane, rendered by default, edit on demand.** The panel shows the rendering. `Enter` or a
-double-click drops into the source with the caret placed; `Esc` goes back and saves. No dependency,
-no mode anybody has to manage, and whatever you are looking at gets the full width. Reading is the
-common case, and reading is where the links are.
+`MarkdownHighlight` reads markdown and returns runs that tile the source exactly: no gaps, no
+overlaps, in order. It reads as a style per character and joins them up, rather than as spans laid
+over each other — markdown nests, and overlapping spans leave the caller to decide which wins.
+Twenty-nine tests, none of which need a control to look at.
 
-**Highlighting the source in place.** In edit mode, style the markdown as it's typed — headings
-larger and bold, `**bold**` drawn bold with its markers muted, code fixed-width, links in the accent
-colour. Markers stay visible; nothing hides. Markdig is already referenced and
-`UsePreciseSourceLocation()` gives exact offsets to style against, the 300 ms idle timer is already
-there, and `Theme` already carries text, muted and accent, so there's no palette to invent.
+## What each candidate then needed
 
-Three known costs, and they're the reason this isn't free:
+### A rich text box drawing its own source
 
-- **Undo.** Setting `SelectionColor` or `SelectionFont` lands on the rich edit control's undo queue,
-  so `Ctrl+Z` un-highlights instead of undoing what was typed. The fix is the Text Object Model:
-  fetch `ITextDocument` with `EM_GETOLEINTERFACE` and wrap each restyle in `Undo(tomSuspend)` /
-  `Undo(tomResume)`. Perhaps forty lines of interop. The other route — `EM_SETUNDOLIMIT` to zero and
-  back — destroys the history it's meant to protect, so it isn't one.
-- **Caret and scroll** have to survive a restyle: save and restore the selection, and the scroll
-  position with `EM_GETSCROLLPOS` / `EM_SETSCROLLPOS`.
-- **Flicker**, which is already solved here — `MarkdownView` turns drawing off around a rebuild with
-  `WM_SETREDRAW` and this would do the same.
+The box shows the markdown, styled from the shared list. Two things had to be built, and both were
+found by building them.
 
-**Scintilla**, which is what the issue suggested. `Scintilla5.NET` is MIT, actively maintained
-(7.0.0, July 2026), has no managed dependencies, and targets `net8.0-windows7.0`, which a
-`net10.0-windows` app consumes fine. It brings a real editor: proper undo, hotspot styles for
-clickable links, proportional fonts with a size per style, find and replace, margins.
+**The control's undo queue can't be used, and the documented way round it does not work.** A rich
+edit control records applying a colour or a font as an undoable action, so a box that highlights
+what you type answers Ctrl+Z by un-highlighting. The documented fix is to suspend the queue through
+the Text Object Model. That was tried, with `ITextDocument` declared far enough down its vtable to
+prove the calls land — `Freeze` answers 1, `Unfreeze` answers 0 — and **the formatting still goes on
+the queue**. Undo #1 removed the bold, undo #2 removed the colour, and the typing was never reached.
 
-What it also brings:
+So the queue is switched off at the source with `EM_SETUNDOLIMIT`, and `NotesHistory` stands in for
+it: one state per pause in the typing, which is the granularity an editor undoes at anyway. 153
+lines, 13 tests, no window.
 
-- A **second native dependency**, in a build that is already outside its cold-start budget. The panel
-  is off by default so the control could be built on first open rather than at startup, but that
-  moves the cost to a moment the user is waiting on rather than removing it. The 70 ms
-  `performance.md` attributes to opening SQLite is the precedent for what a native load costs here.
-- **3.73 MB** of package, into an installer whose whole appeal is that it's a couple of megabytes.
-- **DPI work.** The app is PerMonitorV2. Scintilla handles that in its core, but the host has to
-  forward `WM_DPICHANGED` and rescale margins and extra ascent itself, and there are open reports of
-  DirectWrite rendering blurring under GDI scaling.
-- **Theming by hand**, style index by style index, re-driven whenever the theme changes at runtime.
-- **Accessibility and IME** that differ from a native edit control, since Scintilla draws its own
-  text surface.
-- **A new way for CI to fail.** The `App.Windows` tests realise controls headlessly; a Scintilla
-  control needs its native library loadable in the test host.
-- And the sting: Lexilla's markdown lexer is coarse. Getting headings to look like headings means
-  driving styles from Markdig anyway — at which point the engine has been paid for and the
-  highlighter is still ours.
+**Styling run by run is unusably slow, and the shape of the fix is not the obvious one.** Selecting
+each run and setting its font and colour measured **1,583 ms** for a full-length description — 2,981
+runs, each a round trip that reflows the control. Caching the fonts only took it to 991 ms, because
+the fonts were never the cost. Built instead as one rich text document and handed over in a single
+message it is **18 ms**, and flat: 3 ms at five hundred characters.
 
-**WebView2 or Monaco.** No. §14 sets a 100 MB working set explicitly on the basis of no browser
-engine, and the panel is a notes box.
+| Description length | Run at a time | As one document |
+|---|---|---|
+| 500 chars | 26 ms | 3 ms |
+| 2,000 chars | 114 ms | 12 ms |
+| 8,000 chars | 541 ms | 10 ms |
+| 16,383 chars | 1,583 ms | 18 ms |
 
-**AvalonEdit through `ElementHost`.** MIT and genuinely good, but it drags WPF into a WinForms
-process for its startup cost and its mixed-mode focus and DPI quirks, against a cold-start figure
-that is already the thing we're failing.
+Handing over a whole document means a description becomes document syntax, so the escaping has tests
+of its own — braces, backslashes, tabs, an em dash, Japanese, an emoji, and a note that opens with an
+RTF header. An unescaped brace ends the document early and takes the rest of the note with it.
+
+### Scintilla
+
+`Scintilla5.NET` is MIT, actively maintained (7.0.0, July 2026), has no managed dependencies, and
+targets `net8.0-windows7.0`, which a `net10.0-windows` app consumes fine. The native library loads in
+the headless test host without ceremony, so the CI worry came to nothing.
+
+**Its own markdown lexer can't do the thing that matters most.** Lexilla styles a heading's hash and
+leaves the words as body text, so the heading style lands on one character and a heading cannot be
+drawn larger or bolder than what surrounds it. Three more, each now a test:
+
+- `[ ]` is lexed as the opening of a link, so every box in a checklist — the commonest shape a
+  description takes — is drawn in the link colour with a hand pointer, and then does nothing when
+  clicked. That is exactly the "looks clickable and isn't" the rendered view went out of its way to
+  avoid.
+- Bare URLs are missed in both the plain and the angle-bracket form. The rendered view had tests for
+  both; the angle-bracket one was a bug it had already fixed.
+- A list or a quotation on the very first line is missed entirely. The same text one paragraph down
+  is found.
+
+So the lexer comes off — `LexerName` of null makes the control a container — and the styling comes
+from the shared list through `StyleNeeded`, same as the other candidate. Which is the point: **the
+highlighter is ours either way.**
+
+The incremental lexing that was half the argument mostly doesn't pay either. Scintilla asks only for
+the stretch it needs drawn, but our highlighter parses the whole description to answer, so only the
+styling calls are saved: **5.2 ms against 18 ms**. Both are inside a 300 ms pause.
+
+### Not taken
+
+**WebView2 or Monaco.** §14 sets a 100 MB working set explicitly on the basis of no browser engine.
+
+**AvalonEdit through `ElementHost`.** MIT and good, but it drags WPF into a WinForms process for its
+startup cost and its mixed-mode focus and DPI quirks, against a cold start already failing.
+
+## What it costs, measured
+
+| | Rich text box | Scintilla |
+|---|---|---|
+| Extra production code | 459 lines | 238 lines |
+| Undo | hand-rolled, 13 tests | free, untouched by styling |
+| Published output | **5.3 MB** | **14.9 MB** |
+| First control creation | nil | 66–90 ms warm, 282 ms cold |
+| Styling a full description | 18 ms | 5.2 ms |
+| DPI | inherited from WinForms | needs `WM_DPICHANGED` forwarding and margin rescaling — not built |
+| Theming | one assignment | every style index by hand |
+| Rendered reading view | kept | gone |
+
+The size is worse than the library: the package ships x86, x64 **and** arm64 native pairs under
+`runtimes/` plus a flattened copy beside the executable, so about 4.6 MB of the increase is native
+code for architectures this build doesn't target. Prunable, but somebody has to prune it.
 
 ## What's decided
 
-**One pane, in two steps, and no new dependency.**
+**One pane, and the rich text box.**
 
-First the arrangement: collapse the notes panel to a single pane showing the rendering, `Enter` or a
-double-click to edit, `Esc` back. A click on a link still follows it rather than entering edit mode,
-so nothing about the link behaviour changes. The panel toggle gets a key. `showPreview` and
-`previewWidth` retire — the settings reader takes each key by name with a default and keeps ones it
-doesn't know, so an existing `config.json` degrades to the new default rather than to nothing.
+The panel is a single pane showing the rendering. `Enter`, `F2` or a double-click opens the markdown
+to type into, with the caret where the reading was pointing; `Escape` or the focus leaving puts it
+back and saves. A single click still selects and still follows a link. A task with no notes opens
+ready to write. `Ctrl+E` opens and closes the panel; `showPreview` and `previewWidth` retire.
 
-Then the highlighting, inside that same pane, driven from Markdig.
-
-Splitting it that way is deliberate: the first step is what removes the complaint, and it costs
-nothing and risks nothing. The second is what the issue asked for, and it carries all the risk. They
-don't have to land together, and the first shouldn't wait for the second.
-
-Scintilla is held in reserve rather than ruled out. The expensive parts of an editor engine —
-incremental lexing, large files, folding — buy nothing at sixteen kilobytes, and everything else it
-would give us costs DPI work, theming work, a native library and an installer that's four megabytes
-heavier.
+With the highlighting identical, Scintilla buys exactly one thing that matters: undo that styling
+can't corrupt, worth 153 lines and 13 tests. Against that it costs 9.7 MB, a native load on first
+open, DPI work still unbuilt, theming by hand, its own text surface for screen readers and IME, and
+the rendered reading view. 153 lines of portable, tested logic is the cheaper side of that by a wide
+margin, and §3.2 stands unamended.
 
 ## What would change it
 
-**The undo handling not working.** That's the load-bearing risk in highlighting a `RichTextBox`, and
-it's a bounded thing to find out — suspend and resume around one restyle and type into it. If the
-Text Object Model route doesn't hold, Scintilla becomes the right answer and §3.2 gets an honest
-amendment alongside §8.3's entry on ObjectListView.
+The three conditions this note first named have now been tested, and all three resolved differently
+from the guess — which is the argument for having built both rather than choosing on paper.
 
-**Descriptions getting much bigger.** Whole-document restyling on every pause is fine at sixteen
-kilobytes because sixteen kilobytes is small. If Todoist ever raises that ceiling by an order of
-magnitude, the incremental lexer stops being something we're declining and starts being something we
-need.
+**Descriptions getting much bigger.** Still live. Whole-document restyling is fine at sixteen
+kilobytes because sixteen kilobytes is small. An order of magnitude more and the incremental lexer
+stops being something we're declining and starts being something we need.
 
 **Wanting an editor rather than a notes box** — find and replace, multiple carets, folding. Nothing
-asks for that today, and a task description is not the place it would be asked for first.
+asks for that today.
+
+**The undo behaviour changing.** If a future rich edit honoured `Undo(tomSuspend)`, `NotesHistory`
+could go. Not something to wait for, and the 153 lines are portable in a way the control isn't.
+
+## What running it turned up
+
+Both builds were run against a real account, which found two faults no test would have:
+
+- **[#39](https://github.com/tridian-tn/termyn/issues/39)** — the outline keeps its selection by
+  index, so a sync that reorders rows retargets the notes panel mid-edit and the description saves
+  to a task nobody selected. It cost a real description to find. `DescriptionDraft` defends the text
+  against a sync and the target moves out from under it.
+- **[#40](https://github.com/tridian-tn/termyn/issues/40)** — a malformed cache throws out of
+  `SqliteSnapshotStore`'s constructor and the window never appears. A cache should be rebuilt, not
+  fatal.
+
+And one thing about the account rather than the app: **Todoist rewrites a bare URL into a titled
+markdown link server-side**. A description can come back from a sync differently from how it was
+sent, which is worth knowing wherever a draft is compared against what was saved.
