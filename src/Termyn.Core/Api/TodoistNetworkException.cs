@@ -10,6 +10,23 @@ public class TodoistNetworkException : Exception
         : base(message, innerException)
     {
     }
+
+    /// <param name="status">The status Todoist answered with, when it answered at all</param>
+    public TodoistNetworkException(string message, int status, Exception? innerException = null)
+        : base(message, innerException) => Status = status;
+
+    /// <summary>
+    /// The HTTP status Todoist answered with, or null when nothing answered.
+    /// </summary>
+    /// <remarks>
+    /// The difference between "there is no connection" and "the server is having trouble", which
+    /// look the same to a caller reading only the type. It matters to anything that has to tell the
+    /// user what to do next: the first comes back on its own, the second may not.
+    /// </remarks>
+    public int? Status { get; }
+
+    /// <summary>Whether nothing answered at all — no connection, or a request that timed out.</summary>
+    public bool Unreachable => Status is null;
 }
 
 /// <summary>

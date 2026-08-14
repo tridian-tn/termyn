@@ -249,9 +249,14 @@ public sealed class TodoistApiClient : ITodoistApi
         using var deadline = Deadline(ct);
 
         using var form = new MultipartFormDataContent();
-        using var file = new StreamContent(content);
+
+        // Two parts, and the names matter: the bytes go under "file", and the name Todoist should
+        // store it as goes under "file_name" as a field of its own. Putting the bytes under
+        // "file_name" reads as a form with no file part in it at all.
+        var file = new StreamContent(content);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-        form.Add(file, "file_name", fileName);
+        form.Add(file, "file", fileName);
+        form.Add(new StringContent(fileName), "file_name");
 
         using var req = new HttpRequestMessage(HttpMethod.Post, UploadUrl) { Content = form };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -373,7 +378,7 @@ public sealed class TodoistApiClient : ITodoistApi
         if (resp.StatusCode is HttpStatusCode.TooManyRequests)
             throw new TodoistRateLimitException("Todoist is rate-limiting this account.", RetryAfter(resp));
 
-        throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.");
+        throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.", (int)resp.StatusCode);
     }
 
     /// <summary>

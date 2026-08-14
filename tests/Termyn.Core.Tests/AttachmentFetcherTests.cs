@@ -112,6 +112,19 @@ public sealed class AttachmentFetcherTests : IDisposable
     }
 
     [Fact]
+    public async Task A_server_that_answered_and_said_no_is_not_reported_as_being_offline()
+    {
+        // "You're offline, it'll be there later" is simply untrue when the connection is fine and
+        // Todoist returned a 500 — and it tells the user to wait for something that won't happen.
+        _api.TransferThrow = new TodoistNetworkException("Todoist returned HTTP 500.", 500);
+
+        var result = await Fetcher().FetchAsync(File());
+
+        Assert.Equal(FetchOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain("back online", result.Message);
+    }
+
+    [Fact]
     public async Task A_file_the_server_is_still_processing_is_not_fetched_at_all()
     {
         var result = await Fetcher().FetchAsync(File(pending: true));

@@ -104,12 +104,20 @@ public sealed class AttachmentFetcher
             _cache.Abandon(path);
             return new FetchResult(FetchOutcome.Cancelled);
         }
-        catch (TodoistNetworkException)
+        catch (TodoistNetworkException ex)
         {
             _cache.Abandon(path);
-            return new FetchResult(
-                FetchOutcome.Offline,
-                Message: $"{attachment.FileName} hasn't been downloaded, and Todoist can't be reached. It'll be there to try again when you're back online.");
+
+            // Told apart deliberately. Nothing answering is the ordinary offline case, and it comes
+            // back on its own when the connection does. A server that answered and said no is a
+            // different thing to tell the user, and "you're offline" would be untrue.
+            return ex.Unreachable
+                ? new FetchResult(
+                    FetchOutcome.Offline,
+                    Message: $"{attachment.FileName} hasn't been downloaded, and Todoist can't be reached. It'll be there to try again when you're back online.")
+                : new FetchResult(
+                    FetchOutcome.Failed,
+                    Message: $"Todoist wouldn't hand over {attachment.FileName}. {ex.Message}");
         }
         catch (TodoistAuthException)
         {

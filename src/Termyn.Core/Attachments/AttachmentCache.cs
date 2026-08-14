@@ -110,8 +110,20 @@ public sealed class AttachmentCache
 
         // Written beside and moved into place, so a download that fails or is cancelled part-way
         // can't leave a truncated file that later looks like a hit.
+        //
+        // Opened for real asynchronous writing: the download awaits every block, and a handle
+        // without it turns each of those into blocking work on a pool thread for as long as a
+        // hundred-megabyte file takes.
         var partial = path + ".part";
-        return (new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None), path);
+        var stream = new FileStream(
+            partial,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 81920,
+            useAsync: true);
+
+        return (stream, path);
     }
 
     /// <summary>Puts a finished download in place of any earlier copy.</summary>
