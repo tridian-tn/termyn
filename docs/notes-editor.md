@@ -92,9 +92,9 @@ Three known costs, and they're the reason this isn't free:
   `WM_SETREDRAW` and this would do the same.
 
 **Scintilla**, which is what the issue suggested. `Scintilla5.NET` is MIT, actively maintained
-(7.0.0, July 2026), has no managed dependencies, and targets `net8.0-windows7.0`, which a `net10`
-app consumes fine. It brings a real editor: proper undo, hotspot styles for clickable links,
-proportional fonts with a size per style, find and replace, margins.
+(7.0.0, July 2026), has no managed dependencies, and targets `net8.0-windows7.0`, which a
+`net10.0-windows` app consumes fine. It brings a real editor: proper undo, hotspot styles for
+clickable links, proportional fonts with a size per style, find and replace, margins.
 
 What it also brings:
 
