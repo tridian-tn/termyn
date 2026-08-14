@@ -60,7 +60,7 @@ internal sealed class MainForm : Form
     private readonly SplitContainer _detail;
 
     /// <summary>The task's description, in the markdown the account stores it as.</summary>
-    private readonly TextBox _notes;
+    private readonly MarkdownEditor _notes;
 
     /// <summary>The same description, rendered.</summary>
     private readonly MarkdownView _rendered;
@@ -78,6 +78,15 @@ internal sealed class MainForm : Form
 
     /// <summary>Which task the notes box is on and what it was opened with.</summary>
     private readonly DescriptionDraft _draft = new();
+
+    /// <summary>
+    /// What the notes box said, so Ctrl+Z can put it back.
+    /// </summary>
+    /// <remarks>
+    /// Ours because the control's own queue can't be used once the text is highlighted: applying a
+    /// colour is recorded on it as an action, so Ctrl+Z would un-highlight rather than undo.
+    /// </remarks>
+    private readonly NotesHistory _history = new();
 
     /// <summary>
     /// Holds the rendering back until the typing stops. Re-parsing and re-styling on every
@@ -201,23 +210,14 @@ internal sealed class MainForm : Form
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
 
-        _notes = new TextBox
+        _notes = new MarkdownEditor
         {
             Dock = DockStyle.Fill,
-            Multiline = true,
-            AcceptsReturn = true,
-            WordWrap = true,
-            ScrollBars = ScrollBars.Vertical,
-            PlaceholderText = "Notes…  **bold**  *italic*  - a list",
+            Placeholder = "Notes…  **bold**  *italic*  - a list",
 
             // Until a task is selected there is nowhere for anything typed here to go. Set on the
             // way in because the selection has never changed at this point, so nothing else does.
             ReadOnly = true,
-
-            // Fixed-width, so the half you write in doesn't read as the half you read from. With
-            // both in the same face a description with no formatting in it is the same text twice,
-            // and the panel looks like it has done nothing.
-            Font = new Font(FontFamily.GenericMonospace, Font.Size),
         };
         _notes.TextChanged += OnNotesChanged;
         _notes.KeyDown += OnNotesKeyDown;
@@ -252,11 +252,22 @@ internal sealed class MainForm : Form
         // take the focus while nothing on screen showed it had.
         _notes.Visible = false;
 
+        // One pause, two things that wait for it: the rendering when the panel is reading, and the
+        // highlighting and the undo state when it is being typed into.
         _renderIdle = new System.Windows.Forms.Timer { Interval = 300 };
         _renderIdle.Tick += (_, _) =>
         {
             _renderIdle.Stop();
-            RenderNotes();
+
+            if (_writingNotes)
+            {
+                _notes.Restyle();
+                _history.Record(_notes.Text, _notes.SelectionStart);
+            }
+            else
+            {
+                RenderNotes();
+            }
         };
 
         // Long enough that it isn't saving mid-sentence, short enough that walking away from a
@@ -612,6 +623,7 @@ internal sealed class MainForm : Form
         _theme.Apply(this);
         _outline.Theme = _theme;
         _rendered.Theme = _theme;
+        _notes.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
@@ -1169,9 +1181,14 @@ internal sealed class MainForm : Form
         _notes.TextChanged -= OnNotesChanged;
         try
         {
-            // Paired on the way in. A text box draws a bare newline as nothing at all, so a
-            // description written on the web arrived here as one unbroken run of words.
-            _notes.Text = text.ReplaceLineEndings(Environment.NewLine);
+            // A rich edit control holds a line ending as the single newline the account stores,
+            // so what goes in is what came out of the account and the offsets agree throughout.
+            _notes.Text = text;
+            _notes.Restyle();
+
+            // Nothing before this belongs to this task. Without it, Ctrl+Z on a note you have just
+            // opened replaces it with the previous task's.
+            _history.Reset(text);
         }
         finally
         {
@@ -1210,6 +1227,11 @@ internal sealed class MainForm : Form
         _notes.Visible = writing;
         _rendered.Visible = !writing;
 
+        // Anything typed while the panel was reading — which is nothing, but also anything the
+        // theme changed under it — is drawn before the box is looked at.
+        if (writing)
+            _notes.Restyle();
+
         // Nothing was drawn into the rendering while the markdown was on top of it, so coming back
         // to it is one of the ways it can be out of date.
         if (!writing)
@@ -1233,9 +1255,9 @@ internal sealed class MainForm : Form
         SetNotesMode(writing: true, focus: true);
 
         // Straight through, with no arithmetic on the line endings: the rendering is drawn from
-        // this box's own text, carriage returns and all, so an offset into the markdown behind it
-        // is already an offset into the box. An edit control counts a line ending as the two
-        // characters it holds, which is what makes those the same number.
+        // this box's own text, and a rich edit control holds a line ending as the single newline
+        // the account stores it as — so an offset into the markdown is already an offset into the
+        // box, and both agree with what gets saved.
         _notes.SelectionStart = Math.Clamp(source, 0, _notes.TextLength);
         _notes.SelectionLength = 0;
         _notes.ScrollToCaret();
@@ -1254,14 +1276,64 @@ internal sealed class MainForm : Form
     {
         // Back to reading, the way Escape leaves every other thing you are part-way through here.
         // The outline's own Escape does nothing, so this doesn't take a keystroke off anything.
-        if (e.KeyCode != Keys.Escape)
+        if (e.KeyCode == Keys.Escape)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+
+            StopWriting();
+            _rendered.Focus();
+            return;
+        }
+
+        // Ours rather than the control's, whose queue is switched off — see NotesHistory for why.
+        // Ctrl+Z is bound to the task-level undo with the outline focused, and that is a different
+        // scope from this one, so neither takes the other's keystroke.
+        if (e.Control && e.KeyCode == Keys.Z && !e.Shift)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            PutNotesBack(_history.Undo(_notes.Text, _notes.SelectionStart));
+            return;
+        }
+
+        if (e.Control && (e.KeyCode == Keys.Y || (e.KeyCode == Keys.Z && e.Shift)))
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            PutNotesBack(_history.Redo());
+        }
+    }
+
+    /// <summary>Puts an undone or redone state back into the box.</summary>
+    /// <param name="state">What the box said, or null when there was nothing to go back to</param>
+    private void PutNotesBack(NotesHistory.Snapshot? state)
+    {
+        if (state is not { } snapshot)
             return;
 
-        e.Handled = true;
-        e.SuppressKeyPress = true;
+        _notes.TextChanged -= OnNotesChanged;
+        try
+        {
+            _notes.Text = snapshot.Text;
+            _notes.Restyle();
 
-        StopWriting();
-        _rendered.Focus();
+            // Where the edit was, not where the caret happened to be. Undoing to the top of a long
+            // description and leaving the caret at the bottom of it reads as a broken undo even
+            // when the text is right.
+            _notes.SelectionStart = Math.Clamp(snapshot.Caret, 0, _notes.TextLength);
+            _notes.SelectionLength = 0;
+            _notes.ScrollToCaret();
+        }
+        finally
+        {
+            _notes.TextChanged += OnNotesChanged;
+        }
+
+        // An undo is an edit like any other as far as the account is concerned, and the handler
+        // that would have said so was unhooked while this happened.
+        _saveIdle.Stop();
+        _saveIdle.Start();
     }
 
     /// <summary>Follows a link out of the notes.</summary>

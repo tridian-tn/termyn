@@ -1,0 +1,306 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Termyn.Core.Settings;
+using Termyn.Presentation;
+
+namespace Termyn.App.Windows.Tests;
+
+/// <summary>
+/// The box you type a description into. Styling a run means selecting it, and a selection needs a
+/// window behind it — so each of these realises the control without ever showing it.
+/// </summary>
+public class MarkdownEditorTests
+{
+    private const int WmChar = 0x0102;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+
+    private static MarkdownEditor Editing(string markdown)
+    {
+        var editor = new MarkdownEditor { Theme = Theme.Resolve(ThemePreference.Light) };
+        editor.CreateControl();
+        editor.Text = markdown;
+        editor.Restyle();
+        return editor;
+    }
+
+    /// <summary>The font a stretch of the source is drawn in.</summary>
+    private static Font FontAt(MarkdownEditor editor, string needle)
+    {
+        var at = editor.Text.IndexOf(needle, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"'{needle}' is not in the box: {editor.Text}");
+
+        editor.Select(at, needle.Length);
+        return editor.SelectionFont!;
+    }
+
+    private static Color ColourAt(MarkdownEditor editor, string needle)
+    {
+        FontAt(editor, needle);
+        return editor.SelectionColor;
+    }
+
+    /// <summary>Types into the control the way a keyboard does, rather than by assigning text.</summary>
+    private static void Type(MarkdownEditor editor, string text)
+    {
+        foreach (var c in text)
+            SendMessage(editor.Handle, WmChar, c, 0);
+    }
+
+    // ---- The text is never touched -------------------------------------------------------------
+
+    [Fact]
+    public void Styling_changes_how_the_markdown_looks_and_not_what_it_says()
+    {
+        // The whole basis of drawing the source rather than a rendering of it: what is on screen is
+        // what gets saved, character for character, however it is painted.
+        const string markdown = "# A heading\n\nSome **bold**, `code`, [a link](https://example.com)\n\n- [ ] a box";
+        using var editor = Editing(markdown);
+
+        Assert.Equal(markdown, editor.Text);
+
+        editor.Restyle();
+        editor.Restyle();
+
+        Assert.Equal(markdown, editor.Text);
+    }
+
+    [Fact]
+    public void The_markers_stay_on_screen()
+    {
+        // A box whose text rearranges itself as you type is worse than one that doesn't. The
+        // asterisks are part of what is being written and they stay where they were written.
+        using var editor = Editing("Some **bold** here");
+
+        Assert.Contains("**", editor.Text);
+    }
+
+    [Theory]
+    [InlineData(@"A brace } in the middle and a { too")]
+    [InlineData(@"A backslash \ and a \\ pair")]
+    [InlineData(@"Braces around {everything} at once")]
+    [InlineData("An em dash — and a résumé and 日本語")]
+    [InlineData("An emoji 🎉 in a note")]
+    [InlineData("A tab\tbetween words")]
+    [InlineData(@"{\rtf1 pretending to be a document}")]
+    public void A_description_that_looks_like_the_document_format_survives_being_drawn(string markdown)
+    {
+        // The styling writes a rich text document and hands it over whole, so a description is
+        // account data going into a format with syntax of its own. A brace left alone would end
+        // the document early and take the rest of the note with it; anything above ASCII would
+        // arrive as mojibake. Both are what a pasted note is full of.
+        using var editor = Editing(markdown);
+
+        Assert.Equal(markdown, editor.Text);
+
+        // And again, since what comes back out is what the next restyle reads.
+        editor.Text = markdown + " more";
+        editor.Restyle();
+
+        Assert.Equal(markdown + " more", editor.Text);
+    }
+
+    [Fact]
+    public void The_line_endings_the_account_stores_come_back_as_they_went_in()
+    {
+        // The offsets the rendered view hands over are into this text, and what gets saved is this
+        // text. A line ending that grew a carriage return on the way through would move every
+        // offset after it and write a different description back to the account on each round trip.
+        const string markdown = "first line\nsecond line\n\nafter a gap";
+        using var editor = Editing(markdown);
+
+        Assert.Equal(markdown, editor.Text);
+    }
+
+    // ---- What it draws -------------------------------------------------------------------------
+
+    [Fact]
+    public void A_headings_words_are_larger_and_bold_and_its_hash_is_quiet()
+    {
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var editor = Editing("# A heading\n\nbody text");
+
+        var heading = FontAt(editor, "A heading");
+        var body = FontAt(editor, "body text");
+
+        Assert.True(heading.Bold);
+        Assert.True(heading.Size > body.Size, $"heading {heading.Size} should beat body {body.Size}");
+        Assert.False(body.Bold);
+
+        Assert.Equal(theme.Muted, ColourAt(editor, "#"));
+    }
+
+    [Fact]
+    public void Each_heading_level_is_smaller_than_the_one_above_it()
+    {
+        using var editor = Editing("# one\n\n## two\n\n### three\n\nbody");
+
+        Assert.True(FontAt(editor, "one").Size > FontAt(editor, "two").Size);
+        Assert.True(FontAt(editor, "two").Size > FontAt(editor, "three").Size);
+        Assert.True(FontAt(editor, "three").Size > FontAt(editor, "body").Size);
+    }
+
+    [Fact]
+    public void Bold_is_bold_and_italic_is_italic_and_struck_is_struck()
+    {
+        using var editor = Editing("Some **bold** and *italic* and ~~struck~~ here");
+
+        Assert.True(FontAt(editor, "bold").Bold);
+        Assert.True(FontAt(editor, "italic").Italic);
+        Assert.True(FontAt(editor, "struck").Strikeout);
+        Assert.False(FontAt(editor, "Some").Bold);
+    }
+
+    [Fact]
+    public void A_links_words_are_coloured_and_its_address_is_not()
+    {
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var editor = Editing("See [the docs](https://example.com/path) now");
+
+        Assert.Equal(theme.Accent, ColourAt(editor, "the docs"));
+        Assert.Equal(theme.Muted, ColourAt(editor, "https://example.com/path"));
+        Assert.NotEqual(theme.Accent, ColourAt(editor, "See"));
+    }
+
+    [Fact]
+    public void A_checkbox_is_not_drawn_as_a_link()
+    {
+        // The shape a description most often takes. Drawn as a link it is a page of things that
+        // look clickable and aren't.
+        var theme = Theme.Resolve(ThemePreference.Light);
+        using var editor = Editing("- [ ] still to do");
+
+        Assert.NotEqual(theme.Accent, ColourAt(editor, "[ ]"));
+    }
+
+    [Fact]
+    public void Code_is_set_in_a_fixed_width_face()
+    {
+        using var editor = Editing("Run `dotnet build` first");
+
+        Assert.Equal(FontFamily.GenericMonospace.Name, FontAt(editor, "dotnet build").FontFamily.Name);
+        Assert.NotEqual(FontFamily.GenericMonospace.Name, FontAt(editor, "Run").FontFamily.Name);
+    }
+
+    [Fact]
+    public void Taking_the_markers_off_takes_the_boldness_with_them()
+    {
+        // Styling paints over what was there before rather than adding to it. Without the reset,
+        // deleting the asterisks either side of a word leaves the word bold for ever.
+        using var editor = Editing("Some **bold** here");
+        Assert.True(FontAt(editor, "bold").Bold);
+
+        editor.Text = "Some bold here";
+        editor.Restyle();
+
+        Assert.False(FontAt(editor, "bold").Bold);
+    }
+
+    [Fact]
+    public void Changing_the_theme_redraws_what_is_already_in_the_box()
+    {
+        using var editor = Editing("See [the docs](https://example.com) now");
+
+        editor.Theme = Theme.Resolve(ThemePreference.Dark);
+
+        Assert.Equal(Theme.Resolve(ThemePreference.Dark).Accent, ColourAt(editor, "the docs"));
+    }
+
+    // ---- Undo, which is the reason any of this is hand-rolled ----------------------------------
+
+    [Fact]
+    public void The_controls_own_undo_queue_is_switched_off()
+    {
+        // The measured fact this whole design turns on: a rich edit control records applying a
+        // colour or a font as an undoable action, and the Text Object Model's documented way of
+        // suspending that does not work. Left on, Ctrl+Z answers by un-highlighting.
+        using var editor = Editing(string.Empty);
+
+        Type(editor, "some **bold** words");
+        editor.Restyle();
+
+        Assert.False(editor.CanUndo);
+
+        // And it stays off — nothing turns it back on by touching the text.
+        editor.Undo();
+
+        Assert.Equal("some **bold** words", editor.Text);
+        Assert.True(FontAt(editor, "bold").Bold);
+    }
+
+    // ---- Not losing the user's place -----------------------------------------------------------
+
+    [Fact]
+    public void The_caret_is_where_it_was_after_a_restyle()
+    {
+        // It runs on a pause in the typing, which is to say while the user is sitting in the box.
+        using var editor = Editing("Some **bold** and more words after it");
+
+        editor.SelectionStart = 20;
+        editor.SelectionLength = 0;
+        editor.Text += " and more still";
+        editor.SelectionStart = 20;
+
+        editor.Restyle();
+
+        Assert.Equal(20, editor.SelectionStart);
+        Assert.Equal(0, editor.SelectionLength);
+    }
+
+    [Fact]
+    public void A_selection_is_still_selected_after_a_restyle()
+    {
+        using var editor = Editing("Some **bold** and more words after it");
+
+        editor.Select(5, 8);
+        editor.Restyle();
+
+        // Forced, since the text hasn't changed and an unchanged one isn't styled again.
+        editor.Text += "!";
+        editor.Select(5, 8);
+        editor.Restyle();
+
+        Assert.Equal(5, editor.SelectionStart);
+        Assert.Equal(8, editor.SelectionLength);
+    }
+
+    // ---- Not falling over, and not being slow ---------------------------------------------------
+
+    [Fact]
+    public void Markdown_nested_past_what_the_parser_will_take_is_still_shown()
+    {
+        // A description arrives by sync, so this is reachable without anyone having typed it here.
+        using var editor = Editing(new string('>', 200) + " still here");
+
+        Assert.Contains("still here", editor.Text);
+    }
+
+    [Fact]
+    public void A_description_at_its_full_length_is_styled_faster_than_a_pause()
+    {
+        // It runs 300 ms after the typing stops, in the box the user is working in, so what it
+        // must not be is noticeable. Generous by design — this is a regression gate rather than a
+        // benchmark, and it runs on whatever the build agent happens to be.
+        var big = string.Concat(Enumerable.Repeat("Some **bold** and a [link](https://example.com) here.\n\n", 400))[..16_383];
+
+        using var editor = Editing(string.Empty);
+        editor.Text = big;
+
+        // Warmed first, so this measures the styling rather than the first use of everything under
+        // it. Unwarmed reads several times slower, which is how the write-visible figure in
+        // performance.md was first misread.
+        editor.Restyle();
+        editor.Text = big + " ";
+
+        var clock = Stopwatch.StartNew();
+        editor.Restyle();
+        clock.Stop();
+
+        // Measured at 18 ms for the full sixteen thousand characters, against 1,583 ms for the
+        // same thing applied a run at a time. The gate is loose because it runs on whatever the
+        // build agent happens to be; what it is guarding against is a return to the run-at-a-time
+        // shape, which was two orders of magnitude away rather than a few per cent.
+        Assert.True(clock.ElapsedMilliseconds < 300, $"styling a full description took {clock.ElapsedMilliseconds} ms");
+    }
+}
