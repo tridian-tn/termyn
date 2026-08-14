@@ -4,7 +4,9 @@ A task's description is the one place in Termyn where somebody writes more than 
 what the panel was, why the two-pane arrangement came out, what was tried in its place, and what
 building both candidates showed.
 
-Both were built rather than reasoned about, and the building changed the answer twice.
+Both were built rather than reasoned about, and the building changed the answer twice. One claim in
+an earlier revision — that Lexilla's lexer cannot draw a heading — was simply wrong, and is corrected
+below; it was a property left unset rather than a limit of the lexer.
 
 ## What it was
 
@@ -106,22 +108,32 @@ RTF header. An unescaped brace ends the document early and takes the rest of the
 targets `net8.0-windows7.0`, which a `net10.0-windows` app consumes fine. The native library loads in
 the headless test host without ceremony, so the CI worry came to nothing.
 
-**Its own markdown lexer can't do the thing that matters most.** Lexilla styles a heading's hash and
-leaves the words as body text, so the heading style lands on one character and a heading cannot be
-drawn larger or bolder than what surrounds it. Three more, each now a test:
+**Its own markdown lexer wants configuring, and then has three defects on ordinary descriptions.**
+
+By default Lexilla styles a heading's hash and leaves the words as body text. That is a setting
+rather than a limit: `lexer.markdown.header.eolfill` fills the style to the end of the line, and with
+it on a heading is a heading. The property isn't returned by `PropertyNames()`, so it doesn't turn up
+by asking the lexer what it takes — it turns up by reading `LexMarkdown.cxx`. An earlier revision of
+this note had it as a limit and was wrong.
+
+What survives configuring:
 
 - `[ ]` is lexed as the opening of a link, so every box in a checklist — the commonest shape a
   description takes — is drawn in the link colour with a hand pointer, and then does nothing when
   clicked. That is exactly the "looks clickable and isn't" the rendered view went out of its way to
   avoid.
 - Bare URLs are missed in both the plain and the angle-bracket form. The rendered view had tests for
-  both; the angle-bracket one was a bug it had already fixed.
-- A list or a quotation on the very first line is missed entirely. The same text one paragraph down
-  is found.
+  both; the angle-bracket one was a bug it had already fixed. People paste these far more often than
+  they write a link.
+- A list or a quotation on the very first line of a description is missed entirely — the same text
+  one paragraph down is found. Descriptions that open with a list are not an edge case. Headings
+  don't share this.
 
-So the lexer comes off — `LexerName` of null makes the control a container — and the styling comes
-from the shared list through `StyleNeeded`, same as the other candidate. Which is the point: **the
-highlighter is ours either way.**
+Each of those is a common shape drawn wrongly rather than an exotic one drawn imperfectly, and none
+is a setting. Fixing any of them means taking the lexer off — `LexerName` of null makes the control a
+container — and styling from the shared list through `StyleNeeded`. Which is the point: **the
+highlighter ends up being ours either way**, though by a narrower margin than this note first
+claimed.
 
 The incremental lexing that was half the argument mostly doesn't pay either. Scintilla asks only for
 the stretch it needs drawn, but our highlighter parses the whole description to answer, so only the
@@ -160,11 +172,20 @@ to type into, with the caret where the reading was pointing; `Escape` or the foc
 back and saves. A single click still selects and still follows a link. A task with no notes opens
 ready to write. `Ctrl+E` opens and closes the panel; `showPreview` and `previewWidth` retire.
 
-With the highlighting identical, Scintilla buys exactly one thing that matters: undo that styling
-can't corrupt, worth 153 lines and 13 tests. Against that it costs 9.7 MB, a native load on first
-open, DPI work still unbuilt, theming by hand, its own text surface for screen readers and IME, and
-the rendered reading view. 153 lines of portable, tested logic is the cheaper side of that by a wide
-margin, and §3.2 stands unamended.
+The case turns on how much of the highlighting the control can be left to do. Configured, Lexilla
+does most of it — but not checklists, not bare URLs, and not a list or quotation opening a
+description, which between them cover a lot of what people actually write. Fixing those means
+supplying the styling anyway, and once it is supplied the control is being bought for one thing:
+undo that styling can't corrupt, worth 153 lines and 13 tests.
+
+Against that it costs 9.7 MB, a native load on first open, DPI work still unbuilt, theming by hand,
+its own text surface for screen readers and IME, and the rendered reading view. 153 lines of
+portable, tested logic is the cheaper side of that, and §3.2 stands unamended.
+
+It is a narrower call than it looked before the lexer was configured properly. Somebody willing to
+live with checkboxes drawn as links and bare URLs drawn as prose could have the highlighting for
+almost no code — that is a real option, and it is being declined on what it draws wrongly rather
+than on what it cannot draw.
 
 ## What would change it
 
