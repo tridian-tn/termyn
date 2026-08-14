@@ -10,7 +10,7 @@ using Markdig.Syntax.Inlines;
 namespace Termyn.App.Windows;
 
 /// <summary>
-/// A description as it reads rather than as it is written — the rendered half of the notes panel.
+/// A description as it reads rather than as it is written — the rendered half of the panel.
 /// </summary>
 /// <remarks>
 /// Read-only, and deliberately: the text the account holds is what gets saved, so nothing here can
@@ -63,7 +63,7 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     private readonly List<(int Start, int Length, int Source, int SourceLength)> _sources = [];
 
-    /// <summary>Raised when the user asks to type into the notes, with where in the markdown.</summary>
+    /// <summary>Raised when the user asks to type into the description, with where in the markdown.</summary>
     public event Action<int>? EditRequested;
 
     /// <summary>Shows where a link goes before it is followed.</summary>
@@ -75,7 +75,7 @@ internal sealed class MarkdownView : RichTextBox
     /// <summary>The link the left button went down on, so a drag can't end by following one.</summary>
     private string? _pressedOn;
 
-    /// <summary>Raised when a link in the notes is clicked, with the address it points at.</summary>
+    /// <summary>Raised when a link in the description is clicked, with the address it points at.</summary>
     public event Action<string>? LinkOpened;
 
     public MarkdownView()
@@ -479,7 +479,7 @@ internal sealed class MarkdownView : RichTextBox
         SelectionFont = new Font(family, Font.Size * (1f + style.Larger), font);
         // Muted throughout when the pane can't be typed into, which is the only cue that carries in
         // both themes: the recessed background is a couple of units in the light one and invisible.
-        // Links keep their colour — a completed task's notes are still worth following out of, and
+        // Links keep their colour — a completed task's description is still worth following out of, and
         // drawing them dead while they still work is the mirror of the mistake being avoided here.
         SelectionColor = style.Link ? Theme.Accent
             : _inert || style.Muted ? Theme.Muted
@@ -575,7 +575,7 @@ internal sealed class MarkdownView : RichTextBox
 
         // And the tip says where it goes. The rendering shows a link's words rather than its
         // address, so nothing on screen otherwise contradicts words that claim to be one address
-        // while pointing at another — which is a thing notes shared through an account can do.
+        // while pointing at another — which is a thing a description shared through an account can do.
         if (url != _shownTip)
         {
             _shownTip = url;
@@ -594,7 +594,7 @@ internal sealed class MarkdownView : RichTextBox
     protected override void OnMouseUp(MouseEventArgs e)
     {
         // The same link the press landed on. The box is read-only but still selectable, so dragging
-        // a passage out of the notes ends on a mouse-up that would otherwise open whatever it
+        // a passage out of the description ends on a mouse-up that would otherwise open whatever it
         // finished over — copying a quotation would launch a browser.
         if (e.Button == MouseButtons.Left && _pressedOn is { } url && LinkUnder(e.Location) == url)
             LinkOpened?.Invoke(url);
@@ -607,7 +607,7 @@ internal sealed class MarkdownView : RichTextBox
     /// Draws the line explaining an empty pane, over the top of what the control has just painted.
     /// </summary>
     /// <remarks>
-    /// Only when there is nothing else here: a completed task's notes are shown and can't be
+    /// Only when there is nothing else here: a completed task's description is shown and can't be
     /// edited, and there is no room to say so over the top of them. The recessed background is what
     /// carries it in that case.
     /// </remarks>
@@ -625,7 +625,7 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>
-    /// Asks to type into the notes, at the character that was double-clicked.
+    /// Asks to type into the description, at the character that was double-clicked.
     /// </summary>
     /// <remarks>
     /// Not on a single click. The box is selectable, so one click is how a passage gets picked out
@@ -642,7 +642,7 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>
-    /// Asks to type into the notes, at wherever the caret is sitting.
+    /// Asks to type into the description, at wherever the caret is sitting.
     /// </summary>
     /// <remarks>
     /// Enter and F2, which are what the outline already answers to for editing the thing under the

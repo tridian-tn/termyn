@@ -3,8 +3,8 @@ using Termyn.Core.Settings;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// The rendered half of the notes panel. Styling a run means selecting it, and a selection needs a
-/// window behind it — so each of these realises the control without ever showing it.
+/// The rendered half of the description panel. Styling a run means selecting it, and a selection
+/// needs a window behind it — so each of these realises the control without ever showing it.
 /// </summary>
 public class MarkdownViewTests
 {
@@ -191,7 +191,7 @@ public class MarkdownViewTests
     public void A_link_that_is_not_a_web_address_is_not_offered_as_one()
     {
         // A description syncs from an account and gets pasted into from anywhere. A scheme that
-        // means "open this document" or "run this" is not something a note gets to ask for.
+        // means "open this document" or "run this" is not something a description gets to ask for.
         using var view = Render("[a file](file:///C:/Windows/System32/cmd.exe) and [a script](javascript:alert(1))");
 
         Assert.Null(view.LinkAt(view.Text.IndexOf("a file", StringComparison.Ordinal)));
@@ -265,7 +265,7 @@ public class MarkdownViewTests
     [Fact]
     public void Markdown_nested_past_what_the_parser_will_take_still_shows_its_words()
     {
-        // The parser refuses this by throwing, and a description arrives by sync — so a note
+        // The parser refuses this by throwing, and a description arrives by sync — so a description
         // written on another device could take the window down on the next publish, with the box
         // that would let you fix it being the thing that threw.
         using var view = Render(new string('>', 200) + " still here");
@@ -289,7 +289,7 @@ public class MarkdownViewTests
     public void A_pasted_block_of_html_shows_its_words_rather_than_disappearing()
     {
         // A leaf rather than a container, so it matched nothing and its text was dropped whole —
-        // and a blank preview reads as a task with no notes on it.
+        // and a blank preview reads as a task with no description on it.
         using var view = Render("<div class=\"x\">something worth reading</div>\n\nand after it");
 
         Assert.Contains("something worth reading", view.Text);
@@ -383,9 +383,9 @@ public class MarkdownViewTests
     [Fact]
     public void Moving_to_another_task_replaces_what_was_there()
     {
-        using var view = Render("The first task's notes");
+        using var view = Render("The first task's description");
 
-        view.Markdown = "The second task's notes";
+        view.Markdown = "The second task's description";
 
         Assert.DoesNotContain("first", view.Text);
         Assert.Contains("second", view.Text);
@@ -510,7 +510,7 @@ public class MarkdownViewTests
     public void A_word_in_the_rendering_knows_where_it_was_written()
     {
         // What puts the caret where the user was pointing when they ask to type. Without it the
-        // only honest answer is the top of the description, and a click halfway down a note is
+        // only honest answer is the top of the description, and a click halfway down a description is
         // then a click that scrolls you away from what you were reading.
         const string markdown = "Some **bold** text";
         using var view = Render(markdown);
@@ -594,7 +594,7 @@ public class MarkdownViewTests
     {
         // Clicking in the empty space below a short description. The end is where a caret goes when
         // there is nothing under the pointer, since that is where more of it would be written.
-        const string markdown = "a short note";
+        const string markdown = "a short description";
         using var view = Render(markdown);
 
         Assert.Equal(markdown.Length, view.SourceAt(view.TextLength + 500));
@@ -640,7 +640,7 @@ public class MarkdownViewTests
         // that has the focus hands the focus to the outline, where space ticks a task off. So this
         // is the only thing on screen saying it won't take any typing.
         var theme = Theme.Resolve(ThemePreference.Light);
-        using var view = Render("some notes");
+        using var view = Render("some description");
 
         Assert.Equal(theme.Panel, view.BackColor);
 
@@ -654,7 +654,7 @@ public class MarkdownViewTests
     public void Coming_back_into_use_looks_like_the_pane_it_was()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
-        using var view = Render("some notes");
+        using var view = Render("some description");
         view.Inert = true;
 
         view.Inert = false;
@@ -667,7 +667,7 @@ public class MarkdownViewTests
     {
         // The theme pass runs over every control in the window and would otherwise put the pane
         // back to its ordinary colour while it is still refusing to be typed into.
-        using var view = Render("some notes");
+        using var view = Render("some description");
         view.Inert = true;
 
         view.Theme = Theme.Resolve(ThemePreference.Dark);
@@ -692,9 +692,9 @@ public class MarkdownViewTests
     {
         using var view = Render(string.Empty);
 
-        view.Placeholder = "Select a task to see its notes.";
+        view.Placeholder = "Select a task to see its description.";
 
-        Assert.Equal("Select a task to see its notes.", view.Placeholder);
+        Assert.Equal("Select a task to see its description.", view.Placeholder);
         Assert.Equal(string.Empty, view.Text.Trim());
     }
 
@@ -704,19 +704,19 @@ public class MarkdownViewTests
         // The cue that actually carries. The recessed background is two units in the light palette
         // and invisible on screen, so what says "this can't be typed into" is the text itself.
         var theme = Theme.Resolve(ThemePreference.Light);
-        using var view = Render("some notes here");
+        using var view = Render("some description here");
 
-        Assert.Equal(theme.Text, ColourAt(view, "some notes"));
+        Assert.Equal(theme.Text, ColourAt(view, "some description"));
 
         view.Inert = true;
 
-        Assert.Equal(theme.Muted, ColourAt(view, "some notes"));
+        Assert.Equal(theme.Muted, ColourAt(view, "some description"));
     }
 
     [Fact]
     public void An_inert_panes_links_keep_their_colour()
     {
-        // A completed task's notes are still worth following out of, and drawing a link dead while
+        // A completed task's description are still worth following out of, and drawing a link dead while
         // it still works is the mirror of the mistake this is here to avoid.
         var theme = Theme.Resolve(ThemePreference.Light);
         using var view = Render("See [the docs](https://example.com) now");
@@ -731,11 +731,11 @@ public class MarkdownViewTests
     public void Coming_back_into_use_puts_the_words_back()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
-        using var view = Render("some notes here");
+        using var view = Render("some description here");
         view.Inert = true;
 
         view.Inert = false;
 
-        Assert.Equal(theme.Text, ColourAt(view, "some notes"));
+        Assert.Equal(theme.Text, ColourAt(view, "some description"));
     }
 }

@@ -130,7 +130,7 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void How_the_notes_panel_was_left_comes_back()
+    public void How_the_description_panel_was_left_comes_back()
     {
         // Written by the serialiser and read by hand, so a field added to one and not the other is
         // a setting that saves and never loads.
@@ -151,7 +151,7 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void The_notes_panel_starts_closed()
+    public void The_description_panel_starts_closed()
     {
         // One more thing on screen for someone who doesn't use descriptions, so it is asked for
         // rather than arrived at.
@@ -159,7 +159,7 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void A_config_from_when_the_notes_panel_was_split_still_loads()
+    public void A_config_from_when_the_description_panel_was_split_still_loads()
     {
         // The panel used to be two panes down a splitter, and wrote a flag and a width for the
         // second of them. Both are gone, and a file still carrying them is a file every existing
@@ -177,7 +177,7 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void The_keys_the_split_notes_panel_wrote_are_kept_rather_than_dropped()
+    public void The_keys_the_split_description_panel_wrote_are_kept_rather_than_dropped()
     {
         // Unknown keys survive a write, and these are now unknown. Kept for the same reason any
         // other unrecognised key is: this build is not the only thing that has ever written here,

@@ -1,8 +1,8 @@
 namespace Termyn.Core.Tests;
 
 /// <summary>
-/// Links out of a task's own notes, which unlike Termyn's own may point anywhere on the web — and
-/// so are held to the one thing that still matters when the host can't be.
+/// Links out of a task's own description, which unlike Termyn's own may point anywhere on the web
+/// — and so are held to the one thing that still matters when the host can't be.
 /// </summary>
 public class ExternalLinkTests
 {
@@ -35,9 +35,9 @@ public class ExternalLinkTests
     public void A_host_that_is_not_the_host_it_reads_as_is_refused(string url)
     {
         // Everything before the @ is discarded by the browser, so the address goes to what follows
-        // it while reading as what precedes it — and the notes this comes out of are written by
+        // it while reading as what precedes it — and the description this comes out of are written by
         // whoever shares the project. The credentials form is refused with it: those have no
-        // business in a browser's history, and nothing legitimate in a note needs them.
+        // business in a browser's history, and nothing legitimate in a description needs them.
         Assert.Null(Links.External(url));
     }
 
@@ -59,7 +59,7 @@ public class ExternalLinkTests
     }
 
     [Fact]
-    public void The_notes_are_held_to_a_different_rule_from_Termyns_own_links()
+    public void The_description_is_held_to_a_different_rule_from_Termyns_own_links()
     {
         // Openable answers "is this one of ours" against a list of three places, which a link
         // someone wrote in a description will never be. External asks only whether it is a page.

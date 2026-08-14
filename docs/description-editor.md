@@ -1,4 +1,4 @@
-# The notes editor
+# The description editor
 
 A task's description is the one place in Termyn where somebody writes more than a line. This records
 what the panel was, why the two-pane arrangement came out, what was tried in its place, and what
@@ -10,7 +10,7 @@ below; it was a property left unset rather than a limit of the lexer.
 
 ## What it was
 
-The notes panel sat under the outline and was off until you asked for it. Turned on, it split again:
+The description panel sat under the outline and was off until you asked for it. Turned on, it split again:
 the markdown as it is written on the left, the same markdown rendered on the right.
 
 ```
@@ -36,13 +36,13 @@ split took 320 px off a pane that was already short.
 
 **The halves had different powers.** Only the left one took typing. Only the right one had clickable
 links and hover targets. So you worked in one and looked at the other, and the panel was at its
-worst exactly when the notes had something in them worth following.
+worst exactly when the description had something in it worth following.
 
-**It cost two toggles and no keys.** Show notes and show formatted notes were both menu-only, in an
-app whose whole argument is the keyboard.
+**It cost two toggles and no keys.** Show description and show formatted description were both
+menu-only, in an app whose whole argument is the keyboard.
 
-None of this is in the spec. §8 describes the sidebar and the outline and says nothing about a notes
-editor.
+None of this is in the spec. §8 describes the sidebar and the outline and says nothing about a
+description editor.
 
 ## What has to hold
 
@@ -81,7 +81,7 @@ the Text Object Model. That was tried, with `ITextDocument` declared far enough 
 prove the calls land — `Freeze` answers 1, `Unfreeze` answers 0 — and **the formatting still goes on
 the queue**. Undo #1 removed the bold, undo #2 removed the colour, and the typing was never reached.
 
-So the queue is switched off at the source with `EM_SETUNDOLIMIT`, and `NotesHistory` stands in for
+So the queue is switched off at the source with `EM_SETUNDOLIMIT`, and `DescriptionHistory` stands in for
 it: one state per pause in the typing, which is the granularity an editor undoes at anyway. 153
 lines, 13 tests, no window.
 
@@ -99,8 +99,8 @@ message it is **18 ms**, and flat: 3 ms at five hundred characters.
 | 16,383 chars | 1,583 ms | 18 ms |
 
 Handing over a whole document means a description becomes document syntax, so the escaping has tests
-of its own — braces, backslashes, tabs, an em dash, Japanese, an emoji, and a note that opens with an
-RTF header. An unescaped brace ends the document early and takes the rest of the note with it.
+of its own — braces, backslashes, tabs, an em dash, Japanese, an emoji, and a description that opens with an
+RTF header. An unescaped brace ends the document early and takes the rest of the description with it.
 
 ### Scintilla
 
@@ -169,7 +169,7 @@ code for architectures this build doesn't target. Prunable, but somebody has to 
 
 The panel is a single pane showing the rendering. `Enter`, `F2` or a double-click opens the markdown
 to type into, with the caret where the reading was pointing; `Escape` or the focus leaving puts it
-back and saves. A single click still selects and still follows a link. A task with no notes opens
+back and saves. A single click still selects and still follows a link. A task with no description opens
 ready to write. `Ctrl+E` opens and closes the panel; `showPreview` and `previewWidth` retire.
 
 The case turns on how much of the highlighting the control can be left to do. Configured, Lexilla
@@ -196,10 +196,10 @@ from the guess — which is the argument for having built both rather than choos
 kilobytes because sixteen kilobytes is small. An order of magnitude more and the incremental lexer
 stops being something we're declining and starts being something we need.
 
-**Wanting an editor rather than a notes box** — find and replace, multiple carets, folding. Nothing
+**Wanting an editor rather than a description box** — find and replace, multiple carets, folding. Nothing
 asks for that today.
 
-**The undo behaviour changing.** If a future rich edit honoured `Undo(tomSuspend)`, `NotesHistory`
+**The undo behaviour changing.** If a future rich edit honoured `Undo(tomSuspend)`, `DescriptionHistory`
 could go. Not something to wait for, and the 153 lines are portable in a way the control isn't.
 
 ## What running it turned up
@@ -207,7 +207,7 @@ could go. Not something to wait for, and the 153 lines are portable in a way the
 Both builds were run against a real account, which found two faults no test would have:
 
 - **[#39](https://github.com/tridian-tn/termyn/issues/39)** — the outline keeps its selection by
-  index, so a sync that reorders rows retargets the notes panel mid-edit and the description saves
+  index, so a sync that reorders rows retargets the description panel mid-edit and the description saves
   to a task nobody selected. It cost a real description to find. `DescriptionDraft` defends the text
   against a sync and the target moves out from under it.
 - **[#40](https://github.com/tridian-tn/termyn/issues/40)** — a malformed cache throws out of

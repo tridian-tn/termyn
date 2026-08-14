@@ -50,7 +50,7 @@ public class MarkdownEditorTests
 
 
     [Fact]
-    public void A_task_whose_notes_match_the_last_ones_is_still_drawn()
+    public void A_task_whose_description_matches_the_last_one_is_still_drawn()
     {
         // Styling is skipped when the text hasn't changed since it was last drawn, which is what
         // keeps the wait for the typing to stop from restyling a box nobody touched. But assigning
@@ -99,15 +99,15 @@ public class MarkdownEditorTests
     [InlineData(@"A backslash \ and a \\ pair")]
     [InlineData(@"Braces around {everything} at once")]
     [InlineData("An em dash — and a résumé and 日本語")]
-    [InlineData("An emoji 🎉 in a note")]
+    [InlineData("An emoji 🎉 in a description")]
     [InlineData("A tab\tbetween words")]
     [InlineData(@"{\rtf1 pretending to be a document}")]
     public void A_description_that_looks_like_the_document_format_survives_being_drawn(string markdown)
     {
         // The styling writes a rich text document and hands it over whole, so a description is
         // account data going into a format with syntax of its own. A brace left alone would end
-        // the document early and take the rest of the note with it; anything above ASCII would
-        // arrive as mojibake. Both are what a pasted note is full of.
+        // the document early and take the rest of the description with it; anything above ASCII would
+        // arrive as mojibake. Both are what a pasted description is full of.
         using var editor = Editing(markdown);
 
         Assert.Equal(markdown, editor.Text);

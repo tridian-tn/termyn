@@ -7,8 +7,8 @@ public sealed class TaskItem
     public required string Content { get; init; }
 
     /// <summary>
-    /// The notes under the task. Markdown, as the account stores it — Todoist's own editor is a
-    /// rich-text skin over the same text, so what arrives here is the source and not a rendering
+    /// The description under the task. Markdown, as the account stores it — Todoist's own editor
+    /// is a rich-text skin over the same text, so what arrives here is the source and not a rendering
     /// of it.
     /// </summary>
     public string Description { get; init; } = string.Empty;
