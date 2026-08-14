@@ -24,6 +24,22 @@ public sealed class DescriptionDraft
         Opened = Normalised(description);
     }
 
+    /// <summary>
+    /// Follows the task the box is on to a new name, keeping everything else where it is.
+    /// </summary>
+    /// <remarks>
+    /// Not the same as opening on it again. A task created a moment ago is renamed when the sync
+    /// learns what the server calls it, and the box may be part-way through a sentence at the time
+    /// — reopening would replace what is being typed with what the account holds, which is nothing
+    /// yet. The text, and whether it is dirty, are unaffected: only the address changed.
+    /// </remarks>
+    /// <param name="taskId">What that same task is called now</param>
+    public void Retarget(string taskId)
+    {
+        if (TaskId is not null)
+            TaskId = taskId;
+    }
+
     /// <summary>Whether what is in the box differs from what went into it.</summary>
     public bool IsDirty(string current) => TaskId is not null && Normalised(current) != Opened;
 

@@ -1593,6 +1593,22 @@ public sealed class SyncEngine
     /// <returns>The id the model knows the resource by</returns>
     private string Promoted(string id) => _promoted.GetValueOrDefault(id, id);
 
+    /// <summary>
+    /// What a resource is called now, for a caller that has to recognise it rather than act on it.
+    /// </summary>
+    /// <remarks>
+    /// The methods that do something take care of this themselves. This is for the window, which
+    /// has to be able to tell "the task you were on has been renamed" from "the task you were on
+    /// has gone" — they look identical from the outside and want opposite responses.
+    /// </remarks>
+    /// <param name="id">An id a caller is holding</param>
+    /// <returns>The id the resource is known by now, or the same one when nothing renamed it</returns>
+    public string Resolve(string id)
+    {
+        lock (_gate)
+            return Promoted(id);
+    }
+
     /// <summary>Notes what the server has named something, dropping the oldest to stay bounded.</summary>
     private void Remember(string temp, string real)
     {

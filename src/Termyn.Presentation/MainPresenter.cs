@@ -584,6 +584,18 @@ public sealed class MainPresenter
     public bool HasTask(string? id) => id is not null && _engine.Holds(id);
 
     /// <summary>
+    /// What a task is called now, given what it was called when the caller took hold of it.
+    /// </summary>
+    /// <remarks>
+    /// A task created here carries a name of our own until a sync fetches the server's, and every
+    /// view holding the old one has to be able to tell that rename from a deletion. Answers with
+    /// what it was given when nothing has renamed it, so a caller can compare without asking first.
+    /// </remarks>
+    /// <param name="id">An id a view is holding</param>
+    /// <returns>The id that task goes by now</returns>
+    public string CurrentIdOf(string id) => _engine.Resolve(id);
+
+    /// <summary>
     /// The reminders on a task: the ones tied to its due date first, longest warning to shortest,
     /// then the ones set for a moment of their own.
     /// </summary>
