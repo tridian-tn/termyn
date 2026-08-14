@@ -716,7 +716,7 @@ public class MarkdownViewTests
     [Fact]
     public void An_inert_panes_links_keep_their_colour()
     {
-        // A completed task's description are still worth following out of, and drawing a link dead while
+        // A completed task's description is still worth following out of, and drawing a link dead while
         // it still works is the mirror of the mistake this is here to avoid.
         var theme = Theme.Resolve(ThemePreference.Light);
         using var view = Render("See [the docs](https://example.com) now");

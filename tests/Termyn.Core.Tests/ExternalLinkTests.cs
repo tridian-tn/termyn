@@ -35,7 +35,7 @@ public class ExternalLinkTests
     public void A_host_that_is_not_the_host_it_reads_as_is_refused(string url)
     {
         // Everything before the @ is discarded by the browser, so the address goes to what follows
-        // it while reading as what precedes it — and the description this comes out of are written by
+        // it while reading as what precedes it — and the description this comes out of is written by
         // whoever shares the project. The credentials form is refused with it: those have no
         // business in a browser's history, and nothing legitimate in a description needs them.
         Assert.Null(Links.External(url));
