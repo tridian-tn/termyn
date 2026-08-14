@@ -58,7 +58,7 @@ public static class Links
     }
 
     /// <summary>
-    /// A link out of the user's own notes, in the form to open it in.
+    /// A link out of the user's own description, in the form to open it in.
     /// </summary>
     /// <remarks>
     /// A different question from <see cref="Openable"/>, which asks whether a link is one of
@@ -69,7 +69,7 @@ public static class Links
     /// description is text that arrives from an account, gets pasted into from anywhere, and syncs
     /// between machines; it does not get to say "run this".
     /// </remarks>
-    /// <param name="url">A link written in a task's notes</param>
+    /// <param name="url">A link written in a task's description</param>
     /// <returns>The parsed and normalised URL, or null when it isn't a web address</returns>
     public static string? External(string? url)
     {
@@ -83,7 +83,7 @@ public static class Links
 
         // A host that isn't the host it reads as. "https://app.todoist.com@evil.example/x" goes to
         // evil.example while reading as Todoist to anyone who doesn't parse URLs for a living, and
-        // the notes this comes from are written by whoever shares the project. Credentials get
+        // the description this comes from is written by whoever shares the project. Credentials get
         // refused with it, which is the other thing this component is used for and not something to
         // hand to a browser's address bar and history.
         if (!string.IsNullOrEmpty(uri.UserInfo))

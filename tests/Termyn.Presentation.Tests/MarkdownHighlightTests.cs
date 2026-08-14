@@ -227,7 +227,7 @@ public class MarkdownHighlightTests
     [Fact]
     public void Markdown_nested_past_what_the_parser_will_take_is_left_plain()
     {
-        // The parser refuses this by throwing, and a description arrives by sync — so a note
+        // The parser refuses this by throwing, and a description arrives by sync — so a description
         // written on another device must not be able to take the window down. Unhighlighted is a
         // fine answer.
         var runs = MarkdownHighlight.Runs(new string('>', 200) + " still here");

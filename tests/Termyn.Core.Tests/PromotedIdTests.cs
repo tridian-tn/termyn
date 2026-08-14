@@ -11,12 +11,12 @@ namespace Termyn.Core.Tests;
 /// </summary>
 /// <remarks>
 /// A task created here is named by us until a sync fetches the server's name for it, and that name
-/// is what everything is holding in the meantime — the notes box, the outline, an open dialog. The
-/// rename used to be the end of them: the model no longer held that id, so an edit arriving against
-/// one found no such task and was dropped without a word or a queued command.
+/// is what everything is holding in the meantime — the description box, the outline, an open
+/// dialog. The rename used to be the end of them: the model no longer held that id, so an edit
+/// arriving against one found no such task and was dropped without a word or a queued command.
 ///
-/// The shape of it is ordinary. Quick-add a task, start writing its description, and the sync lands
-/// while you type.
+/// The shape of it is ordinary. Quick-add a task, start writing its description, and the sync
+/// lands while you type.
 /// </remarks>
 public class PromotedIdTests
 {
@@ -101,7 +101,7 @@ public class PromotedIdTests
     [Fact]
     public async Task Asking_about_it_by_the_old_name_still_finds_it()
     {
-        // What the window asks before it will let you type into the notes at all. Answering no left
+        // What the window asks before it will let you type into the description at all. Answering no left
         // the box read-only on a task that was perfectly editable.
         var api = new FakeApi();
         var (engine, temp) = await Promoted(api);

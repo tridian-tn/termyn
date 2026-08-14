@@ -106,10 +106,10 @@ public sealed class SyncEngine
     /// </summary>
     /// <remarks>
     /// A task created here is named by us until a sync gets the server's name for it, and that name
-    /// is what callers are holding in the meantime — the notes box has it, the outline has it, an
-    /// open dialog has it. Renaming the resource and forgetting the old name would leave every one
-    /// of them pointing at nothing, and an edit arriving against one would find no such task and be
-    /// dropped without a word. So the old name goes on answering.
+    /// is what callers are holding in the meantime — the description box has it, the outline has
+    /// it, an open dialog has it. Renaming the resource and forgetting the old name would leave
+    /// every one of them pointing at nothing, and an edit arriving against one would find no such
+    /// task and be dropped without a word. So the old name goes on answering.
     /// </remarks>
     private readonly Dictionary<string, string> _promoted = [];
 
@@ -850,8 +850,8 @@ public sealed class SyncEngine
     }
 
     /// <summary>
-    /// The notes on a task, or empty when it has none — and when the model has never heard of it,
-    /// which is the same answer as far as anything showing them is concerned.
+    /// The description on a task, or empty when it has none — and when the model has never heard
+    /// of it, which is the same answer as far as anything showing them is concerned.
     /// </summary>
     /// <remarks>
     /// Asked for one task rather than carried on every row: a description runs to thousands of
@@ -866,7 +866,7 @@ public sealed class SyncEngine
 
             // The completed ones fetched from the archive are held apart from the live model, and
             // they are selectable in the outline like anything else — so looking only at the model
-            // showed a blank where a task had notes, which reads as "this task has none".
+            // showed a blank where a task had a description, which reads as "this task has none".
             var json = Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id);
             return json is not null ? Projections.ToTaskItem(json).Description : string.Empty;
         }

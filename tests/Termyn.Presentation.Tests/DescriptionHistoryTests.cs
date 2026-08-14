@@ -3,15 +3,16 @@ using Termyn.Presentation;
 namespace Termyn.Presentation.Tests;
 
 /// <summary>
-/// The notes box's undo, which is ours because the control's own can't be used once the text is
-/// highlighted. Typed at in the plain: no window, no control, just what it said and what comes back.
+/// The description box's undo, which is ours because the control's own can't be used once the text
+/// is highlighted. Typed at in the plain: no window, no control, just what it said and what comes
+/// back.
 /// </summary>
-public class NotesHistoryTests
+public class DescriptionHistoryTests
 {
     /// <summary>Types a series of pauses into a fresh history, as the idle timer would.</summary>
-    private static NotesHistory After(string opened, params string[] pauses)
+    private static DescriptionHistory After(string opened, params string[] pauses)
     {
-        var history = new NotesHistory();
+        var history = new DescriptionHistory();
         history.Reset(opened);
 
         foreach (var text in pauses)
@@ -21,14 +22,14 @@ public class NotesHistoryTests
     }
 
     [Fact]
-    public void A_freshly_opened_note_has_nothing_behind_it()
+    public void A_freshly_opened_description_has_nothing_behind_it()
     {
         // The one that matters most: without it, Ctrl+Z on a task you have just clicked replaces
         // its description with the previous task's — an edit nobody made, saved on the next pause.
-        var history = After("the notes of this task");
+        var history = After("the description of this task");
 
         Assert.False(history.CanUndo);
-        Assert.Null(history.Undo("the notes of this task", 0));
+        Assert.Null(history.Undo("the description of this task", 0));
     }
 
     [Fact]
@@ -68,7 +69,7 @@ public class NotesHistoryTests
     {
         // Undoing to the top of a long description and leaving the caret at the bottom of it is
         // the kind of thing that makes an undo feel broken even when the text is right.
-        var history = new NotesHistory();
+        var history = new DescriptionHistory();
         history.Reset("a description with some length to it");
         history.Record("a description with MORE length to it", 23);
         history.Record("a description with MORE length to it, and more", 46);
@@ -133,7 +134,7 @@ public class NotesHistoryTests
     {
         // Reset comes from the box being filled, and Record from the typing. They arrive in that
         // order every time except the once that matters.
-        var history = new NotesHistory();
+        var history = new DescriptionHistory();
 
         history.Record("typed into a box nobody opened", 30);
 
@@ -157,7 +158,7 @@ public class NotesHistoryTests
     [Fact]
     public void A_long_session_of_edits_keeps_only_so_many()
     {
-        var history = new NotesHistory();
+        var history = new DescriptionHistory();
         history.Reset("0");
 
         for (var i = 1; i <= 500; i++)
@@ -178,7 +179,7 @@ public class NotesHistoryTests
         // Sixteen thousand characters is what a description can hold, and a hundred of those would
         // be well over a megabyte kept against a box the user has walked away from.
         var big = new string('x', 16_383);
-        var history = new NotesHistory();
+        var history = new DescriptionHistory();
         history.Reset(big);
 
         for (var i = 0; i < 100; i++)

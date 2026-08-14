@@ -8,13 +8,13 @@ using Termyn.TestSupport;
 
 namespace Termyn.Presentation.Tests;
 
-/// <summary>Reading and writing the notes on a task.</summary>
+/// <summary>Reading and writing the description on a task.</summary>
 public class DescriptionTests
 {
     private static readonly DateOnly Today = new(2026, 7, 31);
 
     [Fact]
-    public void The_notes_on_a_task_are_the_markdown_the_account_holds()
+    public void The_description_on_a_task_is_the_markdown_the_account_holds()
     {
         // Markdown, not a rendering of it: Todoist's own editor is a rich-text skin over the same
         // text, and what arrives here is the source.
@@ -24,7 +24,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void A_task_with_no_notes_has_empty_ones_rather_than_none()
+    public void A_task_with_no_description_has_an_empty_one_rather_than_none()
     {
         var store = new InMemorySnapshotStore();
         store.PutResource("items", "i1", """{"id":"i1","content":"Bare","project_id":"p"}""");
@@ -33,14 +33,14 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void A_task_the_account_no_longer_holds_has_empty_notes()
+    public void A_task_the_account_no_longer_holds_has_an_empty_description()
     {
         Assert.Equal(string.Empty, Seeded("Anything").DescriptionOf("gone"));
         Assert.Equal(string.Empty, Seeded("Anything").DescriptionOf(null));
     }
 
     [Fact]
-    public void Writing_the_notes_queues_the_edit_and_shows_it_at_once()
+    public void Writing_the_description_queues_the_edit_and_shows_it_at_once()
     {
         var presenter = Seeded("Before");
 
@@ -50,7 +50,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Writing_the_notes_queues_one_field_and_no_others()
+    public void Writing_the_description_queues_one_field_and_no_others()
     {
         // The name of the test above claims a queued command; reading the description back only
         // proves the local copy moved. This is the half that reaches the account — and a command
@@ -74,7 +74,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Writing_the_notes_changes_nothing_else_about_the_task()
+    public void Writing_the_description_changes_nothing_else_about_the_task()
     {
         // A patch, not a replacement: the update carries one field, and everything the row shows
         // has to come through it untouched.
@@ -87,7 +87,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Notes_survive_the_task_being_deleted_and_undone()
+    public void A_description_survives_the_task_being_deleted_and_undone()
     {
         // Undo recreates the task from what was held before it went, and the description is one of
         // the fields that may be sent back — so it has to still be there afterwards.
@@ -100,7 +100,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Saving_the_notes_over_and_over_leaves_nothing_to_undo()
+    public void Saving_the_description_over_and_over_leaves_nothing_to_undo()
     {
         // This is what makes an idle save safe to repeat. An item_update records nothing on the
         // undo stack — only a completion or a delete does — so a long editing session can't fill
@@ -133,8 +133,8 @@ public class DescriptionTests
     public void Undoing_a_completion_undoes_the_completion_and_not_the_afternoon()
     {
         // Ctrl+Z after ticking a task off means "I didn't mean to tick that off", not "put the
-        // task back to whatever it was at that moment". Notes written after the tick are a later
-        // intention with nothing to do with it, and undo used to take them with it.
+        // task back to whatever it was at that moment". A description written after the tick is a
+        // later intention with nothing to do with it, and undo used to take it with it.
         var presenter = Seeded("Before");
         presenter.Complete("i1");
         presenter.SetDescription("i1", "Written after it was ticked off");
@@ -146,10 +146,10 @@ public class DescriptionTests
     }
 
     [Fact]
-    public async Task A_completed_task_pulled_out_of_the_archive_still_shows_its_notes()
+    public async Task A_completed_task_pulled_out_of_the_archive_still_shows_its_description()
     {
         // Those are held apart from the live model, which is all the lookup used to consult — so a
-        // completed task with notes on it showed a blank box, which reads as having none.
+        // completed task with a description on it showed a blank box, which reads as having none.
         var done = Json.Change(
             "items",
             "c1",
@@ -180,7 +180,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Writing_notes_to_a_task_the_account_no_longer_holds_queues_nothing()
+    public void Writing_a_description_to_a_task_the_account_no_longer_holds_queues_nothing()
     {
         // The path taken when the selected row disappears mid-edit: the save runs before the box is
         // reopened on whatever is selected now.
@@ -193,7 +193,7 @@ public class DescriptionTests
     }
 
     [Fact]
-    public void Notes_are_not_carried_on_every_row()
+    public void Descriptions_are_not_carried_on_every_row()
     {
         // Deliberate: a description runs to thousands of characters, only the selected task's is
         // ever on screen, and the outline projects every row on every publish.

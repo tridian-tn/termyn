@@ -117,7 +117,7 @@ public class OutlineSelectionTests
         // A task quick-added a moment ago is called t-… until the sync learns the server's name for
         // it. Without something that knows the two are the same task, the rows come back with the
         // new name, the old one is nowhere, and the row reads as deleted — the selection is dropped
-        // and the notes panel blanks under whoever is typing into it.
+        // and the description panel blanks under whoever is typing into it.
         using var view = Outline();
         view.Renamed = id => id == "t-abc" ? "9001" : id;
         view.Rows = [Row("t-abc"), Row("a"), Row("b")];

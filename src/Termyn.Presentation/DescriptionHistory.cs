@@ -1,7 +1,7 @@
 namespace Termyn.Presentation;
 
 /// <summary>
-/// What the notes box said, so that Ctrl+Z can put it back.
+/// What the description box said, so that Ctrl+Z can put it back.
 /// </summary>
 /// <remarks>
 /// Windows' rich edit control has an undo queue of its own, and it cannot be used here: applying a
@@ -14,7 +14,7 @@ namespace Termyn.Presentation;
 /// window because it is a rule about text and not about drawing: it is the same behaviour on any
 /// platform, and it can be tested by typing at it in the plain.
 /// </remarks>
-public sealed class NotesHistory
+public sealed class DescriptionHistory
 {
     /// <summary>How many states are kept. Beyond this the oldest goes.</summary>
     private const int MaxStates = 100;
@@ -49,9 +49,9 @@ public sealed class NotesHistory
     /// Starts again on a new description, which nothing before it can be undone into.
     /// </summary>
     /// <remarks>
-    /// Called whenever the box is put on another task. Without it, Ctrl+Z on a freshly opened note
-    /// would replace it with the previous task's — an edit nobody made, to a task they are not
-    /// looking at, saved on the next pause.
+    /// Called whenever the box is put on another task. Without it, Ctrl+Z on a freshly opened
+    /// description would replace it with the previous task's — an edit nobody made, to a task
+    /// they are not looking at, saved on the next pause.
     /// </remarks>
     /// <param name="text">What the box is being filled with</param>
     public void Reset(string text)

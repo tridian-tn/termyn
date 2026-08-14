@@ -80,11 +80,11 @@ public sealed record ViewState
 
     public int SidebarWidth { get; init; } = 220;
 
-    /// <summary>Whether the notes panel under the outline is open.</summary>
+    /// <summary>Whether the description panel under the outline is open.</summary>
     public bool ShowDescription { get; init; }
 
     /// <summary>
-    /// How tall the notes panel is, in pixels off the bottom of the outline.
+    /// How tall the description panel is, in pixels off the bottom of the outline.
     /// </summary>
     /// <remarks>
     /// Taller than it was when the panel was split down the middle. One pane gets the whole width,

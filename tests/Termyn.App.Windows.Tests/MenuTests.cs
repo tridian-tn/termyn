@@ -261,30 +261,30 @@ public class MenuTests
     }
 
     [Fact]
-    public void The_notes_panel_says_which_way_it_would_go_and_is_ticked_while_open()
+    public void The_description_panel_says_which_way_it_would_go_and_is_ticked_while_open()
     {
         using var closed = Build(View, CommandContext.Empty);
         using var open = Build(View, new CommandContext(ShowingDescription: true));
 
-        Assert.Equal("Show notes", Find(closed, "Show notes").Text);
-        Assert.False(Find(closed, "Show notes").Checked);
-        Assert.True(Find(open, "Hide notes").Checked);
+        Assert.Equal("Show description", Find(closed, "Show description").Text);
+        Assert.False(Find(closed, "Show description").Checked);
+        Assert.True(Find(open, "Hide description").Checked);
     }
 
     [Fact]
-    public void Editing_the_notes_is_offered_only_while_the_panel_it_happens_in_is_open()
+    public void Editing_the_description_is_offered_only_while_the_panel_it_happens_in_is_open()
     {
         using var closed = Build(View, CommandContext.Empty);
         using var reading = Build(View, new CommandContext(ShowingDescription: true));
-        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingNotes: true));
+        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
 
-        Assert.False(Find(closed, "Edit notes").Enabled);
-        Assert.True(Find(reading, "Edit notes").Enabled);
-        Assert.False(Find(reading, "Edit notes").Checked);
+        Assert.False(Find(closed, "Edit description").Enabled);
+        Assert.True(Find(reading, "Edit description").Enabled);
+        Assert.False(Find(reading, "Edit description").Checked);
 
         // Ticked while the markdown is on show, since that is the state you leave rather than the
         // one the panel rests in.
-        Assert.True(Find(writing, "Done editing notes").Checked);
+        Assert.True(Find(writing, "Done editing description").Checked);
     }
 
     [Fact]

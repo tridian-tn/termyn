@@ -3,9 +3,9 @@ using Termyn.Presentation;
 namespace Termyn.Presentation.Tests;
 
 /// <summary>
-/// The rules the notes box saves by. Both ways of getting these wrong are quiet: a box that writes
-/// when nothing was typed pushes a stale copy back over an edit made on the web, and one that
-/// thinks it is clean when it isn't loses what was written.
+/// The rules the description box saves by. Both ways of getting these wrong are quiet: a box that
+/// writes when nothing was typed pushes a stale copy back over an edit made on the web, and one
+/// that thinks it is clean when it isn't loses what was written.
 /// </summary>
 public class DescriptionDraftTests
 {
@@ -35,10 +35,10 @@ public class DescriptionDraftTests
     }
 
     [Fact]
-    public void Emptying_the_notes_is_an_edit_like_any_other()
+    public void Emptying_the_description_is_an_edit_like_any_other()
     {
         // Not a no-op dressed up as one: clearing a description is a thing people do, and a save
-        // that skipped it would leave the old notes on the task for ever.
+        // that skipped it would leave the old description on the task for ever.
         var draft = On("t1", "Something");
 
         Assert.Equal(("t1", ""), draft.Take(string.Empty));

@@ -62,17 +62,17 @@ internal sealed class MainForm : Form
     /// <summary>The right-click menu on a task, refilled for whichever row it opens over.</summary>
     private readonly ContextMenuStrip _taskMenu;
 
-    /// <summary>Splits the outline from the notes panel under it.</summary>
+    /// <summary>Splits the outline from the description panel under it.</summary>
     private readonly SplitContainer _detail;
 
     /// <summary>The task's description, in the markdown the account stores it as.</summary>
-    private readonly MarkdownEditor _notes;
+    private readonly MarkdownEditor _description;
 
     /// <summary>The same description, rendered.</summary>
     private readonly MarkdownView _rendered;
 
     /// <summary>
-    /// Whether the notes panel is showing the markdown to type into rather than the rendering.
+    /// Whether the description panel is showing the markdown to type into rather than the rendering.
     /// </summary>
     /// <remarks>
     /// One pane, two things it can be, rather than both at once down a splitter. The panel is nine
@@ -80,19 +80,19 @@ internal sealed class MainForm : Form
     /// of that half the width — while leaving only one of them able to take a keystroke and only
     /// the other able to follow a link.
     /// </remarks>
-    private bool _writingNotes;
+    private bool _writingDescription;
 
-    /// <summary>Which task the notes box is on and what it was opened with.</summary>
+    /// <summary>Which task the description box is on and what it was opened with.</summary>
     private readonly DescriptionDraft _draft = new();
 
     /// <summary>
-    /// What the notes box said, so Ctrl+Z can put it back.
+    /// What the description box said, so Ctrl+Z can put it back.
     /// </summary>
     /// <remarks>
     /// Ours because the control's own queue can't be used once the text is highlighted: applying a
     /// colour is recorded on it as an action, so Ctrl+Z would un-highlight rather than undo.
     /// </remarks>
-    private readonly NotesHistory _history = new();
+    private readonly DescriptionHistory _history = new();
 
     /// <summary>
     /// Holds the rendering back until the typing stops. Re-parsing and re-styling on every
@@ -101,13 +101,13 @@ internal sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _renderIdle;
 
     /// <summary>
-    /// Writes the notes once the typing has stopped for a while, so an edit left on screen while
-    /// the user goes elsewhere isn't held hostage to them coming back to it.
+    /// Writes the description once the typing has stopped for a while, so an edit left on screen
+    /// while the user goes elsewhere isn't held hostage to them coming back to it.
     /// </summary>
     private readonly System.Windows.Forms.Timer _saveIdle;
 
     /// <summary>The panel size as the user last left it, which is what gets saved.</summary>
-    private int _notesHeight;
+    private int _descriptionHeight;
 
     /// <summary>
     /// True while the panels are being sized by us rather than dragged by the user, so the layout
@@ -238,27 +238,27 @@ internal sealed class MainForm : Form
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
 
-        _notes = new MarkdownEditor
+        _description = new MarkdownEditor
         {
             Dock = DockStyle.Fill,
-            Placeholder = "Notes…  **bold**  *italic*  - a list",
+            Placeholder = "Description…  **bold**  *italic*  - a list",
 
             // Until a task is selected there is nowhere for anything typed here to go. Set on the
             // way in because the selection has never changed at this point, so nothing else does.
             ReadOnly = true,
         };
-        _notes.TextChanged += OnNotesChanged;
-        _notes.KeyDown += OnNotesKeyDown;
+        _description.TextChanged += OnDescriptionChanged;
+        _description.KeyDown += OnDescriptionKeyDown;
 
         // Reading is where the panel rests, so the focus going elsewhere ends the edit as well as
         // saving it — clicking back into the outline shouldn't leave the markers on show.
-        _notes.Leave += (_, _) => StopWriting();
+        _description.Leave += (_, _) => StopWriting();
 
         _rendered = new MarkdownView { Dock = DockStyle.Fill };
-        _rendered.LinkOpened += OnNotesLinkOpened;
+        _rendered.LinkOpened += OnDescriptionLinkOpened;
         _rendered.EditRequested += StartWriting;
 
-        // The notes go under the outline rather than beside it: the outline is five columns wide
+        // The description goes under the outline rather than beside it: the outline is five columns wide
         // before it is useful, and a panel down the side of it takes that from the task names.
         _detail = new SplitContainer
         {
@@ -272,19 +272,19 @@ internal sealed class MainForm : Form
         // rather than two. Which is visible is the only thing deciding what you see — the order
         // they go in doesn't come into it, since the hidden one draws nothing whichever side of the
         // other it sits on.
-        _detail.Panel2.Controls.Add(_notes);
+        _detail.Panel2.Controls.Add(_description);
         _detail.Panel2.Controls.Add(_rendered);
         _detail.SplitterMoved += (_, _) => RememberPanelSizes();
 
         // Said here rather than left to the first selection, which may never come: a control that
         // is merely behind another is still in the tab order, so without this the markdown could
         // take the focus while nothing on screen showed it had.
-        _notes.Visible = false;
+        _description.Visible = false;
 
         // And for the same reason. Nothing is selected at this point and the selection changing is
         // what would otherwise settle this — so a window that opens with the panel showing and no
         // task under it would draw a pane that looks ready to take typing and isn't.
-        ShowNotesEditable(editable: false, anySelected: false);
+        ShowDescriptionEditable(editable: false, anySelected: false);
 
         // One pause, two things that wait for it: the rendering when the panel is reading, and the
         // highlighting and the undo state when it is being typed into.
@@ -293,24 +293,24 @@ internal sealed class MainForm : Form
         {
             _renderIdle.Stop();
 
-            if (_writingNotes)
+            if (_writingDescription)
             {
-                _notes.Restyle();
-                _history.Record(_notes.Text, _notes.SelectionStart);
+                _description.Restyle();
+                _history.Record(_description.Text, _description.SelectionStart);
             }
             else
             {
-                RenderNotes();
+                RenderDescription();
             }
         };
 
         // Long enough that it isn't saving mid-sentence, short enough that walking away from a
-        // half-written note doesn't leave it only in the window. Each save is a queued
+        // half-written description doesn't leave it only in the window. Each save is a queued
         // item_update, which the outbox coalesces on the way out and which — unlike a completion
         // or a delete — records nothing on the undo stack, so a session of these can't push a
         // Ctrl+Z out of reach.
         _saveIdle = new System.Windows.Forms.Timer { Interval = 5000 };
-        _saveIdle.Tick += (_, _) => SaveNotes();
+        _saveIdle.Tick += (_, _) => SaveDescription();
 
         _split = new SplitContainer
         {
@@ -371,12 +371,12 @@ internal sealed class MainForm : Form
         Shown += OnShown;
         FormClosing += OnFormClosing;
 
-        // The notes box losing the focus to another control raises Leave; the whole window losing
+        // The description box losing the focus to another control raises Leave; the whole window losing
         // it to another application does not — the box stays the window's active control and takes
-        // the focus back on return. Without this, alt-tabbing away from a half-written note left it
+        // the focus back on return. Without this, alt-tabbing away from a half-written description left it
         // sitting in the window: not queued, so not on the phone, and not there at all if the
         // process went without closing.
-        Deactivate += (_, _) => SaveNotes();
+        Deactivate += (_, _) => SaveDescription();
         FormClosed += (_, _) =>
         {
             _presenter.RowsChanged -= OnRowsChanged;
@@ -406,8 +406,8 @@ internal sealed class MainForm : Form
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
         // Before the state is written either way: closing to the tray leaves the window standing,
-        // but it is still the moment the user stopped working in the notes box.
-        SaveNotes();
+        // but it is still the moment the user stopped working in the description box.
+        SaveDescription();
 
         if (!_exiting && _settings.CloseToTray && e.CloseReason == CloseReason.UserClosing)
         {
@@ -663,7 +663,7 @@ internal sealed class MainForm : Form
         _theme.Apply(this);
         _outline.Theme = _theme;
         _rendered.Theme = _theme;
-        _notes.Theme = _theme;
+        _description.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
@@ -681,7 +681,7 @@ internal sealed class MainForm : Form
         // Only remembered here. The splitters are set once the window has a size to divide, which
         // is not yet: before it is parented a SplitContainer clamps every distance it is given
         // against its own default and quietly sticks there.
-        _notesHeight = state.DescriptionHeight;
+        _descriptionHeight = state.DescriptionHeight;
 
         // _adjustingPanels is still true here, so the layout this sets off doesn't record the
         // container's unparented default over what has just been read.
@@ -737,7 +737,7 @@ internal sealed class MainForm : Form
             CollapsedKeys = CollapsedKeys().ToList(),
             SidebarWidth = _split.SplitterDistance,
             ShowDescription = !_detail.Panel2Collapsed,
-            DescriptionHeight = _notesHeight,
+            DescriptionHeight = _descriptionHeight,
             WindowX = bounds.X,
             WindowY = bounds.Y,
             WindowWidth = bounds.Width,
@@ -1166,11 +1166,11 @@ internal sealed class MainForm : Form
 
     private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 
-    // ---- Notes ---------------------------------------------------------------------------------
+    // ---- Description ---------------------------------------------------------------------------
 
     /// <summary>
-    /// Puts the notes box on whichever task the outline is now on, writing anything typed into the
-    /// one it was on before.
+    /// Puts the description box on whichever task the outline is now on, writing anything typed
+    /// into the one it was on before.
     /// </summary>
     /// <remarks>
     /// Called from the outline's selection and from every render, which is why it does nothing when
@@ -1182,7 +1182,7 @@ internal sealed class MainForm : Form
         var id = _outline.SelectedId;
         if (id == _draft.TaskId)
         {
-            RefreshNotes();
+            RefreshDescription();
             return;
         }
 
@@ -1192,68 +1192,68 @@ internal sealed class MainForm : Form
         if (id is not null && _draft.TaskId is { } held && _presenter.CurrentIdOf(held) == id)
         {
             _draft.Retarget(id);
-            RefreshNotes();
+            RefreshDescription();
             return;
         }
 
         // The task under the box is changing, so whatever was typed into it belongs to the old one
         // and has to go before the box is refilled.
-        SaveNotes();
+        SaveDescription();
 
         _draft.Open(id, _presenter.DescriptionOf(id));
-        ShowNotes(_draft.Opened);
+        ShowDescription(_draft.Opened);
 
-        ShowNotesEditable(_presenter.HasTask(id), anySelected: id is not null);
+        ShowDescriptionEditable(_presenter.HasTask(id), anySelected: id is not null);
 
-        // A task with no notes on it has nothing to read, and a rendering of nothing is a blank
+        // A task with no description on it has nothing to read, and a rendering of nothing is a blank
         // panel that gives no sign it would take any typing. So an empty one opens ready to write.
-        SetNotesMode(writing: _draft.Opened.Length == 0 && !_notes.ReadOnly, focus: false);
+        SetDescriptionMode(writing: _draft.Opened.Length == 0 && !_description.ReadOnly, focus: false);
     }
 
     /// <summary>
     /// Takes a republished description, unless it would land on top of something being typed.
     /// </summary>
-    private void RefreshNotes()
+    private void RefreshDescription()
     {
-        if (_draft.TaskId is not { } id || !_draft.CanRefresh(_notes.Text))
+        if (_draft.TaskId is not { } id || !_draft.CanRefresh(_description.Text))
             return;
 
         var current = _presenter.DescriptionOf(id);
-        if (current == DescriptionDraft.Normalised(_notes.Text))
+        if (current == DescriptionDraft.Normalised(_description.Text))
             return;
 
         // Changed elsewhere while the box sat open and untouched — on the web, or by an undo.
         _draft.Open(id, current);
-        ShowNotes(current);
+        ShowDescription(current);
     }
 
     /// <summary>Fills the box without it counting as something the user typed.</summary>
-    private void ShowNotes(string text)
+    private void ShowDescription(string text)
     {
-        _notes.TextChanged -= OnNotesChanged;
+        _description.TextChanged -= OnDescriptionChanged;
         try
         {
             // A rich edit control holds a line ending as the single newline the account stores,
             // so what goes in is what came out of the account and the offsets agree throughout.
-            _notes.Text = text;
-            _notes.Restyle();
+            _description.Text = text;
+            _description.Restyle();
 
-            // Nothing before this belongs to this task. Without it, Ctrl+Z on a note you have just
+            // Nothing before this belongs to this task. Without it, Ctrl+Z on a description you have just
             // opened replaces it with the previous task's.
             _history.Reset(text);
         }
         finally
         {
-            _notes.TextChanged += OnNotesChanged;
+            _description.TextChanged += OnDescriptionChanged;
         }
 
         _renderIdle.Stop();
         _saveIdle.Stop();
-        RenderNotes();
+        RenderDescription();
     }
 
     /// <summary>
-    /// Draws the notes as they read, if there is anywhere to draw them.
+    /// Draws the description as it reads, if there is anywhere to draw it.
     /// </summary>
     /// <remarks>
     /// Asked rather than assumed, because the wait for the typing to stop outlives the panel: close
@@ -1261,14 +1261,14 @@ internal sealed class MainForm : Form
     /// control nobody can see. Everything that puts the panel back on screen renders as it does so,
     /// which is what keeps skipping it here from leaving a stale rendering behind.
     /// </remarks>
-    private void RenderNotes()
+    private void RenderDescription()
     {
-        if (!_detail.Panel2Collapsed && !_writingNotes)
-            _rendered.Markdown = _notes.Text;
+        if (!_detail.Panel2Collapsed && !_writingDescription)
+            _rendered.Markdown = _description.Text;
     }
 
     /// <summary>
-    /// Says whether the notes can be typed into, and makes the panel look like the answer.
+    /// Says whether the description can be typed into, and makes the panel look like the answer.
     /// </summary>
     /// <remarks>
     /// Read-only rather than disabled, and deliberately: disabling a control that has the focus
@@ -1281,18 +1281,18 @@ internal sealed class MainForm : Form
     /// into, and the way you found out was to try: Enter, F2 and a double-click all did nothing at
     /// all, silently.
     /// </remarks>
-    /// <param name="editable">Whether the account will take an edit to this task's notes</param>
+    /// <param name="editable">Whether the account will take an edit to this task's description</param>
     /// <param name="anySelected">Whether the outline is on a task at all, which changes what to say</param>
-    private void ShowNotesEditable(bool editable, bool anySelected)
+    private void ShowDescriptionEditable(bool editable, bool anySelected)
     {
-        _notes.ReadOnly = !editable;
+        _description.ReadOnly = !editable;
         _rendered.Inert = !editable;
 
-        // A completed task's notes are shown and can't be edited, and there is no room to say so
+        // A completed task's description is shown and can't be edited, and there is no room to say so
         // over the top of them — the recessed background carries that one on its own.
         _rendered.Placeholder = editable ? string.Empty
-            : anySelected ? "This task's notes can't be edited here."
-            : "Select a task to see its notes.";
+            : anySelected ? "This task's description can't be edited here."
+            : "Select a task to see its description.";
     }
 
     /// <summary>
@@ -1300,25 +1300,25 @@ internal sealed class MainForm : Form
     /// </summary>
     /// <param name="writing">True for the markdown, false for the rendering</param>
     /// <param name="focus">Whether the pane being shown should also be given the keyboard</param>
-    private void SetNotesMode(bool writing, bool focus)
+    private void SetDescriptionMode(bool writing, bool focus)
     {
-        _writingNotes = writing;
+        _writingDescription = writing;
 
-        _notes.Visible = writing;
+        _description.Visible = writing;
         _rendered.Visible = !writing;
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
         if (writing)
-            _notes.Restyle();
+            _description.Restyle();
 
         // Nothing was drawn into the rendering while the markdown was on top of it, so coming back
         // to it is one of the ways it can be out of date.
         if (!writing)
-            RenderNotes();
+            RenderDescription();
 
         if (focus && !_detail.Panel2Collapsed)
-            (writing ? (Control)_notes : _rendered).Focus();
+            (writing ? (Control)_description : _rendered).Focus();
     }
 
     /// <summary>
@@ -1329,30 +1329,30 @@ internal sealed class MainForm : Form
     {
         // Nothing to type into. A completed task pulled out of the archive is held apart from the
         // live model, so an edit to it would be declined rather than queued.
-        if (_notes.ReadOnly)
+        if (_description.ReadOnly)
             return;
 
-        SetNotesMode(writing: true, focus: true);
+        SetDescriptionMode(writing: true, focus: true);
 
         // Straight through, with no arithmetic on the line endings: the rendering is drawn from
         // this box's own text, and a rich edit control holds a line ending as the single newline
         // the account stores it as — so an offset into the markdown is already an offset into the
         // box, and both agree with what gets saved.
-        _notes.SelectionStart = Math.Clamp(source, 0, _notes.TextLength);
-        _notes.SelectionLength = 0;
-        _notes.ScrollToCaret();
+        _description.SelectionStart = Math.Clamp(source, 0, _description.TextLength);
+        _description.SelectionLength = 0;
+        _description.ScrollToCaret();
     }
 
     /// <summary>Writes what was typed and goes back to reading.</summary>
     private void StopWriting()
     {
-        SaveNotes();
+        SaveDescription();
 
-        if (_writingNotes)
-            SetNotesMode(writing: false, focus: false);
+        if (_writingDescription)
+            SetDescriptionMode(writing: false, focus: false);
     }
 
-    private void OnNotesKeyDown(object? sender, KeyEventArgs e)
+    private void OnDescriptionKeyDown(object? sender, KeyEventArgs e)
     {
         // Back to reading, the way Escape leaves every other thing you are part-way through here.
         // The outline's own Escape does nothing, so this doesn't take a keystroke off anything.
@@ -1366,14 +1366,14 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // Ours rather than the control's, whose queue is switched off — see NotesHistory for why.
+        // Ours rather than the control's, whose queue is switched off — see DescriptionHistory for why.
         // Ctrl+Z is bound to the task-level undo with the outline focused, and that is a different
         // scope from this one, so neither takes the other's keystroke.
         if (e.Control && e.KeyCode == Keys.Z && !e.Shift)
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
-            PutNotesBack(_history.Undo(_notes.Text, _notes.SelectionStart));
+            PutDescriptionBack(_history.Undo(_description.Text, _description.SelectionStart));
             return;
         }
 
@@ -1381,33 +1381,33 @@ internal sealed class MainForm : Form
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
-            PutNotesBack(_history.Redo());
+            PutDescriptionBack(_history.Redo());
         }
     }
 
     /// <summary>Puts an undone or redone state back into the box.</summary>
     /// <param name="state">What the box said, or null when there was nothing to go back to</param>
-    private void PutNotesBack(NotesHistory.Snapshot? state)
+    private void PutDescriptionBack(DescriptionHistory.Snapshot? state)
     {
         if (state is not { } snapshot)
             return;
 
-        _notes.TextChanged -= OnNotesChanged;
+        _description.TextChanged -= OnDescriptionChanged;
         try
         {
-            _notes.Text = snapshot.Text;
-            _notes.Restyle();
+            _description.Text = snapshot.Text;
+            _description.Restyle();
 
             // Where the edit was, not where the caret happened to be. Undoing to the top of a long
             // description and leaving the caret at the bottom of it reads as a broken undo even
             // when the text is right.
-            _notes.SelectionStart = Math.Clamp(snapshot.Caret, 0, _notes.TextLength);
-            _notes.SelectionLength = 0;
-            _notes.ScrollToCaret();
+            _description.SelectionStart = Math.Clamp(snapshot.Caret, 0, _description.TextLength);
+            _description.SelectionLength = 0;
+            _description.ScrollToCaret();
         }
         finally
         {
-            _notes.TextChanged += OnNotesChanged;
+            _description.TextChanged += OnDescriptionChanged;
         }
 
         // An undo is an edit like any other as far as the account is concerned, and the handler
@@ -1416,16 +1416,16 @@ internal sealed class MainForm : Form
         _saveIdle.Start();
     }
 
-    /// <summary>Follows a link out of the notes.</summary>
+    /// <summary>Follows a link out of the description.</summary>
     /// <remarks>
     /// Whether it is worth following was settled when it was drawn: a link the shell has no
     /// business being handed isn't coloured as one, isn't given a pointer, and never reaches here.
     /// The check inside <see cref="AppVersion.OpenExternal"/> is the one that decides, and this is
     /// downstream of it rather than a second opinion.
     /// </remarks>
-    private void OnNotesLinkOpened(string url) => Guarded(() => AppVersion.OpenExternal(url));
+    private void OnDescriptionLinkOpened(string url) => Guarded(() => AppVersion.OpenExternal(url));
 
-    private void OnNotesChanged(object? sender, EventArgs e)
+    private void OnDescriptionChanged(object? sender, EventArgs e)
     {
         // Both restarted on each keystroke, so each happens once the typing pauses rather than
         // between two letters.
@@ -1440,26 +1440,26 @@ internal sealed class MainForm : Form
     /// Writes what was typed, if anything was. Called whenever the box stops being the place the
     /// user is working: the focus leaving it, another task selected, the window closing.
     /// </summary>
-    private void SaveNotes()
+    private void SaveDescription()
     {
         // Whatever brought us here has done what the wait was for.
         _saveIdle.Stop();
 
         // The draft puts the box's line endings back to the account's before it compares or saves.
-        if (_draft.Take(_notes.Text) is not { } edit)
+        if (_draft.Take(_description.Text) is not { } edit)
             return;
 
         Guarded(() => _presenter.SetDescription(edit.TaskId, edit.Text));
         _scheduler.NotifyWrite();
     }
 
-    /// <summary>Opens or closes the notes panel.</summary>
+    /// <summary>Opens or closes the description panel.</summary>
     private void ShowDescriptionPanel(bool shown)
     {
         // Saved on the way out: the panel closing is the box losing the user as surely as the focus
         // leaving it, and a collapsed panel gives nothing back.
         if (!shown)
-            SaveNotes();
+            SaveDescription();
 
         _adjustingPanels = true;
         try
@@ -1479,13 +1479,13 @@ internal sealed class MainForm : Form
             // Back to reading on the way out, so the panel opens the way it rests rather than in
             // whatever it was left mid-edit. Set through the same path as every other mode change,
             // since a flag moved on its own would disagree with which pane is actually on top.
-            SetNotesMode(writing: false, focus: false);
+            SetDescriptionMode(writing: false, focus: false);
             return;
         }
 
         ApplyPanelSizes();
         FollowSelection();
-        RenderNotes();
+        RenderDescription();
     }
 
     /// <summary>Puts the panels back to the sizes the user left them at.</summary>
@@ -1507,7 +1507,7 @@ internal sealed class MainForm : Form
         // Clamped against what the container can actually take, not against a figure of ours. The
         // sidebar splitter can be dragged until the outline is its own minimum width, and asking a
         // panel for more room than exists throws rather than settling for what there is.
-        Restore(_detail, _detail.Height, _notesHeight, 60);
+        Restore(_detail, _detail.Height, _descriptionHeight, 60);
 
         static void Restore(SplitContainer split, int across, int wanted, int preferred)
         {
@@ -1541,7 +1541,7 @@ internal sealed class MainForm : Form
             return;
 
         if (!_detail.Panel2Collapsed)
-            _notesHeight = _detail.Panel2.Height;
+            _descriptionHeight = _detail.Panel2.Height;
     }
 
     // ---- Commands ------------------------------------------------------------------------------
@@ -1674,7 +1674,7 @@ internal sealed class MainForm : Form
         _presenter.CanUndo,
         _presenter.Sort,
         !_detail.Panel2Collapsed,
-        _writingNotes);
+        _writingDescription);
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -1874,10 +1874,10 @@ internal sealed class MainForm : Form
                 Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
-            case AppCommand.EditNotes:
+            case AppCommand.EditDescription:
                 Guarded(() =>
                 {
-                    if (_writingNotes)
+                    if (_writingDescription)
                         StopWriting();
                     else
                         StartWriting(_rendered.SourceAt(_rendered.SelectionStart));

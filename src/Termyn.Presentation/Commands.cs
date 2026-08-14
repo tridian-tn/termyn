@@ -42,7 +42,7 @@ public enum AppCommand
     ToggleCompleted,
     SortDefault,
     ToggleDescription,
-    EditNotes,
+    EditDescription,
     Undo,
     Search,
     Palette,
@@ -79,8 +79,8 @@ public sealed record TaskAbilities(
 /// <param name="ShowingCompleted">Whether the outline is also showing completed tasks.</param>
 /// <param name="CanUndo">Whether there is anything to take back.</param>
 /// <param name="Sort">How the outline is currently ordered.</param>
-/// <param name="ShowingDescription">Whether the notes panel is open under the outline.</param>
-/// <param name="WritingNotes">Whether that panel is showing the markdown rather than the rendering.</param>
+/// <param name="ShowingDescription">Whether the description panel is open under the outline.</param>
+/// <param name="WritingDescription">Whether that panel is showing the markdown rather than the rendering.</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -89,7 +89,7 @@ public sealed record CommandContext(
     bool CanUndo = false,
     TaskSort? Sort = null,
     bool ShowingDescription = false,
-    bool WritingNotes = false)
+    bool WritingDescription = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -190,16 +190,16 @@ public static class Commands
                 !(context.Sort ?? TaskSort.Default).IsDefault),
 
             AppCommand.ToggleDescription => new CommandState(
-                context.ShowingDescription ? "Hide notes" : "Show notes",
+                context.ShowingDescription ? "Hide description" : "Show description",
                 true,
                 context.ShowingDescription),
 
             // Only worth offering while the panel it belongs to is open. Ticked while the markdown
             // is on show, since that is the state you leave rather than the one the panel rests in.
-            AppCommand.EditNotes => new CommandState(
-                context.WritingNotes ? "Done editing notes" : "Edit notes",
+            AppCommand.EditDescription => new CommandState(
+                context.WritingDescription ? "Done editing description" : "Edit description",
                 context.ShowingDescription,
-                context.WritingNotes),
+                context.WritingDescription),
 
             AppCommand.Undo => new CommandState("Undo", context.CanUndo),
             AppCommand.Search => Always("Search…"),

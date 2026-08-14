@@ -16,7 +16,7 @@ namespace Termyn.App.Windows;
 ///
 /// The control's own undo queue is switched off, because a rich edit control records applying a
 /// colour or a font as an undoable action: left on, Ctrl+Z answers by un-highlighting rather than
-/// by undoing. <see cref="NotesHistory"/> stands in for it.
+/// by undoing. <see cref="DescriptionHistory"/> stands in for it.
 /// </remarks>
 internal sealed class MarkdownEditor : RichTextBox
 {
@@ -194,8 +194,8 @@ internal sealed class MarkdownEditor : RichTextBox
     /// </summary>
     /// <remarks>
     /// A description is account data and can hold anything. A brace or a backslash left alone would
-    /// be read as the document's own syntax — at best drawing the rest of the note wrongly, at
-    /// worst swallowing it. Anything outside ASCII goes as its code point, since the header says
+    /// be read as the document's own syntax — at best drawing the rest of the description wrongly,
+    /// at worst swallowing it. Anything outside ASCII goes as its code point, since the header says
     /// this document is ANSI and a pasted em dash or emoji would otherwise arrive as mojibake.
     /// </remarks>
     private static void Escape(StringBuilder rtf, ReadOnlySpan<char> text)

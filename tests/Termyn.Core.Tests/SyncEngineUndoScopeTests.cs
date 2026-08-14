@@ -37,7 +37,7 @@ public class SyncEngineUndoScopeTests
     [Theory]
     [InlineData("content", "renamed after")]
     [InlineData("description", "noted after")]
-    public void It_is_every_field_and_not_the_notes_in_particular(string field, string value)
+    public void It_is_every_field_and_not_the_description_in_particular(string field, string value)
     {
         var engine = Seeded();
         engine.CompleteItem("i1");
