@@ -158,3 +158,40 @@ public sealed class Filter
     public bool IsFavorite { get; init; }
     public int ItemOrder { get; init; }
 }
+
+/// <summary>
+/// A comment, on either a task or a project. Exactly one of <see cref="ItemId"/> and
+/// <see cref="ProjectId"/> says which.
+/// </summary>
+public sealed class Comment
+{
+    public required string Id { get; init; }
+
+    /// <summary>The task it's filed under, or null when it belongs to a project.</summary>
+    public string? ItemId { get; init; }
+
+    /// <summary>The project it's filed under, or null when it belongs to a task.</summary>
+    public string? ProjectId { get; init; }
+
+    /// <summary>Whichever of the two it hangs off, so callers that don't care needn't ask twice.</summary>
+    public string OwnerId => ItemId ?? ProjectId ?? string.Empty;
+
+    /// <summary>The comment itself, as the markdown the account stores.</summary>
+    public string Content { get; init; } = string.Empty;
+
+    /// <summary>
+    /// When it was posted, as the server wrote it — an ISO-8601 instant, so it orders correctly as
+    /// text and needs parsing only to be displayed. Null on one this client has only just queued.
+    /// </summary>
+    public string? PostedAt { get; init; }
+
+    /// <summary>
+    /// The name of the file hanging off this comment, or null when there is none.
+    /// </summary>
+    /// <remarks>
+    /// Fetching the file is a later phase. The name is read now because a comment can carry an
+    /// attachment and no text at all, and one drawn from its text alone would be a blank row that
+    /// reads as a bug rather than as a file.
+    /// </remarks>
+    public string? AttachmentName { get; init; }
+}

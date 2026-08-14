@@ -32,6 +32,7 @@ public enum AppCommand
     RenameSelection,
     DeleteSelection,
     ToggleFavourite,
+    CommentOnProject,
 
     // ---- Anywhere ----
     NewTask,
@@ -43,6 +44,7 @@ public enum AppCommand
     SortDefault,
     ToggleDescription,
     EditDescription,
+    ToggleComments,
     Undo,
     Search,
     Palette,
@@ -81,6 +83,7 @@ public sealed record TaskAbilities(
 /// <param name="Sort">How the outline is currently ordered.</param>
 /// <param name="ShowingDescription">Whether the description panel is open under the outline.</param>
 /// <param name="WritingDescription">Whether that panel is showing the markdown rather than the rendering.</param>
+/// <param name="ShowingComments">Whether that panel is showing the comments rather than the description.</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -89,7 +92,8 @@ public sealed record CommandContext(
     bool CanUndo = false,
     TaskSort? Sort = null,
     bool ShowingDescription = false,
-    bool WritingDescription = false)
+    bool WritingDescription = false,
+    bool ShowingComments = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -169,6 +173,12 @@ public static class Commands
             AppCommand.DeleteSelection => Selection("Delete {0}"),
             AppCommand.ToggleFavourite => Favourite(context.Selection),
 
+            // A project's own comments, which nothing in the outline can reach: the pane follows the
+            // task you are on, and a project is never one of those.
+            AppCommand.CommentOnProject => new CommandState(
+                "Comments on project",
+                context.Selection?.Kind is SidebarKind.Project),
+
             AppCommand.NewTask => Always("New task"),
             AppCommand.NewProject => Always("New project"),
 
@@ -198,8 +208,15 @@ public static class Commands
             // is on show, since that is the state you leave rather than the one the panel rests in.
             AppCommand.EditDescription => new CommandState(
                 context.WritingDescription ? "Done editing description" : "Edit description",
-                context.ShowingDescription,
+                context.ShowingDescription && !context.ShowingComments,
                 context.WritingDescription),
+
+            // The same pane, showing a third thing. Ticked while the comments are the thing it is
+            // showing, so the entry says which of the two you are looking at.
+            AppCommand.ToggleComments => new CommandState(
+                "Comments",
+                true,
+                context.ShowingComments),
 
             AppCommand.Undo => new CommandState("Undo", context.CanUndo),
             AppCommand.Search => Always("Search…"),

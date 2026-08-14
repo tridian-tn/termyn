@@ -71,6 +71,31 @@ internal sealed class MainForm : Form
     /// <summary>The same description, rendered.</summary>
     private readonly MarkdownView _rendered;
 
+    /// <summary>The conversation on whatever the pane is pointed at.</summary>
+    private readonly CommentsView _comments;
+
+    /// <summary>
+    /// Whether the panel is showing the comments rather than the description.
+    /// </summary>
+    /// <remarks>
+    /// A third thing the one pane can be, alongside the markdown and its rendering. Kept apart from
+    /// <see cref="_writingDescription"/>, which says which of the other two it would be showing —
+    /// so leaving the comments puts the description back the way it was left.
+    /// </remarks>
+    private bool _showingComments;
+
+    /// <summary>
+    /// What the comments are of: a task, or a project chosen from the sidebar.
+    /// </summary>
+    /// <remarks>
+    /// Held rather than derived from the selection, because a project's comments have nothing in the
+    /// outline to select. Moving to another task re-aims it; the project stays only until then.
+    /// </remarks>
+    private string? _commentsOwner;
+
+    /// <summary>The outline row the comments pane last followed, so a re-render isn't read as a move.</summary>
+    private string? _followed;
+
     /// <summary>
     /// Whether the description panel is showing the markdown to type into rather than the rendering.
     /// </summary>
@@ -258,6 +283,11 @@ internal sealed class MainForm : Form
         _rendered.LinkOpened += OnDescriptionLinkOpened;
         _rendered.EditRequested += StartWriting;
 
+        _comments = new CommentsView { Dock = DockStyle.Fill, Visible = false };
+        _comments.Posted += OnCommentPosted;
+        _comments.Edited += OnCommentEdited;
+        _comments.Deleted += OnCommentDeleted;
+
         // The description goes under the outline rather than beside it: the outline is five columns wide
         // before it is useful, and a panel down the side of it takes that from the task names.
         _detail = new SplitContainer
@@ -274,6 +304,7 @@ internal sealed class MainForm : Form
         // other it sits on.
         _detail.Panel2.Controls.Add(_description);
         _detail.Panel2.Controls.Add(_rendered);
+        _detail.Panel2.Controls.Add(_comments);
         _detail.SplitterMoved += (_, _) => RememberPanelSizes();
 
         // Said here rather than left to the first selection, which may never come: a control that
@@ -664,6 +695,7 @@ internal sealed class MainForm : Form
         _outline.Theme = _theme;
         _rendered.Theme = _theme;
         _description.Theme = _theme;
+        _comments.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
@@ -1179,6 +1211,36 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void FollowSelection()
     {
+        FollowSelectionForDescription();
+        FollowSelectionForComments();
+    }
+
+    /// <summary>
+    /// Keeps the comments pane on the task the outline is on.
+    /// </summary>
+    /// <remarks>
+    /// Only when the outline has actually moved. This runs on every render too, and a project's
+    /// comments — which are chosen from the sidebar and have nothing in the outline to select —
+    /// would otherwise be replaced by whichever task happened to be selected at the time.
+    /// </remarks>
+    private void FollowSelectionForComments()
+    {
+        var id = _outline.SelectedId;
+        var moved = id != _followed;
+        _followed = id;
+
+        if (!_showingComments)
+            return;
+
+        // Choosing a task is choosing its comments, even over a project the sidebar had aimed it at.
+        if (moved && id is not null)
+            _commentsOwner = id;
+
+        RefreshComments();
+    }
+
+    private void FollowSelectionForDescription()
+    {
         var id = _outline.SelectedId;
         if (id == _draft.TaskId)
         {
@@ -1304,8 +1366,10 @@ internal sealed class MainForm : Form
     {
         _writingDescription = writing;
 
-        _description.Visible = writing;
-        _rendered.Visible = !writing;
+        // The comments are in front of both of them. Which of the two is behind is still worth
+        // settling, so that leaving the comments comes back to the one that was showing.
+        _description.Visible = writing && !_showingComments;
+        _rendered.Visible = !writing && !_showingComments;
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
@@ -1317,9 +1381,88 @@ internal sealed class MainForm : Form
         if (!writing)
             RenderDescription();
 
-        if (focus && !_detail.Panel2Collapsed)
+        if (focus && !_detail.Panel2Collapsed && !_showingComments)
             (writing ? (Control)_description : _rendered).Focus();
     }
+
+    // ---- Comments ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Shows the comments in the panel, or gives it back to the description.
+    /// </summary>
+    /// <remarks>
+    /// Opens the panel when it was closed: asking for the comments is asking to see them, and a
+    /// command that appeared to do nothing would be the alternative.
+    /// </remarks>
+    /// <param name="showing">True for the comments, false for the description</param>
+    /// <param name="owner">What the comments should be of, or null to follow the outline</param>
+    private void ShowComments(bool showing, string? owner = null)
+    {
+        _showingComments = showing;
+
+        if (showing)
+        {
+            _commentsOwner = owner ?? _outline.SelectedId;
+
+            // Anything half-typed belongs to the task it was typed against, and switching away is
+            // one of the moments it would otherwise be lost.
+            SaveDescription();
+
+            if (_detail.Panel2Collapsed)
+                ShowDescriptionPanel(shown: true);
+        }
+
+        _comments.Visible = showing;
+
+        // Puts whichever of the two was behind the comments back on top.
+        SetDescriptionMode(_writingDescription, focus: false);
+
+        if (showing)
+        {
+            RefreshComments();
+            _comments.Focus();
+        }
+    }
+
+    /// <summary>Fills the pane with the comments on whatever it is currently pointed at.</summary>
+    private void RefreshComments()
+    {
+        if (!_showingComments)
+            return;
+
+        var owner = _commentsOwner;
+
+        _comments.Comments = _presenter.CommentsOn(owner);
+
+        // A project is always something the account holds; a task may not be, once it has been
+        // pulled out of the archive — and a comment on one of those would be declined, not queued.
+        _comments.CanComment = owner is not null && _presenter.CanCommentOn(owner);
+        _comments.Placeholder = owner is null
+            ? "Select a task to see its comments."
+            : _comments.CanComment
+                ? "No comments yet."
+                : "This task's comments can't be added to here.";
+
+        _comments.Invalidate();
+    }
+
+    private void OnCommentPosted(string text) => Guarded(() =>
+    {
+        if (_presenter.AddComment(_commentsOwner, text))
+            RefreshComments();
+    });
+
+    private void OnCommentEdited(string id, string text) => Guarded(() =>
+    {
+        if (_presenter.EditComment(id, text))
+            RefreshComments();
+    });
+
+    private void OnCommentDeleted(string id) => Guarded(() =>
+    {
+        _presenter.DeleteComment(id);
+        RefreshComments();
+    });
 
     /// <summary>
     /// Opens the markdown to type into, with the caret where the reading was pointing.
@@ -1476,6 +1619,11 @@ internal sealed class MainForm : Form
             // Nothing left to draw on, so the wait for the typing to stop has nothing to wait for.
             _renderIdle.Stop();
 
+            // And out of the comments on the way out, for the same reason as the mode below: the
+            // panel should open showing what it rests on rather than whatever it was left on.
+            _showingComments = false;
+            _comments.Visible = false;
+
             // Back to reading on the way out, so the panel opens the way it rests rather than in
             // whatever it was left mid-edit. Set through the same path as every other mode change,
             // since a flag moved on its own would disagree with which pane is actually on top.
@@ -1605,6 +1753,7 @@ internal sealed class MainForm : Form
         (Keys.F5, AppCommand.SyncNow, Scope.Window),
         (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
         (Keys.Control | Keys.E, AppCommand.ToggleDescription, Scope.Window),
+        (Keys.Control | Keys.M, AppCommand.ToggleComments, Scope.Window),
         (Keys.Control | Keys.F, AppCommand.Search, Scope.Window),
         (Keys.Control | Keys.K, AppCommand.Palette, Scope.Window),
         (Keys.Control | Keys.Up, AppCommand.PreviousView, Scope.Window),
@@ -1674,7 +1823,8 @@ internal sealed class MainForm : Form
         _presenter.CanUndo,
         _presenter.Sort,
         !_detail.Panel2Collapsed,
-        _writingDescription);
+        _writingDescription,
+        _showingComments);
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -1881,6 +2031,18 @@ internal sealed class MainForm : Form
                         StopWriting();
                     else
                         StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+                });
+                return false;
+
+            case AppCommand.ToggleComments:
+                Guarded(() => ShowComments(!_showingComments));
+                return false;
+
+            case AppCommand.CommentOnProject:
+                Guarded(() =>
+                {
+                    if (_sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } project)
+                        ShowComments(showing: true, owner: project.Id);
                 });
                 return false;
 
