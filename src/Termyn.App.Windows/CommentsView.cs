@@ -166,7 +166,14 @@ internal sealed class CommentsView : UserControl
             // Whether the list was sitting on the newest thing said. If it was, it follows the
             // conversation on; if the user had deliberately gone back up it, it stays where they
             // put it — a sync republishes this every forty-five seconds and must not move it.
-            var following = selected is null || (_comments.Count > 0 && _comments[^1].Id == selected);
+            //
+            // Both halves have to agree before it follows. The selection can sit on the newest
+            // comment while the view is nowhere near it, because the wheel and the scrollbar move
+            // the view without touching the selection — and following then would drag the highlight
+            // off screen, leaving the delete key aimed at a comment nobody can see.
+            var onNewest = selected is null || (_comments.Count > 0 && _comments[^1].Id == selected);
+            var atEnd = ShowingTheEnd();
+            var top = _list.TopIndex;
 
             _comments = value;
 
@@ -177,8 +184,14 @@ internal sealed class CommentsView : UserControl
                 foreach (var comment in value)
                     _list.Items.Add(comment);
 
-                var index = following || selected is null ? -1 : IndexOf(selected);
+                var index = (onNewest && atEnd) || selected is null ? -1 : IndexOf(selected);
                 _list.SelectedIndex = index >= 0 ? index : value.Count - 1;
+
+                // Selecting scrolls to what was selected, so the view is put back afterwards. Not
+                // when it was already at the end: there it should stay at the end, which is now one
+                // comment further down.
+                if (!atEnd)
+                    _list.TopIndex = Math.Clamp(top, 0, Math.Max(0, value.Count - 1));
             }
             finally
             {
@@ -199,6 +212,26 @@ internal sealed class CommentsView : UserControl
 
     /// <summary>The comment the list is on, or null when it is on none.</summary>
     public string? SelectedId => _list.SelectedItem is CommentRow row ? row.Id : null;
+
+    /// <summary>
+    /// Whether the newest comment is currently in view.
+    /// </summary>
+    /// <remarks>
+    /// Asked of the view rather than of the selection, which is the only way to tell that the user
+    /// has scrolled back up the conversation: the wheel and the scrollbar both move the view and
+    /// leave the selection where it was.
+    /// </remarks>
+    private bool ShowingTheEnd()
+    {
+        if (_list.Items.Count == 0)
+            return true;
+
+        // An empty rectangle rather than one below the fold is how the control reports a row that
+        // is scrolled out of view altogether — and an empty one has a Top of nought, which reads as
+        // the very top of the list if it isn't asked about first.
+        var last = _list.GetItemRectangle(_list.Items.Count - 1);
+        return !last.IsEmpty && last.Top < _list.ClientSize.Height;
+    }
 
     private int IndexOf(string id)
     {
@@ -251,8 +284,19 @@ internal sealed class CommentsView : UserControl
 
     // ---- Drawing --------------------------------------------------------------------------------
 
-    /// <summary>The width text wraps to, leaving room for the scrollbar the list may be showing.</summary>
-    private int TextWidth => Math.Max(40, _list.ClientSize.Width - (Gap * 2));
+    /// <summary>
+    /// The width text wraps to.
+    /// </summary>
+    /// <remarks>
+    /// The scrollbar is always allowed for, whether or not one is showing. Measuring decides how
+    /// tall the rows are, how tall they are decides whether a scrollbar is needed, and the scrollbar
+    /// takes the width the measuring was done against — so measuring at the width currently
+    /// available is a circle whose first pass is wrong. Reserving it throughout costs a slightly
+    /// early wrap on a short conversation and is the same answer every time.
+    /// </remarks>
+    private int TextWidth => Math.Max(
+        40,
+        _list.ClientSize.Width - (Gap * 2) - SystemInformation.VerticalScrollBarWidth);
 
     private void OnMeasureItem(object? sender, MeasureItemEventArgs e)
     {

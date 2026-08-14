@@ -74,6 +74,27 @@ public class CommentsViewTests
     }
 
     [Fact]
+    public void Scrolling_up_without_touching_the_selection_still_counts_as_having_gone_back()
+    {
+        // The wheel and the scrollbar move the view and leave the selection alone, so the selection
+        // says nothing about whether the newest comment is on screen. Following it on that alone
+        // drags the highlight off screen — and the delete key with it.
+        var many = Enumerable.Range(1, 30)
+            .Select(i => Comment($"n{i}", $"comment number {i}, long enough to take a line or two of the panel"))
+            .ToArray();
+
+        using var view = Realised(many);
+        var list = view.Controls.OfType<ListBox>().Single();
+
+        Assert.Equal("n30", view.SelectedId);
+        list.TopIndex = 0;
+
+        view.Comments = [.. many, Comment("n31", "one more, arriving from a sync")];
+
+        Assert.Equal("n30", view.SelectedId);
+    }
+
+    [Fact]
     public void A_comment_that_has_gone_does_not_leave_the_selection_on_it()
     {
         using var view = Realised(Comment("n1", "first"), Comment("n2", "second"));
