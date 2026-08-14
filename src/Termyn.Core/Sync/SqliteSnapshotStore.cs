@@ -20,10 +20,62 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
 
     private readonly SqliteConnection _conn;
 
+    /// <summary>
+    /// The two SQLite codes that mean the file will never be readable, whatever we do.
+    /// </summary>
+    /// <remarks>
+    /// Narrow on purpose. Most of what SQLite refuses with is temporary — busy, locked, read-only,
+    /// or the "unable to open" you get when something else has the file — and none of those is a
+    /// reason to throw a cache away. Doing so would lose the outbox to a problem that was about to
+    /// resolve itself, which is a worse failure than the one being recovered from.
+    /// </remarks>
+    private const int Corrupt = 11;       // SQLITE_CORRUPT — "database disk image is malformed"
+    private const int NotADatabase = 26;  // SQLITE_NOTADB  — "file is not a database"
+
+    /// <summary>The suffix a cache that couldn't be opened is kept under.</summary>
+    /// <remarks>
+    /// Kept rather than deleted, because a file that stopped the app starting is the only evidence
+    /// of why it did. One copy, overwritten: a growing pile of them in somebody's cache directory
+    /// would be a second problem.
+    /// </remarks>
+    private const string SetAsideSuffix = ".corrupt";
+
+    /// <summary>The sidecars SQLite keeps beside the database in WAL mode.</summary>
+    private static readonly string[] Sidecars = ["", "-wal", "-shm"];
+
+    /// <summary>
+    /// True when the cache on disk couldn't be opened and this one was started from nothing.
+    /// </summary>
+    /// <remarks>
+    /// Worth saying out loud rather than recovering quietly: the outbox lives in the same file, so
+    /// anything queued and not yet sent went with it. Everything else comes back on the first sync.
+    /// </remarks>
+    public bool Rebuilt { get; }
+
     public SqliteSnapshotStore(string databasePath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
 
+        try
+        {
+            _conn = Open(databasePath);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode is Corrupt or NotADatabase)
+        {
+            // A cache is a cache: everything in it can be fetched again, and the one thing that
+            // can't — the outbox — is already lost with the file. Refusing to start is the worst of
+            // the answers available, and it is the one that leaves somebody hunting for a file they
+            // have to be told is safe to delete.
+            SetAside(databasePath);
+
+            _conn = Open(databasePath);
+            Rebuilt = true;
+        }
+    }
+
+    /// <summary>Opens the database and puts the schema in it, disposing the connection if it can't.</summary>
+    private static SqliteConnection Open(string databasePath)
+    {
         // Pooling off: the store holds one long-lived connection, so pooling adds nothing and keeping
         // it off releases the file handle promptly on Dispose.
         var connectionString = new SqliteConnectionStringBuilder
@@ -32,18 +84,58 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             Pooling = false,
         }.ToString();
 
-        _conn = new SqliteConnection(connectionString);
-        _conn.Open();
-        Execute("PRAGMA journal_mode=WAL;");
-        // Overwrite deleted content rather than leaving it readable in freed pages, so purging a
-        // previous account's tasks actually removes them.
-        Execute("PRAGMA secure_delete=ON;");
-        Execute("""
-            CREATE TABLE IF NOT EXISTS resources (type TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id));
-            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, no_verdict INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL, last_error TEXT);
-            CREATE TABLE IF NOT EXISTS deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
-            """);
+        var conn = new SqliteConnection(connectionString);
+        try
+        {
+            conn.Open();
+            Execute(conn, "PRAGMA journal_mode=WAL;");
+            // Overwrite deleted content rather than leaving it readable in freed pages, so purging a
+            // previous account's tasks actually removes them.
+            Execute(conn, "PRAGMA secure_delete=ON;");
+            Execute(conn, """
+                CREATE TABLE IF NOT EXISTS resources (type TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id));
+                CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, no_verdict INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL, last_error TEXT);
+                CREATE TABLE IF NOT EXISTS deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
+                """);
+
+            return conn;
+        }
+        catch
+        {
+            // Or the handle stays on the file, and nothing can move it out of the way.
+            conn.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Moves a cache that couldn't be opened out of the way, sidecars and all.
+    /// </summary>
+    /// <remarks>
+    /// A file that can't be moved is swallowed rather than thrown, because this runs on the way to
+    /// starting the app and the whole point of it is that a bad cache doesn't stop that happening.
+    /// If the move fails then the open that follows fails too, and that is what gets reported —
+    /// which is why only the two failures a locked or unwritable file produces are caught here, and
+    /// anything else still comes out.
+    /// </remarks>
+    private static void SetAside(string databasePath)
+    {
+        foreach (var sidecar in Sidecars)
+        {
+            var from = databasePath + sidecar;
+            if (!File.Exists(from))
+                continue;
+
+            try
+            {
+                File.Move(from, databasePath + SetAsideSuffix + sidecar, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Nothing to be done about it here, and the retry will say so.
+            }
+        }
     }
 
     public StoredSnapshot Load()
@@ -302,9 +394,11 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         cmd.ExecuteNonQuery();
     }
 
-    private void Execute(string sql)
+    private void Execute(string sql) => Execute(_conn, sql);
+
+    private static void Execute(SqliteConnection conn, string sql)
     {
-        using var cmd = _conn.CreateCommand();
+        using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
