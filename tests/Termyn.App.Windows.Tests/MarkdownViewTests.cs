@@ -67,20 +67,26 @@ public class MarkdownViewTests
         // — which narrowed it to one of two lines and told us nothing about either. See #42.
         using var view = Render("Some **bold** and some *italic* here");
 
-        Assert.True(FontAt(view, "bold").Bold, Drawn(view, "bold"));
-        Assert.False(FontAt(view, "bold").Italic, Drawn(view, "bold"));
-        Assert.True(FontAt(view, "italic").Italic, Drawn(view, "italic"));
-        Assert.False(FontAt(view, "italic").Bold, Drawn(view, "italic"));
-        Assert.False(FontAt(view, "Some").Bold, Drawn(view, "Some"));
+        // Read once each, before anything is asserted. A message argument is built whether or not
+        // the assertion fails, so asking the control again inside it would double the selections
+        // this test makes — on a test being instrumented precisely because something about it is
+        // occasionally not reproducible — and would let the message describe a different look at
+        // the control from the one that failed.
+        var text = view.Text.Trim();
+        var bold = FontAt(view, "bold");
+        var italic = FontAt(view, "italic");
+        var plain = FontAt(view, "Some");
+
+        Assert.True(bold.Bold, Drawn("bold", bold, text));
+        Assert.False(bold.Italic, Drawn("bold", bold, text));
+        Assert.True(italic.Italic, Drawn("italic", italic, text));
+        Assert.False(italic.Bold, Drawn("italic", italic, text));
+        Assert.False(plain.Bold, Drawn("Some", plain, text));
     }
 
     /// <summary>How a word actually came out, for an assertion that is about to say it is wrong.</summary>
-    private static string Drawn(MarkdownView view, string needle)
-    {
-        var font = FontAt(view, needle);
-        return $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. "
-            + $"Rendered text: '{view.Text.Trim()}'";
-    }
+    private static string Drawn(string needle, Font font, string text)
+        => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. Rendered text: '{text}'";
 
     [Fact]
     public void Strikethrough_is_struck_through()
