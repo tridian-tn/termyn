@@ -95,6 +95,7 @@ public static class Menus
             MenuEntry.AfterRule(AppCommand.ToggleCompleted),
             MenuEntry.AfterRule(AppCommand.ToggleDescription),
             MenuEntry.Of(AppCommand.EditDescription),
+            MenuEntry.Of(AppCommand.ToggleComments),
 
             // Sorting is done by clicking a column header; this is the way back from it, and the
             // only part of it that needs somewhere to live.
@@ -109,7 +110,8 @@ public static class Menus
             "&Organise",
             MenuEntry.Of(AppCommand.RenameSelection),
             MenuEntry.Of(AppCommand.DeleteSelection),
-            MenuEntry.AfterRule(AppCommand.ToggleFavourite)),
+            MenuEntry.AfterRule(AppCommand.ToggleFavourite),
+            MenuEntry.AfterRule(AppCommand.CommentOnProject)),
 
         MenuEntry.Group(
             "&Help",

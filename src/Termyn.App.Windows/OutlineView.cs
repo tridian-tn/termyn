@@ -289,7 +289,7 @@ internal sealed class OutlineView : ListView
         if (_cache[e.ItemIndex] is not { } cached)
         {
             var row = _rows[e.ItemIndex];
-            cached = new ListViewItem([row.Content, string.Empty, row.Project, DueOf(row), LabelsOf(row)]) { Tag = row.Id };
+            cached = new ListViewItem([ContentOf(row), string.Empty, row.Project, DueOf(row), LabelsOf(row)]) { Tag = row.Id };
             _cache[e.ItemIndex] = cached;
         }
 
@@ -417,7 +417,7 @@ internal sealed class OutlineView : ListView
                 bounds.X += row.Depth * IndentWidth;
                 bounds.Width -= row.Depth * IndentWidth;
                 DrawGuides(e.Graphics, e.Bounds, row.Depth, selected ? Theme.OnAccent : Theme.Border);
-                TextRenderer.DrawText(e.Graphics, row.Content, font, Inset(bounds), text, Flags);
+                TextRenderer.DrawText(e.Graphics, ContentOf(row), font, Inset(bounds), text, Flags);
                 break;
 
             case 1:
@@ -441,6 +441,17 @@ internal sealed class OutlineView : ListView
     /// <summary>Labels as they are written in quick-add, so the row reads the way it was typed.</summary>
     private static string LabelsOf(TaskRow row)
         => row.Labels.Count == 0 ? string.Empty : "@" + string.Join(" @", row.Labels);
+
+    /// <summary>
+    /// The task's own column: its name, and a mark when there's a conversation on it.
+    /// </summary>
+    /// <remarks>
+    /// Marked here rather than beside the repeat and the reminder, which share the due column
+    /// because both are about when the task comes round. A comment isn't about timing at all, and
+    /// without a mark somewhere it's invisible until you open the pane.
+    /// </remarks>
+    private static string ContentOf(TaskRow row)
+        => row.CommentCount > 0 ? $"{row.Content}  💬" : row.Content;
 
     /// <summary>
     /// The due column. A repeat and a reminder are marked here rather than given columns of their

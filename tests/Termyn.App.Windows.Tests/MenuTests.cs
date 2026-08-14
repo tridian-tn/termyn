@@ -288,6 +288,38 @@ public class MenuTests
     }
 
     [Fact]
+    public void The_comments_entry_is_ticked_while_the_pane_is_showing_them()
+    {
+        using var description = Build(View, new CommandContext(ShowingDescription: true));
+        using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
+
+        Assert.False(Find(description, "Comments").Checked);
+        Assert.True(Find(comments, "Comments").Checked);
+    }
+
+    [Fact]
+    public void Editing_the_description_is_not_offered_while_the_pane_is_on_the_comments()
+    {
+        // The same pane showing a third thing. Offering "Edit description" there would put the
+        // markdown behind the comments, where the typing would go somewhere nobody can see.
+        using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
+
+        Assert.False(Find(comments, "Edit description").Enabled);
+    }
+
+    [Fact]
+    public void A_projects_own_comments_are_offered_only_over_a_project()
+    {
+        using var project = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Project)));
+        using var label = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Label)));
+        using var nothing = Build(Organise, CommandContext.Empty);
+
+        Assert.True(Find(project, "Comments on project").Enabled);
+        Assert.False(Find(label, "Comments on project").Enabled);
+        Assert.False(Find(nothing, "Comments on project").Enabled);
+    }
+
+    [Fact]
     public void Showing_completed_tasks_is_ticked_while_they_are_showing()
     {
         using var hidden = Build(View, CommandContext.Empty);

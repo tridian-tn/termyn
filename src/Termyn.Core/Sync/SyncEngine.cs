@@ -20,7 +20,8 @@ public sealed record ModelSnapshot(
     TimeZoneInfo TimeZone,
     int PendingCount,
     int FailedCount,
-    IReadOnlyList<TaskItem> CompletedItems)
+    IReadOnlyList<TaskItem> CompletedItems,
+    IReadOnlyDictionary<string, int> CommentCounts)
 {
     /// <summary>The Inbox, which tasks fall back to when they name no project.</summary>
     public string? InboxProjectId => Projects.FirstOrDefault(p => p.IsInboxProject)?.Id;
@@ -187,7 +188,8 @@ public sealed class SyncEngine
                 zone,
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed),
-                CompletedItems(items));
+                CompletedItems(items),
+                Model.CommentCounts());
         }
     }
 
@@ -1187,6 +1189,126 @@ public sealed class SyncEngine
         }
     }
 
+    // ---- Comments ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The comments on a task or a project, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Ordered by when they were posted, which is the order a conversation reads in. One queued here
+    /// and not yet acked has no posted time at all, and sorts last — which is where it belongs, being
+    /// the most recent thing said.
+    /// </remarks>
+    /// <param name="ownerId">The task or project whose comments are wanted</param>
+    /// <returns>Its comments, or an empty list when it has none or isn't held</returns>
+    public IReadOnlyList<Comment> CommentsFor(string? ownerId)
+    {
+        if (string.IsNullOrEmpty(ownerId))
+            return [];
+
+        lock (_gate)
+        {
+            var id = Promoted(ownerId);
+            return Model.Comments()
+                .Where(c => c.OwnerId == id)
+                .OrderBy(c => c.PostedAt is null ? 1 : 0)
+                .ThenBy(c => c.PostedAt, StringComparer.Ordinal)
+                .ThenBy(c => c.Id, StringComparer.Ordinal)
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// Whether a comment can be filed against this id — whether it names a task or a project the
+    /// account still holds. A completed task out of the archive is held apart from the model, so it
+    /// isn't one of those.
+    /// </summary>
+    public bool CanComment(string? ownerId)
+    {
+        if (string.IsNullOrEmpty(ownerId))
+            return false;
+
+        lock (_gate)
+            return OwnerFieldFor(Promoted(ownerId)) is not null;
+    }
+
+    /// <summary>Adds a comment to a task or a project and queues a <c>note_add</c>.</summary>
+    /// <param name="ownerId">The task or project to comment on</param>
+    /// <param name="content">The comment, as markdown</param>
+    /// <returns>The new comment's temporary id, or null when the owner isn't held</returns>
+    public string? AddComment(string ownerId, string content)
+    {
+        lock (_gate)
+        {
+            var id = Promoted(ownerId);
+
+            if (OwnerFieldFor(id) is not { } owner)
+                return null;
+
+            var tempId = "t-" + Guid.NewGuid().ToString("N");
+            var args = new JsonObject { [owner.Key] = id, ["content"] = content };
+            PromoteReferences(args);
+
+            var obj = args.DeepClone().AsObject();
+            obj["id"] = tempId;
+
+            Persist("note_add", args, tempId, null, [new StoredResource(owner.Type, tempId, obj.ToJsonString())], []);
+            Model.Upsert(owner.Type, tempId, obj);
+            return tempId;
+        }
+    }
+
+    /// <summary>Rewrites a comment and queues a <c>note_update</c>.</summary>
+    public void EditComment(string id, string content)
+    {
+        lock (_gate)
+        {
+            var promoted = Promoted(id);
+            if (CommentTypeOf(promoted) is not { } type)
+                return;
+
+            UpdateResource(type, "note_update", promoted, new JsonObject { ["content"] = content });
+        }
+    }
+
+    /// <summary>
+    /// Deletes a comment and queues a <c>note_delete</c>.
+    /// </summary>
+    /// <remarks>
+    /// A barrier for undo, as every delete is: Todoist has no undelete, so once the server has this
+    /// there is nothing to reverse it with.
+    /// </remarks>
+    public void DeleteComment(string id)
+    {
+        lock (_gate)
+        {
+            var promoted = Promoted(id);
+            if (CommentTypeOf(promoted) is not { } type)
+                return;
+
+            RemoveAll("note_delete", promoted, [new ResourceKey(type, promoted)]);
+        }
+    }
+
+    /// <summary>
+    /// Which field names a comment's owner, and which resource type such a comment is filed under.
+    /// </summary>
+    /// <returns>The pair, or null when nothing held answers to this id</returns>
+    private (string Key, string Type)? OwnerFieldFor(string ownerId)
+    {
+        if (Model.Get(ResourceType.Items, ownerId) is not null)
+            return ("item_id", ResourceType.Notes);
+
+        if (Model.Get(ResourceType.Projects, ownerId) is not null)
+            return ("project_id", ResourceType.ProjectNotes);
+
+        return null;
+    }
+
+    /// <summary>Where a comment is filed, or null when the id isn't one.</summary>
+    private string? CommentTypeOf(string id)
+        => Model.Find(id) is { } found && ResourceType.IsComments(found.Type) ? found.Type : null;
+
     // ---- Labels ------------------------------------------------------------------------------------
 
     /// <summary>
@@ -2136,13 +2258,36 @@ public sealed class SyncEngine
 
     private static bool IsCreate(OutboxCommand cmd) => cmd.Type.EndsWith("_add", StringComparison.Ordinal);
 
-    private static string ResourceTypeFor(OutboxCommand cmd) => cmd.Type.Split('_')[0] switch
+    private string ResourceTypeFor(OutboxCommand cmd) => cmd.Type.Split('_')[0] switch
     {
         "project" => ResourceType.Projects,
         "section" => ResourceType.Sections,
         "label" => ResourceType.Labels,
         "filter" => ResourceType.Filters,
         "reminder" => ResourceType.Reminders,
+        "note" => CommentTypeFor(cmd),
         _ => ResourceType.Items,
     };
+
+    /// <summary>
+    /// Which of the two comment types a queued <c>note_*</c> command is aimed at.
+    /// </summary>
+    /// <remarks>
+    /// Every other command says what it targets in its own name. A comment doesn't: Todoist files
+    /// task comments under <c>notes</c> and project comments under <c>project_notes</c>, and writes
+    /// both with the same command. An add names its owner in its args; an update or a delete carries
+    /// only the comment's id, so the model is asked where that id is currently filed.
+    /// </remarks>
+    private string CommentTypeFor(OutboxCommand cmd)
+    {
+        var args = ParseArgs(cmd);
+
+        if (args.ContainsKey("project_id"))
+            return ResourceType.ProjectNotes;
+
+        if (args.ContainsKey("item_id"))
+            return ResourceType.Notes;
+
+        return args["id"] is JsonValue id ? CommentTypeOf(id.ToString()) ?? ResourceType.Notes : ResourceType.Notes;
+    }
 }

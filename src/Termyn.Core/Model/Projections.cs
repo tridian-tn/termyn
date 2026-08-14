@@ -123,6 +123,19 @@ public static class Projections
         ItemOrder = JsonRead.Int(o, "item_order"),
     };
 
+    public static Comment ToComment(JsonObject o) => new()
+    {
+        Id = JsonRead.String(o, "id") ?? string.Empty,
+        ItemId = JsonRead.String(o, "item_id"),
+        ProjectId = JsonRead.String(o, "project_id"),
+        Content = JsonRead.String(o, "content") ?? string.Empty,
+        PostedAt = JsonRead.String(o, "posted_at"),
+
+        // Only the name, and only to say the file is there. Everything else about an attachment —
+        // fetching it, opening it, putting one on — is a later phase.
+        AttachmentName = o["file_attachment"] is JsonObject file ? JsonRead.String(file, "file_name") : null,
+    };
+
     private static IReadOnlyList<string> ReadLabels(JsonObject o)
     {
         if (o["labels"] is not JsonArray array || array.Count == 0)

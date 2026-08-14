@@ -155,6 +155,33 @@ public sealed class TodoistModel
 
     public IEnumerable<Reminder> Reminders() => All(ResourceType.Reminders).Select(Projections.ToReminder);
 
+    /// <summary>Every comment held, on tasks and on projects alike.</summary>
+    public IEnumerable<Comment> Comments()
+        => All(ResourceType.Notes).Concat(All(ResourceType.ProjectNotes)).Select(Projections.ToComment);
+
+    /// <summary>
+    /// How many comments each task and project carries.
+    /// </summary>
+    /// <remarks>
+    /// Read straight off the raw JSON rather than by projecting every comment. The outline asks for
+    /// this on every publish — which is every keystroke — and all it needs is who each one belongs
+    /// to, so building a Comment per row to then throw it away is work nobody is waiting for.
+    /// </remarks>
+    public Dictionary<string, int> CommentCounts()
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var json in All(ResourceType.Notes).Concat(All(ResourceType.ProjectNotes)))
+        {
+            if ((JsonRead.String(json, "item_id") ?? JsonRead.String(json, "project_id")) is not { } owner)
+                continue;
+
+            counts[owner] = counts.GetValueOrDefault(owner) + 1;
+        }
+
+        return counts;
+    }
+
     /// <summary>
     /// The account's plan limits, or null before the first sync has brought them. Null is not
     /// "unlimited": a caller gating on a plan feature has to treat not-knowing as not-allowed, or

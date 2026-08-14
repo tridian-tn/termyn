@@ -25,7 +25,21 @@ public sealed record TaskRow(
     bool IsRecurring = false,
     int ReminderCount = 0,
     bool Completed = false,
-    DateOnly? DueOn = null);
+    DateOnly? DueOn = null,
+    int CommentCount = 0);
+
+/// <summary>
+/// One comment, as the pane draws it.
+/// </summary>
+/// <param name="Id">The comment's own id, which is what an edit or a delete names</param>
+/// <param name="Content">What it says, as the markdown the account stores</param>
+/// <param name="Posted">When it was posted, in the account's timezone, or empty when it hasn't reached the server</param>
+/// <param name="AttachmentName">The file hanging off it, or null when there is none</param>
+public sealed record CommentRow(
+    string Id,
+    string Content,
+    string Posted,
+    string? AttachmentName);
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -429,6 +443,77 @@ public sealed class MainPresenter
     public void SetDescription(string id, string description)
     {
         _engine.UpdateItem(id, new JsonObject { ["description"] = description });
+        Publish();
+    }
+
+    // ---- Comments ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The comments on a task or a project, oldest first and ready to draw.
+    /// </summary>
+    /// <param name="ownerId">The task or project whose comments are wanted</param>
+    /// <returns>Its comments, or an empty list when it has none or isn't held</returns>
+    public IReadOnlyList<CommentRow> CommentsOn(string? ownerId)
+    {
+        var zone = _engine.Snapshot().TimeZone;
+        return _engine.CommentsFor(ownerId)
+            .Select(c => new CommentRow(c.Id, c.Content, Posted(c.PostedAt, zone), c.AttachmentName))
+            .ToList();
+    }
+
+    /// <summary>
+    /// When a comment was posted, in the account's own timezone.
+    /// </summary>
+    /// <remarks>
+    /// Empty for one that hasn't reached the server, which is how the pane knows to say so. That is
+    /// the ordinary state of a comment written offline, not an error.
+    /// </remarks>
+    /// <param name="postedAt">The instant the server wrote, or null</param>
+    /// <param name="zone">The account's timezone</param>
+    /// <returns>A short local date and time, or empty when it hasn't been posted yet</returns>
+    private static string Posted(string? postedAt, TimeZoneInfo zone)
+    {
+        if (postedAt is null || !DateTimeOffset.TryParse(postedAt, out var when))
+            return string.Empty;
+
+        return TimeZoneInfo.ConvertTime(when, zone).ToString("d MMM yyyy, HH:mm");
+    }
+
+    /// <summary>Whether a comment can be added to this task or project at all.</summary>
+    public bool CanCommentOn(string? ownerId) => _engine.CanComment(ownerId);
+
+    /// <summary>Adds a comment to a task or a project.</summary>
+    /// <param name="ownerId">The task or project to comment on</param>
+    /// <param name="content">The comment, as markdown</param>
+    /// <returns>False when there was nothing to say, or nothing held to say it about</returns>
+    public bool AddComment(string? ownerId, string content)
+    {
+        if (ownerId is null || string.IsNullOrWhiteSpace(content))
+            return false;
+
+        if (_engine.AddComment(ownerId, content.Trim()) is null)
+            return false;
+
+        Publish();
+        return true;
+    }
+
+    /// <summary>Rewrites a comment.</summary>
+    /// <returns>False when there was nothing left to say, which is a delete rather than an edit</returns>
+    public bool EditComment(string id, string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return false;
+
+        _engine.EditComment(id, content.Trim());
+        Publish();
+        return true;
+    }
+
+    /// <summary>Removes a comment. Not undoable — Todoist has no undelete.</summary>
+    public void DeleteComment(string id)
+    {
+        _engine.DeleteComment(id);
         Publish();
     }
 
@@ -1144,7 +1229,8 @@ public sealed class MainPresenter
             item.IsRecurring,
             reminderCounts.GetValueOrDefault(item.Id),
             item.Completed,
-            SmartViews.DueOn(item, snapshot.TimeZone));
+            SmartViews.DueOn(item, snapshot.TimeZone),
+            snapshot.CommentCounts.GetValueOrDefault(item.Id));
     }
 
     /// <summary>
