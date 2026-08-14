@@ -25,6 +25,9 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _interval;
     private readonly CheckBox _launchAtLogin;
     private readonly CheckBox _closeToTray;
+    private readonly NumericUpDown _cacheMb;
+    private readonly NumericUpDown _cacheDays;
+    private readonly Button _clearDownloads;
     private readonly Label _warning;
 
     /// <summary>Internal rather than private so a test can lay one out without a screen to show it on.</summary>
@@ -35,7 +38,7 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(Width_, 404);
+        ClientSize = new Size(Width_, 500);
 
         var binding = settings.HotkeyBinding;
 
@@ -94,8 +97,41 @@ internal sealed class SettingsForm : Form
 
         _closeToTray = Check("Closing the window leaves Termyn in the tray", settings.CloseToTray, 300);
 
-        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 352), Size = new Size(96, 32) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 352), Size = new Size(96, 32) };
+        _cacheMb = new NumericUpDown
+        {
+            Location = new Point(CaptionWidth + 24, 332),
+            Size = new Size(100, 26),
+            Minimum = 1,
+            Maximum = 10_000,
+            Value = Math.Clamp(settings.AttachmentCacheMb, 1, 10_000),
+        };
+
+        _cacheDays = new NumericUpDown
+        {
+            Location = new Point(CaptionWidth + 24, 366),
+            Size = new Size(100, 26),
+            Minimum = 1,
+            Maximum = 3_650,
+            Value = Math.Clamp(settings.AttachmentCacheDays, 1, 3_650),
+        };
+
+        // Deliberately immediate rather than saved with the rest: it isn't a preference, it's an
+        // action, and nothing in the cache is authoritative so there is nothing to confirm.
+        _clearDownloads = new Button
+        {
+            Text = "Clear downloaded files",
+            Location = new Point(CaptionWidth + 24, 400),
+            Size = new Size(200, 30),
+        };
+        _clearDownloads.Click += (_, _) =>
+        {
+            var removed = ClearDownloads?.Invoke() ?? 0;
+            _clearDownloads.Text = removed == 1 ? "1 file removed" : $"{removed} files removed";
+            _clearDownloads.Enabled = false;
+        };
+
+        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 448), Size = new Size(96, 32) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 448), Size = new Size(96, 32) };
 
         AcceptButton = ok;
         CancelButton = cancel;
@@ -106,7 +142,11 @@ internal sealed class SettingsForm : Form
             Caption("Theme", 138), _theme,
             Caption("Background sync", 182), _syncMode,
             Caption("Every (seconds)", 226), _interval,
-            _launchAtLogin, _closeToTray, ok, cancel,
+            _launchAtLogin, _closeToTray,
+            Caption("Downloads: keep up to (MB)", 336), _cacheMb,
+            Caption("and for at most (days)", 370), _cacheDays,
+            _clearDownloads,
+            ok, cancel,
         ]);
 
         _hotkeyEnabled.CheckedChanged += (_, _) => Sync();
@@ -124,9 +164,10 @@ internal sealed class SettingsForm : Form
     /// Whether launch-at-login can actually be set is the platform layer's to know, and it says so by
     /// refusing — the caller reports that rather than the dialog second-guessing it here.
     /// </remarks>
-    public static AppSettings? Edit(IWin32Window owner, AppSettings settings, Theme theme)
+    /// <param name="clearDownloads">Empties the download cache, returning how many files went</param>
+    public static AppSettings? Edit(IWin32Window owner, AppSettings settings, Theme theme, Func<int>? clearDownloads = null)
     {
-        using var form = new SettingsForm(settings, theme);
+        using var form = new SettingsForm(settings, theme) { ClearDownloads = clearDownloads };
         return form.ShowDialog(owner) == DialogResult.OK ? form.Apply(settings) : null;
     }
 
@@ -139,7 +180,20 @@ internal sealed class SettingsForm : Form
         SyncIntervalSeconds = (int)_interval.Value,
         LaunchAtLogin = _launchAtLogin.Checked,
         CloseToTray = _closeToTray.Checked,
+        AttachmentCacheMb = (int)_cacheMb.Value,
+        AttachmentCacheDays = (int)_cacheDays.Value,
     };
+
+    /// <summary>
+    /// Empties the download cache, returning how many files went.
+    /// </summary>
+    /// <remarks>
+    /// Supplied by the caller because the cache is the app's, not the dialog's. Unset leaves the
+    /// button reporting nothing removed, which is what a dialog opened without one should say.
+    /// </remarks>
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Func<int>? ClearDownloads { get; set; }
 
     private HotkeyBinding Binding()
     {

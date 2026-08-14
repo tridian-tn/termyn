@@ -151,6 +151,37 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void The_download_caps_come_back_as_they_were_set()
+    {
+        var saved = new AppSettings { AttachmentCacheMb = 64, AttachmentCacheDays = 3 };
+
+        Assert.Equal(64L * 1024 * 1024, saved.AttachmentCache.MaxBytes);
+        Assert.Equal(TimeSpan.FromDays(3), saved.AttachmentCache.MaxAge);
+    }
+
+    [Fact]
+    public void A_nonsense_download_cap_is_held_to_something_workable()
+    {
+        // Hand-edited, or written by a version that meant something else by it. Nought megabytes
+        // would sweep every file the moment it arrived, which reads as downloads being broken.
+        var saved = new AppSettings { AttachmentCacheMb = 0, AttachmentCacheDays = -5 };
+
+        Assert.True(saved.AttachmentCache.MaxBytes > 0);
+        Assert.True(saved.AttachmentCache.MaxAge > TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void A_config_from_before_downloads_existed_gets_the_defaults()
+    {
+        // Every existing user's file. It has no such keys in it, and must read as the settings it
+        // does have rather than as nought of everything it doesn't.
+        var settings = new AppSettings();
+
+        Assert.Equal(256, settings.AttachmentCacheMb);
+        Assert.Equal(14, settings.AttachmentCacheDays);
+    }
+
+    [Fact]
     public void The_description_panel_starts_closed()
     {
         // One more thing on screen for someone who doesn't use descriptions, so it is asked for

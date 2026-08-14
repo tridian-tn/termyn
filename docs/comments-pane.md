@@ -62,11 +62,52 @@ set is keyed by resource type, so a project comment recorded under `notes` fails
 the server's copy lands on top of the local edit, and the sync token has already advanced past that
 change. The edit is then gone with nothing reporting it. `CommentTests` covers exactly this.
 
-## Attachments are named, not fetched
+## Attachments
 
-A comment can carry a file. Fetching one is a later phase, but the file's *name* is read now,
-because a comment can have an attachment and no text at all — and one drawn from its text alone is a
-blank row that reads as a comment that failed to load rather than as a file.
+A comment can carry a file, and that file is the one thing in Termyn that isn't offline-first.
+
+**Why it can't be.** Every other write is a queued command: mutate locally, append to the outbox,
+sync later. An upload can't work that way, because the `note_add` needs the `file_url` the upload
+returns — so there is nothing to write down until the network has answered. Termyn deliberately does
+*not* queue the file's path instead: by the time it flushed, the file may have moved or changed, and
+silently attaching different bytes is worse than not attaching at all.
+
+**So the exception is contained rather than allowed to spread.** Attachment *metadata* syncs like
+any other field and is always there, offline included — you can always see that a comment has a file,
+what it's called and how big it is. Only the bytes need a connection.
+
+| Situation | What happens |
+|---|---|
+| Offline, reading | Name and size from the cached metadata. Its existence is never hidden. |
+| Offline, opening | Says the file isn't downloaded and that it'll be there to try again when you're back online. Never a spinner, never a silent failure. |
+| Offline, attaching | The affordance is off. Nothing is queued. |
+| Upload fails | Nothing is posted at all, and what you typed stays in the box. A comment queued without its file would sync as one that quietly lost its attachment. |
+
+**Bytes are on request, never on sync.** A 100 MB attachment costs nothing until somebody opens it.
+Downloads stream to disk and are never held whole in memory, which is what keeps §14's footprint
+budget honest now that attachments exist.
+
+**The cache is keyed by a hash of the url**, not by filename — every account has more than one
+`notes.pdf`, and a name from a server isn't a name this machine should accept as a path. The original
+extension is carried over, because handing a file to the default application is done by extension,
+but it's checked first rather than trusted. Downloads are written to a `.part` file and moved into
+place, so a cancelled or failed one can't later masquerade as a complete file.
+
+**It's swept, not kept**: a size cap and an age cap, both in settings, applied on start and after
+every download, plus a "clear downloaded files" button. Age runs from when a file was last *opened*
+rather than when it arrived, so reopening the same document all week keeps it. Nothing in the cache
+is authoritative, which is what makes all of that safe — and it's emptied along with everything else
+when the account is purged.
+
+**Deleting a file is not undoable.** Taking one off a comment updates the comment through the outbox
+like any other write, and then deletes the upload directly, because Todoist has no command for it.
+The confirmation says so. If the delete fails, the file is orphaned on the account rather than lost
+from the comment — the better way round.
+
+**Plan limits** are read from `user_plan_limits` and an over-size file is refused *before* the upload
+rather than after. Unlike reminders, an unknown limit permits the attempt: refusing every upload
+until the first sync lands would make attachments unusable on a fresh install, so the server gets to
+be the one that says no.
 
 ## What isn't here
 
@@ -75,3 +116,7 @@ blank row that reads as a comment that failed to load rather than as a file.
   filter or search by them.
 - Author identity isn't modelled. Everything is shown as though it's yours, which it is until shared
   projects are supported.
+- An attachment can't be added to a comment that already exists, or saved anywhere but the cache.
+  Attaching is part of writing a new comment, and opening hands the file to the desktop.
+- Only one transfer at a time. The panel has one line to report progress in, and two at once would
+  leave you unable to tell which had failed.

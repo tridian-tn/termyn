@@ -85,6 +85,24 @@ public sealed class PlanLimits
 
     /// <summary>How many time-based reminders the plan allows.</summary>
     public int MaxTimeReminders { get; init; }
+
+    /// <summary>
+    /// The largest file the plan will take, in megabytes. Zero when the server hasn't said.
+    /// </summary>
+    /// <remarks>
+    /// Not knowing is not the same as no limit, but it can't be treated the way an unknown reminder
+    /// entitlement is either: refusing every upload because the plan hasn't arrived yet would make
+    /// attachments unusable before the first sync lands. So an unknown limit lets the upload be
+    /// attempted and lets the server be the one to refuse it.
+    /// </remarks>
+    public int UploadLimitMb { get; init; }
+
+    /// <summary>
+    /// Whether a file of this size is worth offering to upload.
+    /// </summary>
+    /// <param name="bytes">The file's size</param>
+    /// <returns>False only when the plan states a limit and the file is over it</returns>
+    public bool AllowsUploadOf(long bytes) => UploadLimitMb <= 0 || bytes <= (long)UploadLimitMb * 1024 * 1024;
 }
 
 /// <summary>A Todoist project.</summary>
@@ -185,13 +203,30 @@ public sealed class Comment
     /// </summary>
     public string? PostedAt { get; init; }
 
-    /// <summary>
-    /// The name of the file hanging off this comment, or null when there is none.
-    /// </summary>
-    /// <remarks>
-    /// Fetching the file is a later phase. The name is read now because a comment can carry an
-    /// attachment and no text at all, and one drawn from its text alone would be a blank row that
-    /// reads as a bug rather than as a file.
-    /// </remarks>
-    public string? AttachmentName { get; init; }
+    /// <summary>The file hanging off this comment, or null when there is none.</summary>
+    public FileAttachment? Attachment { get; init; }
+}
+
+/// <summary>
+/// A file hanging off a comment.
+/// </summary>
+/// <remarks>
+/// Metadata only, which is all that ever syncs. The bytes are fetched on request and live in a
+/// cache that can be swept at any time, so nothing here is a promise that the file is on this
+/// machine — <see cref="FileUrl"/> is where it can always be got again.
+/// </remarks>
+/// <param name="FileName">What the file is called, as the account stores it</param>
+/// <param name="FileSize">Its size in bytes, or zero when the server didn't say</param>
+/// <param name="FileType">Its media type, or empty when the server didn't say</param>
+/// <param name="FileUrl">Where to fetch it, and the handle a delete names</param>
+/// <param name="Pending">Whether the server is still processing the upload</param>
+public sealed record FileAttachment(
+    string FileName,
+    long FileSize,
+    string FileType,
+    string FileUrl,
+    bool Pending)
+{
+    /// <summary>Whether there's anywhere to fetch this from. A pending upload has no url yet.</summary>
+    public bool CanFetch => FileUrl.Length > 0;
 }

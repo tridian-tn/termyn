@@ -85,6 +85,69 @@ public sealed class FakeApi : ITodoistApi
 
     /// <summary>Kept apart from <see cref="Throw"/> so a test can fail one call without failing sync.</summary>
     public Exception? CompletedThrow;
+
+    // ---- Attachments ------------------------------------------------------------------------------
+
+    /// <summary>What a download writes, or unset for a server that has no such file.</summary>
+    public byte[]? FileBytes;
+
+    /// <summary>Kept apart from <see cref="Throw"/> so a test can fail a transfer without failing sync.</summary>
+    public Exception? TransferThrow;
+
+    /// <summary>Every url downloaded, in order.</summary>
+    public List<string> Downloaded = [];
+
+    /// <summary>Every url whose upload was deleted, in order.</summary>
+    public List<string> DeletedUploads = [];
+
+    /// <summary>What each upload returns as its <c>file_attachment</c>, given the name it was sent.</summary>
+    public Func<string, JsonObject>? Upload;
+
+    /// <summary>The bytes each upload actually carried, so a test can check what was sent.</summary>
+    public List<byte[]> Uploaded = [];
+
+    public async Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        Downloaded.Add(fileUrl);
+        if (TransferThrow is not null)
+            throw TransferThrow;
+
+        var bytes = FileBytes ?? throw new TodoistNetworkException("no such file");
+
+        // In two goes, so a test can see progress being reported rather than only its total.
+        var half = bytes.Length / 2;
+        await destination.WriteAsync(bytes.AsMemory(0, half), ct);
+        progress?.Report(half);
+        await destination.WriteAsync(bytes.AsMemory(half), ct);
+        progress?.Report(bytes.Length);
+    }
+
+    public async Task<JsonObject> UploadAsync(string token, Stream content, string fileName, CancellationToken ct = default)
+    {
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, ct);
+        Uploaded.Add(buffer.ToArray());
+
+        if (TransferThrow is not null)
+            throw TransferThrow;
+
+        return Upload is not null
+            ? Upload(fileName)
+            : new JsonObject
+            {
+                ["file_name"] = fileName,
+                ["file_size"] = buffer.Length,
+                ["file_type"] = "application/octet-stream",
+                ["file_url"] = $"https://files.todoist.test/{fileName}",
+                ["upload_state"] = "completed",
+            };
+    }
+
+    public Task DeleteUploadAsync(string token, string fileUrl, CancellationToken ct = default)
+    {
+        DeletedUploads.Add(fileUrl);
+        return TransferThrow is not null ? throw TransferThrow : Task.CompletedTask;
+    }
 }
 
 /// <summary>An in-memory store whose durable write fails, standing in for a full or unwritable disk.</summary>

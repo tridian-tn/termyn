@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Termyn.Core.Attachments;
 using Termyn.Core.Sync;
 
 namespace Termyn.Core.Settings;
@@ -35,6 +36,18 @@ public sealed record AppSettings
     public ThemePreference Theme { get; init; } = ThemePreference.System;
 
     public SyncMode SyncMode { get; init; } = SyncMode.Automatic;
+
+    /// <summary>How much room downloaded attachments may take, in megabytes.</summary>
+    public int AttachmentCacheMb { get; init; } = 256;
+
+    /// <summary>How long a downloaded attachment is kept after it was last opened, in days.</summary>
+    public int AttachmentCacheDays { get; init; } = 14;
+
+    /// <summary>The two caps above, in the form the cache sweeps against.</summary>
+    [JsonIgnore]
+    public CacheLimits AttachmentCache => new(
+        Math.Max(1, AttachmentCacheMb) * 1024L * 1024,
+        TimeSpan.FromDays(Math.Max(1, AttachmentCacheDays)));
 
     public int SyncIntervalSeconds { get; init; } = 45;
 

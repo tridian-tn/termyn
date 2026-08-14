@@ -1258,6 +1258,124 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>
+    /// Adds a comment carrying a file, uploading it first.
+    /// </summary>
+    /// <remarks>
+    /// The one write in Termyn that isn't purely a queued command, and the one that needs a
+    /// connection. The upload has to finish before the <c>note_add</c> can be queued, because the
+    /// command needs the <c>file_url</c> the upload returns — so there is nothing to write down
+    /// until the network has answered.
+    ///
+    /// Nothing is queued if the upload fails. A comment queued without its file would sync as a
+    /// comment that quietly lost its attachment, which is worse than one that didn't happen.
+    /// </remarks>
+    /// <param name="ownerId">The task or project to comment on</param>
+    /// <param name="content">The comment, as markdown. May be empty for a file on its own</param>
+    /// <param name="file">The file's bytes</param>
+    /// <param name="fileName">What to call it on the account</param>
+    /// <returns>The new comment's temporary id</returns>
+    /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
+    public async Task<string?> AddCommentWithFileAsync(string ownerId, string content, Stream file, string fileName, CancellationToken ct = default)
+    {
+        string token;
+        lock (_gate)
+        {
+            if (OwnerFieldFor(Promoted(ownerId)) is null)
+                return null;
+
+            if (_secrets.GetToken() is not { } stored)
+                throw new TodoistAuthException("Termyn isn't signed in to Todoist.");
+
+            token = stored;
+        }
+
+        // Outside the gate, as every network call is: this one can take a minute on a large file,
+        // and holding the model shut for it would stop the UI reading anything at all.
+        var attachment = await _api.UploadAsync(token, file, fileName, ct);
+
+        lock (_gate)
+        {
+            var id = Promoted(ownerId);
+
+            // Checked again on the way back in. The upload took time, and the task it was going on
+            // may have been deleted — here or on the web — while it was in flight.
+            if (OwnerFieldFor(id) is not { } owner)
+                return null;
+
+            var tempId = "t-" + Guid.NewGuid().ToString("N");
+            var args = new JsonObject
+            {
+                [owner.Key] = id,
+                ["content"] = content,
+                ["file_attachment"] = attachment.DeepClone(),
+            };
+            PromoteReferences(args);
+
+            var obj = args.DeepClone().AsObject();
+            obj["id"] = tempId;
+
+            Persist("note_add", args, tempId, null, [new StoredResource(owner.Type, tempId, obj.ToJsonString())], []);
+            Model.Upsert(owner.Type, tempId, obj);
+            return tempId;
+        }
+    }
+
+    /// <summary>
+    /// Takes the file off a comment, leaving what was said.
+    /// </summary>
+    /// <remarks>
+    /// Two steps that can't be one: the comment is updated through the outbox like any other write,
+    /// and the upload itself is deleted directly, because Todoist has no command for it. The upload
+    /// delete is not reversible, which is why the caller confirms first.
+    /// </remarks>
+    /// <returns>The url of the upload to delete, or null when there was no file to take off</returns>
+    public string? DetachFile(string commentId)
+    {
+        lock (_gate)
+        {
+            var id = Promoted(commentId);
+            if (CommentTypeOf(id) is not { } type || Model.Get(type, id) is not { } existing)
+                return null;
+
+            if (existing["file_attachment"] is not JsonObject file)
+                return null;
+
+            var url = JsonRead.String(file, "file_url");
+
+            // Null rather than removed: the field has to reach the server as cleared, and a command
+            // that simply omits it is a command that changes nothing.
+            UpdateResource(type, "note_update", id, new JsonObject { ["file_attachment"] = null });
+
+            return url;
+        }
+    }
+
+    /// <summary>
+    /// Deletes an uploaded file from the account.
+    /// </summary>
+    /// <remarks>
+    /// Straight to the server, because Todoist has no command for it and so the outbox has nowhere
+    /// to put it. That makes it the one write here that simply fails when there's no connection,
+    /// rather than waiting for one — and it is not reversible even when it succeeds.
+    /// </remarks>
+    /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected, or there is none.</exception>
+    public async Task DeleteUploadAsync(string fileUrl, CancellationToken ct = default)
+    {
+        string token;
+        lock (_gate)
+        {
+            if (_secrets.GetToken() is not { } stored)
+                throw new TodoistAuthException("Termyn isn't signed in to Todoist.");
+
+            token = stored;
+        }
+
+        await _api.DeleteUploadAsync(token, fileUrl, ct);
+    }
+
     /// <summary>Rewrites a comment and queues a <c>note_update</c>.</summary>
     public void EditComment(string id, string content)
     {
@@ -2138,6 +2256,16 @@ public sealed class SyncEngine
             Model.SyncToken = "*";
     }
 
+    /// <summary>
+    /// Raised when the local copy of an account has been wiped, so anything else holding that
+    /// account's data can go with it — the downloaded attachments among it.
+    /// </summary>
+    /// <remarks>
+    /// Raised while the engine is locked, so a handler must not call back into it. Deleting files
+    /// is what this is for.
+    /// </remarks>
+    public event Action? Purged;
+
     private void PurgeLocal()
     {
         _generation++;
@@ -2149,6 +2277,9 @@ public sealed class SyncEngine
         _undoable.Clear();
         _completed.Clear();
         _store.Purge();
+
+        // A prior account's files must not linger any more than its tasks do.
+        Purged?.Invoke();
     }
 
     private void RemoveObject(string id)

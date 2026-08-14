@@ -11,4 +11,13 @@ public interface IAppPaths
 
     /// <summary>Directory for rolling logs.</summary>
     string LogDirectory { get; }
+
+    /// <summary>
+    /// Directory for downloaded comment attachments (e.g. <c>%LOCALAPPDATA%\Termyn\attachments</c>).
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from the cache database so it can be swept, emptied or deleted wholesale without
+    /// going near the snapshot. Nothing in it is authoritative — every file can be fetched again.
+    /// </remarks>
+    string AttachmentDirectory { get; }
 }

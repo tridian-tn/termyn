@@ -1,4 +1,5 @@
 using Termyn.Core.Api;
+using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
@@ -58,7 +59,19 @@ internal static class Program
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
-        var presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()));
+        // Swept on the way up rather than only after a download: an app left closed for a month
+        // should not open holding a month-old cache it never got the chance to tidy.
+        var attachments = new AttachmentCache(paths.AttachmentDirectory, settings.AttachmentCache);
+        attachments.Sweep();
+
+        // A rejected token wipes the account's tasks; its downloaded files go the same way, so a
+        // machine that has switched accounts isn't still holding the previous one's documents.
+        engine.Purged += () => attachments.Clear();
+
+        var presenter = new MainPresenter(
+            engine,
+            new QuickAddParser(new SystemClock()),
+            fetcher: new AttachmentFetcher(api, secrets, attachments));
         var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
 
         var autoStart = new WindowsAutoStart();

@@ -232,14 +232,14 @@ public class CommentTests
             """{"id":"n1","item_id":"i1","content":"","file_attachment":{"file_name":"agenda.pdf","file_type":"application/pdf"}}"""));
 
         var comment = Assert.Single(engine.CommentsFor("i1"));
-        Assert.Equal("agenda.pdf", comment.AttachmentName);
+        Assert.Equal("agenda.pdf", comment.Attachment!.FileName);
         Assert.Equal(string.Empty, comment.Content);
     }
 
     [Fact]
     public void A_comment_with_no_file_says_so_rather_than_naming_one()
         => Assert.Null(Assert.Single(
-            Seeded(("notes", "n1", """{"id":"n1","item_id":"i1","content":"words only"}""")).CommentsFor("i1")).AttachmentName);
+            Seeded(("notes", "n1", """{"id":"n1","item_id":"i1","content":"words only"}""")).CommentsFor("i1")).Attachment);
 
     // ---- Ordering when the server has not spoken yet --------------------------------------------
 

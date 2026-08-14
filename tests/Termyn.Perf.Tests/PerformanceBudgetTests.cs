@@ -254,5 +254,14 @@ public class PerformanceBudgetTests : IDisposable
 
         public Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
             => throw new InvalidOperationException("Startup must not validate the token.");
+
+        public Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default)
+            => throw new InvalidOperationException("Startup must not fetch an attachment.");
+
+        public Task<System.Text.Json.Nodes.JsonObject> UploadAsync(string token, Stream content, string fileName, CancellationToken ct = default)
+            => throw new InvalidOperationException("Startup must not upload.");
+
+        public Task DeleteUploadAsync(string token, string fileUrl, CancellationToken ct = default)
+            => throw new InvalidOperationException("Startup must not delete an upload.");
     }
 }

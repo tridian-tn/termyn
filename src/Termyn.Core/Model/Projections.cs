@@ -111,6 +111,7 @@ public static class Projections
             PlanName = JsonRead.String(current, "plan_name") ?? string.Empty,
             Reminders = JsonRead.Bool(current, "reminders"),
             MaxTimeReminders = JsonRead.Int(current, "max_reminders_time"),
+            UploadLimitMb = JsonRead.Int(current, "upload_limit_mb"),
         };
     }
 
@@ -131,10 +132,25 @@ public static class Projections
         Content = JsonRead.String(o, "content") ?? string.Empty,
         PostedAt = JsonRead.String(o, "posted_at"),
 
-        // Only the name, and only to say the file is there. Everything else about an attachment —
-        // fetching it, opening it, putting one on — is a later phase.
-        AttachmentName = o["file_attachment"] is JsonObject file ? JsonRead.String(file, "file_name") : null,
+        Attachment = o["file_attachment"] is JsonObject file ? ToAttachment(file) : null,
     };
+
+    /// <summary>
+    /// The file on a comment.
+    /// </summary>
+    /// <remarks>
+    /// Todoist reports <c>upload_state</c> as <c>pending</c> or <c>completed</c> on a file it holds
+    /// itself. Only an explicit <c>pending</c> counts as still processing: the field is absent
+    /// altogether on an attachment that points at something outside Todoist, and reading "not
+    /// completed" as "not ready" would leave those marked as processing for ever and refuse to open
+    /// a file that was never going to be uploaded in the first place.
+    /// </remarks>
+    public static FileAttachment ToAttachment(JsonObject o) => new(
+        JsonRead.String(o, "file_name") ?? string.Empty,
+        JsonRead.Long(o, "file_size"),
+        JsonRead.String(o, "file_type") ?? string.Empty,
+        JsonRead.String(o, "file_url") ?? string.Empty,
+        string.Equals(JsonRead.String(o, "upload_state"), "pending", StringComparison.OrdinalIgnoreCase));
 
     private static IReadOnlyList<string> ReadLabels(JsonObject o)
     {

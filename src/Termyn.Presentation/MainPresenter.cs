@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
+using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
 using Termyn.Core.Model;
@@ -34,12 +35,37 @@ public sealed record TaskRow(
 /// <param name="Id">The comment's own id, which is what an edit or a delete names</param>
 /// <param name="Content">What it says, as the markdown the account stores</param>
 /// <param name="Posted">When it was posted, in the account's timezone, or empty when it hasn't reached the server</param>
-/// <param name="AttachmentName">The file hanging off it, or null when there is none</param>
+/// <param name="Attachment">The file hanging off it, or null when there is none</param>
 public sealed record CommentRow(
     string Id,
     string Content,
     string Posted,
-    string? AttachmentName);
+    FileAttachment? Attachment)
+{
+    /// <summary>What the file is called, or null when there isn't one.</summary>
+    public string? AttachmentName => Attachment?.FileName;
+
+    /// <summary>
+    /// The file as the pane names it: what it's called, how big it is, and whether it's ready.
+    /// </summary>
+    /// <returns>The line to draw, or null when the comment carries no file</returns>
+    public string? AttachmentLabel => Attachment is not { } file
+        ? null
+        : file.Pending
+            ? $"{file.FileName} (still processing)"
+            : file.FileSize > 0
+                ? $"{file.FileName} ({Size(file.FileSize)})"
+                : file.FileName;
+
+    /// <summary>A byte count as somebody would say it out loud.</summary>
+    private static string Size(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):0.#} GB",
+    };
+}
 
 /// <summary>
 /// What the local parser made of some capture text, and how its names resolved.
@@ -89,13 +115,20 @@ public sealed class MainPresenter
     private bool _syncing;
     private bool _reconnectNeeded;
 
-    public MainPresenter(SyncEngine engine, QuickAddParser parser, IClock? clock = null)
+    /// <param name="fetcher">
+    /// Fetches comment attachments on request. Optional: everything except opening and attaching a
+    /// file works without one, which is what lets the presenter be tested without a download folder.
+    /// </param>
+    public MainPresenter(SyncEngine engine, QuickAddParser parser, IClock? clock = null, AttachmentFetcher? fetcher = null)
     {
         _engine = engine;
         _parser = parser;
         _clock = clock ?? new SystemClock();
+        _fetcher = fetcher;
         Publish(); // reflect whatever the engine already has loaded
     }
+
+    private readonly AttachmentFetcher? _fetcher;
 
     /// <summary>Raised whenever the sidebar, rows or status have been refreshed.</summary>
     public event Action? RowsChanged;
@@ -457,7 +490,7 @@ public sealed class MainPresenter
     {
         var zone = _engine.Snapshot().TimeZone;
         return _engine.CommentsFor(ownerId)
-            .Select(c => new CommentRow(c.Id, c.Content, Posted(c.PostedAt, zone), c.AttachmentName))
+            .Select(c => new CommentRow(c.Id, c.Content, Posted(c.PostedAt, zone), c.Attachment))
             .ToList();
     }
 
@@ -515,6 +548,102 @@ public sealed class MainPresenter
     {
         _engine.DeleteComment(id);
         Publish();
+    }
+
+    // ---- Attachments ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Empties the download cache, returning how many files went.
+    /// </summary>
+    /// <remarks>
+    /// Nothing in it is authoritative — every file can be fetched again — so this needs no
+    /// confirming and loses nothing.
+    /// </remarks>
+    public int ClearDownloads() => _fetcher?.Cache.Clear() ?? 0;
+
+    /// <summary>Applies changed cache caps, and sweeps against them straight away.</summary>
+    public void SetDownloadLimits(CacheLimits limits)
+    {
+        if (_fetcher is null)
+            return;
+
+        _fetcher.Cache.Limits = limits;
+        _fetcher.Cache.Sweep();
+    }
+
+    /// <summary>Whether a file is already downloaded, so the UI can offer to open rather than fetch.</summary>
+    public bool IsAttachmentHeld(FileAttachment? attachment)
+        => attachment is not null && _fetcher?.IsHeld(attachment) == true;
+
+    /// <summary>
+    /// Gets an attachment onto this machine, from the cache when it's already here.
+    /// </summary>
+    /// <remarks>
+    /// Every outcome that isn't Ready is an ordinary answer with something to say. Offline, not
+    /// having the file is the expected state, and the caller's job is to say so and offer to try
+    /// again — never to fail silently.
+    /// </remarks>
+    public Task<FetchResult> FetchAttachmentAsync(FileAttachment attachment, IProgress<long>? progress = null, CancellationToken ct = default)
+        => _fetcher is null
+            ? Task.FromResult(new FetchResult(FetchOutcome.Failed, Message: "Downloads aren't available in this window."))
+            : _fetcher.FetchAsync(attachment, progress, ct);
+
+    /// <summary>
+    /// The largest file this account's plan will take, or null when it hasn't said.
+    /// </summary>
+    /// <remarks>
+    /// Used to refuse an over-size file before uploading it rather than after — a clear refusal
+    /// beats a transfer that runs and then fails.
+    /// </remarks>
+    public int? UploadLimitMb => _engine.Snapshot().PlanLimits?.UploadLimitMb is > 0 and var mb ? mb : null;
+
+    /// <summary>Whether a file of this size is worth offering to upload.</summary>
+    public bool AllowsUploadOf(long bytes)
+        => _engine.Snapshot().PlanLimits?.AllowsUploadOf(bytes) ?? true;
+
+    /// <summary>
+    /// Adds a comment carrying a file. Online only, and by design — see <see cref="SyncEngine"/>.
+    /// </summary>
+    /// <returns>False when the owner isn't held; throws when the upload itself fails</returns>
+    public async Task<bool> AddCommentWithFileAsync(string? ownerId, string content, string path, CancellationToken ct = default)
+    {
+        if (ownerId is null)
+            return false;
+
+        await using var file = File.OpenRead(path);
+        var added = await _engine.AddCommentWithFileAsync(ownerId, content.Trim(), file, Path.GetFileName(path), ct);
+
+        Publish();
+        return added is not null;
+    }
+
+    /// <summary>
+    /// Takes the file off a comment, leaving what was said, and deletes the upload behind it.
+    /// </summary>
+    /// <remarks>
+    /// The comment's own change goes through the outbox and survives being offline. Deleting the
+    /// upload can't: it isn't a command, so it's attempted now and its failure is reported rather
+    /// than queued. The file is then orphaned on the account rather than lost from the comment,
+    /// which is the better way round.
+    /// </remarks>
+    /// <returns>Null when it worked, or what to tell the user when the upload outlived the comment</returns>
+    public async Task<string?> DetachFileAsync(string commentId, CancellationToken ct = default)
+    {
+        var url = _engine.DetachFile(commentId);
+        Publish();
+
+        if (url is null)
+            return null;
+
+        try
+        {
+            await _engine.DeleteUploadAsync(url, ct);
+            return null;
+        }
+        catch (Exception ex) when (ex is TodoistNetworkException or TodoistAuthException)
+        {
+            return "The file was taken off the comment, but Todoist couldn't be reached to delete the upload itself.";
+        }
     }
 
     public void SetPriority(string id, Priority priority)

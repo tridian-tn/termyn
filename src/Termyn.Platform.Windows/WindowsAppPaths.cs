@@ -15,6 +15,11 @@ public sealed class WindowsAppPaths : IAppPaths
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppFolder));
         LogDirectory = EnsureDir(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppFolder, "logs"));
+
+        // Not created up front, unlike the others: an account that never opens an attachment should
+        // not have a folder sitting there implying it downloaded something.
+        AttachmentDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppFolder, "attachments");
     }
 
     public string ConfigDirectory { get; }
@@ -22,6 +27,8 @@ public sealed class WindowsAppPaths : IAppPaths
     public string CacheDirectory { get; }
 
     public string LogDirectory { get; }
+
+    public string AttachmentDirectory { get; }
 
     private static string EnsureDir(string path)
     {

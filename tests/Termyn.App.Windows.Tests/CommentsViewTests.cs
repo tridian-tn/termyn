@@ -19,6 +19,13 @@ public class CommentsViewTests
         return view;
     }
 
+    /// <summary>The compose area, which holds the box, the hint line and the attach link.</summary>
+    private static Panel ComposeArea(CommentsView view) => view.Controls.OfType<Panel>().Single();
+
+    private static Label Hint(CommentsView view) => ComposeArea(view).Controls.OfType<Label>().Single();
+
+    private static LinkLabel Attach(CommentsView view) => Hint(view).Controls.OfType<LinkLabel>().Single();
+
     /// <summary>Puts the list on a row, standing in for the user having clicked or arrowed to it.</summary>
     private static void Select(CommentsView view, int index)
         => view.Controls.OfType<ListBox>().Single().SelectedIndex = index;
@@ -157,6 +164,83 @@ public class CommentsViewTests
 
         var empty = view.Controls.OfType<Label>().Single(l => l.Text == "No comments yet.");
         Assert.False(empty.Visible);
+    }
+
+    // ---- Attachments ------------------------------------------------------------------------------
+
+    [Fact]
+    public void Attaching_is_off_while_a_file_is_already_moving()
+    {
+        // One line to report a transfer in, so two at once would leave the user unable to tell which
+        // had failed.
+        using var view = Realised(Comment("n1", "first"));
+        var attach = Attach(view);
+
+        Assert.True(attach.Enabled);
+
+        view.Progress = "Downloading agenda.pdf… 40%";
+        Assert.False(attach.Enabled);
+
+        view.Progress = null;
+        Assert.True(attach.Enabled);
+    }
+
+    [Fact]
+    public void A_transfer_owns_the_hint_line_while_it_runs()
+    {
+        using var view = Realised(Comment("n1", "first"));
+        var hint = Hint(view);
+
+        view.Progress = "Downloading agenda.pdf… 40%";
+        Assert.Equal("Downloading agenda.pdf… 40%", hint.Text);
+
+        view.Progress = null;
+        Assert.Contains("Ctrl+Enter", hint.Text);
+    }
+
+    [Fact]
+    public void Attaching_is_off_when_nothing_can_be_commented_on_at_all()
+    {
+        using var view = Realised(Comment("n1", "first"));
+        var attach = Attach(view);
+
+        view.CanComment = false;
+
+        Assert.False(attach.Enabled);
+    }
+
+    [Fact]
+    public void Escape_calls_a_transfer_off_and_otherwise_means_what_it_did()
+    {
+        // A download is the one thing in this window the user waits on, so the key that stops
+        // waiting mustn't depend on whether the list or the box has the focus. It only claims
+        // Escape while something is actually moving.
+        using var view = Realised(Comment("n1", "first"));
+        var cancelled = 0;
+        view.CancelRequested += () => cancelled++;
+
+        Assert.False(view.PressEscape());
+        Assert.Equal(0, cancelled);
+
+        view.Progress = "Downloading agenda.pdf… 40%";
+
+        Assert.True(view.PressEscape());
+        Assert.Equal(1, cancelled);
+    }
+
+    [Fact]
+    public void What_was_typed_survives_an_upload_that_failed()
+    {
+        // The box is only emptied once the comment has actually been posted. Clearing it first would
+        // lose the words alongside a file whose upload then failed.
+        using var view = Realised();
+        var compose = ComposeArea(view).Controls.OfType<TextBox>().Single();
+        compose.Text = "  here it is  ";
+
+        Assert.Equal("here it is", view.Draft);
+
+        view.ClearDraft();
+        Assert.Equal(string.Empty, view.Draft);
     }
 
     // ---- Height ----------------------------------------------------------------------------------
