@@ -54,6 +54,7 @@ internal static class Program
         }
 
         using var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
+
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
@@ -74,7 +75,7 @@ internal static class Program
         // account's goes to GitHub with this.
         var updates = new GitHubReleaseCheck(http);
 
-        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, tray, quickAdd);
+        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, tray, quickAdd, store.Rebuilt);
 
         try
         {
