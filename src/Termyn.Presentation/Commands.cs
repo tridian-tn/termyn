@@ -199,8 +199,10 @@ public static class Commands
                 "Default order",
                 !(context.Sort ?? TaskSort.Default).IsDefault),
 
+            // One name, with the tick saying whether the panel is open. An entry that renames itself
+            // is a different entry each time you look, and the tick is already there to say it.
             AppCommand.ToggleDescription => new CommandState(
-                context.ShowingDescription ? "Hide description" : "Show description",
+                "Description",
                 true,
                 context.ShowingDescription),
 
