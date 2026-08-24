@@ -52,7 +52,7 @@ internal sealed class MainForm : Form
     private readonly Shell _shell;
     private readonly CancellationTokenSource _cts = new();
 
-    private readonly TextBox _capture;
+    private readonly HintTextBox _capture;
     private readonly Label _preview;
     private readonly TextBox _search;
     private readonly TreeView _sidebar;
@@ -213,7 +213,8 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
-        _capture = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Add a task…  #project /section @label p1 tomorrow 4pm" };
+        // The same box the quick-add popup uses, so the guide stays up while you type into either.
+        _capture = new HintTextBox { Dock = DockStyle.Top, Hint = CapturePreviewText.Hint };
         _capture.KeyDown += OnCaptureKeyDown;
         _capture.TextChanged += (_, _) => UpdatePreview();
 
@@ -707,6 +708,7 @@ internal sealed class MainForm : Form
         _description.Theme = _theme;
         _comments.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
+        _capture.HintColour = _theme.Muted;
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
         _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
