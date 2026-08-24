@@ -1371,11 +1371,14 @@ public sealed class MainPresenter
     /// it has been round-tripped, so the stored ISO date shows through and the row reads as a
     /// different kind of thing from the ones either side of it. Writing it out the same way closes
     /// that gap. The year is only worth the width when it isn't this one.
+    ///
+    /// Written in the invariant culture rather than the machine's, since what's being reproduced
+    /// here is the server's wording and not a date of Termyn's own.
     /// </remarks>
     /// <param name="due">The ISO date, floating datetime, or UTC instant Todoist stores, or null</param>
     /// <param name="zone">The account's timezone, which a UTC instant is shown in</param>
     /// <param name="today">Today in the account's timezone, for deciding whether to show the year</param>
-    /// <returns>A short date, with the time when the task is due at one, or empty when nothing is</returns>
+    /// <returns>A short date, with the time when the task is due at one, or empty when no date is set</returns>
     private static string DueShown(string? due, TimeZoneInfo zone, DateOnly today)
     {
         if (due is null)
@@ -1398,7 +1401,7 @@ public sealed class MainPresenter
         string Written(DateTime moment, bool withTime)
         {
             var date = moment.Year == today.Year ? "d MMM" : "d MMM yyyy";
-            return moment.ToString(withTime ? date + ", HH:mm" : date);
+            return moment.ToString(withTime ? date + ", HH:mm" : date, CultureInfo.InvariantCulture);
         }
     }
 
