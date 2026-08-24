@@ -85,19 +85,33 @@ public sealed class AttachmentCache
         if (!File.Exists(path))
             return null;
 
-        // Touched so the sweep counts it as recently wanted. Reopening the same file for a week
-        // should keep it, which age alone from the download wouldn't.
+        // Reopening the same file for a week should keep it, which age from the download alone
+        // wouldn't.
+        Touch(path);
+        return path;
+    }
+
+    /// <summary>
+    /// Notes that a file has just been wanted, which is what its age is counted from.
+    /// </summary>
+    /// <remarks>
+    /// Stamped from the cache's own clock rather than left to whatever the filesystem put on it, so
+    /// that age means one thing throughout: <see cref="Sweep"/> measures against that same clock,
+    /// and a file arriving stamped by the OS is being judged by a different reckoning from the one
+    /// doing the judging. The two only agree while the clock happens to be the real one.
+    /// </remarks>
+    /// <param name="path">The file that has just been written or opened</param>
+    private void Touch(string path)
+    {
         try
         {
             File.SetLastAccessTimeUtc(path, _now().UtcDateTime);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The file is there, which is what was asked. Failing to note that it was wanted only
+            // The file is there, which is what matters. Failing to note that it was wanted only
             // means it may be swept sooner.
         }
-
-        return path;
     }
 
     /// <summary>Opens the file to write a download into, making the directory if it isn't there.</summary>
@@ -130,8 +144,13 @@ public sealed class AttachmentCache
     public void Commit(string path)
     {
         var partial = path + ".part";
-        if (File.Exists(partial))
-            File.Move(partial, path, overwrite: true);
+        if (!File.Exists(partial))
+            return;
+
+        // A move carries the part-file's own timestamps over, so without this the file arrives aged
+        // by the filesystem while everything else here counts from the cache's clock.
+        File.Move(partial, path, overwrite: true);
+        Touch(path);
     }
 
     /// <summary>Throws away a download that didn't finish.</summary>
