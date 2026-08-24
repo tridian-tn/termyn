@@ -174,6 +174,13 @@ internal sealed class MarkdownEditor : RichTextBox
             Escape(rtf, text.AsSpan(run.Start, run.Length));
         }
 
+        // The last \par of a document ends the paragraph it is on rather than opening an empty one
+        // after it, so a description ending in a newline came back a newline shorter — and pressing
+        // Return at the end of one, which is where it is nearly always pressed, undid itself as soon
+        // as the styling caught up. One more \par gives that final empty line somewhere to be.
+        if (text.EndsWith('\n'))
+            rtf.Append(@"\par ");
+
         return rtf.Append('}').ToString();
     }
 

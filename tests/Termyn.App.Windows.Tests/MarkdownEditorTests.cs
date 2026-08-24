@@ -12,6 +12,9 @@ namespace Termyn.App.Windows.Tests;
 public class MarkdownEditorTests
 {
     private const int WmChar = 0x0102;
+    private const int WmKeyDown = 0x0100;
+    private const int WmKeyUp = 0x0101;
+    private const int VkReturn = 0x0D;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -48,6 +51,17 @@ public class MarkdownEditorTests
             SendMessage(editor.Handle, WmChar, c, 0);
     }
 
+    /// <summary>
+    /// Presses Return, which a rich edit control turns into a line break on the key rather than on
+    /// the character — sending the character alone puts nothing in the box.
+    /// </summary>
+    private static void PressReturn(MarkdownEditor editor)
+    {
+        SendMessage(editor.Handle, WmKeyDown, VkReturn, 0);
+        SendMessage(editor.Handle, WmChar, VkReturn, 0);
+        SendMessage(editor.Handle, WmKeyUp, VkReturn, 0);
+    }
+
 
     [Fact]
     public void A_task_whose_description_matches_the_last_one_is_still_drawn()
@@ -67,6 +81,40 @@ public class MarkdownEditorTests
     }
 
     // ---- The text is never touched -------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Notes\n")]
+    [InlineData("Notes\n\n")]
+    [InlineData("Notes\n\n\n")]
+    [InlineData("\n")]
+    [InlineData("# A heading\n")]
+    [InlineData("- [ ] a box\n\n")]
+    public void A_description_ending_in_new_lines_still_ends_in_all_of_them(string markdown)
+    {
+        // The last \par of a document ends the paragraph it is on instead of opening an empty one
+        // after it, so styling used to give back one newline fewer than it was handed.
+        using var editor = Editing(markdown);
+
+        Assert.Equal(markdown, editor.Text);
+    }
+
+    [Fact]
+    public void Return_at_the_end_of_a_description_leaves_a_line_to_carry_on_typing_on()
+    {
+        // The fault as it was met: press Return at the end of a description — which is where it is
+        // nearly always pressed — and a moment later, when the styling caught up, the line was gone
+        // and the caret was back on the end of the one above.
+        using var editor = Editing("Notes");
+        editor.Select(editor.TextLength, 0);
+        PressReturn(editor);
+        Assert.Equal("Notes\n", editor.Text);
+
+        editor.Restyle();
+
+        Assert.Equal("Notes\n", editor.Text);
+        Assert.Equal(6, editor.SelectionStart);
+    }
+
 
     [Fact]
     public void Styling_changes_how_the_markdown_looks_and_not_what_it_says()
