@@ -130,7 +130,7 @@ public class MainPresenterTests
         var row = presenter.Rows.Single();
         Assert.Equal("Email report", row.Content);
         Assert.Equal(Priority.P1, row.Priority);
-        Assert.Equal("2026-08-01", row.Due);
+        Assert.Equal("1 Aug", row.Due);
         Assert.True(presenter.IsOffline);
     }
 
@@ -301,7 +301,7 @@ public class MainPresenterTests
         var row = presenter.Rows.Single();
         Assert.Equal("Renamed", row.Content);
         Assert.Equal(Priority.P2, row.Priority);
-        Assert.Equal("2026-07-31", row.Due);
+        Assert.Equal("31 Jul", row.Due);
     }
 
     [Fact]
