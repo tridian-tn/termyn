@@ -108,6 +108,20 @@ public sealed class AttachmentCacheTests : IDisposable
     // ---- Sweeping ---------------------------------------------------------------------------------
 
     [Fact]
+    public void A_file_arrives_stamped_from_the_caches_own_clock()
+    {
+        // The move that puts a download in place carries the part-file's timestamps with it, so a
+        // file used to arrive aged by the filesystem while the sweep counted from here. The two
+        // agree only while this clock happens to be the real one, which is why the age tests below
+        // passed on the day they were written and not afterwards.
+        var cache = Cache();
+
+        var path = Put(cache, "https://files.example/a", "a.pdf", 10);
+
+        Assert.Equal(_now.UtcDateTime, File.GetLastAccessTimeUtc(path));
+    }
+
+    [Fact]
     public void Nothing_is_swept_while_it_is_within_both_caps()
     {
         var cache = Cache();
