@@ -15,7 +15,7 @@ namespace Termyn.App.Windows;
 internal sealed class QuickAddForm : Form
 {
     private readonly MainPresenter _presenter;
-    private readonly TextBox _capture;
+    private readonly HintTextBox _capture;
     private readonly Label _preview;
 
     private bool _shuttingDown;
@@ -34,11 +34,13 @@ internal sealed class QuickAddForm : Form
         KeyPreview = true;
         ClientSize = new Size(560, 76);
 
-        _capture = new TextBox
+        // Drawn rather than set as PlaceholderText: this box is summoned already focused, and
+        // WinForms shows a placeholder only while a box isn't.
+        _capture = new HintTextBox
         {
             Dock = DockStyle.Top,
             Height = 30,
-            PlaceholderText = "Add a task…  #project /section @label p1 tomorrow 4pm",
+            Hint = CapturePreviewText.Hint,
         };
         _capture.KeyDown += OnKeyDown;
         _capture.TextChanged += (_, _) => UpdatePreview();
@@ -75,6 +77,7 @@ internal sealed class QuickAddForm : Form
     {
         theme.Apply(this);
         _preview.ForeColor = theme.Muted;
+        _capture.HintColour = theme.Muted;
     }
 
     /// <summary>

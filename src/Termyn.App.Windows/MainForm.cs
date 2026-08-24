@@ -213,7 +213,7 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
-        _capture = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Add a task…  #project /section @label p1 tomorrow 4pm" };
+        _capture = new TextBox { Dock = DockStyle.Top, PlaceholderText = CapturePreviewText.Hint };
         _capture.KeyDown += OnCaptureKeyDown;
         _capture.TextChanged += (_, _) => UpdatePreview();
 
