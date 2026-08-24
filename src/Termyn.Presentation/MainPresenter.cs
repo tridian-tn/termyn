@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
@@ -1352,7 +1353,7 @@ public sealed class MainPresenter
             item.Content,
             item.Priority,
             item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var name) ? name : string.Empty,
-            item.DueText ?? item.DueDate ?? string.Empty,
+            item.DueText ?? DueShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
             item.Labels,
             depth,
             item.IsRecurring,
@@ -1360,6 +1361,45 @@ public sealed class MainPresenter
             item.Completed,
             SmartViews.DueOn(item, snapshot.TimeZone),
             snapshot.CommentCounts.GetValueOrDefault(item.Id));
+    }
+
+    /// <summary>
+    /// The due date as the column shows it, for a task the server hasn't yet described in words.
+    /// </summary>
+    /// <remarks>
+    /// Todoist supplies the wording — "1 Aug", "every Monday" — and a date set here has none until
+    /// it has been round-tripped, so the stored ISO date shows through and the row reads as a
+    /// different kind of thing from the ones either side of it. Writing it out the same way closes
+    /// that gap. The year is only worth the width when it isn't this one.
+    /// </remarks>
+    /// <param name="due">The ISO date, floating datetime, or UTC instant Todoist stores, or null</param>
+    /// <param name="zone">The account's timezone, which a UTC instant is shown in</param>
+    /// <param name="today">Today in the account's timezone, for deciding whether to show the year</param>
+    /// <returns>A short date, with the time when the task is due at one, or empty when nothing is</returns>
+    private static string DueShown(string? due, TimeZoneInfo zone, DateOnly today)
+    {
+        if (due is null)
+            return string.Empty;
+
+        // A task with a fixed timezone arrives as a UTC instant; the other two forms are already in
+        // the account's own terms. An all-day date is ten characters and no more, so anything
+        // longer carries a time worth showing.
+        if (due.EndsWith('Z'))
+        {
+            return DateTimeOffset.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
+                ? Written(TimeZoneInfo.ConvertTime(instant, zone).DateTime, withTime: true)
+                : due;
+        }
+
+        return DateTime.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
+            ? Written(when, withTime: due.Length > 10)
+            : due;
+
+        string Written(DateTime moment, bool withTime)
+        {
+            var date = moment.Year == today.Year ? "d MMM" : "d MMM yyyy";
+            return moment.ToString(withTime ? date + ", HH:mm" : date);
+        }
     }
 
     /// <summary>

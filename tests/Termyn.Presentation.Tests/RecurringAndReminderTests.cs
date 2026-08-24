@@ -22,7 +22,7 @@ public class RecurringAndReminderTests
 
         presenter.SetDueFromText("i1", "tomorrow");
 
-        Assert.Equal("2026-08-01", Due(presenter));
+        Assert.Equal("1 Aug", Due(presenter));
     }
 
     [Fact]
@@ -68,6 +68,49 @@ public class RecurringAndReminderTests
         presenter.SetDueFromText("i1", "   ");
 
         Assert.Empty(Due(presenter));
+    }
+
+    [Fact]
+    public void A_date_set_here_is_written_out_the_way_the_server_would_have_written_it()
+    {
+        // A date set locally has no words on it until it has been round-tripped, and showing the
+        // stored ISO date meanwhile left the row looking unlike every other one due that day.
+        var presenter = NewPresenter(Store());
+
+        presenter.SetDue("i1", new DateOnly(2026, 8, 1));
+
+        Assert.Equal("1 Aug", Due(presenter));
+    }
+
+    [Fact]
+    public void A_due_date_in_another_year_says_which()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Renew","due":{"date":"2027-12-25"}}""");
+
+        Assert.Equal("25 Dec 2027", Due(NewPresenter(store)));
+    }
+
+    [Fact]
+    public void A_due_date_fixed_to_a_timezone_is_shown_in_the_accounts_own()
+    {
+        // A task with a timezone of its own arrives as a UTC instant, and half past eleven on the
+        // first is half past midnight on the second in London.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}""");
+        store.PutResource("items", "i1", """{"id":"i1","content":"Call","due":{"date":"2026-08-01T23:30:00Z"}}""");
+
+        Assert.Equal("2 Aug, 00:30", Due(NewPresenter(store)));
+    }
+
+    [Fact]
+    public void A_due_date_in_no_form_Termyn_knows_is_shown_as_it_stands()
+    {
+        // Better an odd-looking column than an empty one: whatever it is, it's what the account has.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Odd","due":{"date":"whenever"}}""");
+
+        Assert.Equal("whenever", Due(NewPresenter(store)));
     }
 
     // ---- Rows --------------------------------------------------------------------------------------
@@ -226,7 +269,7 @@ public class RecurringAndReminderTests
 
         presenter.SetDueFromText("i1", "tomorrow 4pm");
 
-        Assert.Equal("2026-08-01T16:00:00", Due(presenter));
+        Assert.Equal("1 Aug, 16:00", Due(presenter));
     }
 
     // ---- Second round ------------------------------------------------------------------------------
@@ -249,10 +292,10 @@ public class RecurringAndReminderTests
     }
 
     [Theory]
-    [InlineData("tomorrow", "2026-08-01")]
-    [InlineData("tomorrow 4pm", "2026-08-01T16:00:00")]
-    [InlineData("2026-12-25", "2026-12-25")]
-    [InlineData("friday", "2026-07-31")]
+    [InlineData("tomorrow", "1 Aug")]
+    [InlineData("tomorrow 4pm", "1 Aug, 16:00")]
+    [InlineData("2026-12-25", "25 Dec")]
+    [InlineData("friday", "31 Jul")]
     public void A_plain_date_is_still_resolved_here(string text, string expected)
     {
         // The rule has to keep working offline for the dates the grammar does cover.
