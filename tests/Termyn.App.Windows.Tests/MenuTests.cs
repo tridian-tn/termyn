@@ -261,14 +261,15 @@ public class MenuTests
     }
 
     [Fact]
-    public void The_description_panel_says_which_way_it_would_go_and_is_ticked_while_open()
+    public void The_description_entry_keeps_one_name_and_is_ticked_while_the_panel_is_open()
     {
+        // It used to read "Show description" and then "Hide description", which is a different
+        // entry each time you look. The tick was already saying which state you were in.
         using var closed = Build(View, CommandContext.Empty);
         using var open = Build(View, new CommandContext(ShowingDescription: true));
 
-        Assert.Equal("Show description", Find(closed, "Show description").Text);
-        Assert.False(Find(closed, "Show description").Checked);
-        Assert.True(Find(open, "Hide description").Checked);
+        Assert.False(Find(closed, "Description").Checked);
+        Assert.True(Find(open, "Description").Checked);
     }
 
     [Fact]
