@@ -91,8 +91,12 @@ public static class ViewPath
                 steps.Add(new Crumb(section.Name, ViewSelection.OfSection(section.Id)));
                 break;
 
+            // Checked against the account like the others, rather than taken on trust because the
+            // selection carries the name rather than an id. A label deleted by a sync leaves the
+            // name behind here, and a path naming one the account hasn't got is a path to nowhere.
             case { LabelName: { } label }:
-                steps.Add(new Crumb(label, ViewSelection.OfLabel(label)));
+                if (snapshot.Labels.Any(l => string.Equals(l.Name, label, StringComparison.OrdinalIgnoreCase)))
+                    steps.Add(new Crumb(label, ViewSelection.OfLabel(label)));
                 break;
 
             case { FilterId: { } filterId }:

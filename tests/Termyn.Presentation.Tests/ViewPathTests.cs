@@ -183,6 +183,30 @@ public class ViewPathTests
     }
 
     [Fact]
+    public void A_label_the_account_no_longer_holds_reads_as_nothing_either()
+    {
+        // A label is selected by name rather than by id, so nothing about the selection goes stale
+        // on its own when one is deleted — which made this the one kind of view that would have gone
+        // on naming something that wasn't there.
+        var presenter = NewPresenter(Store());
+
+        presenter.Select(ViewSelection.OfLabel("deleted"));
+
+        Assert.Empty(presenter.Breadcrumbs);
+    }
+
+    [Fact]
+    public void A_label_is_found_whatever_case_it_is_asked_for_in()
+    {
+        // Todoist matches labels without regard to case, and so does everything else here.
+        var presenter = NewPresenter(Store());
+
+        presenter.Select(ViewSelection.OfLabel("FollowUp"));
+
+        Assert.Equal("FollowUp", Reads(presenter));
+    }
+
+    [Fact]
     public void A_project_that_is_its_own_ancestor_does_not_walk_for_ever()
     {
         // Not reachable through the UI, but it arrives over the wire and the walk up is a loop.
