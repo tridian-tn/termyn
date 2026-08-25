@@ -144,6 +144,9 @@ public sealed class MainPresenter
 
     public IReadOnlyList<SidebarNode> Sidebar { get; private set; } = [];
 
+    /// <summary>The path to the current view, the list you are on last. See <see cref="ViewPath"/>.</summary>
+    public IReadOnlyList<Crumb> Breadcrumbs { get; private set; } = [];
+
     /// <summary>Active tasks due today or overdue — what the tray icon badges.</summary>
     public int DueToday { get; private set; }
 
@@ -1095,6 +1098,7 @@ public sealed class MainPresenter
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
+            Breadcrumbs = ViewPath.For(Selection, snapshot);
 
             // The selected row can go — deleted here, or removed by a sync — and every path that
             // falls the selection back to a default would otherwise have to remember to move the key

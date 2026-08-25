@@ -56,6 +56,10 @@ internal sealed class MainForm : Form
     private readonly Label _preview;
     private readonly TextBox _search;
     private readonly TreeView _sidebar;
+    private readonly LinkLabel _crumbs;
+
+    /// <summary>The row filled in while the tree hasn't got the focus, so it can be cleared again.</summary>
+    private TreeNode? _markedRow;
     private readonly OutlineView _outline;
     private readonly Label _status;
     private readonly SplitContainer _split;
@@ -226,7 +230,11 @@ internal sealed class MainForm : Form
         _sidebar = new TreeView
         {
             Dock = DockStyle.Fill,
-            HideSelection = false,
+
+            // The unfocused selection is marked here rather than by Windows, which draws one so
+            // faintly that which list you are on stops being obvious — and the outline beside it
+            // holds the focus for most of a session. See MarkSidebarSelection.
+            HideSelection = true,
             ShowLines = false,
             ShowRootLines = false,
             FullRowSelect = true,
@@ -236,8 +244,25 @@ internal sealed class MainForm : Form
         _sidebar.MouseDown += (_, _) => Noticed();
         _sidebar.AfterSelect += OnSidebarSelect;
         _sidebar.KeyDown += OnSidebarKeyDown;
+        // Told which way the focus is going rather than asking: both of these are raised while it is
+        // still moving, and the control answers Focused with where it is coming from.
+        _sidebar.Enter += (_, _) => MarkSidebarSelection(focused: true);
+        _sidebar.Leave += (_, _) => MarkSidebarSelection(focused: false);
 
         _outline = new OutlineView { Dock = DockStyle.Fill };
+
+        // Which list you are looking at, said in words above it. The sidebar says the same by
+        // highlighting a row, but a tree that has lost the focus draws its selection faintly, and
+        // that question shouldn't be answered differently depending on where the focus went.
+        _crumbs = new LinkLabel
+        {
+            Dock = DockStyle.Top,
+            Height = 24,
+            Padding = new Padding(6, 4, 6, 2),
+            LinkBehavior = LinkBehavior.HoverUnderline,
+            UseCompatibleTextRendering = false,
+        };
+        _crumbs.LinkClicked += OnCrumbClicked;
 
         // So a row selected while its task still had the name we gave it isn't read as deleted the
         // moment the sync learns what the server calls it.
@@ -302,7 +327,10 @@ internal sealed class MainForm : Form
             Orientation = Orientation.Horizontal,
             FixedPanel = FixedPanel.Panel2,
         };
+        // The outline first and the path after it: a docked control added later sits nearer the
+        // edge, so this is what puts the line above the list rather than below it.
         _detail.Panel1.Controls.Add(_outline);
+        _detail.Panel1.Controls.Add(_crumbs);
 
         // Both fill the panel and exactly one of them is visible, which is what makes this one pane
         // rather than two. Which is visible is the only thing deciding what you see — the order
@@ -709,8 +737,20 @@ internal sealed class MainForm : Form
         _comments.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _capture.HintColour = _theme.Muted;
+
+        // The step you are on is the one being read; the ones above it are offers, and drawn as
+        // links so they read as such without needing to be hovered to find out.
+        _crumbs.BackColor = _theme.Background;
+        _crumbs.ForeColor = _theme.Text;
+        _crumbs.LinkColor = _theme.Muted;
+        _crumbs.ActiveLinkColor = _theme.Accent;
+        _crumbs.VisitedLinkColor = _theme.Muted;
+
         _sidebar.BackColor = _theme.Background;
         _outline.BackColor = _theme.Panel;
+
+        // The mark is a theme colour, so it has to be laid down again in the new one.
+        MarkSidebarSelection();
         _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
         Invalidate(invalidateChildren: true);
 
@@ -857,6 +897,7 @@ internal sealed class MainForm : Form
             return;
 
         RenderSidebar();
+        RenderCrumbs();
 
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
@@ -983,6 +1024,10 @@ internal sealed class MainForm : Form
             _syncingSidebar = false;
         }
 
+        // The nodes were all replaced, so whatever was marked is no longer in the tree.
+        _markedRow = null;
+        MarkSidebarSelection();
+
         // After EndUpdate, not inside it: with redraw suppressed the control doesn't scroll where
         // it's told. Only when the selection stayed put — if it moved, it has already scrolled
         // itself into view and that is where the user should be looking.
@@ -1043,6 +1088,34 @@ internal sealed class MainForm : Form
 
     // ---- Navigation ----------------------------------------------------------------------------
 
+    /// <summary>What the path separates its steps with, and what the steps are measured around.</summary>
+    private const string CrumbSeparator = "  /  ";
+
+    /// <summary>
+    /// Writes the path to the current view, every step but the last one a way back up to it.
+    /// </summary>
+    /// <remarks>
+    /// Cleared after the text is set and not before: assigning Text gives a LinkLabel a fresh link
+    /// over the whole of it, so clearing first would leave the entire path underlined and every
+    /// click on it going wherever the last link added happened to point.
+    /// </remarks>
+    private void RenderCrumbs()
+    {
+        var line = ViewPath.Line(_presenter.Breadcrumbs, CrumbSeparator);
+
+        _crumbs.Text = line.Text;
+        _crumbs.Links.Clear();
+
+        foreach (var link in line.Links)
+            _crumbs.Links.Add(link.Start, link.Length, link.Target);
+    }
+
+    private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
+    {
+        if (e.Link?.LinkData is ViewSelection target)
+            GoTo(target);
+    }
+
     private void OnSidebarSelect(object? sender, TreeViewEventArgs e)
     {
         if (_syncingSidebar || e.Node?.Tag is not SidebarNode node)
@@ -1095,6 +1168,35 @@ internal sealed class MainForm : Form
         {
             _syncingSidebar = false;
         }
+
+        MarkSidebarSelection();
+    }
+
+    /// <summary>
+    /// Marks the selected row for as long as the tree hasn't got the focus.
+    /// </summary>
+    /// <remarks>
+    /// Windows draws an unfocused selection so faintly that which list you are on stops being
+    /// obvious, and the outline beside it holds the focus for most of a session. So the tree is told
+    /// to draw no selection of its own when it isn't focused, and the row is filled here instead —
+    /// quieter than the focused selection, and a good deal louder than what was there before.
+    /// </remarks>
+    private void MarkSidebarSelection() => MarkSidebarSelection(_sidebar.Focused);
+
+    /// <param name="focused">Whether the tree has the focus, or is about to</param>
+    private void MarkSidebarSelection(bool focused)
+    {
+        if (_markedRow is { } was)
+        {
+            was.BackColor = Color.Empty;
+            _markedRow = null;
+        }
+
+        if (focused || _sidebar.SelectedNode is not { } selected)
+            return;
+
+        selected.BackColor = _theme.Unfocused;
+        _markedRow = selected;
     }
 
     private static IEnumerable<TreeNode> Flatten(TreeNodeCollection nodes)
