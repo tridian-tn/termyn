@@ -30,6 +30,11 @@ internal sealed class MarkdownView : RichTextBox
         .UseEmphasisExtras()
         .UseAutoLinks()
         .UseTaskLists()
+        // Markdown proper reads a single newline as a space and wants a blank line or two trailing
+        // spaces before it will break a line. Todoist doesn't: press Return once there and the line
+        // breaks, which is how the descriptions in an account are already written. Following the
+        // spec here would run those lines together and be right about nothing anybody typed.
+        .UseSoftlineBreakAsHardlineBreak()
         // So a click on the rendering knows which character of the markdown it landed on. Without
         // it the spans are good enough to find a block by and not to put a caret with.
         .UsePreciseSourceLocation()
@@ -430,11 +435,12 @@ internal sealed class MarkdownView : RichTextBox
                 Write(task.Checked ? "[x] " : "[ ] ", style with { Muted = true }, newLine: false, from: task.Span);
                 break;
 
-            case LineBreakInline lineBreak:
-                if (lineBreak.IsHard)
-                    Write(string.Empty, style);
-                else
-                    Write(" ", style, newLine: false);
+            // Both kinds end the line now, since a bare newline is read as a break like any other.
+            // Tight, because the air belongs under a paragraph rather than under every line of one:
+            // spaced like a paragraph, one Return would look the same as two, and the difference
+            // between a new line and a new thought is the reason for having both.
+            case LineBreakInline:
+                Write(string.Empty, style with { Tight = true });
                 break;
 
             case ContainerInline container:
