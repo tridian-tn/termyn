@@ -29,6 +29,27 @@ internal sealed record Theme(
     /// <summary>The text drawn on an accent-coloured background — the selected row.</summary>
     public Color OnAccent => IsDark ? Background : Color.White;
 
+    /// <summary>
+    /// The selected row of a control that hasn't got the focus.
+    /// </summary>
+    /// <remarks>
+    /// The accent, mostly faded into the background: the same colour the focused selection is, so it
+    /// reads as the same thing rather than as a second kind of highlight, and quiet enough not to
+    /// compete with the one that has the focus. Border was tried first and is about twenty units off
+    /// the background in the light theme, which is to say invisible.
+    /// </remarks>
+    public Color Unfocused => Blend(Accent, Background, 0.78);
+
+    /// <summary>Mixes two colours.</summary>
+    /// <param name="from">The colour at 0</param>
+    /// <param name="to">The colour at 1</param>
+    /// <param name="amount">How far to travel, 0 to 1</param>
+    /// <returns>The colour that far between them</returns>
+    private static Color Blend(Color from, Color to, double amount) => Color.FromArgb(
+        (int)Math.Round(from.R + ((to.R - from.R) * amount)),
+        (int)Math.Round(from.G + ((to.G - from.G) * amount)),
+        (int)Math.Round(from.B + ((to.B - from.B) * amount)));
+
     public static Theme From(ThemePalette palette) => new(
         palette.IsDark,
         ToColor(palette.Background),
