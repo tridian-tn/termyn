@@ -405,18 +405,6 @@ public class MarkdownViewTests
     }
 
     [Fact]
-    public void One_newline_joins_its_lines_and_two_spaces_break_them()
-    {
-        // The commonest shape of a real description — people press Enter once — so whichever way
-        // it goes is worth writing down.
-        using var joined = Render("line one\nline two");
-        using var broken = Render("line one  \nline two");
-
-        Assert.Equal("line one line two", joined.Text.Trim());
-        Assert.Equal(2, broken.Text.Trim().Split('\n').Length);
-    }
-
-    [Fact]
     public void Each_heading_level_is_smaller_than_the_one_above_it()
     {
         using var view = Render("# one\n\n## two\n\n### three\n\nbody");
@@ -496,6 +484,58 @@ public class MarkdownViewTests
         Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("the docs", StringComparison.Ordinal)));
     }
 
+    // ---- Line breaks ----------------------------------------------------------------------------
+
+    /// <summary>
+    /// The rendered text as lines, with the trailing blank the last line ending leaves off the end.
+    /// </summary>
+    private static string[] Lines(MarkdownView view)
+        => view.Text.ReplaceLineEndings("\n").TrimEnd('\n').Split('\n');
+
+
+    [Fact]
+    public void A_line_typed_on_its_own_is_drawn_on_its_own()
+    {
+        // Markdown proper would run these together with a space between them. Todoist breaks the
+        // line on a single Return and the descriptions in an account are written that way, so the
+        // spec's answer here is right about nothing anybody typed.
+        using var view = Render("Azure.Storage.Blobs = 12.17.0\nAzure.Messaging.ServiceBus = 7.15.0");
+
+        Assert.Equal(2, Lines(view).Length);
+        Assert.Equal("Azure.Storage.Blobs = 12.17.0", Lines(view)[0]);
+    }
+
+    [Fact]
+    public void A_blank_line_still_starts_a_new_paragraph_rather_than_a_third_line()
+    {
+        // Breaking on every newline mustn't turn the blank line between two thoughts into a blank
+        // line of its own on screen.
+        using var view = Render("First thought\n\nSecond thought");
+
+        Assert.Equal(["First thought", "Second thought"], Lines(view));
+    }
+
+    [Fact]
+    public void A_break_written_the_markdown_way_still_breaks_and_does_not_double()
+    {
+        // Two trailing spaces were already a line break, and now that a bare newline is one too
+        // they must not add up to two.
+        using var view = Render("First line  \nSecond line");
+
+        Assert.Equal(["First line", "Second line"], Lines(view));
+    }
+
+    [Fact]
+    public void A_run_of_blank_lines_reads_as_one_break_and_not_as_several()
+    {
+        // Long-standing and not part of the change, but worth writing down beside it: however many
+        // blank lines are left between two thoughts, they arrive as one paragraph break with the
+        // usual air under it. Somebody spacing a description out with three Returns gets one gap.
+        using var view = Render("One\n\n\nTwo");
+
+        Assert.Equal(["One", "Two"], Lines(view));
+    }
+
     // ---- Finding the way back to the markdown ---------------------------------------------------
 
     /// <summary>Where the markdown behind the rendered word <paramref name="needle"/> starts.</summary>
@@ -540,6 +580,19 @@ public class MarkdownViewTests
         using var view = Render(markdown);
 
         Assert.Equal(markdown.IndexOf("body", StringComparison.Ordinal), SourceOf(view, "body"));
+    }
+
+    [Fact]
+    public void A_word_after_a_broken_line_still_knows_where_it_was_written()
+    {
+        // A soft break used to be drawn as a space and is now drawn as a line ending, which is a
+        // different number of characters on some platforms — and every offset after it in the
+        // description rides on that count being right.
+        const string markdown = "ZMATMAS - core data\nBOMMAT - the BOM for a FERT\nand a third line";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("BOMMAT", StringComparison.Ordinal), SourceOf(view, "BOMMAT"));
+        Assert.Equal(markdown.IndexOf("third", StringComparison.Ordinal), SourceOf(view, "third"));
     }
 
     [Fact]
