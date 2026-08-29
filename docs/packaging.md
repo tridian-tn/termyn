@@ -78,8 +78,9 @@ meets the warning. It asks whether a signature is *present*, not whether this ma
 trust depends on the verifier's root store, and a build machine asking that question would fail on a
 test certificate while proving nothing about whether the step ran.
 
-Signing is not yet wired into CI, because that needs a certificate and a certificate needs a
-decision — see the notes on the issue for what the routes cost and who's eligible.
+Signing is not yet wired into CI, because that needs a certificate and nobody has one yet.
+[Setting up signing](signing-setup.md) is what has to exist first, and why the choices are what they
+are — including why the uninstaller rules out the obvious GitHub Action.
 
 ## What the installer does
 
