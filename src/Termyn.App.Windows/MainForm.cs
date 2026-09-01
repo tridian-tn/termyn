@@ -1600,7 +1600,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void OnCommentDeleted(string id)
     {
-        if (!Confirm("Are you sure you want to delete this comment?\r\n\r\nIt can't be brought back — Todoist has no undelete."))
+        if (!Confirm("Are you sure you want to permanently delete this comment?\r\n\r\nIt can't be brought back — Todoist has no undelete."))
             return;
 
         Guarded(() =>
@@ -2596,14 +2596,11 @@ internal sealed class MainForm : Form
                 });
                 return wrote;
 
+            // Deliberately unconfirmed: Ctrl+Z brings the task back, and Windows asks for a
+            // confirmation only where it can't offer that — the same reason deleting a file to the
+            // Recycle Bin doesn't stop to ask. A dialog on every delete is one people learn to
+            // dismiss without reading, which costs the ones that matter their force.
             case AppCommand.Delete:
-                // Named, because the row this is aimed at isn't always the row you were last
-                // looking at — a right-click moves the selection to whatever is under the pointer.
-                // "Anything filed under it" rather than a count of sub-tasks: the outline may be
-                // filtered, and a number that only counted the visible ones would be a wrong one.
-                if (!Confirm($"Are you sure you want to delete \"{_outline.SelectedRow?.Content ?? "this task"}\" and anything filed under it?"))
-                    return false;
-
                 Guarded(() => _presenter.Delete(id));
                 return true;
 
