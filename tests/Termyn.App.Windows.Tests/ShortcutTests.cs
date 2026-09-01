@@ -80,6 +80,18 @@ public class ShortcutTests
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Window));
 
     [Fact]
+    public void The_panel_is_shown_by_F4_and_written_in_by_the_key_everyone_reaches_for()
+    {
+        // Ctrl+E used to put the panel on screen, which is the smaller of the two things and had
+        // the better key. It writes in it now, and F4 does the showing.
+        Assert.Equal(AppCommand.EditDescription, MainForm.CommandFor(Keys.Control | Keys.E, MainForm.Scope.Window));
+        Assert.Equal(AppCommand.ToggleDescription, MainForm.CommandFor(Keys.F4, MainForm.Scope.Window));
+
+        // F4 in the outline is nothing, so the window's own answer is the one that stands there.
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.F4, MainForm.Scope.Outline));
+    }
+
+    [Fact]
     public void The_same_key_means_a_different_thing_in_each_list()
     {
         // F2 and Delete belong to both lists, and which one is meant is decided by where the user

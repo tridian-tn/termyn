@@ -219,8 +219,11 @@ public static class Commands
 
             // One name, with the tick saying whether the panel is open. An entry that renames itself
             // is a different entry each time you look, and the tick is already there to say it.
+            //
+            // "Details" and not "Description": the panel carries the comments as well now, on a tab
+            // of their own, and nothing narrower would still be true of it.
             AppCommand.ToggleDescription => new CommandState(
-                "Description",
+                "Details",
                 true,
                 context.ShowingDescription),
 
