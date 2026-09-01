@@ -1252,6 +1252,20 @@ internal sealed class MainForm : Form
         return true;
     }
 
+    /// <summary>
+    /// Asks before something that can't simply be typed again.
+    /// </summary>
+    /// <remarks>
+    /// Cancel is the default button, so a Return pressed at a dialog nobody read does nothing. The
+    /// question carries whether the thing comes back, because that is the part the answer turns on
+    /// and the only part the user can't see for themselves.
+    /// </remarks>
+    /// <param name="question">What is about to happen, as a question</param>
+    /// <returns>True when the user said to go ahead</returns>
+    private bool Confirm(string question)
+        => MessageBox.Show(this, question, "Termyn", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2)
+            == DialogResult.OK;
+
     /// <returns>True when the delete went ahead</returns>
     private bool DeleteStructure(SidebarNode node)
     {
@@ -1260,8 +1274,7 @@ internal sealed class MainForm : Form
             ? $"Delete the label \"{node.Label}\" and remove it from every task?"
             : $"Delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
 
-        var answer = MessageBox.Show(this, question, "Termyn", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-        if (answer != DialogResult.OK)
+        if (!Confirm(question))
             return false;
 
         Guarded(() =>
@@ -1572,11 +1585,25 @@ internal sealed class MainForm : Form
             RefreshComments();
     });
 
-    private void OnCommentDeleted(string id) => Guarded(() =>
+    /// <summary>
+    /// Deletes a comment, having asked first.
+    /// </summary>
+    /// <remarks>
+    /// The one delete here that Ctrl+Z can't answer for: a comment goes as a barrier on the undo
+    /// stack, because Todoist has no undelete and the server has it the moment the outbox flushes.
+    /// The question says so, since that is what makes this worth stopping for.
+    /// </remarks>
+    private void OnCommentDeleted(string id)
     {
-        _presenter.DeleteComment(id);
-        RefreshComments();
-    });
+        if (!Confirm("Delete this comment?\r\n\r\nIt can't be brought back — Todoist has no undelete."))
+            return;
+
+        Guarded(() =>
+        {
+            _presenter.DeleteComment(id);
+            RefreshComments();
+        });
+    }
 
     // ---- Attachments -------------------------------------------------------------------------------
 
@@ -1711,14 +1738,7 @@ internal sealed class MainForm : Form
         if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
-        var answer = MessageBox.Show(
-            this,
-            $"Remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone.",
-            "Termyn",
-            MessageBoxButtons.OKCancel,
-            MessageBoxIcon.Warning);
-
-        if (answer != DialogResult.OK)
+        if (!Confirm($"Remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
             return;
 
         var trouble = await _presenter.DetachFileAsync(commentId);
@@ -2572,6 +2592,13 @@ internal sealed class MainForm : Form
                 return wrote;
 
             case AppCommand.Delete:
+                // Named, because the row this is aimed at isn't always the row you were last
+                // looking at — a right-click moves the selection to whatever is under the pointer.
+                // "Anything filed under it" rather than a count of sub-tasks: the outline may be
+                // filtered, and a number that only counted the visible ones would be a wrong one.
+                if (!Confirm($"Delete \"{_outline.SelectedRow?.Content ?? "this task"}\" and anything filed under it?"))
+                    return false;
+
                 Guarded(() => _presenter.Delete(id));
                 return true;
 
