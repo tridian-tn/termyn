@@ -315,13 +315,28 @@ public class MenuTests
     }
 
     [Fact]
-    public void Editing_the_description_is_not_offered_while_the_pane_is_on_the_comments()
+    public void Editing_the_description_is_offered_from_the_comments_and_crosses_to_it()
     {
-        // The same pane showing a third thing. Offering "Edit description" there would put the
-        // markdown behind the comments, where the typing would go somewhere nobody can see.
+        // It used to be greyed here. That was right when the two shared one pane and writing would
+        // have gone on behind the comments; with a tab each it is a way across as well as a way in,
+        // and greying it would be right only if the comments were somewhere you couldn't leave.
         using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
 
-        Assert.False(Find(comments, "Edit description").Enabled);
+        Assert.True(Find(comments, "Edit description").Enabled);
+
+        // Not ticked from over there, though: the tick says the markdown is on show, and what is on
+        // show is the comments.
+        Assert.False(Find(comments, "Edit description").Checked);
+    }
+
+    [Fact]
+    public void Editing_is_ticked_only_while_the_markdown_is_the_thing_in_front()
+    {
+        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
+        using var behindComments = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true, ShowingComments: true));
+
+        Assert.True(Find(writing, "Edit description").Checked);
+        Assert.False(Find(behindComments, "Edit description").Checked);
     }
 
     [Fact]

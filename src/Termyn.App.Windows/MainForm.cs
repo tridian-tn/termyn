@@ -318,7 +318,10 @@ internal sealed class MainForm : Form
         _rendered.LinkOpened += OnDescriptionLinkOpened;
         _rendered.EditRequested += StartWriting;
 
-        _comments = new CommentsView { Dock = DockStyle.Fill, Visible = false };
+        // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
+        // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
+        // worse, nowhere to type one.
+        _comments = new CommentsView { Dock = DockStyle.Fill };
         _comments.Posted += OnCommentPosted;
         _comments.Edited += OnCommentEdited;
         _comments.Deleted += OnCommentDeleted;
@@ -1530,10 +1533,11 @@ internal sealed class MainForm : Form
     {
         _writingDescription = writing;
 
-        // The comments are in front of both of them. Which of the two is behind is still worth
-        // settling, so that leaving the comments comes back to the one that was showing.
-        _description.Visible = writing && !_showingComments;
-        _rendered.Visible = !writing && !_showingComments;
+        // One of the two, always, whichever tab is in front. Which tab that is has nothing to do
+        // with it — the comments are on a tab of their own now, and hiding both of these because
+        // that tab was selected is how the comments pane itself came to be invisible.
+        _description.Visible = writing;
+        _rendered.Visible = !writing;
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
@@ -1599,7 +1603,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    /// <summary>Fills the pane with the comments on whatever it is currently pointed at.</summary>
     /// <summary>
     /// Follows the user clicking a tab, so the panel's own state agrees with what is in front.
     /// </summary>
@@ -1630,13 +1633,14 @@ internal sealed class MainForm : Form
     private void RenderCommentsTab()
     {
         var owner = _showingComments ? _commentsOwner : _outline.SelectedId;
-        var count = owner is null ? 0 : _presenter.CommentsOn(owner).Count;
+        var count = _presenter.CommentCountOn(owner);
         var caption = count > 0 ? $"Comments ({count})" : "Comments";
 
         if (_commentsTab.Text != caption)
             _commentsTab.Text = caption;
     }
 
+    /// <summary>Fills the pane with the comments on whatever it is currently pointed at.</summary>
     private void RefreshComments()
     {
         if (!_showingComments)
@@ -1989,9 +1993,9 @@ internal sealed class MainForm : Form
             _renderIdle.Stop();
 
             // And out of the comments on the way out, for the same reason as the mode below: the
-            // panel should open showing what it rests on rather than whatever it was left on.
-            _showingComments = false;
-            _comments.Visible = false;
+            // panel should open showing what it rests on rather than whatever it was left on. The
+            // tab is moved rather than the control hidden, since the tabs own what is on screen.
+            ShowComments(showing: false);
 
             // Back to reading on the way out, so the panel opens the way it rests rather than in
             // whatever it was left mid-edit. Set through the same path as every other mode change,
@@ -2492,6 +2496,16 @@ internal sealed class MainForm : Form
             case AppCommand.EditDescription:
                 Guarded(() =>
                 {
+                    // From the comments this is a way across as well as a way in: come off that tab
+                    // and start writing, rather than toggling whatever the description was left on
+                    // — which from over there would as likely stop an edit as start one.
+                    if (_showingComments)
+                    {
+                        ShowComments(showing: false);
+                        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+                        return;
+                    }
+
                     if (_writingDescription)
                         StopWriting();
                     else
