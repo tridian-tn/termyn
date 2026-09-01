@@ -227,7 +227,7 @@ internal sealed class MainForm : Form
         _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
         _search.TextChanged += (_, _) => Guarded(() => _presenter.Search(_search.Text));
 
-        _sidebar = new TreeView
+        _sidebar = new BufferedTreeView
         {
             Dock = DockStyle.Fill,
 
