@@ -157,7 +157,7 @@ internal sealed class CommandPaletteForm : Form
         // so the names stay in a line whether or not there is anything to the left of them.
         var mark = e.Bounds with { X = e.Bounds.X + 6, Width = Gutter };
         if (entry.Checked)
-            TextRenderer.DrawText(e.Graphics, "✓", Font, mark, text, Flags);
+            TextRenderer.DrawText(e.Graphics, Tick, Font, mark, text, Flags);
 
         var label = e.Bounds with
         {
@@ -170,8 +170,18 @@ internal sealed class CommandPaletteForm : Form
         TextRenderer.DrawText(e.Graphics, kind, Font, hint, muted, Flags | TextFormatFlags.Right);
     }
 
-    /// <summary>How much room the tick gets, whether or not this row has one.</summary>
-    private static int Gutter => 16;
+    /// <summary>The mark an entry already on carries, so drawing it and measuring it can't drift.</summary>
+    private const string Tick = "✓";
+
+    /// <summary>
+    /// How much room the tick gets, whether or not this row has one.
+    /// </summary>
+    /// <remarks>
+    /// Measured rather than fixed. The window follows the scaling of whatever monitor it is on, and
+    /// the mark is drawn in a font that follows it too — so a width in pixels that looks right on
+    /// one screen clips the mark or runs it into the name on the next.
+    /// </remarks>
+    private int Gutter => TextRenderer.MeasureText(Tick, Font).Width + 4;
 
     private static TextFormatFlags Flags
         => TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
