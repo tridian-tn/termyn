@@ -1258,8 +1258,12 @@ internal sealed class MainForm : Form
     /// <remarks>
     /// Yes and No rather than OK and Cancel, because the thing being answered is a question and
     /// those are its answers. No is the default, so a Return pressed at a dialog nobody read does
-    /// nothing. The question carries whether the thing comes back, because that is the part the
-    /// answer turns on and the only part the user can't see for themselves.
+    /// nothing.
+    ///
+    /// Everything asked about here is irreversible, and every question says so — "permanently" for
+    /// the ones that go for good, and a line underneath for what else goes with them. That isn't
+    /// decoration: an action that can be taken back should offer undo instead of a dialog, so
+    /// anything reaching this has already failed that test and the user is owed the reason.
     ///
     /// A message box offering only those two cannot be dismissed with Escape or the close button —
     /// Windows leaves both inert without a Cancel. For a question about deleting something that is
@@ -1274,10 +1278,12 @@ internal sealed class MainForm : Form
     /// <returns>True when the delete went ahead</returns>
     private bool DeleteStructure(SidebarNode node)
     {
-        // A label delete takes the label off its tasks; the other two take the tasks with them.
+        // A label delete takes the label off its tasks; the other two take the tasks with them. All
+        // three end in an undo barrier — Todoist has no undelete for any of them — so all three say
+        // "permanently", which is the word for that.
         var question = node.Kind == SidebarKind.Label
-            ? $"Are you sure you want to delete the label \"{node.Label}\" and remove it from every task?"
-            : $"Are you sure you want to delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
+            ? $"Are you sure you want to permanently delete the label \"{node.Label}\" and remove it from every task?"
+            : $"Are you sure you want to permanently delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
 
         if (!Confirm(question))
             return false;
