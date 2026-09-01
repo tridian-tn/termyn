@@ -95,6 +95,38 @@ public class CommandsTests
     }
 
     [Fact]
+    public void Zooming_is_offered_only_where_there_is_something_to_zoom()
+    {
+        // The panel scales the description, reading or writing. The comments it also shows are
+        // drawn rather than set in text it can scale, so there is nothing to offer over those.
+        Assert.False(State(AppCommand.ZoomIn).Enabled);
+        Assert.False(State(AppCommand.ZoomOut).Enabled);
+
+        var open = new CommandContext(ShowingDescription: true);
+        Assert.True(State(AppCommand.ZoomIn, open).Enabled);
+        Assert.True(State(AppCommand.ZoomOut, open).Enabled);
+
+        var comments = new CommandContext(ShowingDescription: true, ShowingComments: true);
+        Assert.False(State(AppCommand.ZoomIn, comments).Enabled);
+        Assert.False(State(AppCommand.ZoomOut, comments).Enabled);
+    }
+
+    [Fact]
+    public void The_way_back_to_the_default_zoom_is_offered_only_once_there_is_one()
+    {
+        // Greyed until the panel has been scaled, which is also how the entry says whether it is at
+        // its own size — the same as Default order.
+        var open = new CommandContext(ShowingDescription: true);
+        var zoomed = new CommandContext(ShowingDescription: true, Zoomed: true);
+
+        Assert.False(State(AppCommand.ZoomReset, open).Enabled);
+        Assert.True(State(AppCommand.ZoomReset, zoomed).Enabled);
+
+        // And never over the comments, where there is nothing scaled to put back.
+        Assert.False(State(AppCommand.ZoomReset, new CommandContext(ShowingDescription: true, ShowingComments: true, Zoomed: true)).Enabled);
+    }
+
+    [Fact]
     public void No_command_in_the_catalogue_renames_itself_for_its_own_state()
     {
         // The rule this keeps: a label may change with what is selected — "Rename project" against

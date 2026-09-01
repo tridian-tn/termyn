@@ -45,6 +45,9 @@ public enum AppCommand
     ToggleDescription,
     EditDescription,
     ToggleComments,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     Undo,
     Search,
     Palette,
@@ -84,6 +87,7 @@ public sealed record TaskAbilities(
 /// <param name="ShowingDescription">Whether the description panel is open under the outline.</param>
 /// <param name="WritingDescription">Whether that panel is showing the markdown rather than the rendering.</param>
 /// <param name="ShowingComments">Whether that panel is showing the comments rather than the description.</param>
+/// <param name="Zoomed">Whether that panel is scaled away from the size it rests at.</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -93,7 +97,8 @@ public sealed record CommandContext(
     TaskSort? Sort = null,
     bool ShowingDescription = false,
     bool WritingDescription = false,
-    bool ShowingComments = false)
+    bool ShowingComments = false,
+    bool Zoomed = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -234,6 +239,16 @@ public static class Commands
                 true,
                 context.ShowingComments),
 
+            // The description panel already zooms to the wheel; these are the same thing said out
+            // loud, for anybody who doesn't know the wheel does it. Offered on the same terms as
+            // editing, because the comments the pane also shows aren't text it can scale.
+            AppCommand.ZoomIn => new CommandState("Zoom in", Scalable(context)),
+            AppCommand.ZoomOut => new CommandState("Zoom out", Scalable(context)),
+
+            // The way back, greyed while there is nothing to come back from — which is also how the
+            // entry says whether the panel is at its own size, the same as Default order above.
+            AppCommand.ZoomReset => new CommandState("Restore default zoom", Scalable(context) && context.Zoomed),
+
             AppCommand.Undo => new CommandState("Undo", context.CanUndo),
             AppCommand.Search => Always("Search…"),
             AppCommand.Palette => Always("Command palette…"),
@@ -250,6 +265,10 @@ public static class Commands
         CommandState Task(string label) => new(label, task is not null);
 
         CommandState Always(string label) => new(label, true);
+
+        // The panel has something in it that can be scaled: the description, either way round. The
+        // comments it also shows are drawn rather than set in text, so there is nothing to scale.
+        static bool Scalable(CommandContext at) => at.ShowingDescription && !at.ShowingComments;
 
         // Only the three kinds the sidebar lets you rename or delete; a smart view or a saved
         // filter is not ours to change from here.

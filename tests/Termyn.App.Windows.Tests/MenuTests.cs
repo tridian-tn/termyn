@@ -299,6 +299,19 @@ public class MenuTests
     }
 
     [Fact]
+    public void Zooming_sits_in_the_View_menu_and_follows_the_panel()
+    {
+        // The wheel has always zoomed the panel and nothing said so. These are that, written down.
+        using var closed = Build(View, CommandContext.Empty);
+        using var open = Build(View, new CommandContext(ShowingDescription: true));
+
+        Assert.False(Find(closed, "Zoom in").Enabled);
+        Assert.False(Find(closed, "Zoom out").Enabled);
+        Assert.True(Find(open, "Zoom in").Enabled);
+        Assert.True(Find(open, "Zoom out").Enabled);
+    }
+
+    [Fact]
     public void Editing_the_description_is_not_offered_while_the_pane_is_on_the_comments()
     {
         // The same pane showing a third thing. Offering "Edit description" there would put the
