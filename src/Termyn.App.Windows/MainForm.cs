@@ -58,6 +58,14 @@ internal sealed class MainForm : Form
     private readonly TreeView _sidebar;
     private readonly LinkLabel _crumbs;
 
+    /// <summary>The description and the comments, as the two tabs of one panel.</summary>
+    private readonly TabControl _tabs;
+    private readonly TabPage _descriptionTab;
+    private readonly TabPage _commentsTab;
+
+    /// <summary>True while a tab is being selected in code, so it isn't read as the user moving.</summary>
+    private bool _switchingTabs;
+
     /// <summary>The row filled in while the tree hasn't got the focus, so it can be cleared again.</summary>
     private TreeNode? _markedRow;
     private readonly OutlineView _outline;
@@ -310,7 +318,10 @@ internal sealed class MainForm : Form
         _rendered.LinkOpened += OnDescriptionLinkOpened;
         _rendered.EditRequested += StartWriting;
 
-        _comments = new CommentsView { Dock = DockStyle.Fill, Visible = false };
+        // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
+        // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
+        // worse, nowhere to type one.
+        _comments = new CommentsView { Dock = DockStyle.Fill };
         _comments.Posted += OnCommentPosted;
         _comments.Edited += OnCommentEdited;
         _comments.Deleted += OnCommentDeleted;
@@ -332,13 +343,26 @@ internal sealed class MainForm : Form
         _detail.Panel1.Controls.Add(_outline);
         _detail.Panel1.Controls.Add(_crumbs);
 
-        // Both fill the panel and exactly one of them is visible, which is what makes this one pane
-        // rather than two. Which is visible is the only thing deciding what you see — the order
-        // they go in doesn't come into it, since the hidden one draws nothing whichever side of the
-        // other it sits on.
-        _detail.Panel2.Controls.Add(_description);
-        _detail.Panel2.Controls.Add(_rendered);
-        _detail.Panel2.Controls.Add(_comments);
+        // Two tabs rather than three controls stacked on each other. What the panel is showing used
+        // to be a thing you could only find out by looking at it; now it says so, and the way to the
+        // other one is in front of you rather than in a menu.
+        //
+        // The description keeps its own pair inside its tab — the markdown and the rendering, one
+        // visible at a time — because that is a mode rather than a place, and reading and writing
+        // the same text are not two tabs' worth of different.
+        _descriptionTab = new TabPage("Description");
+        _descriptionTab.Controls.Add(_description);
+        _descriptionTab.Controls.Add(_rendered);
+
+        _commentsTab = new TabPage("Comments");
+        _commentsTab.Controls.Add(_comments);
+
+        _tabs = new TabControl { Dock = DockStyle.Fill };
+        _tabs.TabPages.Add(_descriptionTab);
+        _tabs.TabPages.Add(_commentsTab);
+        _tabs.SelectedIndexChanged += OnPanelTabChanged;
+
+        _detail.Panel2.Controls.Add(_tabs);
         _detail.SplitterMoved += (_, _) => RememberPanelSizes();
 
         // Said here rather than left to the first selection, which may never come: a control that
@@ -1351,6 +1375,11 @@ internal sealed class MainForm : Form
     {
         FollowSelectionForDescription();
         FollowSelectionForComments();
+
+        // Last, and here rather than in Render: the count belongs to the task the outline is on,
+        // and Render settles that after it has drawn everything else. Counted there instead, the
+        // tab would answer for whichever task was selected before this one.
+        RenderCommentsTab();
     }
 
     /// <summary>
@@ -1504,10 +1533,11 @@ internal sealed class MainForm : Form
     {
         _writingDescription = writing;
 
-        // The comments are in front of both of them. Which of the two is behind is still worth
-        // settling, so that leaving the comments comes back to the one that was showing.
-        _description.Visible = writing && !_showingComments;
-        _rendered.Visible = !writing && !_showingComments;
+        // One of the two, always, whichever tab is in front. Which tab that is has nothing to do
+        // with it — the comments are on a tab of their own now, and hiding both of these because
+        // that tab was selected is how the comments pane itself came to be invisible.
+        _description.Visible = writing;
+        _rendered.Visible = !writing;
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
@@ -1550,7 +1580,18 @@ internal sealed class MainForm : Form
                 ShowDescriptionPanel(shown: true);
         }
 
-        _comments.Visible = showing;
+        // Selected rather than shown: the tabs own which one is in front now, and this is the same
+        // move the user makes by clicking one. Held quiet so the handler doesn't answer back into
+        // the middle of this.
+        _switchingTabs = true;
+        try
+        {
+            _tabs.SelectedTab = showing ? _commentsTab : _descriptionTab;
+        }
+        finally
+        {
+            _switchingTabs = false;
+        }
 
         // Puts whichever of the two was behind the comments back on top.
         SetDescriptionMode(_writingDescription, focus: false);
@@ -1560,6 +1601,43 @@ internal sealed class MainForm : Form
             RefreshComments();
             _comments.Focus();
         }
+    }
+
+    /// <summary>
+    /// Follows the user clicking a tab, so the panel's own state agrees with what is in front.
+    /// </summary>
+    /// <remarks>
+    /// The same move as the Comments menu entry, and it goes through the same method — a tab that
+    /// changed only what was visible would leave the comments unfetched and the entry unticked.
+    /// </remarks>
+    private void OnPanelTabChanged(object? sender, EventArgs e)
+    {
+        if (_switchingTabs)
+            return;
+
+        Guarded(() => ShowComments(_tabs.SelectedTab == _commentsTab));
+    }
+
+    /// <summary>
+    /// Writes how many comments there are onto the tab, and nothing when there are none.
+    /// </summary>
+    /// <remarks>
+    /// A count of zero is what every task without a conversation would wear, on a tab that is
+    /// already called Comments — so it says nothing rather than saying none.
+    ///
+    /// Counted for whatever that tab would show if it were in front, which is not always what it
+    /// last showed. The owner only follows the outline while the comments are up, so after a look
+    /// at one task's comments it stays on that task — and a count of the task you were reading
+    /// before, on the tab of the task you are reading now, is worse than no count at all.
+    /// </remarks>
+    private void RenderCommentsTab()
+    {
+        var owner = _showingComments ? _commentsOwner : _outline.SelectedId;
+        var count = _presenter.CommentCountOn(owner);
+        var caption = count > 0 ? $"Comments ({count})" : "Comments";
+
+        if (_commentsTab.Text != caption)
+            _commentsTab.Text = caption;
     }
 
     /// <summary>Fills the pane with the comments on whatever it is currently pointed at.</summary>
@@ -1915,9 +1993,9 @@ internal sealed class MainForm : Form
             _renderIdle.Stop();
 
             // And out of the comments on the way out, for the same reason as the mode below: the
-            // panel should open showing what it rests on rather than whatever it was left on.
-            _showingComments = false;
-            _comments.Visible = false;
+            // panel should open showing what it rests on rather than whatever it was left on. The
+            // tab is moved rather than the control hidden, since the tabs own what is on screen.
+            ShowComments(showing: false);
 
             // Back to reading on the way out, so the panel opens the way it rests rather than in
             // whatever it was left mid-edit. Set through the same path as every other mode change,
@@ -1927,6 +2005,13 @@ internal sealed class MainForm : Form
         }
 
         ApplyPanelSizes();
+
+        // The panel takes its room from the bottom of the outline, so a task selected near the
+        // bottom can end up behind it — and the panel that just opened is showing that task's
+        // description, with the task itself nowhere on screen. Done after the sizes are applied,
+        // because what counts as in view depends on the height the outline has just been left with.
+        _outline.ShowSelection();
+
         FollowSelection();
         RenderDescription();
     }
@@ -2047,7 +2132,11 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
         (Keys.F5, AppCommand.SyncNow, Scope.Window),
         (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
-        (Keys.Control | Keys.E, AppCommand.ToggleDescription, Scope.Window),
+        // F4 shows and hides the panel; Ctrl+E goes straight to writing in it. The other way round
+        // until the two were one panel, when the key everyone reaches for stopped belonging to the
+        // thing that merely puts it on screen.
+        (Keys.F4, AppCommand.ToggleDescription, Scope.Window),
+        (Keys.Control | Keys.E, AppCommand.EditDescription, Scope.Window),
         (Keys.Control | Keys.M, AppCommand.ToggleComments, Scope.Window),
 
         // The key the menu shows first, then the number pad's own, which people reach for without
@@ -2414,6 +2503,16 @@ internal sealed class MainForm : Form
             case AppCommand.EditDescription:
                 Guarded(() =>
                 {
+                    // From the comments this is a way across as well as a way in: come off that tab
+                    // and start writing, rather than toggling whatever the description was left on
+                    // — which from over there would as likely stop an edit as start one.
+                    if (_showingComments)
+                    {
+                        ShowComments(showing: false);
+                        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+                        return;
+                    }
+
                     if (_writingDescription)
                         StopWriting();
                     else

@@ -219,18 +219,25 @@ public static class Commands
 
             // One name, with the tick saying whether the panel is open. An entry that renames itself
             // is a different entry each time you look, and the tick is already there to say it.
+            //
+            // "Details" and not "Description": the panel carries the comments as well now, on a tab
+            // of their own, and nothing narrower would still be true of it.
             AppCommand.ToggleDescription => new CommandState(
-                "Description",
+                "Details",
                 true,
                 context.ShowingDescription),
 
             // Only worth offering while the panel it belongs to is open. Ticked while the markdown
             // is on show, since that is the state you leave rather than the one the panel rests in
             // — and ticked is all it says, the name standing still like every other entry's.
+            //
+            // Offered from the comments tab as well, where it crosses to the description and opens
+            // it for writing in one go. Greying it there would be right only if the comments were
+            // somewhere you couldn't leave.
             AppCommand.EditDescription => new CommandState(
                 "Edit description",
-                context.ShowingDescription && !context.ShowingComments,
-                context.WritingDescription),
+                context.ShowingDescription,
+                context.WritingDescription && !context.ShowingComments),
 
             // The same pane, showing a third thing. Ticked while the comments are the thing it is
             // showing, so the entry says which of the two you are looking at.
