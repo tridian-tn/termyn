@@ -6,8 +6,13 @@ namespace Termyn.Core.Tests;
 /// <summary>The normative filter grammar: what it reads, and what it refuses to guess at.</summary>
 public class FilterParserTests
 {
+    /// <summary>
+    /// The names an account is pretending to have. "Work Learning" begins with "Work" on purpose:
+    /// the parser has to prefer the longer of two names it knows, and without a pair like that
+    /// there is nothing for it to prefer.
+    /// </summary>
     private static readonly FilterVocabulary Vocabulary =
-        new(["Work", "My Project", "Kingsbury Shaw"], ["home", "deep work"]);
+        new(["Work", "Work Learning", "My Project"], ["home", "deep work"]);
 
     // ---- Terms -------------------------------------------------------------------------------------
 
@@ -36,8 +41,10 @@ public class FilterParserTests
     [Fact]
     public void The_longest_name_that_exists_wins_over_a_shorter_one()
     {
-        var and = Assert.IsType<FilterExpression.And>(Parse("#Kingsbury Shaw today").Expression);
-        Assert.Equal("Kingsbury Shaw", Assert.IsType<FilterExpression.InProject>(and.Left).Name);
+        // "Work" is a name too, so stopping at the first one that matches would read this as that
+        // project and leave "Learning" as a word of its own.
+        var and = Assert.IsType<FilterExpression.And>(Parse("#Work Learning today").Expression);
+        Assert.Equal("Work Learning", Assert.IsType<FilterExpression.InProject>(and.Left).Name);
         Assert.IsType<FilterExpression.DueToday>(and.Right);
     }
 
