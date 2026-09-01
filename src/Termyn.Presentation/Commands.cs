@@ -247,7 +247,7 @@ public static class Commands
 
             // The way back, greyed while there is nothing to come back from — which is also how the
             // entry says whether the panel is at its own size, the same as Default order above.
-            AppCommand.ZoomReset => new CommandState("Restore Default Zoom", Scalable(context) && context.Zoomed),
+            AppCommand.ZoomReset => new CommandState("Restore default zoom", Scalable(context) && context.Zoomed),
 
             AppCommand.Undo => new CommandState("Undo", context.CanUndo),
             AppCommand.Search => Always("Search…"),

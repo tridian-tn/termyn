@@ -2255,25 +2255,51 @@ internal sealed class MainForm : Form
     /// rather than by being kept in step.
     /// </remarks>
     /// <param name="by">What to multiply the current scale by</param>
-    private void Zoom(float by) => SetZoom(Math.Clamp(_rendered.ZoomFactor * by, MinZoom, MaxZoom));
+    private void Zoom(float by)
+    {
+        if (!CanZoom)
+            return;
+
+        SetZoom(Math.Clamp(Scaled.ZoomFactor * by, MinZoom, MaxZoom));
+    }
 
     /// <summary>Puts both halves of the panel at one scale. No argument means back to its own.</summary>
     /// <param name="to">The scale to set</param>
     private void SetZoom(float to = 1f)
     {
+        // Guarded here and not only in the menu: a keystroke reaches this without asking whether the
+        // entry was offered, and scaling a panel that isn't on screen is a surprise kept in reserve.
+        if (!CanZoom)
+            return;
+
         _rendered.ZoomFactor = to;
         _description.ZoomFactor = to;
     }
+
+    /// <summary>Whether the panel is showing something that can be scaled at all.</summary>
+    private bool CanZoom => !_detail.Panel2Collapsed && !_showingComments;
+
+    /// <summary>
+    /// The half of the panel on show, which is the half the wheel has been scaling.
+    /// </summary>
+    /// <remarks>
+    /// Exactly one of the two is ever visible. Reading the other one would take a step from a scale
+    /// nobody has been changing, so zooming after the wheel had been used would jump.
+    /// </remarks>
+    private RichTextBox Scaled => _writingDescription ? _description : _rendered;
 
     /// <summary>
     /// Whether the panel is scaled away from the size it rests at, for the entry that puts it back.
     /// </summary>
     /// <remarks>
-    /// Read off the control rather than remembered, because the wheel moves it too and a figure of
-    /// our own would only be right until somebody scrolled. Compared with room either side: the
+    /// Either half, because the wheel scales whichever is on show and leaves the other where it was:
+    /// asking only one would leave the way back greyed out on a panel that plainly isn't its own
+    /// size. Read off the controls rather than remembered, for the same reason — a figure of ours
+    /// would only be right until somebody scrolled. Compared with room either side, since the
     /// control keeps this as a float and stepping out and back lands near one rather than on it.
     /// </remarks>
-    private bool Zoomed => Math.Abs(_rendered.ZoomFactor - 1f) > 0.01f;
+    private bool Zoomed
+        => Math.Abs(_rendered.ZoomFactor - 1f) > 0.01f || Math.Abs(_description.ZoomFactor - 1f) > 0.01f;
 
     private void OnMenuOpening(object? sender, EventArgs e)
     {
