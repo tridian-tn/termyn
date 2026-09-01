@@ -82,10 +82,36 @@ public class CommandsTests
     }
 
     [Fact]
-    public void Showing_completed_tasks_becomes_hiding_them_once_they_are_shown()
+    public void Completed_tasks_keeps_one_name_and_says_the_rest_with_the_tick()
     {
-        Assert.Equal("Show completed tasks", State(AppCommand.ToggleCompleted).Label);
-        Assert.Equal("Hide completed tasks", State(AppCommand.ToggleCompleted, new CommandContext(ShowingCompleted: true)).Label);
+        // It used to read "Show completed tasks" and then "Hide completed tasks". A surface that
+        // can draw a tick has no use for that, and one that can't is better told the state than
+        // handed a spelling of it — so the state lives in Checked and the name stands still.
+        Assert.Equal("Completed tasks", State(AppCommand.ToggleCompleted).Label);
+        Assert.Equal("Completed tasks", State(AppCommand.ToggleCompleted, new CommandContext(ShowingCompleted: true)).Label);
+
+        Assert.False(State(AppCommand.ToggleCompleted).Checked);
+        Assert.True(State(AppCommand.ToggleCompleted, new CommandContext(ShowingCompleted: true)).Checked);
+    }
+
+    [Fact]
+    public void No_command_in_the_catalogue_renames_itself_for_its_own_state()
+    {
+        // The rule this keeps: a label may change with what is selected — "Rename project" against
+        // "Rename label" — but never with whether the thing it does is already on. Anything that
+        // did would read as a different entry each time you looked at it, and would leave the
+        // palette, which has no tick, spelling the state a second way.
+        foreach (var command in Enum.GetValues<AppCommand>().Where(c => c != AppCommand.None))
+        {
+            var off = State(command);
+            var on = State(command, new CommandContext(
+                ShowingCompleted: true,
+                ShowingDescription: true,
+                WritingDescription: true,
+                ShowingComments: true));
+
+            Assert.Equal(off.Label, on.Label);
+        }
     }
 
     [Theory]
