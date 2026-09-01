@@ -1256,23 +1256,28 @@ internal sealed class MainForm : Form
     /// Asks before something that can't simply be typed again.
     /// </summary>
     /// <remarks>
-    /// Cancel is the default button, so a Return pressed at a dialog nobody read does nothing. The
-    /// question carries whether the thing comes back, because that is the part the answer turns on
-    /// and the only part the user can't see for themselves.
+    /// Yes and No rather than OK and Cancel, because the thing being answered is a question and
+    /// those are its answers. No is the default, so a Return pressed at a dialog nobody read does
+    /// nothing. The question carries whether the thing comes back, because that is the part the
+    /// answer turns on and the only part the user can't see for themselves.
+    ///
+    /// A message box offering only those two cannot be dismissed with Escape or the close button —
+    /// Windows leaves both inert without a Cancel. For a question about deleting something that is
+    /// no bad thing: it has to be answered rather than waved away.
     /// </remarks>
     /// <param name="question">What is about to happen, as a question</param>
     /// <returns>True when the user said to go ahead</returns>
     private bool Confirm(string question)
-        => MessageBox.Show(this, question, "Termyn", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2)
-            == DialogResult.OK;
+        => MessageBox.Show(this, question, "Termyn", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2)
+            == DialogResult.Yes;
 
     /// <returns>True when the delete went ahead</returns>
     private bool DeleteStructure(SidebarNode node)
     {
         // A label delete takes the label off its tasks; the other two take the tasks with them.
         var question = node.Kind == SidebarKind.Label
-            ? $"Delete the label \"{node.Label}\" and remove it from every task?"
-            : $"Delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
+            ? $"Are you sure you want to delete the label \"{node.Label}\" and remove it from every task?"
+            : $"Are you sure you want to delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
 
         if (!Confirm(question))
             return false;
@@ -1595,7 +1600,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void OnCommentDeleted(string id)
     {
-        if (!Confirm("Delete this comment?\r\n\r\nIt can't be brought back — Todoist has no undelete."))
+        if (!Confirm("Are you sure you want to delete this comment?\r\n\r\nIt can't be brought back — Todoist has no undelete."))
             return;
 
         Guarded(() =>
@@ -1738,7 +1743,7 @@ internal sealed class MainForm : Form
         if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
-        if (!Confirm($"Remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
+        if (!Confirm($"Are you sure you want to remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
             return;
 
         var trouble = await _presenter.DetachFileAsync(commentId);
@@ -2596,7 +2601,7 @@ internal sealed class MainForm : Form
                 // looking at — a right-click moves the selection to whatever is under the pointer.
                 // "Anything filed under it" rather than a count of sub-tasks: the outline may be
                 // filtered, and a number that only counted the visible ones would be a wrong one.
-                if (!Confirm($"Delete \"{_outline.SelectedRow?.Content ?? "this task"}\" and anything filed under it?"))
+                if (!Confirm($"Are you sure you want to delete \"{_outline.SelectedRow?.Content ?? "this task"}\" and anything filed under it?"))
                     return false;
 
                 Guarded(() => _presenter.Delete(id));
