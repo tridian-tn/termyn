@@ -19,12 +19,18 @@ public enum PaletteKind
 /// The command is an <see cref="AppCommand"/>, the same one the menus raise, so a palette entry and
 /// a menu entry for the same action are the same action rather than two spellings of it.
 /// </remarks>
+/// <param name="Checked">
+/// Whether the thing this turns on is on now. The menus draw a tick for this; the palette has no
+/// tick of its own, so it is carried here for the row to mark — see <see cref="CommandState"/> for
+/// why the label doesn't say it instead
+/// </param>
 public sealed record PaletteEntry(
     PaletteKind Kind,
     string Label,
     string Hint,
     ViewSelection? Selection = null,
-    AppCommand Command = AppCommand.None);
+    AppCommand Command = AppCommand.None,
+    bool Checked = false);
 
 /// <summary>
 /// Ranks palette entries against what the user has typed. Matching is a subsequence — "npr" finds

@@ -1769,7 +1769,12 @@ public sealed class MainPresenter
         var context = new CommandContext(ShowingCompleted: ShowingCompleted, CanUndo: CanUndo);
 
         foreach (var command in PaletteActions)
-            yield return new PaletteEntry(PaletteKind.Action, Presentation.Commands.StateOf(command, context).Label, "action", Command: command);
+        {
+            // Both halves of the same answer: what it is called, and whether it is on. The palette
+            // has no tick to draw the second one with, so the row carries it and marks itself.
+            var state = Presentation.Commands.StateOf(command, context);
+            yield return new PaletteEntry(PaletteKind.Action, state.Label, "action", Command: command, Checked: state.Checked);
+        }
 
         // Built from the sidebar rather than the model, so the palette reaches exactly what the tree
         // does — same names, same order, and nothing archived or unaddressable.

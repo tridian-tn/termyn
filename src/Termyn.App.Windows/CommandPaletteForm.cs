@@ -152,12 +152,36 @@ internal sealed class CommandPaletteForm : Form
         var kind = entry.Hint;
         var kindWidth = TextRenderer.MeasureText(kind, Font).Width + 12;
 
-        var label = e.Bounds with { X = e.Bounds.X + 6, Width = Math.Max(0, e.Bounds.Width - kindWidth - 12) };
+        // A tick for an entry that is already on, which is how the palette says what a menu says
+        // with its own. In a gutter every row has rather than in front of the ones that need it,
+        // so the names stay in a line whether or not there is anything to the left of them.
+        var mark = e.Bounds with { X = e.Bounds.X + 6, Width = Gutter };
+        if (entry.Checked)
+            TextRenderer.DrawText(e.Graphics, Tick, Font, mark, text, Flags);
+
+        var label = e.Bounds with
+        {
+            X = e.Bounds.X + 6 + Gutter,
+            Width = Math.Max(0, e.Bounds.Width - kindWidth - Gutter - 12),
+        };
         TextRenderer.DrawText(e.Graphics, entry.Label, Font, label, text, Flags);
 
         var hint = e.Bounds with { X = e.Bounds.Right - kindWidth, Width = kindWidth - 6 };
         TextRenderer.DrawText(e.Graphics, kind, Font, hint, muted, Flags | TextFormatFlags.Right);
     }
+
+    /// <summary>The mark an entry already on carries, so drawing it and measuring it can't drift.</summary>
+    private const string Tick = "✓";
+
+    /// <summary>
+    /// How much room the tick gets, whether or not this row has one.
+    /// </summary>
+    /// <remarks>
+    /// Measured rather than fixed. The window follows the scaling of whatever monitor it is on, and
+    /// the mark is drawn in a font that follows it too — so a width in pixels that looks right on
+    /// one screen clips the mark or runs it into the name on the next.
+    /// </remarks>
+    private int Gutter => TextRenderer.MeasureText(Tick, Font).Width + 4;
 
     private static TextFormatFlags Flags
         => TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;

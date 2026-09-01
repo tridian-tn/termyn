@@ -102,10 +102,23 @@ public sealed record CommandContext(
     public TaskAbilities Can => Task is null ? TaskAbilities.None : Abilities ?? TaskAbilities.None;
 }
 
-/// <summary>How a command should currently be shown.</summary>
+/// <summary>
+/// How a command should currently be shown.
+/// </summary>
+/// <remarks>
+/// A command that can be on or off says so through <see cref="Checked"/> and never by renaming
+/// itself. The two are not interchangeable, and which one a surface leans on is the surface's own
+/// business: a menu draws a tick beside the entry, the palette marks the row. Wording the state into
+/// the label instead would make an entry read as a different entry each time you looked, and would
+/// mean every surface had to be told separately how to spell it.
+///
+/// So a new toggle needs nothing of either surface — it sets <see cref="Checked"/> and both already
+/// know what to do with it. A label that changes with what is <em>selected</em> is a different thing
+/// and still fine: "Rename project" against "Rename label" names its object, not its state.
+/// </remarks>
 /// <param name="Label">What to call it, which some commands change with the thing they act on</param>
 /// <param name="Enabled">False when running it now would do nothing</param>
-/// <param name="Checked">Shown as already the case</param>
+/// <param name="Checked">Whether it is currently on, for the surface to show however it can</param>
 public sealed record CommandState(string Label, bool Enabled, bool Checked = false);
 
 /// <summary>
@@ -190,7 +203,7 @@ public static class Commands
             AppCommand.QuickAdd => Always("Quick add…"),
             AppCommand.SyncNow => Always("Sync now"),
             AppCommand.ToggleCompleted => new CommandState(
-                context.ShowingCompleted ? "Hide completed tasks" : "Show completed tasks",
+                "Completed tasks",
                 true,
                 context.ShowingCompleted),
             // The way back from a sorted outline. Greyed when it is already in the account's own
@@ -207,9 +220,10 @@ public static class Commands
                 context.ShowingDescription),
 
             // Only worth offering while the panel it belongs to is open. Ticked while the markdown
-            // is on show, since that is the state you leave rather than the one the panel rests in.
+            // is on show, since that is the state you leave rather than the one the panel rests in
+            // — and ticked is all it says, the name standing still like every other entry's.
             AppCommand.EditDescription => new CommandState(
-                context.WritingDescription ? "Done editing description" : "Edit description",
+                "Edit description",
                 context.ShowingDescription && !context.ShowingComments,
                 context.WritingDescription),
 

@@ -158,11 +158,12 @@ public class CommandPaletteTests
     }
 
     [Fact]
-    public async Task An_action_the_palette_names_for_the_state_follows_it()
+    public async Task An_action_the_palette_marks_for_the_state_follows_it()
     {
-        // The label the catalogue gives back depends on what the presenter is doing — showing
-        // completed tasks means the entry offers to hide them. Checking only the resting state
-        // would pass just as well if the palette asked the catalogue about nobody in particular.
+        // The state the catalogue gives back depends on what the presenter is doing. Checking only
+        // the resting state would pass just as well if the palette asked the catalogue about nobody
+        // in particular — which it did once, and this is what would catch it happening again. The
+        // question used to be asked of the label, before the label stopped saying it.
         var api = new FakeApi
         {
             Response = new SyncResponse { SyncToken = "s1" },
@@ -170,11 +171,11 @@ public class CommandPaletteTests
         };
         var presenter = await Loaded(api);
 
-        Assert.Equal("Show completed tasks", LabelOf(presenter, AppCommand.ToggleCompleted));
+        Assert.False(CheckedFor(presenter, AppCommand.ToggleCompleted));
 
         Assert.True(await presenter.ToggleCompletedAsync());
 
-        Assert.Equal("Hide completed tasks", LabelOf(presenter, AppCommand.ToggleCompleted));
+        Assert.True(CheckedFor(presenter, AppCommand.ToggleCompleted));
 
         // And still whatever the catalogue would say for the state it is actually in.
         Assert.All(Actions(presenter), e => Assert.Equal(Expected(presenter, e.Command), e.Label));
@@ -185,6 +186,9 @@ public class CommandPaletteTests
 
     private static string LabelOf(MainPresenter presenter, AppCommand command)
         => Actions(presenter).Single(e => e.Command == command).Label;
+
+    private static bool CheckedFor(MainPresenter presenter, AppCommand command)
+        => Actions(presenter).Single(e => e.Command == command).Checked;
 
     /// <summary>
     /// What the catalogue calls a command for the state the presenter is in — the same question the
@@ -226,17 +230,23 @@ public class CommandPaletteTests
     }
 
     [Fact]
-    public async Task The_completed_action_says_which_way_it_will_go()
+    public async Task The_completed_action_carries_whether_they_are_showing()
     {
+        // The palette draws no tick of its own, so the row is handed the state to mark itself with.
+        // The name stays put either way — see CommandState for why it isn't spelled into the label.
         var api = Api();
         api.Completed = _ => new CompletedPage([], null);
         var presenter = await Loaded(api);
 
-        Assert.Contains(presenter.Palette(""), e => e.Label == "Show completed tasks");
+        var before = presenter.Palette("").Single(e => e.Command == AppCommand.ToggleCompleted);
+        Assert.Equal("Completed tasks", before.Label);
+        Assert.False(before.Checked);
 
         await presenter.ToggleCompletedAsync();
 
-        Assert.Contains(presenter.Palette(""), e => e.Label == "Hide completed tasks");
+        var after = presenter.Palette("").Single(e => e.Command == AppCommand.ToggleCompleted);
+        Assert.Equal("Completed tasks", after.Label);
+        Assert.True(after.Checked);
     }
 
     [Fact]

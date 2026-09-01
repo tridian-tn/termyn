@@ -284,8 +284,8 @@ public class MenuTests
         Assert.False(Find(reading, "Edit description").Checked);
 
         // Ticked while the markdown is on show, since that is the state you leave rather than the
-        // one the panel rests in.
-        Assert.True(Find(writing, "Done editing description").Checked);
+        // one the panel rests in. Ticked and not renamed — the tick is the only thing that moves.
+        Assert.True(Find(writing, "Edit description").Checked);
     }
 
     [Fact]
@@ -321,13 +321,14 @@ public class MenuTests
     }
 
     [Fact]
-    public void Showing_completed_tasks_is_ticked_while_they_are_showing()
+    public void Completed_tasks_keeps_one_name_and_is_ticked_while_they_are_showing()
     {
+        // A menu has a tick, so the entry has no reason to rename itself and every reason not to.
         using var hidden = Build(View, CommandContext.Empty);
         using var shown = Build(View, new CommandContext(ShowingCompleted: true));
 
-        Assert.False(Find(hidden, "Show completed tasks").Checked);
-        Assert.True(Find(shown, "Hide completed tasks").Checked);
+        Assert.False(Find(hidden, "Completed tasks").Checked);
+        Assert.True(Find(shown, "Completed tasks").Checked);
     }
 
     // ---- Shortcuts and wiring ------------------------------------------------------------------
