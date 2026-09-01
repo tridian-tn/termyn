@@ -97,6 +97,12 @@ public static class Menus
             MenuEntry.Of(AppCommand.EditDescription),
             MenuEntry.Of(AppCommand.ToggleComments),
 
+            // The description panel's own size, which the wheel has always changed and nothing has
+            // ever said so.
+            MenuEntry.AfterRule(AppCommand.ZoomIn),
+            MenuEntry.Of(AppCommand.ZoomOut),
+            MenuEntry.Of(AppCommand.ZoomReset),
+
             // Sorting is done by clicking a column header; this is the way back from it, and the
             // only part of it that needs somewhere to live.
             MenuEntry.AfterRule(AppCommand.SortDefault)),

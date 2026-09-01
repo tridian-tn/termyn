@@ -2018,6 +2018,15 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
         (Keys.Control | Keys.E, AppCommand.ToggleDescription, Scope.Window),
         (Keys.Control | Keys.M, AppCommand.ToggleComments, Scope.Window),
+
+        // The key the menu shows first, then the number pad's own, which people reach for without
+        // thinking and which is a different key code entirely.
+        (Keys.Control | Keys.Oemplus, AppCommand.ZoomIn, Scope.Window),
+        (Keys.Control | Keys.Add, AppCommand.ZoomIn, Scope.Window),
+        (Keys.Control | Keys.OemMinus, AppCommand.ZoomOut, Scope.Window),
+        (Keys.Control | Keys.Subtract, AppCommand.ZoomOut, Scope.Window),
+        (Keys.Control | Keys.D0, AppCommand.ZoomReset, Scope.Window),
+        (Keys.Control | Keys.NumPad0, AppCommand.ZoomReset, Scope.Window),
         (Keys.Control | Keys.F, AppCommand.Search, Scope.Window),
         (Keys.Control | Keys.K, AppCommand.Palette, Scope.Window),
         (Keys.Control | Keys.Up, AppCommand.PreviousView, Scope.Window),
@@ -2067,6 +2076,12 @@ internal sealed class MainForm : Form
             Keys.Down => "↓",
             Keys.Delete => "Del",
             Keys.Oemcomma => ",",
+
+            // Named after the key's other legend, or after the pad it sits on, and neither is what
+            // the key does here. Written the way a menu writes a zoom.
+            Keys.Oemplus or Keys.Add => "+",
+            Keys.OemMinus or Keys.Subtract => "-",
+            Keys.NumPad0 => "0",
             // The enum's own name for this one is Return, which is not what the key says on it.
             Keys.Return => "Enter",
             _ => code.ToString(),
@@ -2088,7 +2103,8 @@ internal sealed class MainForm : Form
         _presenter.Sort,
         !_detail.Panel2Collapsed,
         _writingDescription,
-        _showingComments);
+        _showingComments,
+        Zoomed);
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -2209,6 +2225,56 @@ internal sealed class MainForm : Form
         return bar;
     }
 
+    /// <summary>
+    /// How much one step of the menu's zoom moves it, as a multiplier.
+    /// </summary>
+    /// <remarks>
+    /// A tenth up or down, so a step is noticeable without being a jump, and multiplied rather than
+    /// added so stepping out undoes stepping in exactly.
+    /// </remarks>
+    private const float ZoomStep = 1.1f;
+
+    /// <summary>
+    /// How far the description panel may be scaled either way.
+    /// </summary>
+    /// <remarks>
+    /// The control itself allows a great deal more in both directions, and the far ends of that are
+    /// a panel you cannot read and a panel with two words in it — reachable by holding a menu item
+    /// down, and awkward to come back from without a reset to go with these.
+    /// </remarks>
+    private const float MinZoom = 0.5f;
+    private const float MaxZoom = 4f;
+
+    /// <summary>
+    /// Scales the description panel, reading and writing alike.
+    /// </summary>
+    /// <remarks>
+    /// Both halves together, because they are one panel as far as anybody using it is concerned:
+    /// zooming what you are reading and then editing it should not hand back the size you started
+    /// with. This is the same <c>ZoomFactor</c> the wheel moves, so the two agree by construction
+    /// rather than by being kept in step.
+    /// </remarks>
+    /// <param name="by">What to multiply the current scale by</param>
+    private void Zoom(float by) => SetZoom(Math.Clamp(_rendered.ZoomFactor * by, MinZoom, MaxZoom));
+
+    /// <summary>Puts both halves of the panel at one scale. No argument means back to its own.</summary>
+    /// <param name="to">The scale to set</param>
+    private void SetZoom(float to = 1f)
+    {
+        _rendered.ZoomFactor = to;
+        _description.ZoomFactor = to;
+    }
+
+    /// <summary>
+    /// Whether the panel is scaled away from the size it rests at, for the entry that puts it back.
+    /// </summary>
+    /// <remarks>
+    /// Read off the control rather than remembered, because the wheel moves it too and a figure of
+    /// our own would only be right until somebody scrolled. Compared with room either side: the
+    /// control keeps this as a float and stepping out and back lands near one rather than on it.
+    /// </remarks>
+    private bool Zoomed => Math.Abs(_rendered.ZoomFactor - 1f) > 0.01f;
+
     private void OnMenuOpening(object? sender, EventArgs e)
     {
         if (sender is ToolStripMenuItem { Tag: MenuEntry { Children: { } children } } heading)
@@ -2300,6 +2366,18 @@ internal sealed class MainForm : Form
 
             case AppCommand.ToggleComments:
                 Guarded(() => ShowComments(!_showingComments));
+                return false;
+
+            case AppCommand.ZoomIn:
+                Guarded(() => Zoom(ZoomStep));
+                return false;
+
+            case AppCommand.ZoomOut:
+                Guarded(() => Zoom(1 / ZoomStep));
+                return false;
+
+            case AppCommand.ZoomReset:
+                Guarded(() => SetZoom());
                 return false;
 
             case AppCommand.CommentOnProject:
