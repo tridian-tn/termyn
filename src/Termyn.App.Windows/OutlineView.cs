@@ -217,6 +217,20 @@ internal sealed class OutlineView : ListView
         }
     }
 
+    /// <summary>
+    /// Scrolls the selected task back into view, for when the room it was in has been taken.
+    /// </summary>
+    /// <remarks>
+    /// Asked for rather than done on its own. The rows are rebuilt every time the sync comes round,
+    /// and a list that scrolled itself then would move the viewport under somebody reading it — so
+    /// this is only for the moments the user has just changed how much room the list has.
+    /// </remarks>
+    public void ShowSelection()
+    {
+        if (SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count)
+            EnsureVisible(SelectedIndices[0]);
+    }
+
     protected override void OnSelectedIndexChanged(EventArgs e)
     {
         _selectedIndex = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;

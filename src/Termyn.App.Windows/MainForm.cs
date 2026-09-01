@@ -2005,6 +2005,13 @@ internal sealed class MainForm : Form
         }
 
         ApplyPanelSizes();
+
+        // The panel takes its room from the bottom of the outline, so a task selected near the
+        // bottom can end up behind it — and the panel that just opened is showing that task's
+        // description, with the task itself nowhere on screen. Done after the sizes are applied,
+        // because what counts as in view depends on the height the outline has just been left with.
+        _outline.ShowSelection();
+
         FollowSelection();
         RenderDescription();
     }
