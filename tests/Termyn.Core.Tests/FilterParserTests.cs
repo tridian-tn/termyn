@@ -68,8 +68,44 @@ public class FilterParserTests
     [InlineData("p1", Priority.P1)]
     [InlineData("p4", Priority.P4)]
     [InlineData("P2", Priority.P2)]
+
+    // Todoist's own spelling, and the one it uses for the four filters it gives every new account.
+    // Reading only the short form refused a query the user never wrote and can't easily change.
+    [InlineData("priority 1", Priority.P1)]
+    [InlineData("Priority 4", Priority.P4)]
     public void Priorities_are_read_in_ui_terms(string query, Priority expected)
         => Assert.Equal(expected, Assert.IsType<FilterExpression.HasPriority>(Parse(query).Expression).Priority);
+
+    [Theory]
+    [InlineData("priority")]
+    [InlineData("priority 5")]
+    [InlineData("priority 0")]
+    [InlineData("priority high")]
+    public void A_priority_that_names_no_priority_is_refused(string query)
+    {
+        // Not silently treated as p4, and not read as the word "priority" on its own: a filter that
+        // ran and answered with the wrong tasks is what this whole grammar exists to avoid.
+        Assert.False(Parse(query).IsSupported);
+    }
+
+    [Fact]
+    public void View_all_is_every_task_there_is()
+    {
+        // Another filter every account is given. It matches everything rather than standing for the
+        // absence of a filter, so it composes with the rest of the grammar.
+        Assert.IsType<FilterExpression.Everything>(Parse("view all").Expression);
+        Assert.IsType<FilterExpression.Everything>(Parse("View All").Expression);
+
+        var and = Assert.IsType<FilterExpression.And>(Parse("view all & p1").Expression);
+        Assert.IsType<FilterExpression.Everything>(and.Left);
+        Assert.IsType<FilterExpression.HasPriority>(and.Right);
+    }
+
+    [Theory]
+    [InlineData("view")]
+    [InlineData("view everything")]
+    public void View_on_its_own_is_not_a_term(string query)
+        => Assert.False(Parse(query).IsSupported);
 
     [Fact]
     public void The_date_keywords_are_read()

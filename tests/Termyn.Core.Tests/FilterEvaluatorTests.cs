@@ -67,6 +67,23 @@ public class FilterEvaluatorTests
     {
         Assert.True(Matches("p1", Item(priority: Priority.P1)));
         Assert.False(Matches("p1", Item(priority: Priority.P4)));
+
+        // The long form is the same term, so it has to reach the same answer and not merely parse.
+        Assert.True(Matches("priority 1", Item(priority: Priority.P1)));
+        Assert.False(Matches("priority 1", Item(priority: Priority.P4)));
+    }
+
+    [Fact]
+    public void View_all_takes_everything_including_what_nothing_else_would()
+    {
+        // A task with no project, no labels, no priority to speak of and no date matches nothing
+        // else in the grammar — which is the case that tells "everything" apart from "anything".
+        Assert.True(Matches("view all", Item()));
+        Assert.True(Matches("view all", Item(projectId: "home", priority: Priority.P1, due: "2026-07-31")));
+
+        // And it composes rather than swallowing what it is combined with.
+        Assert.True(Matches("view all & p1", Item(priority: Priority.P1)));
+        Assert.False(Matches("view all & p1", Item(priority: Priority.P4)));
     }
 
     [Fact]

@@ -13,6 +13,12 @@ public abstract record FilterExpression
     {
     }
 
+    /// <summary>
+    /// Every task there is. Todoist writes this <c>view all</c>, and gives every account a saved
+    /// filter of that name.
+    /// </summary>
+    public sealed record Everything : FilterExpression;
+
     /// <summary>Tasks in a named project, optionally including everything beneath it.</summary>
     public sealed record InProject(string Name, bool IncludeSubProjects) : FilterExpression;
 

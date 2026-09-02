@@ -50,6 +50,8 @@ public static class FilterEvaluator
 {
     public static bool Matches(FilterExpression expression, TaskItem item, FilterContext context) => expression switch
     {
+        FilterExpression.Everything => true,
+
         FilterExpression.InProject e =>
             item.ProjectId is { } id && context.ProjectIds(e.Name, e.IncludeSubProjects).Contains(id),
 

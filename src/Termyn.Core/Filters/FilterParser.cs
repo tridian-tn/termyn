@@ -36,9 +36,9 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 
 /// <summary>
 /// Reads the filter grammar Termyn supports: <c>#project</c>, <c>##project</c> (with sub-projects),
-/// <c>@label</c>, <c>p1</c>–<c>p4</c>, <c>today</c>, <c>overdue</c>, <c>no date</c>,
-/// <c>next N days</c>, <c>search: text</c>, combined with <c>&amp;</c>, <c>|</c>, <c>,</c>,
-/// <c>!</c> and parentheses.
+/// <c>@label</c>, <c>p1</c>–<c>p4</c> (or <c>priority 1</c>–<c>priority 4</c>), <c>view all</c>,
+/// <c>today</c>, <c>overdue</c>, <c>no date</c>, <c>next N days</c>, <c>search: text</c>, combined
+/// with <c>&amp;</c>, <c>|</c>, <c>,</c>, <c>!</c> and parentheses.
 /// </summary>
 /// <remarks>
 /// Precedence is <c>!</c> then <c>&amp;</c> then <c>|</c>/<c>,</c>, left-associative. Adjacent terms
@@ -198,11 +198,11 @@ public static class FilterParser
         if (word.StartsWith(SearchPrefix, StringComparison.OrdinalIgnoreCase))
             return ReadSearch(tokens, ref at, out failed);
 
-        if (TryReadPriority(word, out var priority))
-        {
-            at++;
+        if (TryReadPriority(tokens, ref at, out var priority))
             return new FilterExpression.HasPriority(priority);
-        }
+
+        if (TryReadEverything(tokens, ref at))
+            return new FilterExpression.Everything();
 
         if (word.Equals("today", StringComparison.OrdinalIgnoreCase))
         {
@@ -328,13 +328,52 @@ public static class FilterParser
         return true;
     }
 
-    private static bool TryReadPriority(string word, out Priority priority)
+    /// <summary>
+    /// Reads a priority, written either way round.
+    /// </summary>
+    /// <remarks>
+    /// Todoist itself writes the long form: the four filters it puts in every new account are
+    /// <c>priority 1</c> through <c>priority 4</c>, so reading only <c>p1</c> refused a query the
+    /// user never wrote and can't easily change.
+    /// </remarks>
+    private static bool TryReadPriority(List<string> tokens, ref int at, out Priority priority)
     {
         priority = Priority.P4;
-        if (word.Length != 2 || (word[0] != 'p' && word[0] != 'P') || word[1] is < '1' or > '4')
+        var word = tokens[at];
+
+        if (word.Length == 2 && (word[0] == 'p' || word[0] == 'P') && word[1] is >= '1' and <= '4')
+        {
+            priority = (Priority)(word[1] - '0');
+            at++;
+            return true;
+        }
+
+        if (!word.Equals("priority", StringComparison.OrdinalIgnoreCase)
+            || at + 1 >= tokens.Count
+            || tokens[at + 1].Length != 1
+            || tokens[at + 1][0] is < '1' or > '4')
+        {
+            return false;
+        }
+
+        priority = (Priority)(tokens[at + 1][0] - '0');
+        at += 2;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads <c>view all</c>, Todoist's way of asking for everything.
+    /// </summary>
+    /// <remarks>
+    /// Another one every account is given as a saved filter. It matches every task rather than
+    /// standing for no filter at all, so it composes: <c>view all &amp; p1</c> reads the way it looks.
+    /// </remarks>
+    private static bool TryReadEverything(List<string> tokens, ref int at)
+    {
+        if (!tokens[at].Equals("view", StringComparison.OrdinalIgnoreCase) || !Word(tokens, at + 1, "all"))
             return false;
 
-        priority = (Priority)(word[1] - '0');
+        at += 2;
         return true;
     }
 
