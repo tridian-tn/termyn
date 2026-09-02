@@ -24,6 +24,9 @@ public static class Projections
             Labels = ReadLabels(o),
             Completed = JsonRead.Bool(o, "checked"),
             CompletedAt = JsonRead.String(o, "completed_at"),
+
+            // Todoist has used both field names across API versions; accept either.
+            AddedAt = JsonRead.String(o, "added_at") ?? JsonRead.String(o, "date_added"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
             DueText = due is null ? null : JsonRead.String(due, "string"),
             IsRecurring = due is not null && JsonRead.Bool(due, "is_recurring"),

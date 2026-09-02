@@ -44,19 +44,42 @@ public static class SmartViews
     /// datetime as-is, but a task with a fixed timezone arrives as a UTC instant — taking the date
     /// off the front of that would be a day out either side of midnight.
     /// </summary>
-    public static DateOnly? DueOn(TaskItem item, TimeZoneInfo zone)
+    public static DateOnly? DueOn(TaskItem item, TimeZoneInfo zone) => DayOf(item.DueDate, zone);
+
+    /// <summary>
+    /// The day a task was added, in the account's timezone.
+    /// </summary>
+    /// <remarks>
+    /// Always an instant, unlike a due date: a task is created at a moment, and Todoist writes that
+    /// in UTC. So this is the case the conversion exists for — a task added late in the evening
+    /// west of UTC was added yesterday as far as the server is concerned and today as far as the
+    /// person who added it is.
+    /// </remarks>
+    public static DateOnly? AddedOn(TaskItem item, TimeZoneInfo zone) => DayOf(item.AddedAt, zone);
+
+    /// <summary>
+    /// The day a Todoist timestamp falls on in the account's timezone.
+    /// </summary>
+    /// <remarks>
+    /// Todoist sends a floating date or a local datetime as-is, but anything with a fixed timezone
+    /// arrives as a UTC instant — taking the date off the front of that would be a day out either
+    /// side of midnight.
+    /// </remarks>
+    /// <param name="stamp">The date or instant as the server wrote it, or null</param>
+    /// <param name="zone">The account's timezone</param>
+    /// <returns>The day, or null when there is nothing readable there</returns>
+    private static DateOnly? DayOf(string? stamp, TimeZoneInfo zone)
     {
-        var due = item.DueDate;
-        if (due is null || due.Length < 10)
+        if (stamp is null || stamp.Length < 10)
             return null;
 
-        if (due.EndsWith('Z')
-            && DateTimeOffset.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant))
+        if (stamp.EndsWith('Z')
+            && DateTimeOffset.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant))
         {
             return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, zone).DateTime);
         }
 
-        return DateOnly.TryParseExact(due[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+        return DateOnly.TryParseExact(stamp[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
             ? date
             : null;
     }

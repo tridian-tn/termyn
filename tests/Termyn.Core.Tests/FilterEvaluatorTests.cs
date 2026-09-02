@@ -133,6 +133,52 @@ public class FilterEvaluatorTests
     }
 
     [Fact]
+    public void Created_is_the_day_the_task_was_added()
+    {
+        Assert.True(Matches("created: today", Item(added: "2026-07-31T09:15:00.000000Z")));
+        Assert.False(Matches("created: today", Item(added: "2026-07-30T09:15:00.000000Z")));
+
+        Assert.True(Matches("created: 2026-07-30", Item(added: "2026-07-30T09:15:00.000000Z")));
+        Assert.False(Matches("created: 2026-07-30", Item(added: "2026-07-31T09:15:00.000000Z")));
+    }
+
+    [Fact]
+    public void Created_before_and_after_are_strict_and_counted_from_today()
+    {
+        Assert.True(Matches("created before: today", Item(added: "2026-07-30T09:15:00.000000Z")));
+        Assert.False(Matches("created before: today", Item(added: "2026-07-31T09:15:00.000000Z")));
+
+        // -30 days from 2026-07-31 is 2026-07-01, and the bound excludes the day itself.
+        Assert.True(Matches("created before: -30 days", Item(added: "2026-06-30T09:15:00.000000Z")));
+        Assert.False(Matches("created before: -30 days", Item(added: "2026-07-01T09:15:00.000000Z")));
+
+        Assert.True(Matches("created after: -30 days", Item(added: "2026-07-02T09:15:00.000000Z")));
+        Assert.False(Matches("created after: -30 days", Item(added: "2026-07-01T09:15:00.000000Z")));
+    }
+
+    [Fact]
+    public void A_task_with_no_creation_date_is_in_no_created_term()
+    {
+        // Not in "before" either, which is the tempting one — an unknown day isn't an early day.
+        Assert.False(Matches("created: today", Item()));
+        Assert.False(Matches("created before: today", Item()));
+        Assert.False(Matches("created after: today", Item()));
+    }
+
+    [Fact]
+    public void The_day_a_task_was_added_is_read_in_the_accounts_zone()
+    {
+        // 23:00 UTC on the 30th is already the 31st in Auckland, so it was added today there. This
+        // is the case created: exists for — everything Todoist stamps a creation with is UTC.
+        var auckland = TimeZoneInfo.FindSystemTimeZoneById("Pacific/Auckland");
+        var context = new FilterContext(Projects, Today, auckland);
+        var parsed = FilterParser.Parse("created: today", Vocabulary());
+
+        Assert.True(FilterEvaluator.Matches(parsed.Expression!, Item(added: "2026-07-30T23:00:00.000000Z"), context));
+        Assert.False(FilterEvaluator.Matches(parsed.Expression!, Item(added: "2026-07-30T09:00:00.000000Z"), context));
+    }
+
+    [Fact]
     public void Search_is_a_substring_of_the_content()
     {
         Assert.True(Matches("search: milk", Item(content: "Buy milk today")));
@@ -217,7 +263,8 @@ public class FilterEvaluatorTests
         string? projectId = null,
         string? due = null,
         Priority priority = Priority.P4,
-        string[]? labels = null)
+        string[]? labels = null,
+        string? added = null)
         => new()
         {
             Id = "i",
@@ -226,5 +273,6 @@ public class FilterEvaluatorTests
             DueDate = due,
             Priority = priority,
             Labels = labels ?? [],
+            AddedAt = added,
         };
 }

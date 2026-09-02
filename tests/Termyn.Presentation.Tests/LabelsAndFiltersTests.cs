@@ -164,7 +164,11 @@ public class LabelsAndFiltersTests
         presenter.Select(ViewSelection.OfFilter("f2")); // "assigned to: me"
 
         Assert.Empty(presenter.Rows);
-        Assert.Equal("assigned to: me", presenter.UnsupportedFilter);
+        Assert.Equal("assigned to: me", presenter.UnsupportedFilter!.Query);
+
+        // And the way out goes to this filter rather than to the page listing all of them, which
+        // left the user to find again the one they had just clicked on.
+        Assert.Equal("https://app.todoist.com/app/filter/mine-f2", presenter.UnsupportedFilter.Link);
     }
 
     [Fact]
@@ -355,10 +359,10 @@ public class LabelsAndFiltersTests
         var presenter = NewPresenter(store);
 
         presenter.Select(ViewSelection.OfFilter("f1"));
-        Assert.True(presenter.UnsupportedFilter!.Length <= 201);
+        Assert.True(presenter.UnsupportedFilter!.Query.Length <= 201);
 
         presenter.Select(ViewSelection.OfFilter("f2"));
-        Assert.NotEmpty(presenter.UnsupportedFilter!);
+        Assert.NotEmpty(presenter.UnsupportedFilter!.Query);
     }
 
     [Fact]

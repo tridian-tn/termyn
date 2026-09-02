@@ -63,7 +63,7 @@ public class ProjectDescriptionTests
 
         presenter.SetDescription(SubjectKind.Project, "p1", "After");
 
-        var project = Assert.Single(presenter.Sidebar.Where(n => n is { Kind: SidebarKind.Project, Id: "p1" }));
+        var project = Assert.Single(presenter.Sidebar, n => n is { Kind: SidebarKind.Project, Id: "p1" });
         Assert.Equal("Groundworks", project.Label);
     }
 

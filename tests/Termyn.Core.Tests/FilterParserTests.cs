@@ -108,6 +108,55 @@ public class FilterParserTests
         => Assert.False(Parse(query).IsSupported);
 
     [Fact]
+    public void Created_reads_the_day_a_task_was_added()
+    {
+        var today = Assert.IsType<FilterExpression.Created>(Parse("created: today").Expression);
+        Assert.Equal(DayBound.On, today.Bound);
+        Assert.Equal(FilterDay.Today, today.Day);
+
+        var on = Assert.IsType<FilterExpression.Created>(Parse("created: 2026-01-31").Expression);
+        Assert.Equal(new DateOnly(2026, 1, 31), on.Day.Absolute);
+    }
+
+    [Fact]
+    public void Created_takes_a_bound_of_its_own()
+    {
+        var before = Assert.IsType<FilterExpression.Created>(Parse("created before: -30 days").Expression);
+        Assert.Equal(DayBound.Before, before.Bound);
+        Assert.Equal(-30, before.Day.DaysFromToday);
+
+        var after = Assert.IsType<FilterExpression.Created>(Parse("created after: 2026-01-31").Expression);
+        Assert.Equal(DayBound.After, after.Bound);
+        Assert.Equal(new DateOnly(2026, 1, 31), after.Day.Absolute);
+
+        // A window counted back stays relative, so a view left open overnight means the new today.
+        Assert.Null(before.Day.Absolute);
+    }
+
+    [Fact]
+    public void Created_composes_like_any_other_term()
+    {
+        var and = Assert.IsType<FilterExpression.And>(Parse("created: today & p1").Expression);
+        Assert.IsType<FilterExpression.Created>(and.Left);
+        Assert.IsType<FilterExpression.HasPriority>(and.Right);
+    }
+
+    [Theory]
+    [InlineData("created")]
+    [InlineData("created:")]
+    [InlineData("created: tomorrow")]
+    [InlineData("created: 31-01-2026")]
+    [InlineData("created since: today")]
+    [InlineData("created before:")]
+    [InlineData("created before: 30")]
+    public void A_created_term_it_cannot_read_is_refused_whole(string query)
+    {
+        // Half a dated term is the shape of mistake this grammar exists to avoid: "created:" read
+        // as a bare word and the day dropped would answer with every task in the account.
+        Assert.False(Parse(query).IsSupported);
+    }
+
+    [Fact]
     public void The_date_keywords_are_read()
     {
         Assert.IsType<FilterExpression.DueToday>(Parse("today").Expression);
@@ -198,7 +247,7 @@ public class FilterParserTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("assigned to: me")]     // collaborators are out of scope
-    [InlineData("created before: -30 days")]
+    [InlineData(":to_me:")]             // the same thing in the spelling Todoist's own filter uses
     [InlineData("tomorrow")]            // not in the normative date list
     [InlineData("next week")]
     [InlineData("next 0 days")]

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using Termyn.Core;
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
@@ -174,10 +175,10 @@ public sealed class MainPresenter
     public string SearchQuery { get; private set; } = string.Empty;
 
     /// <summary>
-    /// The query of the selected saved filter when Termyn can't evaluate it, so the view can offer
-    /// to open it in Todoist. Null whenever the current view is showing a real answer.
+    /// The selected saved filter when Termyn can't evaluate it, so the view can say so and offer
+    /// the way to it. Null whenever the current view is showing a real answer.
     /// </summary>
-    public string? UnsupportedFilter { get; private set; }
+    public UnreadableFilter? UnsupportedFilter { get; private set; }
 
     /// <summary>
     /// Every label in the account, in sidebar order. Duplicates by name are kept, unlike the
@@ -1539,7 +1540,9 @@ public sealed class MainPresenter
         {
             // Nothing, not everything. A full task list looks like a filter that ran and matched
             // broadly, which is the mistake this whole path exists to avoid.
-            UnsupportedFilter = ForDisplay(filter.Query);
+            UnsupportedFilter = new UnreadableFilter(
+                ForDisplay(filter.Query),
+                Links.TodoistFilter(filter.Id, filter.Name));
             return _ => false;
         }
 
