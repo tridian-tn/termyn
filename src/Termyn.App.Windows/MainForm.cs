@@ -980,7 +980,7 @@ internal sealed class MainForm : Form
 
     private void RenderUnsupported()
     {
-        if (_presenter.UnsupportedFilter is not { } query)
+        if (_presenter.UnsupportedFilter is not { } unreadable)
         {
             _unsupported.Visible = false;
             return;
@@ -990,7 +990,7 @@ internal sealed class MainForm : Form
         // measures its link into text with the carriage returns already gone, so a \r\n separator
         // put the start one character late and left the O of Open outside the link.
         const string link = "Open in Todoist";
-        var text = $"Termyn can't read this filter: {query}\n{link}";
+        var text = $"Termyn can't read this filter: {unreadable.Query}\n{link}";
 
         _unsupported.Text = text;
         _unsupported.LinkArea = new LinkArea(text.LastIndexOf(link, StringComparison.Ordinal), link.Length);
@@ -1031,10 +1031,17 @@ internal sealed class MainForm : Form
         return wrapped.Height + padding.Vertical;
     }
 
+    /// <summary>Opens the filter the notice is about, in the app that can read it.</summary>
+    /// <remarks>
+    /// The filter itself, not the page listing all of them. It used to be the list, which left the
+    /// user to find again the one they had just clicked.
+    /// </remarks>
     private void OpenTodoist()
     {
-        // The saved filter lives in the account, so the app's own filter page is where to land.
-        Guarded(() => AppVersion.OpenLink(Links.TodoistFilters));
+        if (_presenter.UnsupportedFilter is not { } unreadable)
+            return;
+
+        Guarded(() => AppVersion.OpenLink(unreadable.Link));
     }
 
     private void RenderSidebar()

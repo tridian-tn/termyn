@@ -56,10 +56,49 @@ public class LinksTests
     [Fact]
     public void Both_of_the_places_the_app_offers_to_open_are_openable()
     {
-        // Written as constants and checked against the thing that guards them, so tightening one
-        // without the other fails here rather than in the hands of whoever clicks the menu item.
-        Assert.NotNull(Links.Openable(Links.TodoistFilters));
+        // Built here and checked against the thing that guards them, so tightening one without the
+        // other fails here rather than in the hands of whoever clicks the link.
+        Assert.NotNull(Links.Openable(Links.TodoistFilter("276111043", "Assigned to me")));
         Assert.NotNull(Links.Openable(UpdateResult.ReleasesPage));
+    }
+
+    [Fact]
+    public void A_filter_link_is_written_the_way_todoist_addresses_one()
+    {
+        // Name and id together, which is the form the app's own URLs take. Taken from a real one.
+        Assert.Equal(
+            "https://app.todoist.com/app/filter/assigned-to-me-276111043",
+            Links.TodoistFilter("276111043", "Assigned to me"));
+    }
+
+    [Theory]
+    [InlineData("Priority 1", "priority-1")]
+    [InlineData("No due date", "no-due-date")]
+    [InlineData("Tasks added today", "tasks-added-today")]
+    [InlineData("  Leading and trailing  ", "leading-and-trailing")]
+    [InlineData("Work / Home", "work-home")]
+    [InlineData("Two--hyphens", "two-hyphens")]
+    public void A_filters_name_is_slugified_into_the_link(string name, string slug)
+        => Assert.Equal($"https://app.todoist.com/app/filter/{slug}-1", Links.TodoistFilter("1", name));
+
+    [Theory]
+    [InlineData("🔨")]
+    [InlineData("")]
+    [InlineData("---")]
+    public void A_name_that_slugifies_to_nothing_leaves_the_id_to_identify_it(string name)
+    {
+        // Rather than a link beginning with a stray hyphen. Whatever the app makes of the slug, the
+        // id is the part that says which filter this is.
+        Assert.Equal("https://app.todoist.com/app/filter/1", Links.TodoistFilter("1", name));
+    }
+
+    [Fact]
+    public void A_filter_link_survives_the_check_whatever_the_name_was()
+    {
+        // The name comes off the account and can hold anything at all, including the characters
+        // that would change what a URL means. Nothing built here may come back refused.
+        foreach (var name in new[] { "a/../../etc", "a?b=c", "a#b", "a b", "@ %", "..", "https://evil.example" })
+            Assert.NotNull(Links.Openable(Links.TodoistFilter("1", name)));
     }
 
     [Fact]

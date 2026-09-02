@@ -1,3 +1,4 @@
+using System.Text;
 using Termyn.Core.Update;
 
 namespace Termyn.Core;
@@ -13,8 +14,51 @@ namespace Termyn.Core;
 /// </remarks>
 public static class Links
 {
-    /// <summary>The account's own filter page, which is where the saved filter lives.</summary>
-    public const string TodoistFilters = "https://app.todoist.com/app/filters";
+    /// <summary>
+    /// The page for one saved filter in the Todoist app.
+    /// </summary>
+    /// <remarks>
+    /// The filter itself, rather than the list of them. This is offered from a notice saying that
+    /// this filter can't be read here, so landing on a page of all of them leaves the user to find
+    /// it again — and the one they want is the one they just clicked.
+    ///
+    /// Todoist addresses a filter by its name and its id together, "assigned-to-me-276111043", so
+    /// the name is slugified to match rather than the id being handed over on its own.
+    /// </remarks>
+    /// <param name="id">The filter's id</param>
+    /// <param name="name">What the filter is called</param>
+    /// <returns>The URL of that filter's page</returns>
+    public static string TodoistFilter(string id, string name)
+    {
+        var slug = Slug(name);
+
+        return slug.Length > 0
+            ? $"https://app.todoist.com/app/filter/{slug}-{id}"
+            : $"https://app.todoist.com/app/filter/{id}";
+    }
+
+    /// <summary>
+    /// A filter's name in the form a URL carries it.
+    /// </summary>
+    /// <remarks>
+    /// Runs of anything that isn't a letter or a digit collapse to one hyphen, and the ends are
+    /// trimmed of them — so "Assigned to me" is "assigned-to-me". A name with nothing in it that
+    /// survives, an emoji on its own say, leaves the id to identify the filter by itself.
+    /// </remarks>
+    private static string Slug(string name)
+    {
+        var slug = new StringBuilder(name.Length);
+
+        foreach (var c in name)
+        {
+            if (char.IsAsciiLetterOrDigit(c))
+                slug.Append(char.ToLowerInvariant(c));
+            else if (slug.Length > 0 && slug[^1] != '-')
+                slug.Append('-');
+        }
+
+        return slug.ToString().TrimEnd('-');
+    }
 
     /// <summary>
     /// Where a link may point: a host, and the part of it we have any business opening.
