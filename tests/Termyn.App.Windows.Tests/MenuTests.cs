@@ -340,15 +340,16 @@ public class MenuTests
     }
 
     [Fact]
-    public void A_projects_own_comments_are_offered_only_over_a_project()
+    public void Nothing_in_the_menus_offers_a_projects_comments_any_more()
     {
-        using var project = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Project)));
-        using var label = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Label)));
-        using var nothing = Build(Organise, CommandContext.Empty);
+        // They were an entry of their own — Organise / Comments on project — because the pane could
+        // only be aimed at a task. It follows the selection now, so the entry would be a second way
+        // to say what standing on a project already says.
+        using var bar = Build(Menus.Bar, new CommandContext(Selection: Node(SidebarKind.Project)));
 
-        Assert.True(Find(project, "Comments on project").Enabled);
-        Assert.False(Find(label, "Comments on project").Enabled);
-        Assert.False(Find(nothing, "Comments on project").Enabled);
+        Assert.DoesNotContain(
+            Every(bar.Menu.Items),
+            item => item.Text is { } text && text.StartsWith("Comments on", StringComparison.Ordinal));
     }
 
     [Fact]

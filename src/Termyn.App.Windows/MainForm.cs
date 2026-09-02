@@ -63,6 +63,9 @@ internal sealed class MainForm : Form
     private readonly TabPage _descriptionTab;
     private readonly TabPage _commentsTab;
 
+    /// <summary>The line above those tabs, naming the task or project they are about.</summary>
+    private readonly DetailHeader _panelHeader;
+
     /// <summary>True while a tab is being selected in code, so it isn't read as the user moving.</summary>
     private bool _switchingTabs;
 
@@ -98,16 +101,17 @@ internal sealed class MainForm : Form
     private bool _showingComments;
 
     /// <summary>
-    /// What the comments are of: a task, or a project chosen from the sidebar.
+    /// What the comments are of, and what the pane should call it.
     /// </summary>
     /// <remarks>
-    /// Held rather than derived from the selection, because a project's comments have nothing in the
-    /// outline to select. Moving to another task re-aims it; the project stays only until then.
+    /// Read off the selection rather than held. Held, it went stale the moment the selection moved
+    /// without passing through whatever set it — which it did.
     /// </remarks>
-    private string? _commentsOwner;
+    private PanelSubject Subject
+        => PanelSubject.Of(_outline.SelectedRow, _sidebar.SelectedNode?.Tag as SidebarNode);
 
-    /// <summary>The outline row the comments pane last followed, so a re-render isn't read as a move.</summary>
-    private string? _followed;
+    /// <summary>The task or project the comments hang off, or null when neither is picked out.</summary>
+    private string? CommentsOwner => Subject.Id;
 
     /// <summary>
     /// Whether the description panel is showing the markdown to type into rather than the rendering.
@@ -362,7 +366,12 @@ internal sealed class MainForm : Form
         _tabs.TabPages.Add(_commentsTab);
         _tabs.SelectedIndexChanged += OnPanelTabChanged;
 
+        _panelHeader = new DetailHeader();
+
+        // The tabs first and the header after, so the header takes the top: a docked control added
+        // later sits nearer the edge. The same order the path above the outline is added in.
         _detail.Panel2.Controls.Add(_tabs);
+        _detail.Panel2.Controls.Add(_panelHeader);
         _detail.SplitterMoved += (_, _) => RememberPanelSizes();
 
         // Said here rather than left to the first selection, which may never come: a control that
@@ -373,7 +382,7 @@ internal sealed class MainForm : Form
         // And for the same reason. Nothing is selected at this point and the selection changing is
         // what would otherwise settle this — so a window that opens with the panel showing and no
         // task under it would draw a pane that looks ready to take typing and isn't.
-        ShowDescriptionEditable(editable: false, anySelected: false);
+        ShowDescriptionEditable(DescriptionAccess.Nothing);
 
         // One pause, two things that wait for it: the rendering when the panel is reading, and the
         // highlighting and the undo state when it is being typed into.
@@ -759,6 +768,7 @@ internal sealed class MainForm : Form
         _rendered.Theme = _theme;
         _description.Theme = _theme;
         _comments.Theme = _theme;
+        _panelHeader.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _capture.HintColour = _theme.Muted;
 
@@ -1376,40 +1386,41 @@ internal sealed class MainForm : Form
         FollowSelectionForDescription();
         FollowSelectionForComments();
 
-        // Last, and here rather than in Render: the count belongs to the task the outline is on,
-        // and Render settles that after it has drawn everything else. Counted there instead, the
-        // tab would answer for whichever task was selected before this one.
+        // Last, and here rather than in Render: both read the selection, and Render settles that
+        // after it has drawn everything else. Done there instead, they would answer for whichever
+        // task was selected before this one.
         RenderCommentsTab();
+        RenderPanelHeader();
     }
 
+    /// <summary>Writes what the panel is about across the top of it.</summary>
+    /// <remarks>
+    /// Both tabs, not just the comments: the description belongs to the same task, and a panel that
+    /// says which one it means is the point of the line. It reads the selection like everything else
+    /// about the panel does, so there is nothing here to keep in step.
+    /// </remarks>
+    private void RenderPanelHeader() => _panelHeader.Subject = Subject.About;
+
     /// <summary>
-    /// Keeps the comments pane on the task the outline is on.
+    /// Keeps the comments pane on whatever the selection now points at.
     /// </summary>
     /// <remarks>
-    /// Only when the outline has actually moved. This runs on every render too, and a project's
-    /// comments — which are chosen from the sidebar and have nothing in the outline to select —
-    /// would otherwise be replaced by whichever task happened to be selected at the time.
+    /// Little enough to be worth naming: it used to hold the row it had last followed, so that a
+    /// re-render wasn't read as a move and a project's comments weren't quietly re-aimed at a task.
+    /// The pane reads the selection now, and a fetch on every render is what a sync needs to bring
+    /// in comments on a task nobody has touched.
     /// </remarks>
     private void FollowSelectionForComments()
     {
-        var id = _outline.SelectedId;
-        var moved = id != _followed;
-        _followed = id;
-
-        if (!_showingComments)
-            return;
-
-        // Choosing a task is choosing its comments, even over a project the sidebar had aimed it at.
-        if (moved && id is not null)
-            _commentsOwner = id;
-
-        RefreshComments();
+        if (_showingComments)
+            RefreshComments();
     }
 
     private void FollowSelectionForDescription()
     {
-        var id = _outline.SelectedId;
-        if (id == _draft.TaskId)
+        var (kind, id, _) = Subject;
+
+        if (kind == _draft.Kind && id == _draft.OwnerId)
         {
             RefreshDescription();
             return;
@@ -1418,24 +1429,24 @@ internal sealed class MainForm : Form
         // The same task under a new name: created here a moment ago, and the sync has just learned
         // what the server calls it. Followed rather than reopened, because reopening would replace
         // what is being typed with what the account holds — which for a task that new is nothing.
-        if (id is not null && _draft.TaskId is { } held && _presenter.CurrentIdOf(held) == id)
+        if (id is not null && kind == _draft.Kind && _draft.OwnerId is { } held && _presenter.CurrentIdOf(held) == id)
         {
             _draft.Retarget(id);
             RefreshDescription();
             return;
         }
 
-        // The task under the box is changing, so whatever was typed into it belongs to the old one
-        // and has to go before the box is refilled.
+        // What the box is on is changing, so whatever was typed into it belongs to the old one and
+        // has to go before the box is refilled.
         SaveDescription();
 
-        _draft.Open(id, _presenter.DescriptionOf(id));
+        _draft.Open(kind, id, _presenter.DescriptionOf(kind, id));
         ShowDescription(_draft.Opened);
 
-        ShowDescriptionEditable(_presenter.HasTask(id), anySelected: id is not null);
+        ShowDescriptionEditable(_presenter.AccessToDescriptionOf(kind, id));
 
-        // A task with no description on it has nothing to read, and a rendering of nothing is a blank
-        // panel that gives no sign it would take any typing. So an empty one opens ready to write.
+        // Nothing written yet has nothing to read, and a rendering of nothing is a blank panel that
+        // gives no sign it would take any typing. So an empty one opens ready to write.
         SetDescriptionMode(writing: _draft.Opened.Length == 0 && !_description.ReadOnly, focus: false);
     }
 
@@ -1444,15 +1455,15 @@ internal sealed class MainForm : Form
     /// </summary>
     private void RefreshDescription()
     {
-        if (_draft.TaskId is not { } id || !_draft.CanRefresh(_description.Text))
+        if (_draft.OwnerId is not { } id || !_draft.CanRefresh(_description.Text))
             return;
 
-        var current = _presenter.DescriptionOf(id);
+        var current = _presenter.DescriptionOf(_draft.Kind, id);
         if (current == DescriptionDraft.Normalised(_description.Text))
             return;
 
         // Changed elsewhere while the box sat open and untouched — on the web, or by an undo.
-        _draft.Open(id, current);
+        _draft.Open(_draft.Kind, id, current);
         ShowDescription(current);
     }
 
@@ -1512,16 +1523,20 @@ internal sealed class MainForm : Form
     /// </remarks>
     /// <param name="editable">Whether the account will take an edit to this task's description</param>
     /// <param name="anySelected">Whether the outline is on a task at all, which changes what to say</param>
-    private void ShowDescriptionEditable(bool editable, bool anySelected)
+    private void ShowDescriptionEditable(DescriptionAccess access)
     {
-        _description.ReadOnly = !editable;
-        _rendered.Inert = !editable;
+        _description.ReadOnly = access is not DescriptionAccess.Writable;
+        _rendered.Inert = _description.ReadOnly;
 
         // A completed task's description is shown and can't be edited, and there is no room to say so
         // over the top of them — the recessed background carries that one on its own.
-        _rendered.Placeholder = editable ? string.Empty
-            : anySelected ? "This task's description can't be edited here."
-            : "Select a task to see its description.";
+        _rendered.Placeholder = access switch
+        {
+            DescriptionAccess.Writable => string.Empty,
+            DescriptionAccess.ReadOnly => "This description can't be edited here.",
+            DescriptionAccess.NotKept => "Todoist keeps no description on the Inbox.",
+            _ => "Select a task or a project to see its description.",
+        };
     }
 
     /// <summary>
@@ -1563,15 +1578,12 @@ internal sealed class MainForm : Form
     /// command that appeared to do nothing would be the alternative.
     /// </remarks>
     /// <param name="showing">True for the comments, false for the description</param>
-    /// <param name="owner">What the comments should be of, or null to follow the outline</param>
-    private void ShowComments(bool showing, string? owner = null)
+    private void ShowComments(bool showing)
     {
         _showingComments = showing;
 
         if (showing)
         {
-            _commentsOwner = owner ?? _outline.SelectedId;
-
             // Anything half-typed belongs to the task it was typed against, and switching away is
             // one of the moments it would otherwise be lost.
             SaveDescription();
@@ -1625,15 +1637,12 @@ internal sealed class MainForm : Form
     /// A count of zero is what every task without a conversation would wear, on a tab that is
     /// already called Comments — so it says nothing rather than saying none.
     ///
-    /// Counted for whatever that tab would show if it were in front, which is not always what it
-    /// last showed. The owner only follows the outline while the comments are up, so after a look
-    /// at one task's comments it stays on that task — and a count of the task you were reading
-    /// before, on the tab of the task you are reading now, is worse than no count at all.
+    /// Counted off the same owner the pane reads, so the number on the tab is the number you get
+    /// by clicking it, whether that is a task's conversation or the project's.
     /// </remarks>
     private void RenderCommentsTab()
     {
-        var owner = _showingComments ? _commentsOwner : _outline.SelectedId;
-        var count = _presenter.CommentCountOn(owner);
+        var count = _presenter.CommentCountOn(CommentsOwner);
         var caption = count > 0 ? $"Comments ({count})" : "Comments";
 
         if (_commentsTab.Text != caption)
@@ -1646,7 +1655,7 @@ internal sealed class MainForm : Form
         if (!_showingComments)
             return;
 
-        var owner = _commentsOwner;
+        var owner = Subject.Id;
 
         _comments.Comments = _presenter.CommentsOn(owner);
 
@@ -1654,7 +1663,7 @@ internal sealed class MainForm : Form
         // pulled out of the archive — and a comment on one of those would be declined, not queued.
         _comments.CanComment = owner is not null && _presenter.CanCommentOn(owner);
         _comments.Placeholder = owner is null
-            ? "Select a task to see its comments."
+            ? "Select a task or a project to see its comments."
             : _comments.CanComment
                 ? "No comments yet."
                 : "This task's comments can't be added to here.";
@@ -1664,7 +1673,7 @@ internal sealed class MainForm : Form
 
     private void OnCommentPosted(string text) => Guarded(() =>
     {
-        if (_presenter.AddComment(_commentsOwner, text))
+        if (_presenter.AddComment(CommentsOwner, text))
             RefreshComments();
     });
 
@@ -1712,7 +1721,7 @@ internal sealed class MainForm : Form
         if (_transfer is not null)
             return;
 
-        if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+        if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
         using var transfer = new CancellationTokenSource();
@@ -1758,7 +1767,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private async void OnFileAttached()
     {
-        if (_transfer is not null || _commentsOwner is null)
+        if (_transfer is not null || CommentsOwner is null)
             return;
 
         using var picker = new OpenFileDialog { Title = "Attach a file to this comment", CheckFileExists = true };
@@ -1784,7 +1793,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            await _presenter.AddCommentWithFileAsync(_commentsOwner, _comments.Draft, file.FullName, transfer.Token);
+            await _presenter.AddCommentWithFileAsync(CommentsOwner, _comments.Draft, file.FullName, transfer.Token);
 
             // Only once it has landed. Clearing the box first would lose what was typed alongside a
             // file whose upload then failed.
@@ -1824,7 +1833,7 @@ internal sealed class MainForm : Form
         if (_transfer is not null)
             return;
 
-        if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+        if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
         if (!Confirm($"Are you sure you want to remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
@@ -1965,7 +1974,7 @@ internal sealed class MainForm : Form
         if (_draft.Take(_description.Text) is not { } edit)
             return;
 
-        Guarded(() => _presenter.SetDescription(edit.TaskId, edit.Text));
+        Guarded(() => _presenter.SetDescription(edit.Kind, edit.OwnerId, edit.Text));
         _scheduler.NotifyWrite();
     }
 
@@ -2534,14 +2543,6 @@ internal sealed class MainForm : Form
 
             case AppCommand.ZoomReset:
                 Guarded(() => SetZoom());
-                return false;
-
-            case AppCommand.CommentOnProject:
-                Guarded(() =>
-                {
-                    if (_sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } project)
-                        ShowComments(showing: true, owner: project.Id);
-                });
                 return false;
 
             case AppCommand.Undo:

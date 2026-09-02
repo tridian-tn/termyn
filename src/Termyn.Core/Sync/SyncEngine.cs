@@ -875,6 +875,57 @@ public sealed class SyncEngine
     }
 
     /// <summary>
+    /// The description on a project, or empty when it has none or the model doesn't hold it.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="DescriptionOf"/> rather than folded into it by trying one store
+    /// and then the other. Todoist ids are only unique within a resource type, so a project and a
+    /// task can share one — and a lookup that fell through from one to the other would sooner or
+    /// later answer with the wrong thing's description, which reads as the right one.
+    /// </remarks>
+    public string ProjectDescriptionOf(string id)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+
+            return Model.Get(ResourceType.Projects, id) is { } json
+                ? Projections.ToProject(json).Description
+                : string.Empty;
+        }
+    }
+
+    /// <summary>Writes the description on a project and queues a <c>project_update</c>.</summary>
+    public void SetProjectDescription(string id, string description)
+        => UpdateResource(ResourceType.Projects, "project_update", id, new JsonObject { ["description"] = description });
+
+    /// <summary>Whether the live model holds this project, and so whether an edit to it would be kept.</summary>
+    public bool HoldsProject(string id)
+    {
+        lock (_gate)
+        {
+            return Model.Get(ResourceType.Projects, Promoted(id)) is not null;
+        }
+    }
+
+    /// <summary>
+    /// Whether this is the account's Inbox, which is the one project Todoist keeps no description on.
+    /// </summary>
+    /// <remarks>
+    /// It accepts the command and reports success, and the description is empty when you read it
+    /// back — so nothing here can tell an Inbox description went nowhere by watching the sync. The
+    /// only way not to lose what someone types there is to not take it in the first place.
+    /// </remarks>
+    public bool IsInboxProject(string id)
+    {
+        lock (_gate)
+        {
+            return Model.Get(ResourceType.Projects, Promoted(id)) is { } json
+                && Projections.ToProject(json).IsInboxProject;
+        }
+    }
+
+    /// <summary>
     /// Whether the live model holds this task, and so whether an edit to it would be kept.
     /// </summary>
     /// <remarks>
