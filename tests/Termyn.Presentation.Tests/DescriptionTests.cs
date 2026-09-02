@@ -20,7 +20,7 @@ public class DescriptionTests
         // text, and what arrives here is the source.
         var presenter = Seeded("""Line one\n\n**bold** and a [link](https://example.com)""");
 
-        Assert.Equal("Line one\n\n**bold** and a [link](https://example.com)", presenter.DescriptionOf("i1"));
+        Assert.Equal("Line one\n\n**bold** and a [link](https://example.com)", presenter.DescriptionOf(SubjectKind.Task, "i1"));
     }
 
     [Fact]
@@ -29,14 +29,14 @@ public class DescriptionTests
         var store = new InMemorySnapshotStore();
         store.PutResource("items", "i1", """{"id":"i1","content":"Bare","project_id":"p"}""");
 
-        Assert.Equal(string.Empty, Presenter(store).DescriptionOf("i1"));
+        Assert.Equal(string.Empty, Presenter(store).DescriptionOf(SubjectKind.Task, "i1"));
     }
 
     [Fact]
     public void A_task_the_account_no_longer_holds_has_an_empty_description()
     {
-        Assert.Equal(string.Empty, Seeded("Anything").DescriptionOf("gone"));
-        Assert.Equal(string.Empty, Seeded("Anything").DescriptionOf(null));
+        Assert.Equal(string.Empty, Seeded("Anything").DescriptionOf(SubjectKind.Task, "gone"));
+        Assert.Equal(string.Empty, Seeded("Anything").DescriptionOf(SubjectKind.Task, null));
     }
 
     [Fact]
@@ -44,9 +44,9 @@ public class DescriptionTests
     {
         var presenter = Seeded("Before");
 
-        presenter.SetDescription("i1", "After");
+        presenter.SetDescription(SubjectKind.Task, "i1", "After");
 
-        Assert.Equal("After", presenter.DescriptionOf("i1"));
+        Assert.Equal("After", presenter.DescriptionOf(SubjectKind.Task, "i1"));
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class DescriptionTests
         engine.Load();
         var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
 
-        presenter.SetDescription("i1", "After");
+        presenter.SetDescription(SubjectKind.Task, "i1", "After");
 
         var queued = Assert.Single(engine.Outbox);
         Assert.Equal("item_update", queued.Type);
@@ -81,7 +81,7 @@ public class DescriptionTests
         var presenter = Seeded("Before");
         var before = presenter.Rows.Single();
 
-        presenter.SetDescription("i1", "After");
+        presenter.SetDescription(SubjectKind.Task, "i1", "After");
 
         Assert.Equal(before, presenter.Rows.Single());
     }
@@ -96,7 +96,7 @@ public class DescriptionTests
         presenter.Delete("i1");
         Assert.True(presenter.Undo());
 
-        Assert.Equal("Worth keeping", presenter.DescriptionOf("i1"));
+        Assert.Equal("Worth keeping", presenter.DescriptionOf(SubjectKind.Task, "i1"));
     }
 
     [Fact]
@@ -107,9 +107,9 @@ public class DescriptionTests
         // Ctrl+Z with description edits.
         var presenter = Seeded("Before");
 
-        presenter.SetDescription("i1", "One");
-        presenter.SetDescription("i1", "Two");
-        presenter.SetDescription("i1", "Three");
+        presenter.SetDescription(SubjectKind.Task, "i1", "One");
+        presenter.SetDescription(SubjectKind.Task, "i1", "Two");
+        presenter.SetDescription(SubjectKind.Task, "i1", "Three");
 
         Assert.False(presenter.CanUndo);
     }
@@ -122,8 +122,8 @@ public class DescriptionTests
         var presenter = Seeded("Before");
         presenter.Complete("i1");
 
-        presenter.SetDescription("i1", "One");
-        presenter.SetDescription("i1", "Two");
+        presenter.SetDescription(SubjectKind.Task, "i1", "One");
+        presenter.SetDescription(SubjectKind.Task, "i1", "Two");
 
         Assert.True(presenter.Undo());
         Assert.Contains(presenter.Rows, r => r.Id == "i1" && !r.Completed);
@@ -137,11 +137,11 @@ public class DescriptionTests
         // later intention with nothing to do with it, and undo used to take it with it.
         var presenter = Seeded("Before");
         presenter.Complete("i1");
-        presenter.SetDescription("i1", "Written after it was ticked off");
+        presenter.SetDescription(SubjectKind.Task, "i1", "Written after it was ticked off");
 
         Assert.True(presenter.Undo());
 
-        Assert.Equal("Written after it was ticked off", presenter.DescriptionOf("i1"));
+        Assert.Equal("Written after it was ticked off", presenter.DescriptionOf(SubjectKind.Task, "i1"));
         Assert.Contains(presenter.Rows, r => r.Id == "i1" && !r.Completed);
     }
 
@@ -158,7 +158,7 @@ public class DescriptionTests
         var presenter = await WithCompleted(done);
 
         Assert.Contains(presenter.Rows, r => r.Id == "c1");
-        Assert.Equal("what was agreed", presenter.DescriptionOf("c1"));
+        Assert.Equal("what was agreed", presenter.DescriptionOf(SubjectKind.Task, "c1"));
     }
 
     [Fact]
@@ -186,10 +186,10 @@ public class DescriptionTests
         // reopened on whatever is selected now.
         var presenter = Seeded("Before");
 
-        presenter.SetDescription("gone", "typed after it vanished");
+        presenter.SetDescription(SubjectKind.Task, "gone", "typed after it vanished");
 
         Assert.False(presenter.CanUndo);
-        Assert.Equal(string.Empty, presenter.DescriptionOf("gone"));
+        Assert.Equal(string.Empty, presenter.DescriptionOf(SubjectKind.Task, "gone"));
     }
 
     [Fact]

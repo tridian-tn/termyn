@@ -110,6 +110,10 @@ public sealed class Project
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
+
+    /// <summary>The description on the project. Markdown, the same as a task's.</summary>
+    public string Description { get; init; } = string.Empty;
+
     public string? ParentId { get; init; }
     public bool IsInboxProject { get; init; }
     public bool IsFavorite { get; init; }

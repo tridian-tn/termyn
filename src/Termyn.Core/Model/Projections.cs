@@ -34,6 +34,7 @@ public static class Projections
     {
         Id = JsonRead.String(o, "id") ?? string.Empty,
         Name = JsonRead.String(o, "name") ?? string.Empty,
+        Description = JsonRead.String(o, "description") ?? string.Empty,
         ParentId = JsonRead.String(o, "parent_id"),
         // Todoist has used both field names across API versions; accept either.
         IsInboxProject = JsonRead.Bool(o, "is_inbox_project") || JsonRead.Bool(o, "inbox_project"),

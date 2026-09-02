@@ -1,7 +1,7 @@
 namespace Termyn.Presentation;
 
 /// <summary>
-/// The description box's own state: which task it is showing, and the text it was opened with.
+/// The description box's own state: what it is showing, and the text it was opened with.
 /// </summary>
 /// <remarks>
 /// Here rather than in the window because the rules are where the damage would be. A box that saves
@@ -11,16 +11,30 @@ namespace Termyn.Presentation;
 /// </remarks>
 public sealed class DescriptionDraft
 {
-    /// <summary>The task the box is on, or null when it is on none.</summary>
-    public string? TaskId { get; private set; }
+    /// <summary>The task or project the box is on, or null when it is on neither.</summary>
+    public string? OwnerId { get; private set; }
+
+    /// <summary>
+    /// Which of the two <see cref="OwnerId"/> names.
+    /// </summary>
+    /// <remarks>
+    /// Held rather than worked out at save time. The box saves on a timer and on the window losing
+    /// the focus, either of which can land after the selection has moved on — so the answer has to
+    /// be the one that was true when the box was filled, not whatever is selected when it writes.
+    /// </remarks>
+    public SubjectKind Kind { get; private set; }
 
     /// <summary>What the box was filled with, which is what "changed" is measured against.</summary>
     public string Opened { get; private set; } = string.Empty;
 
-    /// <summary>Puts the box on a task. Any pending edit should have been taken first.</summary>
-    public void Open(string? taskId, string description)
+    /// <summary>Puts the box on a task or a project. Any pending edit should have been taken first.</summary>
+    /// <param name="kind">Which of the two it is on</param>
+    /// <param name="ownerId">The task or project, or null for neither</param>
+    /// <param name="description">What the account holds for it</param>
+    public void Open(SubjectKind kind, string? ownerId, string description)
     {
-        TaskId = taskId;
+        Kind = ownerId is null ? SubjectKind.None : kind;
+        OwnerId = ownerId;
         Opened = Normalised(description);
     }
 
@@ -33,15 +47,15 @@ public sealed class DescriptionDraft
     /// — reopening would replace what is being typed with what the account holds, which is nothing
     /// yet. The text, and whether it is dirty, are unaffected: only the address changed.
     /// </remarks>
-    /// <param name="taskId">What that same task is called now</param>
-    public void Retarget(string taskId)
+    /// <param name="ownerId">What that same task is called now</param>
+    public void Retarget(string ownerId)
     {
-        if (TaskId is not null)
-            TaskId = taskId;
+        if (OwnerId is not null)
+            OwnerId = ownerId;
     }
 
     /// <summary>Whether what is in the box differs from what went into it.</summary>
-    public bool IsDirty(string current) => TaskId is not null && Normalised(current) != Opened;
+    public bool IsDirty(string current) => OwnerId is not null && Normalised(current) != Opened;
 
     /// <summary>
     /// A description in the form the account keeps it: newlines as single characters.
@@ -64,14 +78,14 @@ public sealed class DescriptionDraft
     /// so a save followed by a close doesn't write twice.
     /// </remarks>
     /// <param name="current">What is in the box now</param>
-    /// <returns>The task and the text to save, or null when nothing was typed</returns>
-    public (string TaskId, string Text)? Take(string current)
+    /// <returns>What to write, where, and of which kind — or null when nothing was typed</returns>
+    public (SubjectKind Kind, string OwnerId, string Text)? Take(string current)
     {
-        if (TaskId is not { } id || !IsDirty(current))
+        if (OwnerId is not { } id || !IsDirty(current))
             return null;
 
         Opened = Normalised(current);
-        return (id, Opened);
+        return (Kind, id, Opened);
     }
 
     /// <summary>

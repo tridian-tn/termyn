@@ -107,8 +107,8 @@ internal sealed class MainForm : Form
     /// Read off the selection rather than held. Held, it went stale the moment the selection moved
     /// without passing through whatever set it — which it did.
     /// </remarks>
-    private CommentSubject Subject
-        => CommentSubject.Of(_outline.SelectedRow, _sidebar.SelectedNode?.Tag as SidebarNode);
+    private PanelSubject Subject
+        => PanelSubject.Of(_outline.SelectedRow, _sidebar.SelectedNode?.Tag as SidebarNode);
 
     /// <summary>The task or project the comments hang off, or null when neither is picked out.</summary>
     private string? CommentsOwner => Subject.Id;
@@ -382,7 +382,7 @@ internal sealed class MainForm : Form
         // And for the same reason. Nothing is selected at this point and the selection changing is
         // what would otherwise settle this — so a window that opens with the panel showing and no
         // task under it would draw a pane that looks ready to take typing and isn't.
-        ShowDescriptionEditable(editable: false, anySelected: false);
+        ShowDescriptionEditable(DescriptionAccess.Nothing);
 
         // One pause, two things that wait for it: the rendering when the panel is reading, and the
         // highlighting and the undo state when it is being typed into.
@@ -1418,8 +1418,9 @@ internal sealed class MainForm : Form
 
     private void FollowSelectionForDescription()
     {
-        var id = _outline.SelectedId;
-        if (id == _draft.TaskId)
+        var (kind, id, _) = Subject;
+
+        if (kind == _draft.Kind && id == _draft.OwnerId)
         {
             RefreshDescription();
             return;
@@ -1428,24 +1429,24 @@ internal sealed class MainForm : Form
         // The same task under a new name: created here a moment ago, and the sync has just learned
         // what the server calls it. Followed rather than reopened, because reopening would replace
         // what is being typed with what the account holds — which for a task that new is nothing.
-        if (id is not null && _draft.TaskId is { } held && _presenter.CurrentIdOf(held) == id)
+        if (id is not null && kind == _draft.Kind && _draft.OwnerId is { } held && _presenter.CurrentIdOf(held) == id)
         {
             _draft.Retarget(id);
             RefreshDescription();
             return;
         }
 
-        // The task under the box is changing, so whatever was typed into it belongs to the old one
-        // and has to go before the box is refilled.
+        // What the box is on is changing, so whatever was typed into it belongs to the old one and
+        // has to go before the box is refilled.
         SaveDescription();
 
-        _draft.Open(id, _presenter.DescriptionOf(id));
+        _draft.Open(kind, id, _presenter.DescriptionOf(kind, id));
         ShowDescription(_draft.Opened);
 
-        ShowDescriptionEditable(_presenter.HasTask(id), anySelected: id is not null);
+        ShowDescriptionEditable(_presenter.AccessToDescriptionOf(kind, id));
 
-        // A task with no description on it has nothing to read, and a rendering of nothing is a blank
-        // panel that gives no sign it would take any typing. So an empty one opens ready to write.
+        // Nothing written yet has nothing to read, and a rendering of nothing is a blank panel that
+        // gives no sign it would take any typing. So an empty one opens ready to write.
         SetDescriptionMode(writing: _draft.Opened.Length == 0 && !_description.ReadOnly, focus: false);
     }
 
@@ -1454,15 +1455,15 @@ internal sealed class MainForm : Form
     /// </summary>
     private void RefreshDescription()
     {
-        if (_draft.TaskId is not { } id || !_draft.CanRefresh(_description.Text))
+        if (_draft.OwnerId is not { } id || !_draft.CanRefresh(_description.Text))
             return;
 
-        var current = _presenter.DescriptionOf(id);
+        var current = _presenter.DescriptionOf(_draft.Kind, id);
         if (current == DescriptionDraft.Normalised(_description.Text))
             return;
 
         // Changed elsewhere while the box sat open and untouched — on the web, or by an undo.
-        _draft.Open(id, current);
+        _draft.Open(_draft.Kind, id, current);
         ShowDescription(current);
     }
 
@@ -1522,16 +1523,20 @@ internal sealed class MainForm : Form
     /// </remarks>
     /// <param name="editable">Whether the account will take an edit to this task's description</param>
     /// <param name="anySelected">Whether the outline is on a task at all, which changes what to say</param>
-    private void ShowDescriptionEditable(bool editable, bool anySelected)
+    private void ShowDescriptionEditable(DescriptionAccess access)
     {
-        _description.ReadOnly = !editable;
-        _rendered.Inert = !editable;
+        _description.ReadOnly = access is not DescriptionAccess.Writable;
+        _rendered.Inert = _description.ReadOnly;
 
         // A completed task's description is shown and can't be edited, and there is no room to say so
         // over the top of them — the recessed background carries that one on its own.
-        _rendered.Placeholder = editable ? string.Empty
-            : anySelected ? "This task's description can't be edited here."
-            : "Select a task to see its description.";
+        _rendered.Placeholder = access switch
+        {
+            DescriptionAccess.Writable => string.Empty,
+            DescriptionAccess.ReadOnly => "This description can't be edited here.",
+            DescriptionAccess.NotKept => "Todoist keeps no description on the Inbox.",
+            _ => "Select a task or a project to see its description.",
+        };
     }
 
     /// <summary>
@@ -1969,7 +1974,7 @@ internal sealed class MainForm : Form
         if (_draft.Take(_description.Text) is not { } edit)
             return;
 
-        Guarded(() => _presenter.SetDescription(edit.TaskId, edit.Text));
+        Guarded(() => _presenter.SetDescription(edit.Kind, edit.OwnerId, edit.Text));
         _scheduler.NotifyWrite();
     }
 

@@ -12,7 +12,7 @@ public class DescriptionDraftTests
     private static DescriptionDraft On(string task, string description)
     {
         var draft = new DescriptionDraft();
-        draft.Open(task, description);
+        draft.Open(SubjectKind.Task, task, description);
         return draft;
     }
 
@@ -31,7 +31,7 @@ public class DescriptionDraftTests
         var draft = On("t1", "As it was");
 
         Assert.True(draft.IsDirty("As it is now"));
-        Assert.Equal(("t1", "As it is now"), draft.Take("As it is now"));
+        Assert.Equal((SubjectKind.Task, "t1", "As it is now"), draft.Take("As it is now"));
     }
 
     [Fact]
@@ -41,14 +41,14 @@ public class DescriptionDraftTests
         // that skipped it would leave the old description on the task for ever.
         var draft = On("t1", "Something");
 
-        Assert.Equal(("t1", ""), draft.Take(string.Empty));
+        Assert.Equal((SubjectKind.Task, "t1", ""), draft.Take(string.Empty));
     }
 
     [Fact]
     public void A_box_on_no_task_never_writes()
     {
         var draft = new DescriptionDraft();
-        draft.Open(null, string.Empty);
+        draft.Open(SubjectKind.Task, null, string.Empty);
 
         Assert.False(draft.IsDirty("typed into nothing"));
         Assert.Null(draft.Take("typed into nothing"));
@@ -82,11 +82,11 @@ public class DescriptionDraftTests
     {
         var draft = On("t1", "First task");
 
-        draft.Open("t2", "Second task");
+        draft.Open(SubjectKind.Task, "t2", "Second task");
 
-        Assert.Equal("t2", draft.TaskId);
+        Assert.Equal("t2", draft.OwnerId);
         Assert.Null(draft.Take("Second task"));
-        Assert.Equal(("t2", "Edited"), draft.Take("Edited"));
+        Assert.Equal((SubjectKind.Task, "t2", "Edited"), draft.Take("Edited"));
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class DescriptionDraftTests
 
         var edit = draft.Take("One line\r\nand another");
 
-        Assert.Equal(("t1", "One line\nand another"), edit);
+        Assert.Equal((SubjectKind.Task, "t1", "One line\nand another"), edit);
         Assert.DoesNotContain('\r', edit!.Value.Text);
     }
 
@@ -154,14 +154,14 @@ public class DescriptionDraftTests
         // replace what is being typed with what the account holds — which for a task that new is
         // nothing at all.
         var draft = new DescriptionDraft();
-        draft.Open("t-abc", "opened with this");
+        draft.Open(SubjectKind.Task, "t-abc", "opened with this");
 
         draft.Retarget("9001");
 
-        Assert.Equal("9001", draft.TaskId);
+        Assert.Equal("9001", draft.OwnerId);
         Assert.Equal("opened with this", draft.Opened);
         Assert.True(draft.IsDirty("and this was typed"));
-        Assert.Equal(("9001", "and this was typed"), draft.Take("and this was typed"));
+        Assert.Equal((SubjectKind.Task, "9001", "and this was typed"), draft.Take("and this was typed"));
     }
 
     [Fact]
@@ -170,11 +170,11 @@ public class DescriptionDraftTests
         // With the box on nothing, a rename arriving from anywhere must not give it something to
         // save to — there is no text of anybody's to save.
         var draft = new DescriptionDraft();
-        draft.Open(null, string.Empty);
+        draft.Open(SubjectKind.Task, null, string.Empty);
 
         draft.Retarget("9001");
 
-        Assert.Null(draft.TaskId);
+        Assert.Null(draft.OwnerId);
         Assert.Null(draft.Take("typed into a box on no task"));
     }
 }

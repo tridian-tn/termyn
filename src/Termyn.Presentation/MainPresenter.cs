@@ -471,17 +471,67 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// The description on a task, as the markdown the account stores. Empty for a task with none,
-    /// and for one the account no longer holds.
+    /// The description on whatever the panel is about, as the markdown the account stores. Empty
+    /// for something with none, and for something the account no longer holds.
     /// </summary>
-    public string DescriptionOf(string? id) => id is null ? string.Empty : _engine.DescriptionOf(id);
-
-    /// <summary>Writes the description on a task.</summary>
-    public void SetDescription(string id, string description)
+    /// <param name="kind">Which of the two the id names, since the id alone doesn't say</param>
+    /// <param name="id">The task or project to read, or null for neither</param>
+    /// <returns>The markdown, or empty</returns>
+    public string DescriptionOf(SubjectKind kind, string? id) => (kind, id) switch
     {
-        _engine.UpdateItem(id, new JsonObject { ["description"] = description });
+        (SubjectKind.Task, { } task) => _engine.DescriptionOf(task),
+        (SubjectKind.Project, { } project) => _engine.ProjectDescriptionOf(project),
+        _ => string.Empty,
+    };
+
+    /// <summary>
+    /// Writes the description on a task or a project.
+    /// </summary>
+    /// <remarks>
+    /// The kind decides which command is queued, and it comes from the caller rather than from
+    /// looking the id up in one store and then the other: Todoist ids are only unique within a
+    /// resource type, so a guess would eventually write a task's description onto a project.
+    /// </remarks>
+    /// <param name="kind">Which of the two the id names</param>
+    /// <param name="id">The task or project to write to</param>
+    /// <param name="description">The markdown to store</param>
+    public void SetDescription(SubjectKind kind, string id, string description)
+    {
+        switch (kind)
+        {
+            case SubjectKind.Task:
+                _engine.UpdateItem(id, new JsonObject { ["description"] = description });
+                break;
+
+            case SubjectKind.Project:
+                _engine.SetProjectDescription(id, description);
+                break;
+
+            default:
+                return;
+        }
+
         Publish();
     }
+
+    /// <summary>
+    /// Whether the description of what the panel is about can be written, and when it can't, why —
+    /// because the panel has to say so, and the three reasons don't read the same.
+    /// </summary>
+    /// <param name="kind">Which of the two the id names</param>
+    /// <param name="id">The task or project the panel is on, or null for neither</param>
+    /// <returns>What the panel may do with this description</returns>
+    public DescriptionAccess AccessToDescriptionOf(SubjectKind kind, string? id) => (kind, id) switch
+    {
+        // Out of the live model: a completed task fetched from the archive. Shown, not written to,
+        // because an edit would be declined rather than queued.
+        (SubjectKind.Task, { } task) => _engine.Holds(task) ? DescriptionAccess.Writable : DescriptionAccess.ReadOnly,
+
+        (SubjectKind.Project, { } project) when _engine.IsInboxProject(project) => DescriptionAccess.NotKept,
+        (SubjectKind.Project, { } project) => _engine.HoldsProject(project) ? DescriptionAccess.Writable : DescriptionAccess.ReadOnly,
+
+        _ => DescriptionAccess.Nothing,
+    };
 
     // ---- Comments ------------------------------------------------------------------------------
 
