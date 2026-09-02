@@ -24,6 +24,9 @@ public sealed class TaskItem
     /// <summary>When it was ticked off, as the server wrote it. Null while the task is still active.</summary>
     public string? CompletedAt { get; init; }
 
+    /// <summary>When the task was created, as the server wrote it — a UTC instant.</summary>
+    public string? AddedAt { get; init; }
+
     public string? DueDate { get; init; }
 
     /// <summary>The schedule as it was written — "every Monday" — which is what a recurrence is.</summary>

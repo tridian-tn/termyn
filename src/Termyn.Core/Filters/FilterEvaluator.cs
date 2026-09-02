@@ -75,6 +75,15 @@ public static class FilterEvaluator
             && day >= context.Today
             && day <= context.Today.AddDays(e.Days - 1),
 
+        // A task the account has no creation date for matches none of these rather than all: the
+        // question is when it was added, and "no idea" isn't an answer to it.
+        FilterExpression.Created e => SmartViews.AddedOn(item, context.Zone) is { } added && e.Bound switch
+        {
+            DayBound.Before => added < e.Day.Resolve(context.Today),
+            DayBound.After => added > e.Day.Resolve(context.Today),
+            _ => added == e.Day.Resolve(context.Today),
+        },
+
         FilterExpression.Search e => item.Content.Contains(e.Text, StringComparison.OrdinalIgnoreCase),
 
         FilterExpression.Not e => !Matches(e.Operand, item, context),

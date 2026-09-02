@@ -26,6 +26,19 @@ public class ProjectionsTests
     }
 
     [Theory]
+
+    // What the account sends today, and what it used to send. A "created:" filter reading neither
+    // would match nothing at all and look like a filter that ran and found no tasks.
+    [InlineData("""{"id":"i","added_at":"2021-09-17T09:59:45.791288Z"}""")]
+    [InlineData("""{"id":"i","date_added":"2021-09-17T09:59:45.791288Z"}""")]
+    public void Reads_when_a_task_was_added_under_either_field_name(string json)
+        => Assert.Equal("2021-09-17T09:59:45.791288Z", Projections.ToTaskItem(Obj(json)).AddedAt);
+
+    [Fact]
+    public void A_task_with_no_creation_stamp_has_none_rather_than_a_guess()
+        => Assert.Null(Projections.ToTaskItem(Obj("""{"id":"i"}""")).AddedAt);
+
+    [Theory]
     [InlineData("""{"id":"i"}""")]
     [InlineData("""{"id":"i","due":null}""")]
     public void Tolerates_an_absent_due(string json)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Termyn.Core.Model;
 
@@ -37,8 +38,9 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// <summary>
 /// Reads the filter grammar Termyn supports: <c>#project</c>, <c>##project</c> (with sub-projects),
 /// <c>@label</c>, <c>p1</c>–<c>p4</c> (or <c>priority 1</c>–<c>priority 4</c>), <c>view all</c>,
-/// <c>today</c>, <c>overdue</c>, <c>no date</c>, <c>next N days</c>, <c>search: text</c>, combined
-/// with <c>&amp;</c>, <c>|</c>, <c>,</c>, <c>!</c> and parentheses.
+/// <c>today</c>, <c>overdue</c>, <c>no date</c>, <c>next N days</c>, <c>created:</c> (with
+/// <c>before:</c> and <c>after:</c>), <c>search: text</c>, combined with <c>&amp;</c>, <c>|</c>,
+/// <c>,</c>, <c>!</c> and parentheses.
 /// </summary>
 /// <remarks>
 /// Precedence is <c>!</c> then <c>&amp;</c> then <c>|</c>/<c>,</c>, left-associative. Adjacent terms
@@ -204,6 +206,12 @@ public static class FilterParser
         if (TryReadEverything(tokens, ref at))
             return new FilterExpression.Everything();
 
+        if (word.Equals("created", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("created:", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReadCreated(tokens, ref at, out failed);
+        }
+
         if (word.Equals("today", StringComparison.OrdinalIgnoreCase))
         {
             at++;
@@ -282,6 +290,96 @@ public static class FilterParser
 
         failed = null;
         return new FilterExpression.Search(text.ToString());
+    }
+
+    /// <summary>
+    /// Reads a <c>created:</c> term — when the task was added.
+    /// </summary>
+    /// <remarks>
+    /// Todoist writes the bound as its own word: <c>created: today</c>, <c>created before: -30
+    /// days</c>, <c>created after: 2026-01-01</c>. Nothing here guesses at a term it only half
+    /// reads; a <c>created</c> with no readable day after it is refused with that day named, so the
+    /// notice says which part was the trouble.
+    /// </remarks>
+    private static FilterExpression? ReadCreated(List<string> tokens, ref int at, out string? failed)
+    {
+        failed = null;
+        var start = at;
+        var bound = DayBound.On;
+        at++;
+
+        // "created:" carries its colon and the day follows; "created" spells the bound out first.
+        if (!tokens[start].EndsWith(':'))
+        {
+            if (at >= tokens.Count)
+            {
+                failed = tokens[start];
+                return null;
+            }
+
+            bound = tokens[at].ToLowerInvariant() switch
+            {
+                "before:" => DayBound.Before,
+                "after:" => DayBound.After,
+                _ => (DayBound)(-1),
+            };
+
+            if (bound is (DayBound)(-1))
+            {
+                failed = $"{tokens[start]} {tokens[at]}";
+                return null;
+            }
+
+            at++;
+        }
+
+        if (TryReadDay(tokens, ref at) is not { } day)
+        {
+            at = start;
+            failed = string.Join(' ', tokens[start..Math.Min(tokens.Count, start + 3)]);
+            return null;
+        }
+
+        return new FilterExpression.Created(bound, day);
+    }
+
+    /// <summary>
+    /// Reads the day a dated term names: <c>today</c>, a date, or a count of days from today.
+    /// </summary>
+    /// <remarks>
+    /// The count keeps its sign — Todoist writes a window into the past as <c>-30 days</c> — and a
+    /// bare <c>30 days</c> is read as ahead, which is how the same number reads in <c>next 30
+    /// days</c>.
+    /// </remarks>
+    /// <param name="tokens">The query</param>
+    /// <param name="at">Where to read from, advanced past what was read</param>
+    /// <returns>The day, or null when nothing there names one</returns>
+    private static FilterDay? TryReadDay(List<string> tokens, ref int at)
+    {
+        if (at >= tokens.Count)
+            return null;
+
+        if (tokens[at].Equals("today", StringComparison.OrdinalIgnoreCase))
+        {
+            at++;
+            return FilterDay.Today;
+        }
+
+        if (DateOnly.TryParseExact(tokens[at], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            at++;
+            return FilterDay.On(date);
+        }
+
+        if (int.TryParse(tokens[at], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var days)
+            && Math.Abs(days) <= MaxDays
+            && (Word(tokens, at + 1, "days") || Word(tokens, at + 1, "day")))
+        {
+            at += 2;
+            return FilterDay.FromToday(days);
+        }
+
+        return null;
     }
 
     private static bool TryReadNoDate(List<string> tokens, ref int at)
