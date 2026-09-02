@@ -32,7 +32,6 @@ public enum AppCommand
     RenameSelection,
     DeleteSelection,
     ToggleFavourite,
-    CommentOnProject,
 
     // ---- Anywhere ----
     NewTask,
@@ -190,12 +189,6 @@ public static class Commands
             AppCommand.RenameSelection => Selection("Rename {0}"),
             AppCommand.DeleteSelection => Selection("Delete {0}"),
             AppCommand.ToggleFavourite => Favourite(context.Selection),
-
-            // A project's own comments, which nothing in the outline can reach: the pane follows the
-            // task you are on, and a project is never one of those.
-            AppCommand.CommentOnProject => new CommandState(
-                "Comments on project",
-                context.Selection?.Kind is SidebarKind.Project),
 
             AppCommand.NewTask => Always("New task"),
             AppCommand.NewProject => Always("New project"),

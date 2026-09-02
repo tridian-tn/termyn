@@ -116,8 +116,7 @@ public static class Menus
             "&Organise",
             MenuEntry.Of(AppCommand.RenameSelection),
             MenuEntry.Of(AppCommand.DeleteSelection),
-            MenuEntry.AfterRule(AppCommand.ToggleFavourite),
-            MenuEntry.AfterRule(AppCommand.CommentOnProject)),
+            MenuEntry.AfterRule(AppCommand.ToggleFavourite)),
 
         MenuEntry.Group(
             "&Help",

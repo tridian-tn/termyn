@@ -98,16 +98,17 @@ internal sealed class MainForm : Form
     private bool _showingComments;
 
     /// <summary>
-    /// What the comments are of: a task, or a project chosen from the sidebar.
+    /// What the comments are of, and what the pane should call it.
     /// </summary>
     /// <remarks>
-    /// Held rather than derived from the selection, because a project's comments have nothing in the
-    /// outline to select. Moving to another task re-aims it; the project stays only until then.
+    /// Read off the selection rather than held. Held, it went stale the moment the selection moved
+    /// without passing through whatever set it — which it did.
     /// </remarks>
-    private string? _commentsOwner;
+    private CommentSubject Subject
+        => CommentSubject.Of(_outline.SelectedRow, _sidebar.SelectedNode?.Tag as SidebarNode);
 
-    /// <summary>The outline row the comments pane last followed, so a re-render isn't read as a move.</summary>
-    private string? _followed;
+    /// <summary>The task or project the comments hang off, or null when neither is picked out.</summary>
+    private string? CommentsOwner => Subject.Id;
 
     /// <summary>
     /// Whether the description panel is showing the markdown to type into rather than the rendering.
@@ -1383,27 +1384,18 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Keeps the comments pane on the task the outline is on.
+    /// Keeps the comments pane on whatever the selection now points at.
     /// </summary>
     /// <remarks>
-    /// Only when the outline has actually moved. This runs on every render too, and a project's
-    /// comments — which are chosen from the sidebar and have nothing in the outline to select —
-    /// would otherwise be replaced by whichever task happened to be selected at the time.
+    /// Little enough to be worth naming: it used to hold the row it had last followed, so that a
+    /// re-render wasn't read as a move and a project's comments weren't quietly re-aimed at a task.
+    /// The pane reads the selection now, and a fetch on every render is what a sync needs to bring
+    /// in comments on a task nobody has touched.
     /// </remarks>
     private void FollowSelectionForComments()
     {
-        var id = _outline.SelectedId;
-        var moved = id != _followed;
-        _followed = id;
-
-        if (!_showingComments)
-            return;
-
-        // Choosing a task is choosing its comments, even over a project the sidebar had aimed it at.
-        if (moved && id is not null)
-            _commentsOwner = id;
-
-        RefreshComments();
+        if (_showingComments)
+            RefreshComments();
     }
 
     private void FollowSelectionForDescription()
@@ -1563,15 +1555,12 @@ internal sealed class MainForm : Form
     /// command that appeared to do nothing would be the alternative.
     /// </remarks>
     /// <param name="showing">True for the comments, false for the description</param>
-    /// <param name="owner">What the comments should be of, or null to follow the outline</param>
-    private void ShowComments(bool showing, string? owner = null)
+    private void ShowComments(bool showing)
     {
         _showingComments = showing;
 
         if (showing)
         {
-            _commentsOwner = owner ?? _outline.SelectedId;
-
             // Anything half-typed belongs to the task it was typed against, and switching away is
             // one of the moments it would otherwise be lost.
             SaveDescription();
@@ -1625,15 +1614,12 @@ internal sealed class MainForm : Form
     /// A count of zero is what every task without a conversation would wear, on a tab that is
     /// already called Comments — so it says nothing rather than saying none.
     ///
-    /// Counted for whatever that tab would show if it were in front, which is not always what it
-    /// last showed. The owner only follows the outline while the comments are up, so after a look
-    /// at one task's comments it stays on that task — and a count of the task you were reading
-    /// before, on the tab of the task you are reading now, is worse than no count at all.
+    /// Counted off the same owner the pane reads, so the number on the tab is the number you get
+    /// by clicking it, whether that is a task's conversation or the project's.
     /// </remarks>
     private void RenderCommentsTab()
     {
-        var owner = _showingComments ? _commentsOwner : _outline.SelectedId;
-        var count = _presenter.CommentCountOn(owner);
+        var count = _presenter.CommentCountOn(CommentsOwner);
         var caption = count > 0 ? $"Comments ({count})" : "Comments";
 
         if (_commentsTab.Text != caption)
@@ -1646,15 +1632,16 @@ internal sealed class MainForm : Form
         if (!_showingComments)
             return;
 
-        var owner = _commentsOwner;
+        var (owner, about) = Subject;
 
         _comments.Comments = _presenter.CommentsOn(owner);
+        _comments.About = about;
 
         // A project is always something the account holds; a task may not be, once it has been
         // pulled out of the archive — and a comment on one of those would be declined, not queued.
         _comments.CanComment = owner is not null && _presenter.CanCommentOn(owner);
         _comments.Placeholder = owner is null
-            ? "Select a task to see its comments."
+            ? "Select a task or a project to see its comments."
             : _comments.CanComment
                 ? "No comments yet."
                 : "This task's comments can't be added to here.";
@@ -1664,7 +1651,7 @@ internal sealed class MainForm : Form
 
     private void OnCommentPosted(string text) => Guarded(() =>
     {
-        if (_presenter.AddComment(_commentsOwner, text))
+        if (_presenter.AddComment(CommentsOwner, text))
             RefreshComments();
     });
 
@@ -1712,7 +1699,7 @@ internal sealed class MainForm : Form
         if (_transfer is not null)
             return;
 
-        if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+        if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
         using var transfer = new CancellationTokenSource();
@@ -1758,7 +1745,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private async void OnFileAttached()
     {
-        if (_transfer is not null || _commentsOwner is null)
+        if (_transfer is not null || CommentsOwner is null)
             return;
 
         using var picker = new OpenFileDialog { Title = "Attach a file to this comment", CheckFileExists = true };
@@ -1784,7 +1771,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            await _presenter.AddCommentWithFileAsync(_commentsOwner, _comments.Draft, file.FullName, transfer.Token);
+            await _presenter.AddCommentWithFileAsync(CommentsOwner, _comments.Draft, file.FullName, transfer.Token);
 
             // Only once it has landed. Clearing the box first would lose what was typed alongside a
             // file whose upload then failed.
@@ -1824,7 +1811,7 @@ internal sealed class MainForm : Form
         if (_transfer is not null)
             return;
 
-        if (_presenter.CommentsOn(_commentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+        if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
         if (!Confirm($"Are you sure you want to remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
@@ -2534,14 +2521,6 @@ internal sealed class MainForm : Form
 
             case AppCommand.ZoomReset:
                 Guarded(() => SetZoom());
-                return false;
-
-            case AppCommand.CommentOnProject:
-                Guarded(() =>
-                {
-                    if (_sidebar.SelectedNode?.Tag is SidebarNode { Kind: SidebarKind.Project } project)
-                        ShowComments(showing: true, owner: project.Id);
-                });
                 return false;
 
             case AppCommand.Undo:
