@@ -1,15 +1,19 @@
 namespace Termyn.Presentation;
 
 /// <summary>
-/// Whose comments the pane is showing, and what it should say they are of.
+/// What the detail panel is about: whose comments it would show, and what to call them.
 /// </summary>
 /// <remarks>
 /// The two together, because they are one decision. Worked out separately they would be free to
-/// disagree, and a pane headed with a project's name showing a task's conversation is a worse lie
+/// disagree, and a panel headed with a project's name showing a task's conversation is a worse lie
 /// than either half alone.
+///
+/// Named for the comments because they are what turns on it — the description follows the task on
+/// its own and has nothing to say about a project — but the name is what the whole panel is headed
+/// with, both tabs included.
 /// </remarks>
 /// <param name="Id">The task or the project the comments hang off, or null when neither is picked out</param>
-/// <param name="About">What to write above them, or empty when there is nothing to write it about</param>
+/// <param name="About">What to head the panel with, or empty when there is nothing to head it about</param>
 public sealed record CommentSubject(string? Id, string About)
 {
     /// <summary>Neither a task nor a project: a label or a filter with nothing selected in it.</summary>
@@ -26,7 +30,7 @@ public sealed record CommentSubject(string? Id, string About)
     /// </remarks>
     /// <param name="task">The row the outline is on, or null when it is on none</param>
     /// <param name="selection">The row the sidebar is on, or null when it is on none</param>
-    /// <returns>What the comments are of, and what to call it</returns>
+    /// <returns>What the panel is about, and what to call it</returns>
     public static CommentSubject Of(TaskRow? task, SidebarNode? selection) => (task, selection) switch
     {
         ({ } row, _) => new CommentSubject(row.Id, $"Task: {row.Content}"),

@@ -63,6 +63,9 @@ internal sealed class MainForm : Form
     private readonly TabPage _descriptionTab;
     private readonly TabPage _commentsTab;
 
+    /// <summary>The line above those tabs, naming the task or project they are about.</summary>
+    private readonly DetailHeader _panelHeader;
+
     /// <summary>True while a tab is being selected in code, so it isn't read as the user moving.</summary>
     private bool _switchingTabs;
 
@@ -363,7 +366,12 @@ internal sealed class MainForm : Form
         _tabs.TabPages.Add(_commentsTab);
         _tabs.SelectedIndexChanged += OnPanelTabChanged;
 
+        _panelHeader = new DetailHeader();
+
+        // The tabs first and the header after, so the header takes the top: a docked control added
+        // later sits nearer the edge. The same order the path above the outline is added in.
         _detail.Panel2.Controls.Add(_tabs);
+        _detail.Panel2.Controls.Add(_panelHeader);
         _detail.SplitterMoved += (_, _) => RememberPanelSizes();
 
         // Said here rather than left to the first selection, which may never come: a control that
@@ -760,6 +768,7 @@ internal sealed class MainForm : Form
         _rendered.Theme = _theme;
         _description.Theme = _theme;
         _comments.Theme = _theme;
+        _panelHeader.Theme = _theme;
         _preview.ForeColor = _theme.Muted;
         _capture.HintColour = _theme.Muted;
 
@@ -1377,11 +1386,20 @@ internal sealed class MainForm : Form
         FollowSelectionForDescription();
         FollowSelectionForComments();
 
-        // Last, and here rather than in Render: the count belongs to the task the outline is on,
-        // and Render settles that after it has drawn everything else. Counted there instead, the
-        // tab would answer for whichever task was selected before this one.
+        // Last, and here rather than in Render: both read the selection, and Render settles that
+        // after it has drawn everything else. Done there instead, they would answer for whichever
+        // task was selected before this one.
         RenderCommentsTab();
+        RenderPanelHeader();
     }
+
+    /// <summary>Writes what the panel is about across the top of it.</summary>
+    /// <remarks>
+    /// Both tabs, not just the comments: the description belongs to the same task, and a panel that
+    /// says which one it means is the point of the line. It reads the selection like everything else
+    /// about the panel does, so there is nothing here to keep in step.
+    /// </remarks>
+    private void RenderPanelHeader() => _panelHeader.Subject = Subject.About;
 
     /// <summary>
     /// Keeps the comments pane on whatever the selection now points at.
@@ -1632,10 +1650,9 @@ internal sealed class MainForm : Form
         if (!_showingComments)
             return;
 
-        var (owner, about) = Subject;
+        var owner = Subject.Id;
 
         _comments.Comments = _presenter.CommentsOn(owner);
-        _comments.About = about;
 
         // A project is always something the account holds; a task may not be, once it has been
         // pulled out of the archive — and a comment on one of those would be declined, not queued.

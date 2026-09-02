@@ -33,9 +33,6 @@ internal sealed class CommentsView : UserControl
     /// </remarks>
     private readonly Label _empty;
 
-    /// <summary>Says whose comments these are, since the pane shows a project's as well as a task's.</summary>
-    private readonly Label _about;
-
     private readonly TextBox _compose;
     private readonly Label _hint;
     private readonly LinkLabel _attach;
@@ -122,38 +119,9 @@ internal sealed class CommentsView : UserControl
         _composeArea.Controls.Add(_compose);
         _composeArea.Controls.Add(_hint);
 
-        // Whose conversation this is. The tab says how many there are and not what they are on, and
-        // the pane follows the selection now — a project's comments when no task is picked out, a
-        // task's when one is — so which of the two you are reading has to be written down somewhere.
-        _about = new Label
-        {
-            Dock = DockStyle.Top,
-            AutoSize = false,
-            Height = 22,
-
-            // Nothing to head until something is selected. The About setter turns it on from there.
-            Visible = false,
-
-            // A task's own text is the whole of what it is called, and some of them are sentences.
-            AutoEllipsis = true,
-            Padding = new Padding(Gap, 3, Gap, 0),
-            TextAlign = ContentAlignment.MiddleLeft,
-        };
-
-        // A rule under it, or the line reads as the first thing in the conversation rather than as
-        // the heading over it — the comments below have their own rules between them.
-        _about.Paint += (_, e) =>
-        {
-            using var pen = new Pen(_theme.Border);
-            e.Graphics.DrawLine(pen, 0, _about.Height - 1, _about.Width, _about.Height - 1);
-        };
-
-        // The heading added last, so it takes its strip off the top before the list fills the rest:
-        // docking is settled in reverse of the order they go in.
         Controls.Add(_empty);
         Controls.Add(_list);
         Controls.Add(_composeArea);
-        Controls.Add(_about);
 
         SetHint();
         ApplyTheme();
@@ -233,24 +201,6 @@ internal sealed class CommentsView : UserControl
     {
         get => _empty.Text;
         set => _empty.Text = value;
-    }
-
-    /// <summary>
-    /// What the pane says it is showing the comments of. Empty for nothing, and the heading goes.
-    /// </summary>
-    [Browsable(false)]
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public string About
-    {
-        get => _about.Text;
-        set
-        {
-            _about.Text = value;
-
-            // Kept rather than left empty, a heading with a rule under it and nothing written in it
-            // reads as something that failed to load.
-            _about.Visible = value.Length > 0;
-        }
     }
 
     /// <summary>
@@ -395,8 +345,6 @@ internal sealed class CommentsView : UserControl
         _composeArea.BackColor = _theme.Panel;
         _empty.BackColor = _theme.Panel;
         _empty.ForeColor = _theme.Muted;
-        _about.BackColor = _theme.Panel;
-        _about.ForeColor = _theme.Muted;
         _hint.BackColor = _theme.Panel;
         _hint.ForeColor = _theme.Muted;
         _list.Invalidate();
