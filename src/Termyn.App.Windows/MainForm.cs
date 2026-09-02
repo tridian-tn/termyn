@@ -161,6 +161,9 @@ internal sealed class MainForm : Form
     /// <summary>Shown in place of a result when the selected filter is beyond the local grammar.</summary>
     private readonly LinkLabel _unsupported;
 
+    /// <summary>The width the notice was last measured against, so a resize isn't refitted twice.</summary>
+    private int _unsupportedWidth;
+
     /// <summary>
     /// Built once and hidden between uses, so the hotkey has it ready. Made just after the window
     /// appears rather than during startup: the hundred-millisecond budget is on the hotkey, and
@@ -296,11 +299,21 @@ internal sealed class MainForm : Form
         _unsupported = new LinkLabel
         {
             Dock = DockStyle.Top,
-            Height = 40,
             Padding = new Padding(8, 4, 8, 4),
             Visible = false,
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
+
+        // Only when the width actually changed. Fitting sets the height, which raises this again —
+        // and the second pass has nothing to do, so comparing the width is what ends it.
+        _unsupported.SizeChanged += (_, _) =>
+        {
+            if (_unsupported.Width == _unsupportedWidth)
+                return;
+
+            _unsupportedWidth = _unsupported.Width;
+            FitUnsupported();
+        };
 
         _description = new MarkdownEditor
         {
@@ -973,10 +986,49 @@ internal sealed class MainForm : Form
             return;
         }
 
+        // A bare newline, and the offset found rather than counted back from the end: a link label
+        // measures its link into text with the carriage returns already gone, so a \r\n separator
+        // put the start one character late and left the O of Open outside the link.
         const string link = "Open in Todoist";
-        _unsupported.Text = $"Termyn can't read this filter: {query}\r\n{link}";
-        _unsupported.LinkArea = new LinkArea(_unsupported.Text.Length - link.Length, link.Length);
+        var text = $"Termyn can't read this filter: {query}\n{link}";
+
+        _unsupported.Text = text;
+        _unsupported.LinkArea = new LinkArea(text.LastIndexOf(link, StringComparison.Ordinal), link.Length);
         _unsupported.Visible = true;
+
+        FitUnsupported();
+    }
+
+    /// <summary>Sizes the notice to the text it is carrying.</summary>
+    private void FitUnsupported()
+        => _unsupported.Height = NoticeHeight(
+            _unsupported.Text,
+            _unsupported.Font,
+            _unsupported.ClientSize.Width,
+            _unsupported.Padding);
+
+    /// <summary>
+    /// How tall the notice has to be for all of its text to show at a given width.
+    /// </summary>
+    /// <remarks>
+    /// It was a fixed forty pixels, which is two lines at the font it was written against and one
+    /// and a bit at anything larger — so the way out of the filter it was refusing was cut in half.
+    /// The query it names runs to eighty characters and the window is resizable, so the number of
+    /// lines isn't something a constant in the constructor can know.
+    /// </remarks>
+    /// <param name="text">What the notice says</param>
+    /// <param name="font">The font it says it in</param>
+    /// <param name="width">How wide the notice is</param>
+    /// <param name="padding">The room it keeps around the text</param>
+    /// <returns>The height in pixels</returns>
+    internal static int NoticeHeight(string text, Font font, int width, Padding padding)
+    {
+        // Never nothing: a control measured before it has been laid out has no width yet, and a
+        // wrap width of zero measures every word onto a line of its own.
+        var room = Math.Max(1, width - padding.Horizontal);
+        var wrapped = TextRenderer.MeasureText(text, font, new Size(room, 0), TextFormatFlags.WordBreak);
+
+        return wrapped.Height + padding.Vertical;
     }
 
     private void OpenTodoist()
