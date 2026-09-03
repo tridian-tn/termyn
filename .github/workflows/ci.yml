@@ -58,10 +58,12 @@ jobs:
       - name: Build the artefacts
         shell: pwsh
         run: |
-          # Not $args, which is the automatic PowerShell name for a function's arguments.
+          # Read from the environment rather than templated into the script — a tag name that git
+          # accepts can contain a single quote, and interpolating it into '' would break parsing.
+          # Not $args either, which is the automatic PowerShell name for a function's arguments.
           $buildArgs = @('-SkipTests', '-RequireInstaller')
-          if ('${{ github.ref_type }}' -eq 'tag' -and '${{ github.ref_name }}'.StartsWith('v')) {
-            $buildArgs += @('-Version', '${{ github.ref_name }}'.TrimStart('v'))
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME.StartsWith('v')) {
+            $buildArgs += @('-Version', $env:GITHUB_REF_NAME.TrimStart('v'))
           }
           pwsh -File ./packaging/build.ps1 @buildArgs
 
@@ -101,7 +103,8 @@ jobs:
       - name: Check both artefacts are here
         shell: pwsh
         run: |
-          $version = '${{ github.ref_name }}'.TrimStart('v')
+          # Off the environment, not templated into the script — same reasoning as the packaging job.
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $missing = @('setup.exe', 'portable.zip') |
             ForEach-Object { Join-Path 'artifacts' "Termyn-$version-$_" } |
             Where-Object { -not (Test-Path $_) }
@@ -125,7 +128,8 @@ jobs:
           # place to find it.
           GH_REPO: ${{ github.repository }}
         run: |
-          $tag = '${{ github.ref_name }}'
+          # Off the environment, not templated into the script — same reasoning as above.
+          $tag = $env:GITHUB_REF_NAME
 
           # gh exits non-zero when there's no release yet, which is the ordinary case here rather
           # than a failure. Whether a non-zero native command becomes a terminating error under
