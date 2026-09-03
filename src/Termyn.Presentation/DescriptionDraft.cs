@@ -27,6 +27,18 @@ public sealed class DescriptionDraft
     /// <summary>What the box was filled with, which is what "changed" is measured against.</summary>
     public string Opened { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Whether the box is where the user is working.
+    /// </summary>
+    /// <remarks>
+    /// Being in the box is not the same as having typed in it, and it is not the same as holding
+    /// the keyboard focus either. Alt-tabbing to something else takes the focus off every control
+    /// in the window, and coming back has to find the description exactly as it was left — so this
+    /// follows the focus moving <em>within</em> the window, and a window that is merely inactive is
+    /// still a window someone is part-way through a sentence in.
+    /// </remarks>
+    public bool Editing { get; set; }
+
     /// <summary>Puts the box on a task or a project. Any pending edit should have been taken first.</summary>
     /// <param name="kind">Which of the two it is on</param>
     /// <param name="ownerId">The task or project, or null for neither</param>
@@ -92,5 +104,11 @@ public sealed class DescriptionDraft
     /// Whether a republished description can be shown, or whether it would land on top of an edit
     /// in progress. A sync runs every forty-five seconds and must not overwrite what is being typed.
     /// </summary>
-    public bool CanRefresh(string current) => !IsDirty(current);
+    /// <remarks>
+    /// Two questions, not one. Dirtiness alone was the old answer, and it is the wrong test: a
+    /// caret placed in the middle of a description that hasn't been typed into yet isn't dirty, so
+    /// a sync was free to replace the text under it. Worse, saving makes a box clean — so walking
+    /// away from the window, which saves, took away the only cover the box had.
+    /// </remarks>
+    public bool CanRefresh(string current) => !Editing && !IsDirty(current);
 }

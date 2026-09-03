@@ -19,6 +19,46 @@ public class MarkdownEditorTests
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
 
+    [Fact]
+    public void Refilling_the_box_leaves_the_caret_where_it_was()
+    {
+        // Assigning Text collapses the caret to nought, and Restyle can't put it back — it saves
+        // the selection when it runs, by which time the selection is already nought. So a sync
+        // landing on a description being read or written moved the caret to the top of it.
+        using var editor = Editing("The quick brown fox jumps over the lazy dog");
+        editor.Select(20, 0);
+
+        editor.Refill("The quick brown fox leaps over the lazy dog");
+
+        Assert.Equal(20, editor.SelectionStart);
+    }
+
+    [Fact]
+    public void Refilling_keeps_a_selection_and_not_only_a_caret()
+    {
+        using var editor = Editing("The quick brown fox jumps over the lazy dog");
+        editor.Select(4, 5); // "quick"
+
+        editor.Refill("The quick brown fox leaps over the lazy dog");
+
+        Assert.Equal(4, editor.SelectionStart);
+        Assert.Equal(5, editor.SelectionLength);
+    }
+
+    [Fact]
+    public void A_place_past_the_end_of_shorter_text_lands_at_the_end_of_it()
+    {
+        // The place was measured against the text being replaced. A description cut down elsewhere
+        // would otherwise be asked for a caret it has no room for.
+        using var editor = Editing("The quick brown fox jumps over the lazy dog");
+        editor.Select(40, 2);
+
+        editor.Refill("Short");
+
+        Assert.Equal(5, editor.SelectionStart);
+        Assert.Equal(0, editor.SelectionLength);
+    }
+
     private static MarkdownEditor Editing(string markdown)
     {
         var editor = new MarkdownEditor { Theme = Theme.Resolve(ThemePreference.Light) };

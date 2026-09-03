@@ -79,6 +79,41 @@ internal sealed class MarkdownEditor : RichTextBox
     }
 
     /// <summary>
+    /// Replaces what is in the box, leaving the caret and the scroll where they were.
+    /// </summary>
+    /// <remarks>
+    /// Assigning <see cref="Control.Text"/> collapses the caret to the start of the box, and
+    /// <see cref="Restyle"/> can't put it back afterwards: it saves the selection when it runs, and
+    /// by then the selection is already nought. So the place is taken before the assignment and
+    /// handed back after it.
+    ///
+    /// The place was measured against text that has just been replaced, so it can point past the
+    /// end of the new one — clamped rather than trusted.
+    /// </remarks>
+    /// <param name="text">What the box should hold</param>
+    internal void Refill(string text)
+    {
+        // Nothing to keep a place in yet, and asking for the scroll position would realise the
+        // control as a side effect of being told what to show.
+        if (!IsHandleCreated)
+        {
+            Text = text;
+            return;
+        }
+
+        var selection = SelectionStart;
+        var length = SelectionLength;
+        var scroll = ScrollPosition();
+
+        Text = text;
+        Restyle();
+
+        var start = Math.Clamp(selection, 0, TextLength);
+        Select(start, Math.Clamp(length, 0, TextLength - start));
+        ScrollTo(scroll);
+    }
+
+    /// <summary>
     /// Draws the markdown as what it means, leaving every character of it where it is.
     /// </summary>
     /// <remarks>
