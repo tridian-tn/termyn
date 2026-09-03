@@ -327,9 +327,22 @@ internal sealed class MainForm : Form
         _description.TextChanged += OnDescriptionChanged;
         _description.KeyDown += OnDescriptionKeyDown;
 
+        // The box is where the user is from here until the focus moves somewhere else in this
+        // window. Deliberately not Focused: alt-tabbing away takes the keyboard focus off every
+        // control here and must not be read as having finished with the description.
+        _description.Enter += (_, _) => _draft.Editing = true;
+
         // Reading is where the panel rests, so the focus going elsewhere ends the edit as well as
         // saving it — clicking back into the outline shouldn't leave the markers on show.
-        _description.Leave += (_, _) => StopWriting();
+        _description.Leave += (_, _) =>
+        {
+            _draft.Editing = false;
+            StopWriting();
+
+            // Anything a sync brought in while the box was in use was held back rather than
+            // dropped, and this is where it lands.
+            RefreshDescription();
+        };
 
         _rendered = new MarkdownView { Dock = DockStyle.Fill };
         _rendered.LinkOpened += OnDescriptionLinkOpened;
@@ -1521,21 +1534,35 @@ internal sealed class MainForm : Form
         if (current == DescriptionDraft.Normalised(_description.Text))
             return;
 
-        // Changed elsewhere while the box sat open and untouched — on the web, or by an undo.
+        // Changed elsewhere while the box sat open and untouched — on the web, or by an undo. The
+        // place is kept because this text arrived under the reader rather than because they moved
+        // to something else: the box may not be theirs to type in, but the caret in it is theirs.
         _draft.Open(_draft.Kind, id, current);
-        ShowDescription(current);
+        ShowDescription(current, keepPlace: true);
     }
 
     /// <summary>Fills the box without it counting as something the user typed.</summary>
-    private void ShowDescription(string text)
+    /// <param name="text">What the box should hold</param>
+    /// <param name="keepPlace">
+    /// True to leave the caret and the scroll where they are — for text that arrived under the
+    /// user, rather than because they went to something else and the box is being reused for it
+    /// </param>
+    private void ShowDescription(string text, bool keepPlace = false)
     {
         _description.TextChanged -= OnDescriptionChanged;
         try
         {
             // A rich edit control holds a line ending as the single newline the account stores,
             // so what goes in is what came out of the account and the offsets agree throughout.
-            _description.Text = text;
-            _description.Restyle();
+            if (keepPlace)
+            {
+                _description.Refill(text);
+            }
+            else
+            {
+                _description.Text = text;
+                _description.Restyle();
+            }
 
             // Nothing before this belongs to this task. Without it, Ctrl+Z on a description you have just
             // opened replaces it with the previous task's.
@@ -2041,9 +2068,14 @@ internal sealed class MainForm : Form
     private void ShowDescriptionPanel(bool shown)
     {
         // Saved on the way out: the panel closing is the box losing the user as surely as the focus
-        // leaving it, and a collapsed panel gives nothing back.
+        // leaving it, and a collapsed panel gives nothing back. Said outright rather than left to
+        // the Leave a collapse may or may not raise — a box that stayed "being edited" after going
+        // off screen would hold back every refresh from then on.
         if (!shown)
+        {
+            _draft.Editing = false;
             SaveDescription();
+        }
 
         _adjustingPanels = true;
         try

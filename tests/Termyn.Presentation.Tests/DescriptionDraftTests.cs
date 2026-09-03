@@ -104,6 +104,45 @@ public class DescriptionDraftTests
     public void An_empty_box_on_no_task_can_always_be_refreshed()
         => Assert.True(new DescriptionDraft().CanRefresh("anything at all"));
 
+    [Fact]
+    public void A_box_being_worked_in_is_refreshed_into_at_no_point()
+    {
+        // Dirtiness was the whole test, and it is the wrong one. A caret placed in the middle of a
+        // description nobody has typed into yet is not dirty — and a sync replacing the text under
+        // it moved the caret to the top of the box, mid-read.
+        var draft = On("t1", "As it was");
+        draft.Editing = true;
+
+        Assert.False(draft.CanRefresh("As it was"));
+    }
+
+    [Fact]
+    public void Saving_does_not_make_a_box_in_use_available_again()
+    {
+        // The one that made alt-tabbing enough on its own. Leaving the window saves, saving makes
+        // the box clean, and clean was all that was standing between it and the next sync — so
+        // coming back found the caret at the top of a description nobody had touched.
+        var draft = On("t1", "As it was");
+        draft.Editing = true;
+
+        Assert.NotNull(draft.Take("As it was, now typed in"));
+        Assert.False(draft.IsDirty("As it was, now typed in"));  // the save cleaned it
+        Assert.False(draft.CanRefresh("As it was, now typed in"));
+    }
+
+    [Fact]
+    public void Leaving_the_box_lets_what_was_held_back_land()
+    {
+        // Held back rather than dropped: the description may genuinely have changed elsewhere, and
+        // refusing for ever would leave the box showing something the account no longer holds.
+        var draft = On("t1", "As it was");
+        draft.Editing = true;
+        Assert.False(draft.CanRefresh("As it was"));
+
+        draft.Editing = false;
+        Assert.True(draft.CanRefresh("As it was"));
+    }
+
     // ---- Line endings --------------------------------------------------------------------------
 
     /// <summary>As the account keeps it.</summary>
