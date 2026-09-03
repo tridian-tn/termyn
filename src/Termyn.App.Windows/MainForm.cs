@@ -2068,9 +2068,10 @@ internal sealed class MainForm : Form
     private void ShowDescriptionPanel(bool shown)
     {
         // Saved on the way out: the panel closing is the box losing the user as surely as the focus
-        // leaving it, and a collapsed panel gives nothing back. Said outright rather than left to
-        // the Leave a collapse may or may not raise — a box that stayed "being edited" after going
-        // off screen would hold back every refresh from then on.
+        // leaving it, and a collapsed panel gives nothing back. The edit is ended here outright
+        // rather than left to whatever Leave event collapsing the panel does or doesn't raise — a
+        // box still counted as being edited after it has gone off screen would hold back every
+        // refresh from then on.
         if (!shown)
         {
             _draft.Editing = false;

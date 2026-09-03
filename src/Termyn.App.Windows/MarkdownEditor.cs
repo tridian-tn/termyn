@@ -79,15 +79,6 @@ internal sealed class MarkdownEditor : RichTextBox
     }
 
     /// <summary>
-    /// Draws the markdown as what it means, leaving every character of it where it is.
-    /// </summary>
-    /// <remarks>
-    /// Called on a pause in the typing rather than on each keystroke: styling means selecting each
-    /// run in turn, and doing that between two letters is work nobody is waiting on, done in the
-    /// place they are working. Internal so a test can force it on a control that was never shown —
-    /// styling a run needs a window behind it.
-    /// </remarks>
-    /// <summary>
     /// Replaces what is in the box, leaving the caret and the scroll where they were.
     /// </summary>
     /// <remarks>
@@ -122,6 +113,15 @@ internal sealed class MarkdownEditor : RichTextBox
         ScrollTo(scroll);
     }
 
+    /// <summary>
+    /// Draws the markdown as what it means, leaving every character of it where it is.
+    /// </summary>
+    /// <remarks>
+    /// Called on a pause in the typing rather than on each keystroke: styling means selecting each
+    /// run in turn, and doing that between two letters is work nobody is waiting on, done in the
+    /// place they are working. Internal so a test can force it on a control that was never shown —
+    /// styling a run needs a window behind it.
+    /// </remarks>
     internal void Restyle()
     {
         if (!IsHandleCreated || _styling)
