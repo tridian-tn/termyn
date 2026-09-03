@@ -8,8 +8,11 @@
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
-  <!-- One version for the whole product, read back at runtime by the update check and shown in the
-       about box. Release tags are this number with a leading v. -->
+  <!-- The version a dev build stamps itself with, read back at runtime by the update check and
+       shown in the about box. A release build gets its version from the tag instead — the packaging
+       job passes it to publish, so an assembly cut from a tag carries the tag's number regardless
+       of what is here. Left as something a running app can still report so `dotnet run` shows
+       something meaningful. -->
   <PropertyGroup>
     <Version>0.2.0</Version>
     <Company>Tridian</Company>

@@ -7,8 +7,15 @@
     .NET 10 Desktop Runtime on the target machine; neither bundles it, which is what keeps the
     download small and lets the runtime be serviced independently.
 
-    The version comes from Directory.Build.props, so there is one place to change it and the
-    installer, the executable and the release tag cannot disagree.
+    The version comes from -Version when it is given, and from Directory.Build.props otherwise.
+    Given, it is passed to dotnet publish as well, so the stamped assembly, the two filenames and
+    the release tag cannot disagree. Not given, the props are the one place to change it and the
+    rest still cannot disagree — the release job in CI passes the tag through when there is one.
+
+.PARAMETER Version
+    The version to build. Plain numbers, up to four parts (e.g. 1.2.3). Overrides the value in
+    Directory.Build.props and stamps the assembly with the same number the filenames carry, so a
+    release cut from a tag comes out named after the tag whatever the props still say.
 
 .PARAMETER SkipTests
     Package without running the test suite first. For iterating on the packaging itself.
@@ -35,6 +42,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string]$Version,
     [switch]$SkipTests,
     [switch]$RequireInstaller,
     [string]$SignCommand,
@@ -66,9 +74,17 @@ if ($RegenerateIcon) {
 }
 
 function Get-ProductVersion {
-    # Asked of MSBuild rather than parsed out of the props file, so this is the version that actually
-    # stamped the assembly even if a project overrides it.
-    $version = (dotnet msbuild $app -getProperty:Version -nologo).Trim()
+    param([string]$Override)
+
+    # An override wins so the packaging job in CI can carry the release tag through. Not given,
+    # asked of MSBuild rather than parsed out of the props file, so this is the version that
+    # actually stamped the assembly even if a project overrides it.
+    $version = if ($Override) {
+        $Override
+    } else {
+        (dotnet msbuild $app -getProperty:Version -nologo).Trim()
+    }
+
     if (-not $version) { throw 'Could not read <Version> from the project.' }
 
     # Caught here rather than by the installer compiler, which rejects a pre-release VersionInfoVersion
@@ -117,7 +133,7 @@ function Invoke-Sign {
     Assert-Signed $Path
 }
 
-$version = Get-ProductVersion
+$version = Get-ProductVersion -Override $Version
 Write-Host "Termyn $version" -ForegroundColor Cyan
 
 if (-not $SkipTests) {
@@ -135,7 +151,14 @@ if (Test-Path -LiteralPath $publish) { Remove-Item -LiteralPath $publish -Recurs
 New-Item -ItemType Directory -Path $publish -Force | Out-Null
 
 Write-Host 'Publishing...' -ForegroundColor Cyan
-dotnet publish $app -c Release -o $publish --nologo --verbosity quiet -p:DebugType=none
+
+# The version passed to publish as well, or the assembly is stamped from the props and the two
+# filenames wrap something whose about box reads as the old number. Not given, publish reads the
+# same props Get-ProductVersion just did, and the two agree by construction.
+$publishArgs = @('publish', $app, '-c', 'Release', '-o', $publish, '--nologo', '--verbosity', 'quiet', '-p:DebugType=none')
+if ($Version) { $publishArgs += "-p:Version=$version" }
+
+dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
 
 # Before either package is made, so the zip and the installer both carry a signed executable. The
