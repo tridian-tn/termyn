@@ -48,11 +48,24 @@ jobs:
       # is missing, which is right on a laptop and wrong here: half a release, announced in a warning
       # nobody reads, is worse than a failure.
       #
+      # -Version is taken from the tag when there is one and left off otherwise, so a tag push
+      # names the artefacts and stamps the assembly with the tag rather than with the props. On a
+      # branch or a PR the props are the source, as before.
+      #
       # The runner image ships Inno Setup 6 under Program Files (x86), which is one of the three
       # places the script looks, so nothing is installed for it. That is the part of this worth
       # watching on the first run.
       - name: Build the artefacts
-        run: pwsh -File ./packaging/build.ps1 -SkipTests -RequireInstaller
+        shell: pwsh
+        run: |
+          # Read from the environment rather than templated into the script — a tag name that git
+          # accepts can contain a single quote, and interpolating it into '' would break parsing.
+          # Not $args either, which is the automatic PowerShell name for a function's arguments.
+          $buildArgs = @('-SkipTests', '-RequireInstaller')
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME.StartsWith('v')) {
+            $buildArgs += @('-Version', $env:GITHUB_REF_NAME.TrimStart('v'))
+          }
+          pwsh -File ./packaging/build.ps1 @buildArgs
 
       # Named rather than globbed at the directory, so the publish folder underneath doesn't come
       # too — that is the unpackaged app, and it is what both of these are made of.
@@ -83,21 +96,22 @@ jobs:
           name: termyn-artefacts
           path: artifacts
 
-      # The version lives in Directory.Build.props and names both files; the tag is that number with
-      # a leading v. Asking for the files by the tag's name is what holds the two together — a tag
-      # that has run ahead of the version finds nothing here, rather than quietly attaching the last
-      # version's installer to this version's release.
-      - name: Check the tag is the version that was built
+      # The packaging job stamps both filenames and the assembly with the tag, so the tag and the
+      # artefacts agree by construction. This is here to catch that packaging didn't drop one of
+      # them silently — half a release, downloaded by whoever clicked the link first, is worse than
+      # one that stops here.
+      - name: Check both artefacts are here
         shell: pwsh
         run: |
-          $version = '${{ github.ref_name }}'.TrimStart('v')
+          # Off the environment, not templated into the script — same reasoning as the packaging job.
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $missing = @('setup.exe', 'portable.zip') |
             ForEach-Object { Join-Path 'artifacts' "Termyn-$version-$_" } |
             Where-Object { -not (Test-Path $_) }
 
           if ($missing) {
             $built = (Get-ChildItem artifacts | ForEach-Object Name) -join ', '
-            throw "Tag ${{ github.ref_name }} wants $($missing -join ', '), but the build produced: $built"
+            throw "Expected $($missing -join ', '), got: $built"
           }
 
       # Drafted rather than published: these are unsigned, so somebody should look before they are
@@ -114,7 +128,8 @@ jobs:
           # place to find it.
           GH_REPO: ${{ github.repository }}
         run: |
-          $tag = '${{ github.ref_name }}'
+          # Off the environment, not templated into the script — same reasoning as above.
+          $tag = $env:GITHUB_REF_NAME
 
           # gh exits non-zero when there's no release yet, which is the ordinary case here rather
           # than a failure. Whether a non-zero native command becomes a terminating error under
