@@ -275,7 +275,7 @@ public static class MarkdownHighlight
         }
 
         var span = link.Span;
-        var close = text.IndexOf(']', span.Start);
+        var close = Closes(text, span);
         var end = span.End;
 
         if (close < 0 || close > end)
@@ -295,6 +295,88 @@ public static class MarkdownHighlight
 
         foreach (var child in link)
             PaintInline(child, styles, text);
+    }
+
+    /// <summary>
+    /// Where a link's words end — the bracket that closes the one it opened with.
+    /// </summary>
+    /// <remarks>
+    /// Counted rather than found, because the words of a link are allowed to contain brackets of
+    /// their own so long as they balance: "[foo [bar]](address)" is one link whose words are
+    /// "foo [bar]", and an image inside a link puts a whole "![alt](picture)" in there. Taking the
+    /// first bracket instead stops a character early, which drops the last of the words out of the
+    /// colour they are drawn in and pulls the opening parenthesis into the address.
+    ///
+    /// An escaped bracket is a character of the words rather than a piece of the syntax, so the
+    /// character after a backslash is stepped over rather than counted.
+    /// </remarks>
+    /// <param name="text">The markdown being read</param>
+    /// <param name="span">Where the whole link was written</param>
+    /// <returns>Where its words close, or -1 where nothing closes them</returns>
+    private static int Closes(string text, SourceSpan span)
+    {
+        var depth = 0;
+
+        for (var at = span.Start; at <= span.End && at < text.Length; at++)
+        {
+            switch (text[at])
+            {
+                case '\\':
+                    at++;
+                    break;
+
+                case '`':
+                    at = Ticks(text, at, span.End);
+                    break;
+
+                case '[':
+                    depth++;
+                    break;
+
+                case ']' when --depth == 0:
+                    return at;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Where the code span opening at <paramref name="at"/> ends.
+    /// </summary>
+    /// <remarks>
+    /// Code is read before any of this, so a bracket between backticks is a character of the code
+    /// and closes nothing: "[a `]` code](address)" is one link whose words hold a bracket. A run of
+    /// backticks is closed by the next run of exactly as many, and by nothing else — which is what
+    /// lets a code span hold a backtick of its own. A run that nothing closes is ordinary text, so
+    /// the scan carries on from the end of it.
+    /// </remarks>
+    /// <param name="text">The markdown being read</param>
+    /// <param name="at">The first backtick of the run that opens it</param>
+    /// <param name="end">The last character worth looking at</param>
+    /// <returns>The last backtick of the run that closes it, or of the opening run where none does</returns>
+    private static int Ticks(string text, int at, int end)
+    {
+        var opened = at;
+        while (at + 1 <= end && at + 1 < text.Length && text[at + 1] == '`')
+            at++;
+
+        var ticks = at - opened + 1;
+
+        for (var seek = at + 1; seek <= end && seek < text.Length; seek++)
+        {
+            if (text[seek] != '`')
+                continue;
+
+            var from = seek;
+            while (seek + 1 <= end && seek + 1 < text.Length && text[seek + 1] == '`')
+                seek++;
+
+            if (seek - from + 1 == ticks)
+                return seek;
+        }
+
+        return at;
     }
 
     /// <summary>How many of <paramref name="marker"/> run from <paramref name="at"/>, plus a space.</summary>
