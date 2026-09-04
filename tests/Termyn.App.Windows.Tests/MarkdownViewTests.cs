@@ -595,6 +595,33 @@ public class MarkdownViewTests
         Assert.Equal(markdown.IndexOf("third", StringComparison.Ordinal), SourceOf(view, "third"));
     }
 
+    [Theory]
+    [InlineData("plain words")]
+    [InlineData("a\nb\nc")]
+    [InlineData("```\nfirst line\nsecond line\nthird line\n```")]
+    [InlineData("# H\n\n> quoted\n\n- [ ] a box\n\n[a link](https://example.com) after")]
+    public void The_writing_and_the_box_agree_about_how_much_is_in_it(string markdown)
+    {
+        // Everything written after a run rides on these two agreeing — where the next one goes,
+        // where a run came from in the markdown, and where a link starts and stops.
+        using var view = Render(markdown);
+
+        Assert.Equal(view.TextLength, view.Counted);
+    }
+
+    [Fact]
+    public void A_return_the_parser_never_saw_is_counted_as_the_box_holds_it()
+    {
+        // Markdown nested past what the parser will take is written through exactly as the account
+        // sent it, which is the one way a line ending reaches the writing untidied. A return with a
+        // newline after it becomes one character where a return on its own stays one, so counting
+        // every return as vanishing leaves the writing a character behind for each of them.
+        var markdown = new string('>', 200) + " before\rafter";
+        using var view = Render(markdown);
+
+        Assert.Equal(view.TextLength, view.Counted);
+    }
+
     [Fact]
     public void A_word_below_a_fenced_block_still_knows_where_it_was_written()
     {
