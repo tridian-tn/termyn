@@ -30,12 +30,11 @@ updates:
       interval: monthly
 
     # Only the testing packages are grouped. They move together and a green suite is the whole of
-    # the argument for them, so a run of majors across the four reads better as one pull request
-    # than as four. Markdig and SQLite are deliberately outside it: one parses every description
-    # and the other holds the cache, and neither is worth waving through in a list.
+    # the argument for them, so a run of majors across them reads better as one pull request than
+    # as three. Markdig and SQLite are deliberately outside it: one parses every description and
+    # the other holds the cache, and neither is worth waving through in a list.
     groups:
       testing:
         patterns:
           - "xunit*"
           - "Microsoft.NET.Test.Sdk"
-          - "coverlet.*"
