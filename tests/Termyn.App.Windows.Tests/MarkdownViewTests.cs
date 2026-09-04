@@ -603,12 +603,17 @@ public class MarkdownViewTests
         // than asking the box, so a run holding several endings has to be counted as it will be
         // held — and getting that wrong leaves every offset below the block pointing at the wrong
         // character, which is the offset a click on the rendering opens the text at.
-        const string markdown = "before\n\n```\nfirst line\nsecond line\n```\n\nafter the block";
+        // Three lines rather than two, because the ending that closes the run absorbs one of the
+        // ones inside it — so a block of two hides a miscount that a block of three shows.
+        const string markdown = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block";
         using var view = Render(markdown);
 
-        // Asked of a word inside the run rather than the one starting it. A rendered offset landing
-        // in front of every run it knows about is answered with the start of the next one, so a
-        // miscount is invisible at a run's first word and shifts every word after it.
+        // Asked of the word starting the run below the block and of one inside it, because the two
+        // fail to different faults. A run whose recorded length reaches past its own last character
+        // answers for the first character of the next one, which is "after"; a run recorded as
+        // starting too late is answered from the run following it, which hides a miscount at
+        // "after" and shifts "block".
+        Assert.Equal(markdown.IndexOf("after", StringComparison.Ordinal), SourceOf(view, "after"));
         Assert.Equal(markdown.IndexOf("block", StringComparison.Ordinal), SourceOf(view, "block"));
     }
 

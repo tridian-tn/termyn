@@ -477,8 +477,11 @@ internal sealed class MarkdownView : RichTextBox
         // The source length is the span's own, not the run's: a run of code is shorter than the
         // backticks it was written with, and a rule is longer than the three dashes that made it.
         // Clamping an offset into the run against the span keeps it inside what it came from.
+        // How much of the box the run covers, not how much was handed over: a run holding its own
+        // line endings is shorter on screen than in hand, and a length overstated here reaches past
+        // the run's last character and answers for the one after it as well.
         if (from is { Length: > 0 } span && text.Length > 0)
-            _sources.Add((_at, text.Length, span.Start, span.Length));
+            _sources.Add((_at, Shown(text), span.Start, span.Length));
 
         Select(_at, 0);
 
