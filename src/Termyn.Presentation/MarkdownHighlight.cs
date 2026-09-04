@@ -275,7 +275,7 @@ public static class MarkdownHighlight
         }
 
         var span = link.Span;
-        var close = text.IndexOf(']', span.Start);
+        var close = Closes(text, span);
         var end = span.End;
 
         if (close < 0 || close > end)
@@ -295,6 +295,46 @@ public static class MarkdownHighlight
 
         foreach (var child in link)
             PaintInline(child, styles, text);
+    }
+
+    /// <summary>
+    /// Where a link's words end — the bracket that closes the one it opened with.
+    /// </summary>
+    /// <remarks>
+    /// Counted rather than found, because the words of a link are allowed to contain brackets of
+    /// their own so long as they balance: "[foo [bar]](address)" is one link whose words are
+    /// "foo [bar]", and an image inside a link puts a whole "![alt](picture)" in there. Taking the
+    /// first bracket instead stops a character early, which drops the last of the words out of the
+    /// colour they are drawn in and pulls the opening parenthesis into the address.
+    ///
+    /// An escaped bracket is a character of the words rather than a piece of the syntax, so the
+    /// character after a backslash is stepped over rather than counted.
+    /// </remarks>
+    /// <param name="text">The markdown being read</param>
+    /// <param name="span">Where the whole link was written</param>
+    /// <returns>Where its words close, or -1 where nothing closes them</returns>
+    private static int Closes(string text, SourceSpan span)
+    {
+        var depth = 0;
+
+        for (var at = span.Start; at <= span.End && at < text.Length; at++)
+        {
+            switch (text[at])
+            {
+                case '\\':
+                    at++;
+                    break;
+
+                case '[':
+                    depth++;
+                    break;
+
+                case ']' when --depth == 0:
+                    return at;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>How many of <paramref name="marker"/> run from <paramref name="at"/>, plus a space.</summary>

@@ -187,6 +187,38 @@ public class MarkdownHighlightTests
     }
 
     [Fact]
+    public void A_links_words_may_have_brackets_of_their_own()
+    {
+        // They are allowed to, so long as they balance, and the closing one used to be found by
+        // taking the first bracket after the link began — which is the inner one here. That stopped
+        // a character short: the last of the words was drawn as syntax and the opening parenthesis
+        // was drawn as part of the address.
+        const string markdown = "See [foo [bar]](https://example.com/path) now";
+
+        Assert.Equal(MarkdownStyle.LinkText, StyleOf(markdown, "foo [bar]"));
+        Assert.Equal(MarkdownStyle.LinkText, StyleAt(markdown, markdown.IndexOf("]](", StringComparison.Ordinal)));
+        Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "https://example.com/path"));
+
+        // The bracket that closes the words and the parenthesis that opens the address, either side
+        // of each other and both of them syntax.
+        var closing = markdown.IndexOf("](", StringComparison.Ordinal);
+        Assert.Equal(MarkdownStyle.Marker, StyleAt(markdown, closing));
+        Assert.Equal(MarkdownStyle.Marker, StyleAt(markdown, closing + 1));
+    }
+
+    [Fact]
+    public void An_escaped_bracket_in_a_links_words_is_not_counted_as_one()
+    {
+        // Asked of the words rather than of the address: a link whose words are cut short early
+        // still has the address inside what is then drawn as the address, so only the words show
+        // the difference.
+        const string markdown = @"See [a \] bracket](https://example.com/path) now";
+
+        Assert.Equal(MarkdownStyle.LinkText, StyleOf(markdown, "bracket"));
+        Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "https://example.com/path"));
+    }
+
+    [Fact]
     public void A_bare_url_is_a_link()
     {
         // Lexilla misses both of these outright, and people paste them far more often than they
