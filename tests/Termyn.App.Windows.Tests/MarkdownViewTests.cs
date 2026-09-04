@@ -596,6 +596,28 @@ public class MarkdownViewTests
     }
 
     [Fact]
+    public void A_word_below_a_fenced_block_still_knows_where_it_was_written()
+    {
+        // A fenced block arrives as a single run carrying its own line endings, where every other
+        // run carries at most the one that closes it. The writing counts what it has written rather
+        // than asking the box, so a run holding several endings has to be counted as it will be
+        // held — and getting that wrong leaves every offset below the block pointing at the wrong
+        // character, which is the offset a click on the rendering opens the text at.
+        // Three lines rather than two, because the ending that closes the run absorbs one of the
+        // ones inside it — so a block of two hides a miscount that a block of three shows.
+        const string markdown = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block";
+        using var view = Render(markdown);
+
+        // Asked of the word starting the run below the block and of one inside it, because the two
+        // fail to different faults. A run whose recorded length reaches past its own last character
+        // answers for the first character of the next one, which is "after"; a run recorded as
+        // starting too late is answered from the run following it, which hides a miscount at
+        // "after" and shifts "block".
+        Assert.Equal(markdown.IndexOf("after", StringComparison.Ordinal), SourceOf(view, "after"));
+        Assert.Equal(markdown.IndexOf("block", StringComparison.Ordinal), SourceOf(view, "block"));
+    }
+
+    [Fact]
     public void The_words_of_a_link_map_to_the_words_and_not_to_the_address()
     {
         // The address isn't drawn at all, so an offset that landed in it would put the caret

@@ -68,6 +68,19 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     private readonly List<(int Start, int Length, int Source, int SourceLength)> _sources = [];
 
+    /// <summary>
+    /// Where the next run goes, counted here rather than asked of the control.
+    /// </summary>
+    /// <remarks>
+    /// A render is a few hundred runs and each one used to ask the box how much text it was holding
+    /// — twice for itself and once more inside <see cref="TextBoxBase.AppendText"/>. One wrong
+    /// answer puts a run somewhere other than the end, and a build agent has answered nought while
+    /// the box held a sentence: the run went to the front, the description read back out of order,
+    /// and every offset after it pointed at the wrong character. The writing already knows how much
+    /// it has written, so it says so instead of asking.
+    /// </remarks>
+    private int _at;
+
     /// <summary>Raised when the user asks to type into the description, with where in the markdown.</summary>
     public event Action<int>? EditRequested;
 
@@ -209,6 +222,7 @@ internal sealed class MarkdownView : RichTextBox
             Clear();
             _links.Clear();
             _sources.Clear();
+            _at = 0;
 
             foreach (var block in Parse())
                 WriteBlock(block, indent: 0);
@@ -463,11 +477,13 @@ internal sealed class MarkdownView : RichTextBox
         // The source length is the span's own, not the run's: a run of code is shorter than the
         // backticks it was written with, and a rule is longer than the three dashes that made it.
         // Clamping an offset into the run against the span keeps it inside what it came from.
+        // How much of the box the run covers, not how much was handed over: a run holding its own
+        // line endings is shorter on screen than in hand, and a length overstated here reaches past
+        // the run's last character and answers for the one after it as well.
         if (from is { Length: > 0 } span && text.Length > 0)
-            _sources.Add((TextLength, text.Length, span.Start, span.Length));
+            _sources.Add((_at, Shown(text), span.Start, span.Length));
 
-        SelectionStart = TextLength;
-        SelectionLength = 0;
+        Select(_at, 0);
 
         // Paragraph settings, so every run of a paragraph has to agree about them. The air under
         // each one is what makes a description read as separate thoughts rather than as a wall —
@@ -491,8 +507,24 @@ internal sealed class MarkdownView : RichTextBox
             : _inert || style.Muted ? Theme.Muted
             : Theme.Text;
 
-        AppendText(newLine ? text + Environment.NewLine : text);
+        // Written at the selection rather than through AppendText, which would look the end of the
+        // text up for itself.
+        var written = newLine ? text + Environment.NewLine : text;
+        SelectedText = written;
+        _at += Shown(written);
     }
+
+    /// <summary>
+    /// How much longer the box's text is after being handed <paramref name="written"/>.
+    /// </summary>
+    /// <remarks>
+    /// Not its length: the box keeps a line ending as one newline where this hands it two. A run
+    /// carries its own endings as well as the one that closes it — a fenced block arrives here as
+    /// several lines in a single run — so they're counted rather than assumed to be one.
+    /// </remarks>
+    /// <param name="written">The text handed to the box</param>
+    /// <returns>How many characters of it the box will hold</returns>
+    private static int Shown(string written) => written.Length - written.AsSpan().Count('\r');
 
     /// <summary>
     /// A span with its delimiters taken off each end.

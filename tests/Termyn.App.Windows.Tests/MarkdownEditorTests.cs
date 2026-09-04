@@ -252,11 +252,25 @@ public class MarkdownEditorTests
     {
         using var editor = Editing("Some **bold** and *italic* and ~~struck~~ here");
 
-        Assert.True(FontAt(editor, "bold").Bold);
-        Assert.True(FontAt(editor, "italic").Italic);
-        Assert.True(FontAt(editor, "struck").Strikeout);
-        Assert.False(FontAt(editor, "Some").Bold);
+        // Read once each, before anything is asserted, and every assertion says what it saw. This
+        // one has failed on a build agent and passed on a re-run of the same commit, reporting
+        // nothing but "Assert.True() Failure" — which is four lines to choose between and no way to
+        // tell styling that didn't apply from text that came out wrong. See #42.
+        var text = editor.Text;
+        var bold = FontAt(editor, "bold");
+        var italic = FontAt(editor, "italic");
+        var struck = FontAt(editor, "struck");
+        var plain = FontAt(editor, "Some");
+
+        Assert.True(bold.Bold, Drawn("bold", bold, text));
+        Assert.True(italic.Italic, Drawn("italic", italic, text));
+        Assert.True(struck.Strikeout, Drawn("struck", struck, text));
+        Assert.False(plain.Bold, Drawn("Some", plain, text));
     }
+
+    /// <summary>How a word actually came out, for an assertion that is about to say it is wrong.</summary>
+    private static string Drawn(string needle, Font font, string text)
+        => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. Text in the box: '{text}'";
 
     [Fact]
     public void A_links_words_are_coloured_and_its_address_is_not()
