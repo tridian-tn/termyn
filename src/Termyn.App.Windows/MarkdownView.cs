@@ -481,7 +481,7 @@ internal sealed class MarkdownView : RichTextBox
         if (style.Italic) font |= FontStyle.Italic;
         if (style.Strike) font |= FontStyle.Strikeout;
 
-        var family = style.Fixed ? FontFamily.GenericMonospace : Font.FontFamily;
+        var family = style.Fixed ? Faces.FixedWidth : Font.FontFamily;
         SelectionFont = new Font(family, Font.Size * (1f + style.Larger), font);
         // Muted throughout when the pane can't be typed into, which is the only cue that carries in
         // both themes: the recessed background is a couple of units in the light one and invisible.
