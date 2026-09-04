@@ -77,16 +77,24 @@ public class MarkdownViewTests
         var italic = FontAt(view, "italic");
         var plain = FontAt(view, "Some");
 
-        Assert.True(bold.Bold, Drawn("bold", bold, text));
-        Assert.False(bold.Italic, Drawn("bold", bold, text));
-        Assert.True(italic.Italic, Drawn("italic", italic, text));
-        Assert.False(italic.Bold, Drawn("italic", italic, text));
-        Assert.False(plain.Bold, Drawn("Some", plain, text));
+        Assert.True(bold.Bold, Drawn(view, "bold", bold, text));
+        Assert.False(bold.Italic, Drawn(view, "bold", bold, text));
+        Assert.True(italic.Italic, Drawn(view, "italic", italic, text));
+        Assert.False(italic.Bold, Drawn(view, "italic", italic, text));
+        Assert.False(plain.Bold, Drawn(view, "Some", plain, text));
     }
 
-    /// <summary>How a word actually came out, for an assertion that is about to say it is wrong.</summary>
-    private static string Drawn(string needle, Font font, string text)
-        => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. Rendered text: '{text}'";
+    /// <summary>
+    /// How a word actually came out, for an assertion that is about to say it is wrong.
+    /// </summary>
+    /// <remarks>
+    /// Carries the count of runs the control wrote somewhere other than where they were put, which
+    /// is what #115 is trying to catch: it separates a rendering that came out scrambled from one
+    /// that came out right and was styled wrongly.
+    /// </remarks>
+    private static string Drawn(MarkdownView view, string needle, Font font, string text)
+        => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. "
+           + $"Misplaced runs: {view.MisplacedRuns}. Rendered text: '{text}'";
 
     [Fact]
     public void Strikethrough_is_struck_through()
@@ -231,8 +239,17 @@ public class MarkdownViewTests
     {
         using var view = Render("Run `dotnet build` first");
 
-        Assert.Equal(FontFamily.GenericMonospace.Name, FontAt(view, "dotnet build").FontFamily.Name);
-        Assert.Equal("Run dotnet build first", view.Text.Trim());
+        var text = view.Text.Trim();
+        var code = FontAt(view, "dotnet build");
+
+        // Assert.True rather than Assert.Equal, which has no room for a message: the face coming
+        // back as the body face is how #115 reads, and the text alongside it says whether the
+        // rendering went wrong as well or only the styling did.
+        Assert.True(
+            code.FontFamily.Name == FontFamily.GenericMonospace.Name,
+            $"code wanted {FontFamily.GenericMonospace.Name}. {Drawn(view, "dotnet build", code, text)}");
+
+        Assert.Equal("Run dotnet build first", text);
     }
 
     [Fact]
@@ -414,9 +431,13 @@ public class MarkdownViewTests
         var three = FontAt(view, "three").Size;
         var body = FontAt(view, "body").Size;
 
-        Assert.True(one > two, $"h1 {one} should beat h2 {two}");
-        Assert.True(two > three, $"h2 {two} should beat h3 {three}");
-        Assert.True(three > body, $"h3 {three} should beat body {body}");
+        // The rendered text alongside the sizes, since #115 has these failing together with the
+        // rendering being wrong — and the sizes on their own don't say which of the two it was.
+        var seen = $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.Replace("\n", "\\n")}'";
+
+        Assert.True(one > two, $"h1 {one} should beat h2 {two}. {seen}");
+        Assert.True(two > three, $"h2 {two} should beat h3 {three}. {seen}");
+        Assert.True(three > body, $"h3 {three} should beat body {body}. {seen}");
     }
 
     [Fact]
@@ -546,6 +567,26 @@ public class MarkdownViewTests
         return view.SourceAt(at);
     }
 
+    /// <summary>
+    /// Asserts that a word in the rendering maps back to where it was written, saying what it saw
+    /// when it doesn't.
+    /// </summary>
+    /// <remarks>
+    /// Assert.Equal has no room for a message, and an offset on its own says nothing about why it
+    /// is wrong. #115 has these failing alongside a rendering that came out wrong, and the rendered
+    /// text is what tells a bad map from a bad render.
+    /// </remarks>
+    private static void MapsBack(MarkdownView view, string markdown, string needle)
+    {
+        var written = markdown.IndexOf(needle, StringComparison.Ordinal);
+        var mapped = SourceOf(view, needle);
+
+        Assert.True(
+            written == mapped,
+            $"'{needle}' was written at {written} and maps to {mapped}. "
+            + $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.Replace("\n", "\\n")}'");
+    }
+
     [Fact]
     public void A_word_in_the_rendering_knows_where_it_was_written()
     {
@@ -579,7 +620,7 @@ public class MarkdownViewTests
         const string markdown = "# A heading\n\nThe *body* of it";
         using var view = Render(markdown);
 
-        Assert.Equal(markdown.IndexOf("body", StringComparison.Ordinal), SourceOf(view, "body"));
+        MapsBack(view, markdown, "body");
     }
 
     [Fact]
@@ -640,8 +681,8 @@ public class MarkdownViewTests
         // answers for the first character of the next one, which is "after"; a run recorded as
         // starting too late is answered from the run following it, which hides a miscount at
         // "after" and shifts "block".
-        Assert.Equal(markdown.IndexOf("after", StringComparison.Ordinal), SourceOf(view, "after"));
-        Assert.Equal(markdown.IndexOf("block", StringComparison.Ordinal), SourceOf(view, "block"));
+        MapsBack(view, markdown, "after");
+        MapsBack(view, markdown, "block");
     }
 
     [Fact]
@@ -664,7 +705,7 @@ public class MarkdownViewTests
         const string markdown = "Run `dotnet build` first";
         using var view = Render(markdown);
 
-        Assert.Equal(markdown.IndexOf("dotnet", StringComparison.Ordinal), SourceOf(view, "dotnet"));
+        MapsBack(view, markdown, "dotnet");
     }
 
     [Fact]

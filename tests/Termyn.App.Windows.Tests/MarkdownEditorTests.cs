@@ -242,10 +242,23 @@ public class MarkdownEditorTests
     {
         using var editor = Editing("# one\n\n## two\n\n### three\n\nbody");
 
-        Assert.True(FontAt(editor, "one").Size > FontAt(editor, "two").Size);
-        Assert.True(FontAt(editor, "two").Size > FontAt(editor, "three").Size);
-        Assert.True(FontAt(editor, "three").Size > FontAt(editor, "body").Size);
+        // Read once each and said in full, for the reason #45 gave the rendered view's assertions
+        // the same treatment: this fails on a build agent and passes on a re-run of the same commit,
+        // and "Assert.True() Failure" is three lines to choose between and nothing about any of
+        // them. See #115.
+        var text = editor.Text;
+        var one = FontAt(editor, "one").Size;
+        var two = FontAt(editor, "two").Size;
+        var three = FontAt(editor, "three").Size;
+        var body = FontAt(editor, "body").Size;
+
+        Assert.True(one > two, $"h1 {one} should beat h2 {two}. In the box: '{Shown(text)}'");
+        Assert.True(two > three, $"h2 {two} should beat h3 {three}. In the box: '{Shown(text)}'");
+        Assert.True(three > body, $"h3 {three} should beat body {body}. In the box: '{Shown(text)}'");
     }
+
+    /// <summary>Text with its line endings written out, so a message stays on one line.</summary>
+    private static string Shown(string text) => text.Replace("\n", "\\n");
 
     [Fact]
     public void Bold_is_bold_and_italic_is_italic_and_struck_is_struck()
@@ -299,8 +312,20 @@ public class MarkdownEditorTests
     {
         using var editor = Editing("Run `dotnet build` first");
 
-        Assert.Equal(FontFamily.GenericMonospace.Name, FontAt(editor, "dotnet build").FontFamily.Name);
-        Assert.NotEqual(FontFamily.GenericMonospace.Name, FontAt(editor, "Run").FontFamily.Name);
+        var text = editor.Text;
+        var code = FontAt(editor, "dotnet build");
+        var plain = FontAt(editor, "Run");
+
+        // Assert.True rather than Assert.Equal, which has no room for a message: the face coming
+        // back as the body face is how #115 reads, and the two faces and the text tell that apart
+        // from the styling having missed this run alone.
+        Assert.True(
+            code.FontFamily.Name == FontFamily.GenericMonospace.Name,
+            $"code wanted {FontFamily.GenericMonospace.Name}. {Drawn("dotnet build", code, text)}");
+
+        Assert.True(
+            plain.FontFamily.Name != FontFamily.GenericMonospace.Name,
+            $"body should not be fixed width. {Drawn("Run", plain, text)}");
     }
 
     [Fact]
