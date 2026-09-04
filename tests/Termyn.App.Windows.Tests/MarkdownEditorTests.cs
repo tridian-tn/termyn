@@ -258,7 +258,7 @@ public class MarkdownEditorTests
     }
 
     /// <summary>Text with its line endings written out, so a message stays on one line.</summary>
-    private static string Shown(string text) => text.Replace("\n", "\\n");
+    private static string Shown(string text) => text.ReplaceLineEndings("\\n");
 
     [Fact]
     public void Bold_is_bold_and_italic_is_italic_and_struck_is_struck()

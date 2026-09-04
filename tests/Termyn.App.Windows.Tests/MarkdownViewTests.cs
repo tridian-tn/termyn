@@ -433,7 +433,7 @@ public class MarkdownViewTests
 
         // The rendered text alongside the sizes, since #115 has these failing together with the
         // rendering being wrong — and the sizes on their own don't say which of the two it was.
-        var seen = $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.Replace("\n", "\\n")}'";
+        var seen = $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'";
 
         Assert.True(one > two, $"h1 {one} should beat h2 {two}. {seen}");
         Assert.True(two > three, $"h2 {two} should beat h3 {three}. {seen}");
@@ -584,7 +584,7 @@ public class MarkdownViewTests
         Assert.True(
             written == mapped,
             $"'{needle}' was written at {written} and maps to {mapped}. "
-            + $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.Replace("\n", "\\n")}'");
+            + $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
     }
 
     [Fact]

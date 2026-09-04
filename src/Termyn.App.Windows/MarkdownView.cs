@@ -224,6 +224,12 @@ internal sealed class MarkdownView : RichTextBox
             _sources.Clear();
             _at = 0;
 
+            // With the rest of the per-render state. What a reader of this is holding it against is
+            // the text now in the box, and Clear has just thrown away everything an earlier render
+            // put there — so a count carried over from one would point at a rendering that no
+            // longer exists.
+            MisplacedRuns = 0;
+
             foreach (var block in Parse())
                 WriteBlock(block, indent: 0);
 
