@@ -218,6 +218,23 @@ public class MarkdownHighlightTests
         Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "https://example.com/path"));
     }
 
+    [Theory]
+    [InlineData("See [a `]` code](https://example.com/path) now", "code")]
+    [InlineData("See [a ``] `` two](https://example.com/path) now", "two")]
+    [InlineData("See [a `` `]` `` tick](https://example.com/path) now", "tick")]
+    public void A_bracket_between_backticks_closes_nothing(string markdown, string after)
+    {
+        // Code is read before any of this, so a bracket between backticks is a character of the
+        // code and closes nothing. A run of backticks is closed by a run of exactly as many, which
+        // is what lets the third of these hold a backtick of its own.
+        //
+        // Asked of the word after the code, which is still part of the link's words: a label cut
+        // short at the bracket leaves everything from there to the address drawn as the address.
+        Assert.Equal(MarkdownStyle.LinkText, StyleOf(markdown, after));
+        Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "https://example.com/path"));
+        Assert.Equal(MarkdownStyle.Marker, StyleAt(markdown, markdown.LastIndexOf("](", StringComparison.Ordinal)));
+    }
+
     [Fact]
     public void A_bare_url_is_a_link()
     {

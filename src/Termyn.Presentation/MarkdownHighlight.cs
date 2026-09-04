@@ -325,6 +325,10 @@ public static class MarkdownHighlight
                     at++;
                     break;
 
+                case '`':
+                    at = Ticks(text, at, span.End);
+                    break;
+
                 case '[':
                     depth++;
                     break;
@@ -335,6 +339,44 @@ public static class MarkdownHighlight
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Where the code span opening at <paramref name="at"/> ends.
+    /// </summary>
+    /// <remarks>
+    /// Code is read before any of this, so a bracket between backticks is a character of the code
+    /// and closes nothing: "[a `]` code](address)" is one link whose words hold a bracket. A run of
+    /// backticks is closed by the next run of exactly as many, and by nothing else — which is what
+    /// lets a code span hold a backtick of its own. A run that nothing closes is ordinary text, so
+    /// the scan carries on from the end of it.
+    /// </remarks>
+    /// <param name="text">The markdown being read</param>
+    /// <param name="at">The first backtick of the run that opens it</param>
+    /// <param name="end">The last character worth looking at</param>
+    /// <returns>The last backtick of the run that closes it, or of the opening run where none does</returns>
+    private static int Ticks(string text, int at, int end)
+    {
+        var opened = at;
+        while (at + 1 <= end && at + 1 < text.Length && text[at + 1] == '`')
+            at++;
+
+        var ticks = at - opened + 1;
+
+        for (var seek = at + 1; seek <= end && seek < text.Length; seek++)
+        {
+            if (text[seek] != '`')
+                continue;
+
+            var from = seek;
+            while (seek + 1 <= end && seek + 1 < text.Length && text[seek + 1] == '`')
+                seek++;
+
+            if (seek - from + 1 == ticks)
+                return seek;
+        }
+
+        return at;
     }
 
     /// <summary>How many of <paramref name="marker"/> run from <paramref name="at"/>, plus a space.</summary>
