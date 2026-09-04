@@ -183,6 +183,22 @@ public class LabelsAndFiltersTests
     }
 
     [Fact]
+    public void Searching_over_an_unsupported_filter_hides_the_warning_until_the_search_is_cleared()
+    {
+        // The results come from the whole account, not from the filter, so a notice saying the
+        // list is empty because the filter can't be read would be explaining rows that aren't there.
+        var presenter = NewPresenter(Seeded());
+        presenter.Select(ViewSelection.OfFilter("f2"));
+
+        presenter.Search("chores");
+        Assert.Null(presenter.UnsupportedFilter);
+        Assert.NotEmpty(presenter.Rows);
+
+        presenter.Search(string.Empty);
+        Assert.Equal("assigned to: me", presenter.UnsupportedFilter!.Query);
+    }
+
+    [Fact]
     public void A_filter_that_no_longer_exists_shows_nothing()
     {
         var presenter = NewPresenter(Seeded());
