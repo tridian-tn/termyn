@@ -353,6 +353,9 @@ internal sealed class OutlineView : ListView
     /// </summary>
     protected override void OnDrawItem(DrawListViewItemEventArgs e)
     {
+        if (!Buffered(e.Bounds))
+            return;
+
         var columns = 0;
         foreach (ColumnHeader column in Columns)
             columns += column.Width;
@@ -374,10 +377,45 @@ internal sealed class OutlineView : ListView
     /// frame — the flicker under the mouse. Everything is painted by the draw handlers, so there is
     /// nothing the erase needs to do.
     /// </remarks>
+    /// <summary>True while a paint is being served, which is the only drawing that is buffered.</summary>
+    private bool _painting;
+
+    /// <summary>How much has been drawn through a paint, and how much was turned away to become one.</summary>
+    /// <remarks>
+    /// Internal because the fault this control had is invisible from the outside: it drew the right
+    /// pixels either way, and what was wrong was which side of a paint it drew them on. A test
+    /// crossing the rows with the pointer holds the first of these above nought — refusing to draw
+    /// at all would leave the flicker gone and the rows blank, and both readings tell those apart.
+    /// </remarks>
+    internal int DrawnInPaint { get; private set; }
+
+    internal int AskedOutsidePaint { get; private set; }
+
+    /// <summary>Forgets the counts, so a test can measure one stretch of drawing rather than all of it.</summary>
+    internal void ForgetDrawCounts() => (DrawnInPaint, AskedOutsidePaint) = (0, 0);
+
     protected override void WndProc(ref Message m)
     {
         const int WmEraseBackground = 0x0014;
         const int WmContextMenu = 0x007B;
+        const int WmPaint = 0x000F;
+
+        // Which side of this a draw arrives on is the whole of the flicker, so it is noted here
+        // rather than guessed at from anything the draw itself carries.
+        if (m.Msg == WmPaint)
+        {
+            _painting = true;
+            try
+            {
+                base.WndProc(ref m);
+            }
+            finally
+            {
+                _painting = false;
+            }
+
+            return;
+        }
 
         if (m.Msg == WmEraseBackground)
         {
@@ -396,6 +434,37 @@ internal sealed class OutlineView : ListView
         base.WndProc(ref m);
     }
 
+    /// <summary>
+    /// Whether this draw will reach the screen through the buffer, and asks for one that will when
+    /// it won't.
+    /// </summary>
+    /// <remarks>
+    /// The list redraws a row the first time the pointer enters it, and that redraw does not come
+    /// through a paint — it is drawn straight onto the window. Double buffering only covers a
+    /// paint, which is why this control has had it all along and flickered anyway: the row's six
+    /// draws, the item and then each of its cells, land one at a time and the row is watched being
+    /// assembled. What it draws is identical to what is already there, which is why it reads as a
+    /// flicker rather than as a change.
+    ///
+    /// So nothing is drawn outside a paint. The row is asked for again as one instead, which comes
+    /// back buffered and puts it up in a single go. Asking costs a paint that would not otherwise
+    /// have happened, and it happens once per row until something redraws the list.
+    /// </remarks>
+    /// <param name="bounds">What the draw would have covered</param>
+    /// <returns>True to go ahead and draw</returns>
+    private bool Buffered(Rectangle bounds)
+    {
+        if (_painting)
+        {
+            DrawnInPaint++;
+            return true;
+        }
+
+        AskedOutsidePaint++;
+        Invalidate(bounds);
+        return false;
+    }
+
     /// <summary>Whether a screen position packed into an lParam is over a row.</summary>
     private bool PointsAtRow(nint lParam)
     {
@@ -406,6 +475,9 @@ internal sealed class OutlineView : ListView
 
     protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
     {
+        if (!Buffered(e.Bounds))
+            return;
+
         if (e.ItemIndex >= _rows.Count)
             return;
 

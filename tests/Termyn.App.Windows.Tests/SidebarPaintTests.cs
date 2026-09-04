@@ -1,4 +1,7 @@
 using System.Runtime.InteropServices;
+using Termyn.Core.Model;
+using Termyn.Core.Settings;
+using Termyn.Presentation;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -35,5 +38,44 @@ public class SidebarPaintTests
         var styles = (int)SendMessage(outline.Handle, LvmGetExtendedListViewStyle, 0, 0);
 
         Assert.Equal(LvsExDoubleBuffer, styles & LvsExDoubleBuffer);
+    }
+
+    /// <summary>WM_MOUSEMOVE.</summary>
+    private const int WmMouseMove = 0x0200;
+
+    [Fact]
+    public void The_pointer_crossing_a_row_redraws_it_through_a_paint()
+    {
+        // The style above is not enough on its own, which is the whole of why the outline still
+        // flickered after it was set: the list redraws a row the first time the pointer enters it
+        // and draws that one straight onto the window, where buffering only covers a paint. The
+        // row's draws then land one at a time and it is watched being assembled.
+        //
+        // Both readings are asserted. That the row was asked for outside a paint says the fault
+        // this guards against actually happened here — without it the test would pass on a machine
+        // that never triggers it and prove nothing. That something was drawn inside a paint says
+        // the row still gets drawn, which refusing to draw at all would also satisfy the first.
+        using var form = new Form { Width = 900, Height = 600 };
+        var outline = new OutlineView { Theme = Theme.Resolve(ThemePreference.Light), Dock = DockStyle.Fill };
+        form.Controls.Add(outline);
+        form.Show();
+
+        outline.Rows = Enumerable.Range(0, 20)
+            .Select(i => new TaskRow($"t{i}", $"task {i}", Priority.P4, "Work", string.Empty, []))
+            .ToList();
+
+        form.Refresh();
+        Application.DoEvents();
+        outline.ForgetDrawCounts();
+
+        // Down the rows the way a hand crosses them.
+        for (var y = 40; y < 300; y += 12)
+        {
+            SendMessage(outline.Handle, WmMouseMove, 0, (y << 16) | 80);
+            Application.DoEvents();
+        }
+
+        Assert.True(outline.AskedOutsidePaint > 0, "the list never redrew a row outside a paint, so this proves nothing");
+        Assert.True(outline.DrawnInPaint > 0, $"nothing was drawn through a paint: {outline.AskedOutsidePaint} asked outside");
     }
 }
