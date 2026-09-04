@@ -89,6 +89,15 @@ public static class Links
         if (uri.Scheme != Uri.UriSchemeHttps)
             return null;
 
+        // Refused for the same reason a description's links refuse them, and needed here for a
+        // second one. "https://github.com@evil.example/x" is turned away by the host check below,
+        // since the host of that is evil.example — but credentials on a host that does pass,
+        // "https://anything@github.com/...", are carried into AbsoluteUri and handed to the shell
+        // from there. What arrives off the network is the release's own address, so this is the
+        // shape a tampered answer takes when the host has to stay right for the link to be taken.
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+            return null;
+
         if (!Array.Exists(Allowed, place =>
                 place.Host == uri.Host
                 && uri.AbsolutePath.StartsWith(place.Path, StringComparison.OrdinalIgnoreCase)))

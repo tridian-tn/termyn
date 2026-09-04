@@ -203,6 +203,13 @@ public sealed class GitHubReleaseCheck
         if (uri.Host is not ("github.com" or "www.github.com"))
             return null;
 
+        // Credentials written into the address survive into AbsoluteUri and go to the browser with
+        // it, where they reach the history and whatever the address bar shows. The host check above
+        // turns away a link only pretending to be GitHub; this turns away one that really is GitHub
+        // and carries something else along with it.
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+            return null;
+
         return uri.AbsolutePath.StartsWith($"/{Repository}/", StringComparison.OrdinalIgnoreCase)
             ? uri.AbsoluteUri
             : null;

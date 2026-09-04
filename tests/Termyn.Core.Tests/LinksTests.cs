@@ -37,6 +37,20 @@ public class LinksTests
         => Assert.Null(Links.Openable(url));
 
     [Theory]
+    [InlineData("https://anything@github.com/tridian-tn/termyn/releases/tag/v1.4.0")]
+    [InlineData("https://user:secret@github.com/tridian-tn/termyn/releases")]
+    [InlineData("https://user:secret@www.github.com/tridian-tn/termyn/releases")]
+    [InlineData("https://someone@app.todoist.com/app/filters")]
+    public void A_link_of_ours_carrying_credentials_is_not_opened(string url)
+    {
+        // The host in each of these is genuinely ours, so the host check has nothing to say about
+        // them — and what is written before it rides along in the address handed to the shell,
+        // into the browser's history and whatever its address bar shows. The other side of the
+        // pair the host check already covers, where the real host is somebody else's.
+        Assert.Null(Links.Openable(url));
+    }
+
+    [Theory]
     [InlineData("https://github.com/tridian-tn/termyn/releases")]
     [InlineData("https://www.github.com/tridian-tn/termyn/releases/tag/v1.4.0")]
     [InlineData("https://app.todoist.com/app/filters")]
