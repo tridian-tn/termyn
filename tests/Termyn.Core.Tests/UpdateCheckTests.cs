@@ -112,6 +112,18 @@ public class UpdateVersionTests
         Assert.Equal(UpdateResult.ReleasesPage, Links.Openable(UpdateResult.ReleasesPage));
     }
 
+    [Theory]
+    [InlineData("https://anything@github.com/tridian-tn/termyn/releases/tag/v9")]
+    [InlineData("https://user:secret@github.com/tridian-tn/termyn/releases")]
+    public void A_release_page_carrying_credentials_is_dropped(string url)
+    {
+        // This one is read straight off the answer to the release check, so it is the field a
+        // tampered answer gets to write. The host has to stay ours for the link to be taken at all,
+        // which leaves what can be written in front of it — and that goes to the browser with the
+        // address, into its history and its address bar.
+        Assert.Null(GitHubReleaseCheck.SafeUrl(url));
+    }
+
     [Fact]
     public void A_release_naming_an_empty_page_falls_back_like_one_naming_none()
     {
