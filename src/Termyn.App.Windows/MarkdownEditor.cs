@@ -183,7 +183,7 @@ internal sealed class MarkdownEditor : RichTextBox
         rtf.Append(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil ")
            .Append(Font.FontFamily.Name)
            .Append(@";}{\f1\fmodern ")
-           .Append(FontFamily.GenericMonospace.Name)
+           .Append(Faces.FixedWidth.Name)
            .Append(@";}}");
 
         rtf.Append(@"{\colortbl ;")
