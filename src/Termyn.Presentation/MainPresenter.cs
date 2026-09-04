@@ -146,7 +146,15 @@ public sealed class MainPresenter
     public IReadOnlyList<SidebarNode> Sidebar { get; private set; } = [];
 
     /// <summary>The path to the current view, the list you are on last. See <see cref="ViewPath"/>.</summary>
-    public IReadOnlyList<Crumb> Breadcrumbs { get; private set; } = [];
+    /// <remarks>
+    /// Search results while a search is on, whatever is selected. Worked out on each read rather
+    /// than stored, so a search — which republishes the rows without rebuilding the view — can't
+    /// leave a stale path behind.
+    /// </remarks>
+    public IReadOnlyList<Crumb> Breadcrumbs => Searching ? ViewPath.SearchResults : _viewPath;
+
+    /// <summary>The path to <see cref="Selection"/>, kept whether or not a search is standing in for it.</summary>
+    private IReadOnlyList<Crumb> _viewPath = [];
 
     /// <summary>Active tasks due today or overdue — what the tray icon badges.</summary>
     public int DueToday { get; private set; }
@@ -175,10 +183,20 @@ public sealed class MainPresenter
     public string SearchQuery { get; private set; } = string.Empty;
 
     /// <summary>
-    /// The selected saved filter when Termyn can't evaluate it, so the view can say so and offer
-    /// the way to it. Null whenever the current view is showing a real answer.
+    /// Whether a search is on. Whitespace alone isn't one: the outline shows the view then, and
+    /// everything that says "searching" has to agree with the rows.
     /// </summary>
-    public UnreadableFilter? UnsupportedFilter { get; private set; }
+    private bool Searching => !string.IsNullOrWhiteSpace(SearchQuery);
+
+    /// <summary>
+    /// The selected saved filter when Termyn can't evaluate it, so the view can say so and offer
+    /// the way to it. Null whenever the current view is showing a real answer — which a search is,
+    /// whatever list it was typed over: the results come from the whole account, not the filter.
+    /// </summary>
+    public UnreadableFilter? UnsupportedFilter => Searching ? null : _unsupportedFilter;
+
+    /// <summary>The unreadable filter as the view found it, kept while a search is hiding it.</summary>
+    private UnreadableFilter? _unsupportedFilter;
 
     /// <summary>
     /// Every label in the account, in sidebar order. Duplicates by name are kept, unlike the
@@ -1156,13 +1174,13 @@ public sealed class MainPresenter
             var snapshot = _engine.Snapshot();
 
             // Cleared before the outline is built, which is what decides whether it gets set again.
-            UnsupportedFilter = null;
+            _unsupportedFilter = null;
 
             Labels = snapshot.Labels.OrderBy(l => l.ItemOrder).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
-            Breadcrumbs = ViewPath.For(Selection, snapshot);
+            _viewPath = ViewPath.For(Selection, snapshot);
 
             // The selected row can go — deleted here, or removed by a sync — and every path that
             // falls the selection back to a default would otherwise have to remember to move the key
@@ -1540,7 +1558,7 @@ public sealed class MainPresenter
         {
             // Nothing, not everything. A full task list looks like a filter that ran and matched
             // broadly, which is the mistake this whole path exists to avoid.
-            UnsupportedFilter = new UnreadableFilter(
+            _unsupportedFilter = new UnreadableFilter(
                 ForDisplay(filter.Query),
                 Links.TodoistFilter(filter.Id, filter.Name));
             return _ => false;
@@ -1570,7 +1588,7 @@ public sealed class MainPresenter
     {
         IReadOnlyList<TaskRow> rows;
 
-        if (string.IsNullOrWhiteSpace(SearchQuery))
+        if (!Searching)
         {
             rows = _allRows;
         }

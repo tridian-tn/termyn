@@ -32,11 +32,20 @@ public sealed record PathLine(string Text, IReadOnlyList<PathLink> Links);
 ///
 /// Every step but the last is a view in its own right, so the path doubles as the way back up: a
 /// section names the project holding it, a nested project names the ones above it. A smart view, a
-/// label and a filter have nothing above them and are a single step.
+/// label and a filter have nothing above them and are a single step. So are search results, which
+/// stand in for the path while a search is on: see <see cref="SearchResults"/>.
 /// </remarks>
 public static class ViewPath
 {
-        /// <summary>
+    /// <summary>The path while a search is on: one step, leading nowhere.</summary>
+    /// <remarks>
+    /// A search runs over the whole account rather than the list that was open, so a path still
+    /// naming that list would say the results came from it. And there's nothing above the results
+    /// to go back up to — clearing the search box is the way back.
+    /// </remarks>
+    public static readonly IReadOnlyList<Crumb> SearchResults = [new Crumb("Search results", null)];
+
+    /// <summary>
     /// The path written as one line, with where in it each step that leads somewhere sits.
     /// </summary>
     /// <remarks>

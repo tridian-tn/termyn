@@ -30,9 +30,9 @@ public class ViewPathTests
         return store;
     }
 
-    private static MainPresenter NewPresenter(InMemorySnapshotStore store)
+    private static MainPresenter NewPresenter(InMemorySnapshotStore store, FakeApi? api = null)
     {
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();
         return new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
     }
@@ -218,5 +218,116 @@ public class ViewPathTests
         presenter.Select(ViewSelection.OfProject("a"));
 
         Assert.Equal("B / A", Reads(presenter));
+    }
+
+    // ---- While searching ---------------------------------------------------------------------------
+
+    [Fact]
+    public void Searching_reads_as_search_results_rather_than_the_list_that_was_open()
+    {
+        // The results are drawn from the whole account, so a path naming the list that was open
+        // would say they came from it.
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.OfProject("inner"));
+
+        presenter.Search("task");
+
+        Assert.Equal("Search results", Reads(presenter));
+    }
+
+    [Fact]
+    public void Search_results_are_a_single_step_that_leads_nowhere()
+    {
+        // There's nothing above the results to go back up to, and the step itself is where you are.
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.OfSection("s1"));
+
+        presenter.Search("task");
+
+        Assert.Null(Assert.Single(presenter.Breadcrumbs).Target);
+    }
+
+    [Fact]
+    public void Clearing_the_search_puts_the_path_back()
+    {
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.OfProject("inner"));
+        presenter.Search("task");
+
+        presenter.Search(string.Empty);
+
+        Assert.Equal("Work / Chores", Reads(presenter));
+    }
+
+    [Fact]
+    public void Moving_to_another_list_while_searching_keeps_the_results_heading()
+    {
+        // The search box still has its text, so the rows are still the results — and the path has
+        // to say so however the view underneath them was rebuilt.
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.OfProject("inner"));
+        presenter.Search("task");
+
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+        Assert.Equal("Search results", Reads(presenter));
+
+        presenter.Search(string.Empty);
+        Assert.Equal("Today", Reads(presenter));
+    }
+
+    [Fact]
+    public void A_search_of_nothing_but_spaces_is_not_a_search()
+    {
+        // The outline shows the list that was open when only whitespace has been typed, and the
+        // path has to agree with the rows beneath it.
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.OfProject("inner"));
+
+        presenter.Search("   ");
+
+        Assert.Equal("Work / Chores", Reads(presenter));
+    }
+
+    [Fact]
+    public void The_path_and_the_rows_agree_on_whether_a_search_is_on()
+    {
+        // One predicate decides both, and this is what that buys: never a heading naming the list
+        // that was open over rows from the whole account, nor the other way round.
+        var store = Store();
+        store.PutResource("items", "i2", """{"id":"i2","content":"Another task","project_id":"outer","child_order":1}""");
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfProject("inner"));
+
+        presenter.Search("   ");
+        Assert.Equal("Work / Chores", Reads(presenter));
+        Assert.Equal(["i1"], presenter.Rows.Select(r => r.Id));
+
+        presenter.Search("task");
+        Assert.Equal("Search results", Reads(presenter));
+        Assert.Contains("i2", presenter.Rows.Select(r => r.Id));
+    }
+
+    [Fact]
+    public async Task A_sync_landing_mid_search_keeps_the_heading_and_the_path_beneath_it_current()
+    {
+        // The sync loop republishes from its own thread, and it has to leave the heading alone
+        // while still taking in what changed — the list that was open, here, being renamed.
+        var api = new FakeApi
+        {
+            Response = new SyncResponse
+            {
+                SyncToken = "s1",
+                Changes = [Json.Change("projects", "inner", """{"id":"inner","name":"Errands","parent_id":"outer","child_order":1}""")],
+            },
+        };
+        var presenter = NewPresenter(Store(), api);
+        presenter.Select(ViewSelection.OfProject("inner"));
+        presenter.Search("task");
+
+        await presenter.SyncAsync();
+        Assert.Equal("Search results", Reads(presenter));
+
+        presenter.Search(string.Empty);
+        Assert.Equal("Work / Errands", Reads(presenter));
     }
 }
