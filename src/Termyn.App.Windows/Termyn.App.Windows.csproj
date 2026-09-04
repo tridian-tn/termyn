@@ -21,7 +21,7 @@
     <!-- Parses the markdown a description is written in, for the rendered half of the notes panel.
          Only ever read from: the text the account holds is what gets saved, so nothing here can
          rewrite a description into a poorer version of itself. -->
-    <PackageReference Include="Markdig" Version="0.42.0" />
+    <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
   <ItemGroup>
