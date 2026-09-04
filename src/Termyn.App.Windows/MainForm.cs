@@ -456,6 +456,13 @@ internal sealed class MainForm : Form
             Text = "Loading…",
         };
 
+        // The failed count is the only part of the status there is anything to do about, and this
+        // is where the doing lives. Clicking anywhere on the status opens it, which is coarse but
+        // discoverable — the alternative is hit-testing a stretch of a label nobody would guess was
+        // a target. It does nothing at all while there is nothing to show.
+        _status.Click += (_, _) => ShowFailures();
+        _status.Cursor = Cursors.Default;
+
         Controls.Add(_split);
         Controls.Add(_status);
         Controls.Add(_search);
@@ -948,7 +955,21 @@ internal sealed class MainForm : Form
             SyncState.ReconnectNeeded => Theme.ForPriority(Priority.P1),
             _ => _theme.Muted,
         };
+
+        // Only a target while there is something behind it, so the pointer doesn't promise a window
+        // that never opens.
+        _status.Cursor = _presenter.SyncStatus.Failed > 0 ? Cursors.Hand : Cursors.Default;
     }
+
+    /// <summary>
+    /// Shows the writes the server refused, so they can be read and let go.
+    /// </summary>
+    /// <remarks>
+    /// The count in the status bar is the only sign of these, and until this it was the only thing
+    /// there was: a "1 failed" that named nothing and lasted for good.
+    /// </remarks>
+    private void ShowFailures()
+        => FailedChangesForm.Show(this, _theme, () => _presenter.FailedChanges, _presenter.DismissFailure);
 
     private void Render()
     {

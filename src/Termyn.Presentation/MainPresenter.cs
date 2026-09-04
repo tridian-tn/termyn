@@ -179,6 +179,36 @@ public sealed class MainPresenter
 
     public bool CanUndo => _engine.CanUndo;
 
+    /// <summary>
+    /// The writes the server has finished refusing, in the words of whoever made them.
+    /// </summary>
+    /// <remarks>
+    /// Empty until something fails, which is nearly always. Read on demand rather than kept: it is
+    /// only ever wanted when the user goes looking at a count that isn't nought.
+    /// </remarks>
+    public IReadOnlyList<FailedChange> FailedChanges
+        => _projectedFrom is { } snapshot ? Failures.From(_engine.Outbox, snapshot) : [];
+
+    /// <summary>
+    /// Lets a refused write go, and puts the count right.
+    /// </summary>
+    /// <remarks>
+    /// The engine's own reversal, which for a change to something that already exists is a second
+    /// helping of a rollback that happened when the command failed, and for a refused creation is
+    /// what finally takes the local copy away. Either way the command leaves the outbox, which is
+    /// the count the user is trying to be rid of.
+    /// </remarks>
+    /// <param name="uuid">Which failure to let go, from <see cref="FailedChanges"/></param>
+    public void DismissFailure(string uuid)
+    {
+        _engine.Revert(uuid);
+
+        // The model and not only the count: letting a refused creation go takes the task out of it,
+        // and re-filtering the rows already built would leave that task on screen until the next
+        // sync happened to rebuild them.
+        Publish();
+    }
+
     /// <summary>Free-text filter applied to the rendered rows.</summary>
     public string SearchQuery { get; private set; } = string.Empty;
 
