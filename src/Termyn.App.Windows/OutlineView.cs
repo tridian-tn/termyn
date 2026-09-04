@@ -368,15 +368,6 @@ internal sealed class OutlineView : ListView
         e.Graphics.FillRectangle(background, left, e.Bounds.Y, e.Bounds.Right - left, e.Bounds.Height);
     }
 
-    /// <summary>
-    /// Swallows the background erase, and the request for a menu where there is no task to put one
-    /// on.
-    /// </summary>
-    /// <remarks>
-    /// The control repaints a row as the pointer crosses it, and erasing first leaves it blank for a
-    /// frame — the flicker under the mouse. Everything is painted by the draw handlers, so there is
-    /// nothing the erase needs to do.
-    /// </remarks>
     /// <summary>True while a paint is being served, which is the only drawing that is buffered.</summary>
     private bool _painting;
 
@@ -389,19 +380,30 @@ internal sealed class OutlineView : ListView
     /// </remarks>
     internal int DrawnInPaint { get; private set; }
 
+    /// <summary>How many draws were refused and asked for again as a paint.</summary>
     internal int AskedOutsidePaint { get; private set; }
 
     /// <summary>Forgets the counts, so a test can measure one stretch of drawing rather than all of it.</summary>
     internal void ForgetDrawCounts() => (DrawnInPaint, AskedOutsidePaint) = (0, 0);
 
+    /// <summary>
+    /// Notes which side of a paint the drawing is on, and swallows the background erase and the
+    /// request for a menu where there is no task to put one on.
+    /// </summary>
+    /// <remarks>
+    /// The control repaints a row as the pointer crosses it, and erasing first leaves it blank for a
+    /// frame — the flicker under the mouse. Everything is painted by the draw handlers, so there is
+    /// nothing the erase needs to do.
+    ///
+    /// Whether a draw is inside a paint is not something the draw itself carries, and it is the
+    /// whole of the other half of that flicker, so it is noted here. See <see cref="Buffered"/>.
+    /// </remarks>
     protected override void WndProc(ref Message m)
     {
         const int WmEraseBackground = 0x0014;
         const int WmContextMenu = 0x007B;
         const int WmPaint = 0x000F;
 
-        // Which side of this a draw arrives on is the whole of the flicker, so it is noted here
-        // rather than guessed at from anything the draw itself carries.
         if (m.Msg == WmPaint)
         {
             _painting = true;

@@ -68,10 +68,15 @@ public class SidebarPaintTests
         Application.DoEvents();
         outline.ForgetDrawCounts();
 
-        // Down the rows the way a hand crosses them.
-        for (var y = 40; y < 300; y += 12)
+        // Down the rows the way a hand crosses them, aimed at where the rows actually are rather
+        // than at a guess: how tall one is follows from the font and the display, so counting in
+        // pixels from the top would walk past them entirely on a machine unlike this one.
+        for (var i = 0; i < 12; i++)
         {
-            SendMessage(outline.Handle, WmMouseMove, 0, (y << 16) | 80);
+            var row = outline.GetItemRect(i);
+            var point = ((row.Top + row.Height / 2) << 16) | ((row.Left + 8) & 0xFFFF);
+
+            SendMessage(outline.Handle, WmMouseMove, 0, point);
             Application.DoEvents();
         }
 
