@@ -42,7 +42,7 @@ internal sealed record Shell(
     /// </summary>
     bool CacheRebuilt = false);
 
-/// <summary>Main window: sidebar, capture box, task outline, and the keyboard map.</summary>
+/// <summary>Main window: sidebar, search box, task outline, and the keyboard map.</summary>
 internal sealed class MainForm : Form
 {
     private const string ReconnectMessage = "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.";
@@ -52,8 +52,6 @@ internal sealed class MainForm : Form
     private readonly Shell _shell;
     private readonly CancellationTokenSource _cts = new();
 
-    private readonly HintTextBox _capture;
-    private readonly Label _preview;
     private readonly TextBox _search;
     private readonly TreeView _sidebar;
     private readonly LinkLabel _crumbs;
@@ -231,13 +229,6 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(640, 400);
         KeyPreview = true;
-
-        // The same box the quick-add popup uses, so the guide stays up while you type into either.
-        _capture = new HintTextBox { Dock = DockStyle.Top, Hint = CapturePreviewText.Hint };
-        _capture.KeyDown += OnCaptureKeyDown;
-        _capture.TextChanged += (_, _) => UpdatePreview();
-
-        _preview = new Label { Dock = DockStyle.Top, Height = 20, Padding = new Padding(4, 2, 0, 0) };
 
         _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
         _search.TextChanged += (_, _) => Guarded(() => _presenter.Search(_search.Text));
@@ -466,10 +457,8 @@ internal sealed class MainForm : Form
         Controls.Add(_split);
         Controls.Add(_status);
         Controls.Add(_search);
-        Controls.Add(_preview);
-        Controls.Add(_capture);
 
-        // Last, so it docks outermost and sits above the capture box where a menu bar belongs.
+        // Last, so it docks outermost and sits above the search box where a menu bar belongs.
         // Built after the outline and the sidebar exist: filling it asks both what is selected.
         var bar = BuildMenuBar();
         MainMenuStrip = bar;
@@ -802,8 +791,6 @@ internal sealed class MainForm : Form
         _description.Theme = _theme;
         _comments.Theme = _theme;
         _panelHeader.Theme = _theme;
-        _preview.ForeColor = _theme.Muted;
-        _capture.HintColour = _theme.Muted;
 
         // The step you are on is the one being read; the ones above it are offers, and drawn as
         // links so they read as such without needing to be hovered to find out.
@@ -1433,35 +1420,6 @@ internal sealed class MainForm : Form
 
         return true;
     }
-
-    // ---- Capture -------------------------------------------------------------------------------
-
-    private async void OnCaptureKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.KeyCode != Keys.Enter)
-            return;
-
-        e.SuppressKeyPress = true;
-        var text = _capture.Text;
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-
-        _capture.Clear();
-        UpdatePreview();
-
-        if (!await GuardedAsync(() => _presenter.CaptureAsync(text, _cts.Token)))
-        {
-            // Nothing was created anywhere, so give the user their typing back.
-            _capture.Text = text;
-            _capture.SelectionStart = text.Length;
-            UpdatePreview();
-            return;
-        }
-
-        _scheduler.NotifyWrite();
-    }
-
-    private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);
 
     // ---- Description ---------------------------------------------------------------------------
 
@@ -2593,7 +2551,9 @@ internal sealed class MainForm : Form
         switch (command)
         {
             case AppCommand.NewTask:
-                _capture.Focus();
+                // Guarded like the hotkey and the tray, which are the other two ways in: the popup
+                // is built the first time it is asked for, and Run has no guard of its own.
+                Guarded(QuickAdd.Summon);
                 return false;
 
             case AppCommand.NewProject:
