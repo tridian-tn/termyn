@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # The actions the CI workflow uses. They name a major tag, which floats within a major but never
+  # across one, so nothing moves on its own until somebody looks — which is how all four of them
+  # ended up between two and four majors behind, still declaring a Node the runner had stopped
+  # offering.
+  - package-ecosystem: github-actions
+    directory: "/"
+
+    # Monthly rather than weekly. These move a few times a year between them, and a bot that opens
+    # something most weeks is a bot whose pull requests stop being read.
+    schedule:
+      interval: monthly
+
+    # One pull request for the lot rather than one per action. They get read and merged in one
+    # sitting anyway, and the CI run that would prove any of them proves all of them at once.
+    groups:
+      actions:
+        patterns:
+          - "*"
