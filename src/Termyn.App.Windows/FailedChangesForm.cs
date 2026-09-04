@@ -40,7 +40,9 @@ internal sealed class FailedChangesForm : Form
 
         var heading = new Label
         {
-            Text = "Termyn couldn't save these. They are not in your account.",
+            // Not "these are not in your account", which is only true of the ones the server
+            // refused. The ones it never answered about may well have landed, and each says so.
+            Text = "Termyn couldn't complete these changes.",
             Location = new Point(14, 12),
             Size = new Size(492, 20),
             ForeColor = theme.Muted,
@@ -115,11 +117,20 @@ internal sealed class FailedChangesForm : Form
             ? $"Todoist said: {reason}"
             : "Todoist gave no reason.";
 
+        // Where it ended up, which only a refusal actually settles. Saying "it never reached your
+        // account" of a change the server simply went quiet about would be a guess, and the wrong
+        // guess would have someone delete their only copy of something the account already has.
+        var landed = failure.Unruled
+            ? "Todoist never reported a result, so whether your account has this is unknown."
+            : "Todoist refused it, so your account doesn't have it.";
+
         // Said before it happens rather than asked about afterwards. Dismissing a change that was
         // already put back costs nothing, and this is the one time it costs something.
-        _reason.Text = failure.DiscardsWork
-            ? $"{said}\r\n\r\nDismissing this removes it from Termyn. It was never added to your account, so this is the only copy of it."
-            : $"{said}\r\n\r\nThis was already put back. Dismissing it only clears the notice.";
+        var cost = failure.DiscardsWork
+            ? "Dismissing removes Termyn's copy, which is the only one on this machine."
+            : "Termyn has already put this back. Dismissing only clears the notice.";
+
+        _reason.Text = $"{said}\r\n{landed}\r\n\r\n{cost}";
     }
 
     private void Dismiss()

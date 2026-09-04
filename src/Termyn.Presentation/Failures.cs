@@ -17,10 +17,19 @@ namespace Termyn.Presentation;
 ///
 /// A creation is the other way about. One the server refuses outright is cancelled there and then
 /// and never reaches this list at all, so a creation that does reach it is one the server never
-/// ruled on — the account may well have it, which is why what was typed was kept, and dismissing
-/// is what finally takes it away.
+/// ruled on — which is why what was typed was kept, and dismissing is what finally takes it away.
 /// </param>
-public sealed record FailedChange(string Uuid, string Change, string? Subject, string? Reason, bool DiscardsWork)
+/// <param name="Unruled">
+/// Whether the server never said either way, as against having refused it. Only a refusal says
+/// where the change ended up: silence leaves it unknown, and the account may have it after all.
+/// </param>
+public sealed record FailedChange(
+    string Uuid,
+    string Change,
+    string? Subject,
+    string? Reason,
+    bool DiscardsWork,
+    bool Unruled)
 {
     /// <summary>
     /// The one line of it: what was being done, and to what.
@@ -59,7 +68,24 @@ public static class Failures
             .ToList();
 
     private static FailedChange Describe(OutboxCommand command, ModelSnapshot snapshot)
-        => new(command.Uuid, Change(command.Type), Subject(command, snapshot), Reason(command), Creates(command));
+        => new(
+            command.Uuid,
+            Change(command.Type),
+            Subject(command, snapshot),
+            Reason(command),
+            Creates(command),
+            Unruled(command));
+
+    /// <summary>
+    /// Whether the server never said either way, as against having refused it.
+    /// </summary>
+    /// <remarks>
+    /// The two are worth telling apart, because only one of them says where the change ended up. A
+    /// refusal is a definite answer: it didn't happen, and the account doesn't have it. Silence is
+    /// not — the engine gives up after so many rounds of it, and the account may well have the
+    /// change anyway. Counted rather than read off the message, which is ours and may be reworded.
+    /// </remarks>
+    private static bool Unruled(OutboxCommand command) => command.NoVerdictRounds > 0;
 
     /// <summary>Whether this command was making something that had not existed before.</summary>
     /// <remarks>
@@ -115,10 +141,27 @@ public static class Failures
     /// </remarks>
     private static string? Subject(OutboxCommand command, ModelSnapshot snapshot)
     {
-        if (Identifier(command) is not { Length: > 0 } id)
+        var family = command.Type.Split('_')[0];
+
+        // A comment or a reminder is about something else, and it is that something the user would
+        // recognise. Its own id names a note nobody has ever seen on screen.
+        if (family is "note" or "reminder")
+        {
+            var args = Arguments(command);
+            return Named(snapshot, "item", Text(args, "item_id"))
+                ?? Named(snapshot, "project", Text(args, "project_id"));
+        }
+
+        return Named(snapshot, family, Identifier(command));
+    }
+
+    /// <summary>What a resource of the given family is called, or null where nothing answers to it.</summary>
+    private static string? Named(ModelSnapshot snapshot, string family, string? id)
+    {
+        if (id is not { Length: > 0 })
             return null;
 
-        var named = command.Type.Split('_')[0] switch
+        var named = family switch
         {
             "project" => snapshot.Projects.FirstOrDefault(p => p.Id == id)?.Name,
             "section" => snapshot.Sections.FirstOrDefault(s => s.Id == id)?.Name,
@@ -129,19 +172,31 @@ public static class Failures
         return string.IsNullOrWhiteSpace(named) ? null : named;
     }
 
+    private static string? Text(JsonObject? args, string key)
+        => args?[key] is JsonValue value ? value.ToString() : null;
+
     /// <summary>The id the command names, which for a creation is the temporary one it was given.</summary>
     private static string? Identifier(OutboxCommand command)
     {
         if (command.TempId is { Length: > 0 } temp)
             return temp;
 
-        // Read rather than trusted: the arguments are stored as text and a command from an older
-        // build, or one this one doesn't queue, may carry nothing of the sort.
+        return Text(Arguments(command), "id");
+    }
+
+    /// <summary>
+    /// A command's arguments, or null where they can't be read.
+    /// </summary>
+    /// <remarks>
+    /// Read rather than trusted. They are stored as text, so a row written by an older build is
+    /// reachable here — and the window this feeds is the one somebody opened to clear a failure,
+    /// which is a poor moment for it to throw.
+    /// </remarks>
+    private static JsonObject? Arguments(OutboxCommand command)
+    {
         try
         {
-            return JsonNode.Parse(command.ArgsJson) is JsonObject args && args["id"] is JsonValue id
-                ? id.ToString()
-                : null;
+            return JsonNode.Parse(command.ArgsJson) as JsonObject;
         }
         catch (System.Text.Json.JsonException)
         {

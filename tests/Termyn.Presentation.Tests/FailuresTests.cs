@@ -200,7 +200,7 @@ public class FailuresTests
     [Fact]
     public void A_failure_reads_as_what_was_being_done_and_to_what()
     {
-        var failure = new FailedChange("u1", "Changing a task", "Buy milk", "no", false);
+        var failure = new FailedChange("u1", "Changing a task", "Buy milk", "no", false, false);
 
         Assert.Equal("Changing a task — Buy milk", failure.ToString());
     }
@@ -210,7 +210,7 @@ public class FailuresTests
     {
         // Rather than trailing a dash with nothing after it, which reads as a name that failed to
         // load rather than as one there was never going to be.
-        var failure = new FailedChange("u1", "Deleting a task", null, "no", false);
+        var failure = new FailedChange("u1", "Deleting a task", null, "no", false, false);
 
         Assert.Equal("Deleting a task", failure.ToString());
     }
@@ -286,4 +286,93 @@ public class FailuresTests
         await engine.SyncAsync();
         await presenter.LoadAsync();
     }
+
+    [Fact]
+    public void A_comment_and_a_reminder_are_named_after_the_task_they_are_on()
+    {
+        // Their own ids name a note and a reminder, neither of which has ever been on screen. What
+        // the user would recognise is the task, which is what the arguments carry.
+        var comment = new OutboxCommand
+        {
+            Uuid = "u1",
+            Type = "note_add",
+            TempId = "tmp-note",
+            ArgsJson = """{"item_id":"i1","content":"a thought"}""",
+            State = OutboxState.Failed,
+        };
+
+        var reminder = new OutboxCommand
+        {
+            Uuid = "u2",
+            Type = "reminder_add",
+            TempId = "tmp-rem",
+            ArgsJson = """{"item_id":"i1"}""",
+            State = OutboxState.Failed,
+        };
+
+        var failures = Failures.From([comment, reminder], WithTask());
+
+        Assert.Equal("Adding a comment — Task", failures[0].ToString());
+        Assert.Equal("Adding a reminder — Task", failures[1].ToString());
+    }
+
+    [Fact]
+    public void A_comment_on_a_project_is_named_after_the_project()
+    {
+        var comment = new OutboxCommand
+        {
+            Uuid = "u1",
+            Type = "note_add",
+            TempId = "tmp-note",
+            ArgsJson = """{"project_id":"p1","content":"a thought"}""",
+            State = OutboxState.Failed,
+        };
+
+        Assert.Equal("Work", Assert.Single(Failures.From([comment], WithTask())).Subject);
+    }
+
+    [Fact]
+    public void A_refusal_and_a_silence_are_told_apart()
+    {
+        // Only a refusal says where the change ended up. Reading a silence as a refusal would have
+        // the window tell someone their account doesn't have something it may well have.
+        var refused = new OutboxCommand
+        {
+            Uuid = "u1", Type = "item_update", ArgsJson = """{"id":"i1"}""", State = OutboxState.Failed,
+        };
+
+        var unanswered = new OutboxCommand
+        {
+            Uuid = "u2", Type = "item_update", ArgsJson = """{"id":"i1"}""", State = OutboxState.Failed,
+            NoVerdictRounds = 2,
+        };
+
+        var failures = Failures.From([refused, unanswered], WithTask());
+
+        Assert.False(failures[0].Unruled);
+        Assert.True(failures[1].Unruled);
+    }
+
+    [Fact]
+    public async Task A_creation_the_server_never_answered_about_is_marked_unruled()
+    {
+        // The path that actually produces one, rather than a command built by hand: it is the only
+        // way a creation reaches this list at all.
+        var (presenter, engine, api) = await Loaded();
+
+        engine.AddItem(new JsonObject { ["content"] = "Buy milk", ["project_id"] = "p1" });
+        await Ignore(presenter, engine, api);
+
+        var failure = Assert.Single(presenter.FailedChanges);
+
+        Assert.True(failure.Unruled);
+        Assert.True(failure.DiscardsWork);
+    }
+
+    /// <summary>One project and one task, for naming things against.</summary>
+    private static ModelSnapshot WithTask()
+        => new(
+            [new TaskItem { Id = "i1", Content = "Task", ProjectId = "p1" }],
+            [new Project { Id = "p1", Name = "Work" }],
+            [], [], [], [], null, Today, TimeZoneInfo.Utc, 0, 0, [], new Dictionary<string, int>());
 }
