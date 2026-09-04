@@ -13,10 +13,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -36,10 +36,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
@@ -70,7 +70,7 @@ jobs:
       # Named rather than globbed at the directory, so the publish folder underneath doesn't come
       # too — that is the unpackaged app, and it is what both of these are made of.
       - name: Keep them
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: termyn-artefacts
           if-no-files-found: error
@@ -91,7 +91,7 @@ jobs:
 
     steps:
       - name: Take the artefacts the packaging job built
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: termyn-artefacts
           path: artifacts
