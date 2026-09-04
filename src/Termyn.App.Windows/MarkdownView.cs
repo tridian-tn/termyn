@@ -413,20 +413,20 @@ internal sealed class MarkdownView : RichTextBox
                 // link drawn in the link colour looks like something to click and then isn't, which
                 // is a worse answer than reading as the plain text it is.
                 var target = Links.External(link.Url);
-                var from = TextLength;
+                var from = _at;
 
                 foreach (var child in link)
                     WriteInline(child, target is null ? style : style with { Link = true });
 
-                if (target is not null && TextLength > from)
-                    _links.Add((from, TextLength, target));
+                if (target is not null && _at > from)
+                    _links.Add((from, _at, target));
                 break;
 
             // The angle-bracket form, which is a leaf rather than a link and so used to render as
             // nothing at all — the whole URL gone from the preview with no sign it was there.
             case AutolinkInline auto:
                 var bare = auto.IsEmail ? null : Links.External(auto.Url);
-                var opened = TextLength;
+                var opened = _at;
 
                 // Likewise the angle brackets, which are written but not drawn.
                 Write(
@@ -435,8 +435,8 @@ internal sealed class MarkdownView : RichTextBox
                     newLine: false,
                     from: Inside(auto.Span, 1));
 
-                if (bare is not null && TextLength > opened)
-                    _links.Add((opened, TextLength, bare));
+                if (bare is not null && _at > opened)
+                    _links.Add((opened, _at, bare));
                 break;
 
             // Also a leaf. "&amp;" is written this way by anything that generates markdown from
@@ -521,10 +521,25 @@ internal sealed class MarkdownView : RichTextBox
     /// Not its length: the box keeps a line ending as one newline where this hands it two. A run
     /// carries its own endings as well as the one that closes it — a fenced block arrives here as
     /// several lines in a single run — so they're counted rather than assumed to be one.
+    ///
+    /// It is the pair that collapses and not the return on its own. A return with nothing after it
+    /// is a line ending of its own and stays a character, which a description can hold: the parser
+    /// tidies the line endings of anything it reads, but markdown nested past what it will take is
+    /// written through here exactly as the account sent it.
     /// </remarks>
     /// <param name="written">The text handed to the box</param>
     /// <returns>How many characters of it the box will hold</returns>
-    private static int Shown(string written) => written.Length - written.AsSpan().Count('\r');
+    private static int Shown(string written) => written.Length - written.AsSpan().Count("\r\n");
+
+    /// <summary>
+    /// How much text the writing believes it has put in the box.
+    /// </summary>
+    /// <remarks>
+    /// Internal so a test can hold it against what the box says it is holding. The two agreeing is
+    /// what everything written after a run depends on, and a description only has to reach here
+    /// with a line ending the writing counts wrongly for the two to part company.
+    /// </remarks>
+    internal int Counted => _at;
 
     /// <summary>
     /// A span with its delimiters taken off each end.
