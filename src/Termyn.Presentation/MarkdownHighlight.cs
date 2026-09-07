@@ -260,6 +260,11 @@ public static class MarkdownHighlight
     /// it is left as one run. A written link is picked apart from the source rather than from the
     /// model's label and URL spans, which don't agree with each other across the reference forms.
     ///
+    /// Not every one of them is written "[words](address)". An image opens with a "!" before the
+    /// bracket, and a reference link can name its definition — "[words][label]" — or leave the name
+    /// to the words and stop at the closing bracket. So where the words open is found rather than
+    /// assumed, and what follows them is drawn only where there is something there.
+    ///
     /// Only coloured as a link where it is somewhere worth going. A <c>file:</c> or
     /// <c>javascript:</c> target drawn in the link colour looks like something to click and then
     /// isn't, which is the same judgement the rendered view makes.
@@ -275,8 +280,12 @@ public static class MarkdownHighlight
         }
 
         var span = link.Span;
-        var close = Closes(text, span);
         var end = span.End;
+
+        // An image's span opens with its "!", so the bracket the words start after is one further
+        // in. Taking the span's own start left the bracket coloured as a word.
+        var open = link.IsImage ? span.Start + 1 : span.Start;
+        var close = Closes(text, open, end);
 
         if (close < 0 || close > end)
         {
@@ -284,14 +293,21 @@ public static class MarkdownHighlight
             return;
         }
 
-        // "[words](address)" — the brackets and parentheses quiet, the words coloured when there is
-        // somewhere to go, the address quiet either way.
-        Fill(styles, span.Start + 1, close - span.Start - 1, openable ? MarkdownStyle.LinkText : MarkdownStyle.Text);
-        Fill(styles, span.Start, 1, MarkdownStyle.Marker);
+        // The words, coloured when there is somewhere to go, and the punctuation around them quiet
+        // — an image's "!" along with the bracket it introduces.
+        Fill(styles, open + 1, close - open - 1, openable ? MarkdownStyle.LinkText : MarkdownStyle.Text);
+        Fill(styles, span.Start, open - span.Start + 1, MarkdownStyle.Marker);
         Fill(styles, close, 1, MarkdownStyle.Marker);
-        Fill(styles, close + 1, 1, MarkdownStyle.Marker);
-        Fill(styles, close + 2, end - close - 2, MarkdownStyle.Url);
-        Fill(styles, end, 1, MarkdownStyle.Marker);
+
+        // "(address)" or "[label]", where there is one. A link that names its definition by its own
+        // words — "[words]" and nothing after it — closes at the end of the span, and drawing a tail
+        // it hasn't got put the marker colour on the character after the link.
+        if (close < end)
+        {
+            Fill(styles, close + 1, 1, MarkdownStyle.Marker);
+            Fill(styles, close + 2, end - close - 2, MarkdownStyle.Url);
+            Fill(styles, end, 1, MarkdownStyle.Marker);
+        }
 
         foreach (var child in link)
             PaintInline(child, styles, text);
@@ -311,13 +327,14 @@ public static class MarkdownHighlight
     /// character after a backslash is stepped over rather than counted.
     /// </remarks>
     /// <param name="text">The markdown being read</param>
-    /// <param name="span">Where the whole link was written</param>
+    /// <param name="start">The bracket the words open with</param>
+    /// <param name="end">The last character of the link</param>
     /// <returns>Where its words close, or -1 where nothing closes them</returns>
-    private static int Closes(string text, SourceSpan span)
+    private static int Closes(string text, int start, int end)
     {
         var depth = 0;
 
-        for (var at = span.Start; at <= span.End && at < text.Length; at++)
+        for (var at = start; at <= end && at < text.Length; at++)
         {
             switch (text[at])
             {
@@ -326,7 +343,7 @@ public static class MarkdownHighlight
                     break;
 
                 case '`':
-                    at = Ticks(text, at, span.End);
+                    at = Ticks(text, at, end);
                     break;
 
                 case '[':

@@ -271,6 +271,46 @@ public class MarkdownHighlightTests
         Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "file:///"));
     }
 
+    [Fact]
+    public void An_images_opening_bracket_is_syntax_like_every_other()
+    {
+        // The "!" comes first, so the span opens a character before the bracket does. Read as the
+        // bracket it left that one coloured as part of the words — the only bracket anywhere here
+        // that wasn't drawn as the syntax it is.
+        const string markdown = "![alt](https://example.com/a.png)";
+
+        Assert.Equal(MarkdownStyle.Marker, StyleAt(markdown, markdown.IndexOf('[')));
+        Assert.Equal(MarkdownStyle.Marker, StyleAt(markdown, 0));
+        Assert.Equal(MarkdownStyle.LinkText, StyleOf(markdown, "alt"));
+        Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "https://"));
+    }
+
+    [Fact]
+    public void A_link_named_by_its_own_words_stops_at_its_bracket()
+    {
+        // "[words]" with the address defined further down and nothing after the words. There is no
+        // "(address)" to draw, and drawing one anyway put the marker colour on the first character
+        // of the next word — a letter outside the link entirely, greyed out as though it were
+        // punctuation.
+        const string markdown = "See [example]next\n\n[example]: https://example.com";
+
+        Assert.Equal(MarkdownStyle.LinkText, StyleOf(markdown, "example]next"));
+        Assert.Equal(MarkdownStyle.Marker, StyleAt(markdown, markdown.IndexOf(']')));
+        Assert.Equal(MarkdownStyle.Text, StyleOf(markdown, "next"));
+    }
+
+    [Fact]
+    public void A_link_that_names_its_definition_still_draws_the_label()
+    {
+        // The other reference form, which does have something after the words. It was always right
+        // and stays so: the label is drawn where an address would be.
+        const string markdown = "See [words][label] here\n\n[label]: https://example.com";
+
+        Assert.Equal(MarkdownStyle.LinkText, StyleOf(markdown, "words"));
+        Assert.Equal(MarkdownStyle.Url, StyleOf(markdown, "label] here"));
+        Assert.Equal(MarkdownStyle.Text, StyleOf(markdown, "here"));
+    }
+
     // ---- Not falling over ----------------------------------------------------------------------
 
     [Fact]
