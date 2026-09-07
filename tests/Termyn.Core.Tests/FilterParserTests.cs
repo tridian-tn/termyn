@@ -287,6 +287,18 @@ public class FilterParserTests
     }
 
     [Theory]
+    [InlineData("""#"My Project""")]
+    [InlineData("""#My Project\""")]
+    [InlineData("\"")]
+    [InlineData("\\")]
+    public void A_query_that_stops_part_way_through_a_name_is_refused(string query)
+    {
+        // Rather than read as the shorter name it would otherwise leave behind: "#Foo\" is not a
+        // query for #Foo, and answering it as though it were is the mistake all-or-nothing is for.
+        Assert.False(Parse(query).IsSupported);
+    }
+
+    [Theory]
     [InlineData("no labels")]
     [InlineData("no label")]
     public void No_labels_is_read(string query)

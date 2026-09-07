@@ -93,14 +93,23 @@ public static class FilterParser
 
     public static FilterParse Parse(string? query, FilterVocabulary vocabulary)
     {
-        var tokens = Tokenize(query ?? string.Empty);
+        var text = query ?? string.Empty;
+        var tokens = Tokenize(text, out var unclosed);
+
+        // A quote or an escape left open means the query stops part-way through a name. Reading the
+        // rest as though it were finished would turn a broken query into a different working one —
+        // "#Foo\" into "#Foo" — and answering a question nobody asked is the whole of what
+        // all-or-nothing exists to prevent.
+        if (unclosed)
+            return FilterParse.No(Shortened(text));
+
         if (tokens.Count == 0)
             return FilterParse.No(string.Empty);
 
         // The raw query rather than the tokens rejoined: this one is already too big, and building
         // a second copy of it to throw away is the work we are refusing it to avoid.
         if (tokens.Count > MaxTokens)
-            return FilterParse.No(Shortened(query!));
+            return FilterParse.No(Shortened(text));
 
         var at = 0;
         var expression = ParseOr(tokens, vocabulary, ref at, out var failed);
@@ -677,8 +686,14 @@ public static class FilterParser
     /// otherwise take for its own — <c>/"Wed &amp; Thu"</c>, or <c>#Books\&amp;Papers</c>. Both put the
     /// character into the word being built rather than starting a new one, so a name is one token
     /// however it is written.
+    ///
+    /// Either can be left open, and the caller is told when one is: a query that stops in the
+    /// middle of a name is a broken query, not a shorter one.
     /// </remarks>
-    private static List<string> Tokenize(string query)
+    /// <param name="query">The query as the account stores it</param>
+    /// <param name="unclosed">Whether the query ended part-way through a quote or an escape</param>
+    /// <returns>The words and operators, in order</returns>
+    private static List<string> Tokenize(string query, out bool unclosed)
     {
         var tokens = new List<string>();
         var word = new StringBuilder();
@@ -740,6 +755,7 @@ public static class FilterParser
         }
 
         Flush();
+        unclosed = quoted || escaped;
         return tokens;
 
         void Flush()
