@@ -46,11 +46,19 @@ public sealed partial class QuickAddParser
 
             switch (token[0])
             {
+                // The first one names it and a second is left in the words. Dropped, it went from a
+                // task without being applied to it — the one thing here that lost what was typed.
                 case '#' when token.Length > 1:
-                    project ??= token[1..];
+                    if (project is null)
+                        project = token[1..];
+                    else
+                        content.Add(token);
                     continue;
                 case '/' when token.Length > 1:
-                    section ??= token[1..];
+                    if (section is null)
+                        section = token[1..];
+                    else
+                        content.Add(token);
                     continue;
                 case '@' when token.Length > 1:
                     if (!labels.Contains(token[1..], StringComparer.OrdinalIgnoreCase))

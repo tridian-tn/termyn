@@ -181,7 +181,12 @@ public class QuickAddParserTests
         Assert.Equal("A", parse.ProjectName);
         Assert.Equal("S1", parse.SectionName);
         Assert.Equal(new[] { "x" }, parse.Labels.ToArray());
-        Assert.Equal("Plan tomorrow", parse.Content); // the second date is left as text
+
+        // Anything the first one already answered for is left as text, which used to be true of the
+        // second date and not of the second project or section — those went from the task without
+        // being applied to it. The repeated label is the one that is properly gone: it named a label
+        // already on the task, so it was acted on rather than ignored.
+        Assert.Equal("Plan tomorrow #B /S2", parse.Content);
     }
 
     [Fact]
@@ -201,6 +206,38 @@ public class QuickAddParserTests
 
         Assert.Equal(string.Empty, parse.Content);
         Assert.Equal("Work", parse.ProjectName);
+    }
+
+    [Fact]
+    public void A_second_project_stays_in_the_words()
+    {
+        // The first one names the project. The second used to be dropped on the floor: not applied,
+        // not flagged, and not in the content either — so a word the user typed and can see in the
+        // box was simply not on the task afterwards.
+        var parse = Parse("call mum #Work #Personal");
+
+        Assert.Equal("Work", parse.ProjectName);
+        Assert.Equal("call mum #Personal", parse.Content);
+    }
+
+    [Fact]
+    public void A_second_section_stays_in_the_words()
+    {
+        var parse = Parse("tidy /Later /Someday");
+
+        Assert.Equal("Later", parse.SectionName);
+        Assert.Equal("tidy /Someday", parse.Content);
+    }
+
+    [Fact]
+    public void A_repeated_label_is_applied_once_and_not_written_twice()
+    {
+        // Not the same case, and it stays as it is: the second one names a label that is already on
+        // the task, so it was acted on rather than ignored and belongs out of the words.
+        var parse = Parse("water plants @home @home");
+
+        Assert.Equal(["home"], parse.Labels);
+        Assert.Equal("water plants", parse.Content);
     }
 
     [Fact]

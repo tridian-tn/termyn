@@ -32,7 +32,10 @@ public static class CapturePreviewText
             parts.Add("@" + label);
         if (parse.Priority != Priority.P4)
             parts.Add(parse.Priority.ToString());
-        if (parse.DueDate is { } date)
+        // A repeating task goes over with no due date at all, so naming one here would promise a
+        // task that isn't the one about to be created. The schedule itself is named below, which is
+        // the honest answer: the server settles when it next falls due, and nothing here can.
+        if (!parse.IsRecurrence && parse.DueDate is { } date)
             parts.Add(parse.DueTime is { } time ? $"{date:yyyy-MM-dd} {time:HH:mm}" : $"{date:yyyy-MM-dd}");
         if (parse.Unsupported.Count > 0)
             parts.Add("(needs a connection: " + string.Join(", ", parse.Unsupported) + ")");
