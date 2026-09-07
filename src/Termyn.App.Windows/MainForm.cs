@@ -1738,14 +1738,20 @@ internal sealed class MainForm : Form
 
     private void OnCommentPosted(string text) => Guarded(() =>
     {
-        if (_presenter.AddComment(CommentsOwner, text))
-            RefreshComments();
+        if (!_presenter.AddComment(CommentsOwner, text))
+            return;
+
+        RefreshComments();
+        Wrote();
     });
 
     private void OnCommentEdited(string id, string text) => Guarded(() =>
     {
-        if (_presenter.EditComment(id, text))
-            RefreshComments();
+        if (!_presenter.EditComment(id, text))
+            return;
+
+        RefreshComments();
+        Wrote();
     });
 
     /// <summary>
@@ -1765,8 +1771,23 @@ internal sealed class MainForm : Form
         {
             _presenter.DeleteComment(id);
             RefreshComments();
+            Wrote();
         });
     }
+
+    /// <summary>
+    /// Tells the sync loop something was written, so it goes now rather than on its own clock.
+    /// </summary>
+    /// <remarks>
+    /// A write is queued in the outbox and flushed by the loop, which otherwise comes round every
+    /// forty-five seconds. Until it does, a comment sits under "Not sent yet" on a window that is
+    /// online and idle — so the user is told their comment hasn't gone when nothing is wrong with
+    /// it except that nobody has asked.
+    ///
+    /// Named rather than called directly at each place, because the scattering is how the comments
+    /// came to be missed while the task writes around them were not.
+    /// </remarks>
+    private void Wrote() => _scheduler.NotifyWrite();
 
     // ---- Attachments -------------------------------------------------------------------------------
 
@@ -1864,6 +1885,7 @@ internal sealed class MainForm : Form
             // file whose upload then failed.
             _comments.ClearDraft();
             RefreshComments();
+            Wrote();
         }
         catch (OperationCanceledException)
         {
@@ -1906,6 +1928,11 @@ internal sealed class MainForm : Form
 
         var trouble = await _presenter.DetachFileAsync(commentId);
         RefreshComments();
+
+        // Whether or not it reported trouble. Half of this can land — the file goes and the comment
+        // it hung off is left to be written — and asking for a sync that turns out to have nothing
+        // to send costs a round trip, where not asking for one that did is the fault being fixed.
+        Wrote();
 
         if (trouble is not null)
             MessageBox.Show(this, trouble, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
