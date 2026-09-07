@@ -2427,7 +2427,21 @@ public sealed class SyncEngine
         // Every write the engine takes passes through here, which is what makes this the one place
         // that has to say so. Not the outbox being loaded from the store on the way up — that is
         // the same writes being remembered, not new ones being made.
-        Queued?.Invoke();
+        //
+        // Guarded the way the scheduler guards its own event, and for a sharper reason: by this
+        // point the write is in the store and in the outbox, so a subscriber that threw would
+        // unwind through the caller and have the window report a failure for a write that had
+        // already happened — and skip the refresh that would have shown it. The worst a swallowed
+        // one costs is the loop coming round on its own clock, which is where it was before any of
+        // this.
+        try
+        {
+            Queued?.Invoke();
+        }
+        catch
+        {
+            // A subscriber's failure must not turn a write that landed into one that looks lost.
+        }
 
         return cmd;
     }

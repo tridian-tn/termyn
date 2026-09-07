@@ -75,6 +75,22 @@ public class SyncEngineQueuedTests
     }
 
     [Fact]
+    public void A_listener_that_throws_does_not_lose_the_write()
+    {
+        // By the time this is said the write is in the store and in the outbox. A subscriber that
+        // threw would unwind through the caller and have the window report a failure for a write
+        // that had already happened — and skip the refresh that would have shown it.
+        var engine = Engine(new InMemorySnapshotStore());
+        engine.Queued += () => throw new InvalidOperationException("the loop is having a bad day");
+
+        var id = engine.AddItem(new JsonObject { ["content"] = "Buy milk" });
+
+        Assert.NotNull(id);
+        Assert.Equal(1, engine.PendingCount);
+        Assert.Equal("Buy milk", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
     public void Reading_says_nothing()
     {
         // It is a write that the loop has to be woken for. Waking it for a look at the model would
