@@ -2990,8 +2990,6 @@ internal sealed class MainForm : Form
         return true;
     }
 
-    /// <summary>Adds a section to whichever project the sidebar is sitting on.</summary>
-    /// <returns>True when a section was created</returns>
     /// <summary>
     /// Adds a task under the one selected, and puts the selection on it.
     /// </summary>
@@ -3027,6 +3025,8 @@ internal sealed class MainForm : Form
         return true;
     }
 
+    /// <summary>Adds a section to whichever project the sidebar is sitting on.</summary>
+    /// <returns>True when a section was created</returns>
     private bool AddSection()
     {
         // Greyed in the menus, but the palette and Ctrl+N both reach this without one having been
