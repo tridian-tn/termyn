@@ -82,11 +82,11 @@ public class MarkdownEditorTests
     /// Selects a stretch, and makes sure the selection went there.
     /// </summary>
     /// <remarks>
-    /// This is how #115 hid for so long. Setting a selection on one of these controls sometimes
-    /// doesn't take and leaves it at nought, and everything asked afterwards then answers about
-    /// character nought — so a monospace face came back as the body face, which the test read as
-    /// the styling being wrong rather than as its own question having gone astray. Asked again,
-    /// and said plainly when it still won't take.
+    /// This is how the trouble hid behind these tests for so long. Setting a selection on one of
+    /// these controls sometimes doesn't take and leaves it at nought, and everything asked after
+    /// that then answers about character nought — so a monospace face came back as the body face,
+    /// which the test read as the styling being wrong rather than as its own question having gone
+    /// astray. Asked again, and said plainly when it still won't take.
     /// </remarks>
     private static void Pick(MarkdownEditor editor, int at, int length)
     {
@@ -268,10 +268,10 @@ public class MarkdownEditorTests
     {
         using var editor = Editing("# one\n\n## two\n\n### three\n\nbody");
 
-        // Read once each and said in full, for the reason #45 gave the rendered view's assertions
-        // the same treatment: this fails on a build agent and passes on a re-run of the same commit,
-        // and "Assert.True() Failure" is three lines to choose between and nothing about any of
-        // them. See #115.
+        // Read once each and said in full, for the same reason the rendered view's assertions were
+        // given that treatment: this fails on a build agent and passes on a re-run of the same
+        // commit, and "Assert.True() Failure" is three lines to choose between and nothing at all
+        // about any of them.
         var text = editor.Text;
         var one = FontAt(editor, "one").Size;
         var two = FontAt(editor, "two").Size;
@@ -294,7 +294,7 @@ public class MarkdownEditorTests
         // Read once each, before anything is asserted, and every assertion says what it saw. This
         // one has failed on a build agent and passed on a re-run of the same commit, reporting
         // nothing but "Assert.True() Failure" — which is four lines to choose between and no way to
-        // tell styling that didn't apply from text that came out wrong. See #42.
+        // tell styling that didn't apply from text that came out wrong.
         var text = editor.Text;
         var bold = FontAt(editor, "bold");
         var italic = FontAt(editor, "italic");
@@ -343,8 +343,8 @@ public class MarkdownEditorTests
         var plain = FontAt(editor, "Run");
 
         // Assert.True rather than Assert.Equal, which has no room for a message: the face coming
-        // back as the body face is how #115 reads, and the two faces and the text tell that apart
-        // from the styling having missed this run alone.
+        // back as the body face is how a selection that didn't take reads, and the two faces and
+        // the text tell that apart from the styling having missed this run alone.
         Assert.True(
             code.FontFamily.Name == FontFamily.GenericMonospace.Name,
             $"code wanted {FontFamily.GenericMonospace.Name}. {Drawn("dotnet build", code, text)}");

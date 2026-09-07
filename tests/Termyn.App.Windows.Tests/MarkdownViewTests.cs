@@ -52,11 +52,12 @@ public class MarkdownViewTests
     /// Selects a stretch, and makes sure the selection went there.
     /// </summary>
     /// <remarks>
-    /// This is how #115 hid for so long. Setting a selection on one of these controls sometimes
-    /// doesn't take and leaves it at nought, and everything asked afterwards then answers about
-    /// character nought — so a monospace face came back as the body face and a heading came back
-    /// body-sized, and the test read that as the styling being wrong rather than as its own
-    /// question having gone astray. Asked again, and said plainly when it still won't take.
+    /// This is how the trouble hid behind these tests for so long. Setting a selection on one of
+    /// these controls sometimes doesn't take and leaves it at nought, and everything asked after
+    /// that then answers about character nought — so a monospace face came back as the body face
+    /// and a heading came back body-sized, and the test read that as the styling being wrong rather
+    /// than as its own question having gone astray. Asked again, and said plainly when it still
+    /// won't take.
     /// </remarks>
     private static void Pick(MarkdownView view, int at, int length)
     {
@@ -91,7 +92,7 @@ public class MarkdownViewTests
     {
         // Every assertion here says what it saw. This is the one that failed on a build agent and
         // then passed on a re-run of the same commit, reporting nothing but "Assert.True() Failure"
-        // — which narrowed it to one of two lines and told us nothing about either. See #42.
+        // — which narrowed it to one of two lines and told us nothing about either.
         using var view = Render("Some **bold** and some *italic* here");
 
         // Read once each, before anything is asserted. A message argument is built whether or not
@@ -116,8 +117,8 @@ public class MarkdownViewTests
     /// </summary>
     /// <remarks>
     /// Carries the count of runs the control wrote somewhere other than where they were put, which
-    /// is what #115 is trying to catch: it separates a rendering that came out scrambled from one
-    /// that came out right and was styled wrongly.
+    /// is the thing worth catching: it separates a rendering that came out scrambled from one that
+    /// came out right and was styled wrongly.
     /// </remarks>
     private static string Drawn(MarkdownView view, string needle, Font font, string text)
         => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. "
@@ -271,8 +272,8 @@ public class MarkdownViewTests
         var code = FontAt(view, "dotnet build");
 
         // Assert.True rather than Assert.Equal, which has no room for a message: the face coming
-        // back as the body face is how #115 reads, and the text alongside it says whether the
-        // rendering went wrong as well or only the styling did.
+        // back as the body face is how a selection that didn't take reads, and the text alongside
+        // it says whether the rendering went wrong as well or only the styling did.
         Assert.True(
             code.FontFamily.Name == FontFamily.GenericMonospace.Name,
             $"code wanted {FontFamily.GenericMonospace.Name}. {Drawn(view, "dotnet build", code, text)}");
@@ -459,7 +460,7 @@ public class MarkdownViewTests
         var three = FontAt(view, "three").Size;
         var body = FontAt(view, "body").Size;
 
-        // The rendered text alongside the sizes, since #115 has these failing together with the
+        // The rendered text alongside the sizes, because these have failed together with the
         // rendering being wrong — and the sizes on their own don't say which of the two it was.
         var seen = $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'";
 
@@ -601,8 +602,8 @@ public class MarkdownViewTests
     /// </summary>
     /// <remarks>
     /// Assert.Equal has no room for a message, and an offset on its own says nothing about why it
-    /// is wrong. #115 has these failing alongside a rendering that came out wrong, and the rendered
-    /// text is what tells a bad map from a bad render.
+    /// is wrong. These have failed alongside a rendering that came out wrong, and the rendered text
+    /// is what tells a bad map from a bad render.
     /// </remarks>
     private static void MapsBack(MarkdownView view, string markdown, string needle)
     {
