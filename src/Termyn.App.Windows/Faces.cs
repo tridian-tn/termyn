@@ -5,10 +5,10 @@ namespace Termyn.App.Windows;
 /// </summary>
 /// <remarks>
 /// <see cref="FontFamily.GenericMonospace"/> hands back a new family — and a new GDI+ handle behind
-/// it — on every read; it caches nothing. The rendered view asks for one on every run of code it
-/// draws, so a description of any size leaves a handful of handles behind for the finaliser to
-/// collect, which is the same waste the font cache next to it exists to avoid and is avoided here
-/// for the cost of one field.
+/// it — on every read; it caches nothing. <see cref="MarkdownView"/> asks for one on every run of
+/// code it draws, so a description of any size leaves a handful of handles behind for the finaliser
+/// to collect. That is the same waste the view keeps its own cache of fonts to avoid, and it is
+/// avoided here for the cost of one field.
 ///
 /// The other half of it is that this is the one place saying what code is set in. The editor names
 /// the face in the RTF it builds and the view sets it on a selection, and the two are drawing the
