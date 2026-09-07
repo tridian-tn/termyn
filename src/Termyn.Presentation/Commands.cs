@@ -144,6 +144,16 @@ public static class Commands
     public static bool IsTaskCommand(AppCommand command)
         => command is >= AppCommand.ToggleComplete and <= AppCommand.Delete;
 
+    /// <summary>
+    /// How deep sub-tasks may go, which is where the New sub-task entry stops being offered.
+    /// </summary>
+    /// <remarks>
+    /// Todoist takes four levels below a top-level task, so a task at that depth can hold nothing
+    /// further. The engine holds the same number for the indent path and refuses a move that would
+    /// pass it; this is the half that greys the entry rather than letting it be picked and fail.
+    /// </remarks>
+    private const int MaxSubtaskDepth = 4;
+
     /// <summary>The commands that act on whichever row the sidebar is on.</summary>
     public static bool IsSelectionCommand(AppCommand command)
         => command is >= AppCommand.RenameSelection and <= AppCommand.ToggleFavourite;
@@ -189,11 +199,12 @@ public static class Commands
             AppCommand.MoveDown => new CommandState("Move down", can.CanMoveDown),
             AppCommand.Delete => Task("Delete"),
 
-            // Not on a task that is finished with. A sub-task of one would be work filed under
-            // something already ticked off, where nothing on screen would ever show it as due.
+            // Not on a task that is finished with — a sub-task of one would be work filed under
+            // something already ticked off, where nothing on screen would ever show it as due — and
+            // not on one already as deep as Todoist will hold.
             AppCommand.NewSubtask => new CommandState(
                 "New sub-task…",
-                context.Task is { Completed: false }),
+                context.Task is { Completed: false, Depth: < MaxSubtaskDepth }),
 
             // Named for what is selected, because "Rename" over a sidebar holding projects,
             // sections and labels doesn't say which of the three is about to change.

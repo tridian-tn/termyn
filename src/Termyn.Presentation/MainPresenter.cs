@@ -980,6 +980,14 @@ public sealed class MainPresenter
         return indented;
     }
 
+    /// <summary>
+    /// Whether an indent was refused for how deep it would go rather than for want of a task above
+    /// it, so the refusal can say which.
+    /// </summary>
+    /// <param name="id">The task that wouldn't indent</param>
+    /// <returns>True when there was somewhere to go and it was too deep to go there</returns>
+    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id);
+
     /// <summary>Promotes a sub-task alongside its parent.</summary>
     public bool Outdent(string id)
     {

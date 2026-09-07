@@ -2860,8 +2860,15 @@ internal sealed class MainForm : Form
 
                     // Still said, though the menus now grey these out: the keyboard reaches them
                     // without a menu having opened to grey anything.
+                    // Which of the two refused it, since they send the reader different places: one
+                    // is "not here" and the other is "not ever", and naming the wrong one has them
+                    // looking for a task above that is sitting right there.
                     if (!wrote)
-                        _status.Text = outdent ? "Already at the top level." : "Nothing above it to indent under.";
+                        _status.Text = outdent
+                            ? "Already at the top level."
+                            : _presenter.IndentTooDeep(id)
+                                ? "Todoist holds four levels of sub-task, and this is as deep as it goes."
+                                : "Nothing above it to indent under.";
                 });
                 return wrote;
 
