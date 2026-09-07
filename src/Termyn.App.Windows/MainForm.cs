@@ -587,7 +587,7 @@ internal sealed class MainForm : Form
                 return _quickAdd;
 
             _quickAdd = new QuickAddForm(_presenter, _theme);
-            _quickAdd.Captured += () => _scheduler.NotifyWrite();
+            _quickAdd.Captured += Wrote;
             _quickAdd.Failed += ex => Report(ex);
             return _quickAdd;
         }
@@ -2067,7 +2067,7 @@ internal sealed class MainForm : Form
             return;
 
         Guarded(() => _presenter.SetDescription(edit.Kind, edit.OwnerId, edit.Text));
-        _scheduler.NotifyWrite();
+        Wrote();
     }
 
     /// <summary>Opens or closes the description panel.</summary>
@@ -2540,7 +2540,7 @@ internal sealed class MainForm : Form
         Noticed();
 
         if (Dispatch(command))
-            _scheduler.NotifyWrite();
+            Wrote();
     }
 
     /// <summary>
@@ -2976,7 +2976,7 @@ internal sealed class MainForm : Form
         }
 
         Guarded(() => _presenter.Rename(id, text));
-        _scheduler.NotifyWrite();
+        Wrote();
     }
 
     /// <summary>Asks for a due date and applies it. Returns false when nothing was changed.</summary>
