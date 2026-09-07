@@ -224,6 +224,12 @@ internal sealed class MarkdownView : RichTextBox
             _sources.Clear();
             _at = 0;
 
+            // With the rest of the per-render state. What a reader of this is holding it against is
+            // the text now in the box, and Clear has just thrown away everything an earlier render
+            // put there — so a count carried over from one would point at a rendering that no
+            // longer exists.
+            MisplacedRuns = 0;
+
             foreach (var block in Parse())
                 WriteBlock(block, indent: 0);
 
@@ -485,6 +491,16 @@ internal sealed class MarkdownView : RichTextBox
 
         Select(_at, 0);
 
+        // Asked back, because a run landing somewhere other than where it was put is what a
+        // mangled rendering looks like and there is nothing else that would notice. #108 fixed one
+        // way of getting the place wrong — the box being asked how much it held and answering
+        // nought — and left the other: the place being right and the caret not going there.
+        //
+        // Counted rather than corrected. Correcting it would hide whether it ever happens, and a
+        // fix for a cause nobody has confirmed is what #42 spent three rounds not doing.
+        if (SelectionStart != _at)
+            MisplacedRuns++;
+
         // Paragraph settings, so every run of a paragraph has to agree about them. The air under
         // each one is what makes a description read as separate thoughts rather than as a wall —
         // which is how it looks in Todoist, and the thing most obviously missing without it.
@@ -540,6 +556,17 @@ internal sealed class MarkdownView : RichTextBox
     /// with a line ending the writing counts wrongly for the two to part company.
     /// </remarks>
     internal int Counted => _at;
+
+    /// <summary>
+    /// How many runs were written somewhere other than where they were put.
+    /// </summary>
+    /// <remarks>
+    /// Nought on every machine this has been run on. It is here for the one it isn't: #115 has the
+    /// rendering coming out scrambled on a build agent and never anywhere else, and this says
+    /// whether the caret refusing to move is how it happens. The tests carry it into their failure
+    /// messages so an occurrence reports it without anyone having to catch it live.
+    /// </remarks>
+    internal int MisplacedRuns { get; private set; }
 
     /// <summary>
     /// A span with its delimiters taken off each end.
