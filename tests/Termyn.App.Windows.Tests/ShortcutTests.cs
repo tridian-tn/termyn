@@ -68,7 +68,7 @@ public class ShortcutTests
     [Theory]
     [InlineData(Keys.Control | Keys.N, AppCommand.NewTask)]
     [InlineData(Keys.Insert, AppCommand.NewTask)]
-    [InlineData(Keys.Control | Keys.Shift | Keys.N, AppCommand.NewProject)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.Shift | Keys.N, AppCommand.NewProject)]
     [InlineData(Keys.F5, AppCommand.SyncNow)]
     [InlineData(Keys.Control | Keys.H, AppCommand.ToggleCompleted)]
     [InlineData(Keys.Control | Keys.F, AppCommand.Search)]

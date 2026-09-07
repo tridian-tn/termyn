@@ -15,6 +15,7 @@ public enum AppCommand
     // ---- On the selected task ----
     ToggleComplete,
     Rename,
+    NewSubtask,
     Due,
     Priority1,
     Priority2,
@@ -187,6 +188,12 @@ public static class Commands
             AppCommand.MoveUp => new CommandState("Move up", can.CanMoveUp),
             AppCommand.MoveDown => new CommandState("Move down", can.CanMoveDown),
             AppCommand.Delete => Task("Delete"),
+
+            // Not on a task that is finished with. A sub-task of one would be work filed under
+            // something already ticked off, where nothing on screen would ever show it as due.
+            AppCommand.NewSubtask => new CommandState(
+                "New sub-task…",
+                context.Task is { Completed: false }),
 
             // Named for what is selected, because "Rename" over a sidebar holding projects,
             // sections and labels doesn't say which of the three is about to change.

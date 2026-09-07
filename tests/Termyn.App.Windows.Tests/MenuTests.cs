@@ -68,6 +68,7 @@ public class MenuTests
             [
                 AppCommand.ToggleComplete,
                 AppCommand.Rename,
+                AppCommand.NewSubtask,
                 AppCommand.Due,
                 AppCommand.Priority1,
                 AppCommand.Priority2,

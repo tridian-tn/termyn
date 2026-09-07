@@ -12,7 +12,14 @@ public static class ItemFields
     /// and section ids first, so it can tell an unmatched name from an absent one and flag it;
     /// leaving them null puts the task in the Inbox.
     /// </summary>
-    public static JsonObject ForAdd(QuickAddParse parse, string? projectId = null, string? sectionId = null)
+    /// <param name="parentId">
+    /// The task this one goes under, for a sub-task. Null for one that stands on its own
+    /// </param>
+    public static JsonObject ForAdd(
+        QuickAddParse parse,
+        string? projectId = null,
+        string? sectionId = null,
+        string? parentId = null)
     {
         var fields = new JsonObject { ["content"] = parse.Content };
 
@@ -21,6 +28,9 @@ public static class ItemFields
 
         if (sectionId is not null)
             fields["section_id"] = sectionId;
+
+        if (parentId is not null)
+            fields["parent_id"] = parentId;
 
         if (parse.Labels.Count > 0)
         {

@@ -2267,6 +2267,7 @@ internal sealed class MainForm : Form
         (Keys.Space, AppCommand.ToggleComplete, Scope.Outline),
         (Keys.Control | Keys.Enter, AppCommand.ToggleComplete, Scope.Outline),
         (Keys.F2, AppCommand.Rename, Scope.Outline),
+        (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewSubtask, Scope.Outline),
         (Keys.Control | Keys.D, AppCommand.Due, Scope.Outline),
         (Keys.Control | Keys.D1, AppCommand.Priority1, Scope.Outline),
         (Keys.Control | Keys.D2, AppCommand.Priority2, Scope.Outline),
@@ -2295,7 +2296,9 @@ internal sealed class MainForm : Form
         // Anywhere in the window.
         (Keys.Control | Keys.N, AppCommand.NewTask, Scope.Window),
         (Keys.Insert, AppCommand.NewTask, Scope.Window),
-        (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
+        // Moved off Ctrl+Shift+N, which now adds a sub-task to whatever the outline is on. A new
+        // project is the rarer of the two by a long way, and it keeps the shape of the shortcut.
+        (Keys.Control | Keys.Alt | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
         (Keys.F5, AppCommand.SyncNow, Scope.Window),
         (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
         // F4 shows and hides the panel; Ctrl+E goes straight to writing in it. The other way round
@@ -2818,6 +2821,9 @@ internal sealed class MainForm : Form
                 });
                 return true;
 
+            case AppCommand.NewSubtask:
+                return AddSubtask(id);
+
             // Nothing is written here: the editor commits when it closes, and that path syncs.
             case AppCommand.Rename:
                 // Focused first, because this can come from a menu, and a menu has just taken the
@@ -2986,6 +2992,41 @@ internal sealed class MainForm : Form
 
     /// <summary>Adds a section to whichever project the sidebar is sitting on.</summary>
     /// <returns>True when a section was created</returns>
+    /// <summary>
+    /// Adds a task under the one selected, and puts the selection on it.
+    /// </summary>
+    /// <remarks>
+    /// The prompt takes quick-add text, so a priority or a day can be typed with the words. Where
+    /// it goes is not up for discussion — a sub-task lives in its parent's project — so a name in
+    /// the text stays in the words rather than moving it somewhere it cannot be.
+    ///
+    /// The view can then refuse to show it. A sub-task with no due date added while the outline is
+    /// on Today belongs to the account but not to the list in front of you, and a row that never
+    /// appears reads as a task that was never created — so it says so rather than leaving that to
+    /// be worked out.
+    /// </remarks>
+    /// <param name="parentId">The task the new one goes under</param>
+    /// <returns>True when a task was queued</returns>
+    private bool AddSubtask(string parentId)
+    {
+        var text = InputDialog.Ask(this, "New sub-task", "Sub-task:");
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+
+        string? id = null;
+        Guarded(() => id = _presenter.AddSubtask(parentId, text));
+
+        if (id is null)
+            return false;
+
+        if (_outline.Rows.Any(r => r.Id == id))
+            _outline.SelectId(id);
+        else
+            _status.Text = "Added, but this view doesn't show it.";
+
+        return true;
+    }
+
     private bool AddSection()
     {
         // Greyed in the menus, but the palette and Ctrl+N both reach this without one having been

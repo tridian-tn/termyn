@@ -47,6 +47,9 @@ public static class Menus
         MenuEntry.Of(AppCommand.ToggleComplete),
         MenuEntry.Of(AppCommand.Rename),
 
+        // With the two above it: what this task is, before what it is due or where it sits.
+        MenuEntry.Of(AppCommand.NewSubtask),
+
         MenuEntry.AfterRule(AppCommand.Due),
         MenuEntry.Group(
             "&Priority",
