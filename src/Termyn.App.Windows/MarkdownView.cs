@@ -649,10 +649,21 @@ internal sealed class MarkdownView : RichTextBox
         ForgetFaces();
     }
 
+    /// <summary>
+    /// Lets go of what this owns: the faces it drew with, and the tip it shows an address in.
+    /// </summary>
+    /// <remarks>
+    /// The tip is a window of its own and belongs to nothing else — there is no components
+    /// container here to dispose it — so it lasted until the finaliser. One object against the
+    /// faces' seventeen hundred, and it goes here because this is where the letting go happens.
+    /// </remarks>
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             ForgetFaces();
+            _tip.Dispose();
+        }
 
         base.Dispose(disposing);
     }
