@@ -9,11 +9,15 @@ namespace Termyn.App.Windows.Tests;
 /// </summary>
 public class MenuTests
 {
-    private static TaskRow Row(Priority priority = Priority.P4, bool completed = false)
-        => new("i1", "Write it up", priority, "Work", string.Empty, [], Completed: completed);
+    private static TaskRow Row(Priority priority = Priority.P4, bool completed = false, int depth = 0)
+        => new("i1", "Write it up", priority, "Work", string.Empty, [], depth, Completed: completed);
 
-    private static CommandContext OnTask(TaskRow? row = null, TaskAbilities? can = null)
-        => new(row ?? Row(), can ?? new TaskAbilities(true, true, true, true));
+    private static CommandContext OnTask(
+        TaskRow? row = null,
+        TaskAbilities? can = null,
+        bool completed = false,
+        int depth = 0)
+        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true));
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -68,6 +72,7 @@ public class MenuTests
             [
                 AppCommand.ToggleComplete,
                 AppCommand.Rename,
+                AppCommand.NewSubtask,
                 AppCommand.Due,
                 AppCommand.Priority1,
                 AppCommand.Priority2,
@@ -186,6 +191,28 @@ public class MenuTests
 
         Assert.True(Find(built, "Move up").Enabled);
         Assert.False(Find(built, "Move down").Enabled);
+    }
+
+    [Fact]
+    public void A_task_as_deep_as_Todoist_holds_is_not_offered_another_level()
+    {
+        // Four levels below a top-level task is what Todoist takes, so a task already at four can
+        // hold nothing further. Greyed rather than offered and refused, since the refusal would
+        // come back from the server long after the click.
+        using var shallow = BuildTaskMenu(OnTask(depth: 3));
+        using var deepest = BuildTaskMenu(OnTask(depth: 4));
+
+        Assert.True(Find(shallow, "New sub-task…").Enabled);
+        Assert.False(Find(deepest, "New sub-task…").Enabled);
+    }
+
+    [Fact]
+    public void A_task_already_done_is_not_offered_a_sub_task()
+    {
+        // Work filed under something ticked off, which nothing on screen would ever show as due.
+        using var built = BuildTaskMenu(OnTask(completed: true));
+
+        Assert.False(Find(built, "New sub-task…").Enabled);
     }
 
     [Fact]

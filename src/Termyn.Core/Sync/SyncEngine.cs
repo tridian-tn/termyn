@@ -810,7 +810,115 @@ public sealed class SyncEngine
                 return false;
 
             return AdopterFor(placement.Siblings, placement.Index) is { } adopter
+                   && Fits(id, adopter)
                    && MoveTo(id, parentId: adopter.Id);
+        }
+    }
+
+    /// <summary>
+    /// How deep sub-tasks may go. Todoist takes four levels below a top-level task, so a task with
+    /// no parent sits at nought and the deepest one it will hold sits at four.
+    /// </summary>
+    /// <remarks>
+    /// Documented in the sub-tasks help article and nowhere near the page listing every other cap,
+    /// so it is written down here for the next person to look. The server has no clean answer for
+    /// being sent something deeper — reports of it are generic sync errors rather than a refusal
+    /// naming the reason — so being turned away here is the better of the two.
+    /// </remarks>
+    public const int MaxDepth = 4;
+
+    /// <summary>
+    /// Whether a task and everything under it would still fit under a new parent.
+    /// </summary>
+    /// <remarks>
+    /// The whole subtree and not the task alone: indenting takes its children down with it, so a
+    /// task that would land inside the limit can still push its own grandchildren past it.
+    /// </remarks>
+    /// <param name="id">The task about to move</param>
+    /// <param name="parent">The task it would move under</param>
+    /// <returns>True when nothing would end up deeper than the limit allows</returns>
+    private bool Fits(string id, TaskItem parent) => DepthOf(parent.Id) + 1 + HeightOf(id) <= MaxDepth;
+
+    /// <summary>
+    /// Whether an indent is refused for how deep it would go, rather than for want of a task above
+    /// it to go under.
+    /// </summary>
+    /// <remarks>
+    /// Only so the refusal can say which it was. The two read quite differently to whoever pressed
+    /// Tab — one is "not here" and the other is "not ever" — and a message naming the wrong one
+    /// sends them looking for a task above that is sitting right there.
+    /// </remarks>
+    /// <param name="id">The task that would be indented</param>
+    /// <returns>True when there is somewhere to go and it is too deep to go there</returns>
+    public bool IndentTooDeep(string id)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+
+            return Placement(id) is { } p
+                   && AdopterFor(p.Siblings, p.Index) is { } adopter
+                   && !Fits(id, adopter);
+        }
+    }
+
+    /// <summary>
+    /// How far a task sits below the top level.
+    /// </summary>
+    /// <remarks>
+    /// Walked upward, and bounded by what has already been seen: a parent cycle in the data would
+    /// otherwise go round for ever, and the data is the account's rather than ours to trust.
+    /// </remarks>
+    /// <param name="id">The task to measure</param>
+    /// <returns>Nought for a task with no parent, one for a sub-task, and so on</returns>
+    private int DepthOf(string? id)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var depth = 0;
+
+        while (id is not null && seen.Add(id))
+        {
+            if (Model.Get(ResourceType.Items, id) is not { } json)
+                break;
+
+            id = Projections.ToTaskItem(json).ParentId;
+            if (id is not null)
+                depth++;
+        }
+
+        return depth;
+    }
+
+    /// <summary>
+    /// How far the deepest task under this one sits below it.
+    /// </summary>
+    /// <param name="id">The task to measure from</param>
+    /// <returns>Nought for a task with nothing under it</returns>
+    private int HeightOf(string id)
+    {
+        var byParent = Model.Items()
+            .Where(i => i.ParentId is not null)
+            .GroupBy(i => i.ParentId!)
+            .ToDictionary(g => g.Key, g => g.Select(i => i.Id).ToList(), StringComparer.Ordinal);
+
+        // Walked a level at a time rather than by recursion, and each task counted once, so a cycle
+        // in the parents runs out instead of running away with the stack.
+        var seen = new HashSet<string>(StringComparer.Ordinal) { id };
+        var level = new List<string> { id };
+        var height = 0;
+
+        while (true)
+        {
+            var next = level
+                .SelectMany(p => byParent.TryGetValue(p, out var kids) ? kids : [])
+                .Where(seen.Add)
+                .ToList();
+
+            if (next.Count == 0)
+                return height;
+
+            height++;
+            level = next;
         }
     }
 
@@ -821,7 +929,9 @@ public sealed class SyncEngine
         {
             id = Promoted(id);
 
-            return Placement(id) is { } p && AdopterFor(p.Siblings, p.Index) is not null;
+            return Placement(id) is { } p
+                   && AdopterFor(p.Siblings, p.Index) is { } adopter
+                   && Fits(id, adopter);
         }
 
     }

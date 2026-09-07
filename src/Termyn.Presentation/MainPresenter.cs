@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json.Nodes;
 using Termyn.Core;
 using Termyn.Core.Api;
@@ -373,6 +374,72 @@ public sealed class MainPresenter
         }
 
         Publish();
+    }
+
+    /// <summary>
+    /// Adds a task under another one.
+    /// </summary>
+    /// <remarks>
+    /// Read here rather than by the server, which is the one difference from an ordinary capture:
+    /// the online quick-add takes a line of text and nothing else, so there is no way to tell it
+    /// which task the new one belongs under. The local grammar covers what is worth typing into a
+    /// prompt this size — a priority, a day, a label — and the rest can be set afterwards.
+    ///
+    /// Where it goes is the parent's business: a sub-task lives in its parent's project and section
+    /// whatever the text says, so a "#project" in it would be a place it cannot be put. Anything
+    /// naming one is left in the words rather than acted on.
+    ///
+    /// A folded parent is opened, since a sub-task added into one would otherwise be created out of
+    /// sight — the one way this can appear to have done nothing at all.
+    /// </remarks>
+    /// <param name="parentId">The task the new one goes under</param>
+    /// <param name="text">What was typed, in the quick-add grammar</param>
+    /// <returns>The new task's id, or null when there was nothing to add or nowhere to put it</returns>
+    public string? AddSubtask(string parentId, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var snapshot = _engine.Snapshot();
+        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent)
+            return null;
+
+        var parse = Placed(_parser.Parse(text));
+        var id = _engine.AddItem(ItemFields.ForAdd(parse, parent.ProjectId, parent.SectionId, parentId));
+
+        _collapsed.Remove(parentId);
+
+        Publish();
+        return id;
+    }
+
+    /// <summary>
+    /// Gives back the words a place name was lifted out of, for a task whose place is already
+    /// decided.
+    /// </summary>
+    /// <remarks>
+    /// The parser reads "#Home" as a project and takes it out of the content. A sub-task lives
+    /// where its parent lives, so there is nothing to act on — and dropping the token would delete
+    /// something the user typed, which is no better here than it was in the capture box. It goes on
+    /// the end rather than back where it was: the parser doesn't say where it came from, and a word
+    /// out of order is a smaller wrong than a word that isn't there.
+    /// </remarks>
+    /// <param name="parse">What the quick-add grammar made of the text</param>
+    /// <returns>The same parse, with any place it named written back into the words</returns>
+    private static QuickAddParse Placed(QuickAddParse parse)
+    {
+        if (parse.ProjectName is null && parse.SectionName is null)
+            return parse;
+
+        var words = new StringBuilder(parse.Content);
+
+        if (parse.ProjectName is { } project)
+            words.Append(words.Length > 0 ? " #" : "#").Append(project);
+
+        if (parse.SectionName is { } section)
+            words.Append(words.Length > 0 ? " /" : "/").Append(section);
+
+        return parse with { Content = words.ToString(), ProjectName = null, SectionName = null };
     }
 
     /// <summary>
@@ -912,6 +979,14 @@ public sealed class MainPresenter
             Publish();
         return indented;
     }
+
+    /// <summary>
+    /// Whether an indent was refused for how deep it would go rather than for want of a task above
+    /// it, so the refusal can say which.
+    /// </summary>
+    /// <param name="id">The task that wouldn't indent</param>
+    /// <returns>True when there was somewhere to go and it was too deep to go there</returns>
+    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id);
 
     /// <summary>Promotes a sub-task alongside its parent.</summary>
     public bool Outdent(string id)
