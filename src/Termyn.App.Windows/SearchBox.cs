@@ -86,6 +86,31 @@ internal sealed class SearchBox : TextBox
             Focus();
     }
 
+    /// <summary>
+    /// Whether Escape is this box's to take, which it is only when there is something to clear.
+    /// </summary>
+    /// <remarks>
+    /// An Escape in an empty box is left alone rather than quietly eaten. Nothing else in the
+    /// window wants it while the search box has the focus, but a key swallowed by whatever happens
+    /// to be focused is the sort of thing nobody can account for later.
+    /// </remarks>
+    internal bool TakesEscape => TextLength > 0;
+
+    /// <summary>
+    /// Empties the box on Escape, the way Escape leaves anything else here that is part-way
+    /// through — the description goes back to reading, a comment stops being edited.
+    /// </summary>
+    protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+    {
+        if (keyData == Keys.Escape && TakesEscape)
+        {
+            Reset();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref message, keyData);
+    }
+
     protected override void OnTextChanged(EventArgs e)
     {
         base.OnTextChanged(e);

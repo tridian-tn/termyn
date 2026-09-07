@@ -72,6 +72,39 @@ public class SearchBoxTests
         Assert.Equal(box.BackColor, box.ResetBackColour);
     }
 
+    /// <summary>WM_KEYDOWN, and the virtual key for Escape.</summary>
+    private const int WmKeyDown = 0x0100;
+
+    /// <summary>Presses a key at the box the way the message loop would, so the binding runs.</summary>
+    private static bool Press(SearchBox box, Keys key)
+    {
+        var message = Message.Create(box.Handle, WmKeyDown, (nint)key, 0);
+        return box.PreProcessMessage(ref message);
+    }
+
+    [Fact]
+    public void Escape_empties_the_box()
+    {
+        using var box = Box();
+        box.Text = "milk";
+
+        Assert.True(Press(box, Keys.Escape));
+
+        Assert.Equal(string.Empty, box.Text);
+        Assert.False(box.ShowingReset);
+    }
+
+    [Fact]
+    public void Escape_in_an_empty_box_is_left_for_something_else()
+    {
+        // Nothing else in the window wants it while this has the focus, but a key swallowed by
+        // whatever happens to be focused is the sort of thing nobody can account for later.
+        using var box = Box();
+
+        Assert.False(box.TakesEscape);
+        Assert.False(Press(box, Keys.Escape));
+    }
+
     [Fact]
     public void Whitespace_is_something_to_clear()
     {
