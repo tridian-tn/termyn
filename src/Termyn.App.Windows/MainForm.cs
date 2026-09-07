@@ -814,9 +814,9 @@ internal sealed class MainForm : Form
         _comments.Theme = _theme;
         _panelHeader.Theme = _theme;
 
-        // Quiet, like the hint it sits beside: it is there to be found when wanted rather than to
-        // be read past on every glance at the box.
-        _search.ResetColour = _theme.Muted;
+        // Its cross is quiet at rest and lit under the pointer, so it wants the palette rather
+        // than one colour out of it.
+        _search.Theme = _theme;
 
         // The step you are on is the one being read; the ones above it are offers, and drawn as
         // links so they read as such without needing to be hovered to find out.

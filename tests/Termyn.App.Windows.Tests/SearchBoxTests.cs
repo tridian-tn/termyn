@@ -13,9 +13,11 @@ namespace Termyn.App.Windows.Tests;
 /// </remarks>
 public class SearchBoxTests
 {
-    private static SearchBox Box()
+    private static readonly Theme Light = Theme.Resolve(ThemePreference.Light);
+
+    private static SearchBox Box(Theme? theme = null)
     {
-        var box = new SearchBox();
+        var box = new SearchBox { Theme = theme ?? Light };
         box.CreateControl();
         return box;
     }
@@ -64,12 +66,65 @@ public class SearchBoxTests
         // Applying a theme walks every control it can reach and paints a label the window's
         // background, which is not the box's. Left at that the cross sat on a strip of the wrong
         // colour — invisible in the light theme, and not in the dark one.
-        using var box = Box();
+        var theme = Theme.Resolve(preference);
+        using var box = Box(theme);
         box.Text = "milk";
 
-        Theme.Resolve(preference).Apply(box);
+        theme.Apply(box);
+        box.Theme = theme;
 
         Assert.Equal(box.BackColor, box.ResetBackColour);
+    }
+
+    [Theory]
+    [InlineData(ThemePreference.Light)]
+    [InlineData(ThemePreference.Dark)]
+    public void The_cross_lights_under_the_pointer_and_goes_quiet_again(ThemePreference preference)
+    {
+        // Quiet is the whole reason it was hard to see, and lighting it is the answer that doesn't
+        // shout at rest. Both colours come from the palette, so this holds in either theme.
+        var theme = Theme.Resolve(preference);
+        using var box = Box(theme);
+        box.Text = "milk";
+
+        Assert.Equal(theme.Muted, box.ResetColour);
+        Assert.Equal(box.BackColor, box.ResetBackColour);
+
+        box.Highlight(true);
+
+        Assert.Equal(theme.Text, box.ResetColour);
+        Assert.Equal(theme.Row, box.ResetBackColour);
+
+        box.Highlight(false);
+
+        Assert.Equal(theme.Muted, box.ResetColour);
+        Assert.Equal(box.BackColor, box.ResetBackColour);
+    }
+
+    [Fact]
+    public void A_cross_left_lit_comes_back_quiet()
+    {
+        // The pointer never leaves a control that vanishes under it, so nothing would put it back.
+        using var box = Box();
+        box.Text = "milk";
+        box.Highlight(true);
+
+        box.Reset();
+        box.Text = "bread";
+
+        Assert.Equal(Light.Muted, box.ResetColour);
+    }
+
+    [Fact]
+    public void The_cross_is_a_glyph_this_knows_it_can_draw()
+    {
+        // Which of the two it lands on is a fact about the machine rather than about the code, so
+        // this holds the choice rather than the outcome: whatever font is or isn't installed, what
+        // comes out is one of the two glyphs and never the empty box a missing font would give.
+        using var box = Box();
+        var (native, plain) = SearchBox.Glyphs;
+
+        Assert.Contains(box.ResetGlyph, new[] { native, plain });
     }
 
     /// <summary>WM_KEYDOWN, and the virtual key for Escape.</summary>
