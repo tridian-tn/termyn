@@ -72,7 +72,8 @@ public class MarkdownViewTests
         Assert.Fail(
             $"asked for {length} characters at {at} and got {view.SelectionLength} at {view.SelectionStart}. "
             + $"Nothing read from this selection would be about the right place. "
-            + $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
+            + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
+            + $"Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
     }
 
     // ---- What it reads as ----------------------------------------------------------------------
@@ -120,7 +121,8 @@ public class MarkdownViewTests
     /// </remarks>
     private static string Drawn(MarkdownView view, string needle, Font font, string text)
         => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. "
-           + $"Misplaced runs: {view.MisplacedRuns}. Rendered text: '{text}'";
+           + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
+           + $"Rendered text: '{text}'";
 
     [Fact]
     public void Strikethrough_is_struck_through()
@@ -610,7 +612,118 @@ public class MarkdownViewTests
         Assert.True(
             written == mapped,
             $"'{needle}' was written at {written} and maps to {mapped}. "
-            + $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
+            + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
+            + $"Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
+    }
+
+    // ---- A rendering that went wrong ------------------------------------------------------------
+
+    /// <summary>The description the build agent scrambled, and what it should come out as.</summary>
+    private const string Fenced = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block";
+
+    private const string FencedShown = "before\nfirst line\nsecond line\nthird line\nafter the block";
+
+    /// <summary>How many goes the rendering gets, and so how many it takes to use them all up.</summary>
+    private const int EveryRender = 3;
+
+    private static MarkdownView Render(string markdown, int spoilRenders)
+    {
+        var view = new MarkdownView { Theme = Theme.Resolve(ThemePreference.Light) };
+        view.CreateControl();
+        view.SpoilRenders = spoilRenders;
+        view.Markdown = markdown;
+        return view;
+    }
+
+    /// <summary>What is on screen, as one line-ending and without the one that closes the last run.</summary>
+    private static string Shown(MarkdownView view) => view.Text.ReplaceLineEndings("\n").TrimEnd('\n');
+
+    [Fact]
+    public void A_run_that_missed_its_place_scrambles_the_description()
+    {
+        // What the agent produced, made to happen on purpose: with only one go at drawing it, the
+        // last paragraph is written at the front. This is the fault rather than the fix — here so
+        // that the tests below are known to be answering something.
+        using var view = Render(Fenced, spoilRenders: 0);
+
+        view.SpoilRenders = 1;
+        view.Draw();
+
+        Assert.Equal(1, view.MisplacedRuns);
+        Assert.NotEqual(FencedShown, Shown(view));
+    }
+
+    [Fact]
+    public void A_render_that_lost_a_run_is_drawn_again()
+    {
+        // And the description that comes out is in the right order. It used to be handed over as
+        // the scrambled one above, with every offset after the misplaced run pointing at the wrong
+        // character and the count saying so read by nothing but a test.
+        using var view = Render(Fenced, spoilRenders: 1);
+
+        Assert.Equal(2, view.Renders);
+        Assert.Equal(0, view.MisplacedRuns);
+        Assert.False(view.Plain);
+        Assert.Equal(FencedShown, Shown(view));
+
+        // Still a rendering, and one that knows where its words came from — the whole of what a
+        // misplaced run took away.
+        MapsBack(view, Fenced, "after");
+        MapsBack(view, Fenced, "block");
+    }
+
+    [Fact]
+    public void A_render_that_comes_out_right_is_drawn_once()
+    {
+        // The other half of it: the retry costs nothing when there is nothing to retry, and a
+        // description is redrawn on every keystroke in it.
+        using var view = Render("Some **bold** text", spoilRenders: 0);
+
+        Assert.Equal(1, view.Renders);
+        Assert.Equal(0, view.MisplacedRuns);
+        Assert.False(view.Plain);
+    }
+
+    [Fact]
+    public void A_rendering_that_cannot_be_got_right_is_shown_as_written()
+    {
+        // Three goes and every one of them lost a run. The markdown itself is truthful and always
+        // readable, and it is already what markdown too deeply nested to parse falls back to.
+        using var view = Render(Fenced, EveryRender);
+
+        Assert.True(view.Plain);
+        Assert.Equal(3, view.Renders);
+        Assert.Equal(Fenced, Shown(view));
+    }
+
+    [Fact]
+    public void The_text_shown_as_written_still_knows_where_a_click_lands()
+    {
+        // It is the markdown on screen, so a character is where it says it is. Unmapped, every
+        // click opened the editor at the top of the description — which is the answer this whole
+        // mapping exists to avoid, reached from the other side.
+        using var view = Render(Fenced, EveryRender);
+        var at = Fenced.IndexOf("second", StringComparison.Ordinal);
+
+        Assert.True(view.Plain);
+        Assert.Equal(at, view.SourceAt(at));
+    }
+
+    [Fact]
+    public void A_render_drawn_again_does_not_keep_what_the_lost_one_said()
+    {
+        // Each go throws the last one away: the box, the links, the offsets and the count. A
+        // rendering described by an attempt no longer on screen would be worse than one described
+        // by nothing, because it would look answerable.
+        const string markdown = "A [link](https://example.com) and some `code`";
+        using var view = Render(markdown, spoilRenders: 1);
+
+        Assert.Equal(2, view.Renders);
+        MapsBack(view, markdown, "code");
+
+        // One rendering's worth of text and not two, which is what a Clear that didn't happen on
+        // the second go would have left behind.
+        Assert.Equal("A link and some code", Shown(view));
     }
 
     [Fact]

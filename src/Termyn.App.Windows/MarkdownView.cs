@@ -231,19 +231,25 @@ internal sealed class MarkdownView : RichTextBox
         SendMessage(Handle, WmSetRedraw, 0, 0);
         try
         {
-            Clear();
-            _links.Clear();
-            _sources.Clear();
-            _at = 0;
+            // Drawn again rather than shown wrong. A run whose caret never went where it was put is
+            // written wherever the caret actually was, which moves a paragraph to the wrong part of
+            // the description and leaves every offset after it pointing at the wrong character.
+            // Nothing about the markdown brings it on — the same text drawn again comes out right —
+            // so having noticed it, drawing it again is both the cheapest answer and the whole of
+            // one. Showing a rendering already known to be wrong is the thing worth not doing.
+            Renders = 0;
+            do
+            {
+                Renders++;
+                Draw();
+            }
+            while (MisplacedRuns > 0 && Renders < RenderAttempts);
 
-            // With the rest of the per-render state. What a reader of this is holding it against is
-            // the text now in the box, and Clear has just thrown away everything an earlier render
-            // put there — so a count carried over from one would point at a rendering that no
-            // longer exists.
-            MisplacedRuns = 0;
-
-            foreach (var block in Parse())
-                WriteBlock(block, indent: 0);
+            // Every go missed. The text as the account wrote it is truthful, always readable, and
+            // the least this can get wrong — one run, at a caret already sitting where it goes.
+            // It is the same answer markdown too deeply nested to parse already gets.
+            if (MisplacedRuns > 0)
+                DrawPlain();
 
             // Back to the top, so switching task doesn't leave the box scrolled to where the last
             // one happened to end.
@@ -257,6 +263,65 @@ internal sealed class MarkdownView : RichTextBox
             Invalidate();
         }
     }
+
+    /// <summary>
+    /// Draws the description once, styled.
+    /// </summary>
+    /// <remarks>
+    /// Internal for the same reason <see cref="Rebuild"/> is: a test needs the single go, without
+    /// the drawing again that would put it right, to show that a refused caret really does scramble
+    /// the description. Everything else goes through Rebuild.
+    /// </remarks>
+    internal void Draw()
+    {
+        Forget();
+
+        // Spends one of the renders a test asked to have go wrong. Nothing in the running app ever
+        // asks for one, so this is false for every render there.
+        _spoiling = SpoilRenders > 0;
+        if (_spoiling)
+            SpoilRenders--;
+
+        foreach (var block in Parse())
+            WriteBlock(block, indent: 0);
+    }
+
+    /// <summary>
+    /// Puts the description up as the account wrote it, styling abandoned.
+    /// </summary>
+    /// <remarks>
+    /// What is left when the rendering can't be got right. The whole text is recorded as one run
+    /// over the whole markdown, because here they are the same characters — so a click still opens
+    /// the editor where it was aimed rather than at the top.
+    /// </remarks>
+    private void DrawPlain()
+    {
+        Forget();
+        Plain = true;
+
+        Write(_markdown, Style.Plain, from: Whole(_markdown));
+    }
+
+    /// <summary>Throws away the last rendering and everything said about it.</summary>
+    /// <remarks>
+    /// What a reader of any of this is holding it against is the text now in the box, and Clear has
+    /// just thrown away everything an earlier render put there — so anything carried over from one
+    /// would describe a rendering that no longer exists.
+    /// </remarks>
+    private void Forget()
+    {
+        Clear();
+        _links.Clear();
+        _sources.Clear();
+        _at = 0;
+        MisplacedRuns = 0;
+        Plain = false;
+        _run = 0;
+        _spoiling = false;
+    }
+
+    /// <summary>The span covering a whole string, for text that stands for itself.</summary>
+    private static SourceSpan Whole(string text) => new(0, text.Length - 1);
 
     /// <summary>
     /// The markdown as blocks, or the whole thing as one plain run when it can't be read.
@@ -277,7 +342,8 @@ internal sealed class MarkdownView : RichTextBox
         }
         catch (ArgumentException)
         {
-            Write(_markdown, Style.Plain);
+            Plain = true;
+            Write(_markdown, Style.Plain, from: Whole(_markdown));
             return [];
         }
     }
@@ -556,6 +622,29 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     private const int CaretAttempts = 3;
 
+    /// <summary>How many goes the whole rendering gets before it is given up on.</summary>
+    /// <remarks>
+    /// Three, on the same reasoning as the caret's own: what has been seen is two runs of several
+    /// hundred, and the text drawn again comes out right. Whatever the control is doing, it does
+    /// not last — and a description is redrawn on every keystroke in it, so this is not a budget
+    /// worth spending more of.
+    /// </remarks>
+    private const int RenderAttempts = 3;
+
+    /// <summary>
+    /// Which run of a spoilt render misses its place, and whether this render is one.
+    /// </summary>
+    /// <remarks>
+    /// The second, because the first belongs at the front anyway: refusing the caret to that one
+    /// would count as misplaced without moving a character, and what a test needs to see is the
+    /// description actually come out wrong.
+    /// </remarks>
+    private const int SpoiltRun = 1;
+
+    private bool _spoiling;
+
+    private int _run;
+
     /// <summary>
     /// Puts the caret where the next run goes, and makes sure it went there.
     /// </summary>
@@ -571,6 +660,16 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     private void PlaceCaret()
     {
+        // The run a test is holding the caret back from. Every go at it fails and the caret is left
+        // at the front, so the run is written there — the damage itself rather than a flag saying
+        // it happened, which is the only way what follows can be held to repairing it.
+        if (_spoiling && _run++ == SpoiltRun)
+        {
+            Select(0, 0);
+            MisplacedRuns++;
+            return;
+        }
+
         for (var attempt = 0; attempt < CaretAttempts; attempt++)
         {
             Select(_at, 0);
@@ -688,6 +787,43 @@ internal sealed class MarkdownView : RichTextBox
     /// messages so an occurrence reports it without anyone having to catch it live.
     /// </remarks>
     internal int MisplacedRuns { get; private set; }
+
+    /// <summary>
+    /// How many goes it took to draw what is on screen.
+    /// </summary>
+    /// <remarks>
+    /// One on every machine this has been run on, and the number that says the retry did its job
+    /// where it isn't. It is the diagnostic <see cref="MisplacedRuns"/> used to be: now that a
+    /// misplaced run is drawn again rather than shown, a render that had one and recovered leaves
+    /// nothing else behind to say so.
+    /// </remarks>
+    internal int Renders { get; private set; }
+
+    /// <summary>
+    /// Whether what is on screen is the markdown itself rather than a rendering of it.
+    /// </summary>
+    /// <remarks>
+    /// Two ways to end up here and both are the same answer: markdown nested past what the parser
+    /// will take, and a rendering that couldn't be got right in the goes it was given.
+    /// </remarks>
+    internal bool Plain { get; private set; }
+
+    /// <summary>
+    /// How many of the next renders should have a run miss its place, for a test.
+    /// </summary>
+    /// <remarks>
+    /// A seam and nothing else — nought in the running app, where every caret is asked of the
+    /// control as it always was. It is here because the fault it stands in for has only ever
+    /// appeared on a build agent, twice, and an answer to that which couldn't be brought on
+    /// deliberately would be an answer taken on trust.
+    ///
+    /// Counted in renders rather than in runs, because that is what the two answers turn on: one
+    /// spoilt render is drawn again and comes out right, and every render spoilt is what falls back
+    /// to the plain text. How many runs a render has is neither here nor there.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal int SpoilRenders { get; set; }
 
     /// <summary>
     /// A span with its delimiters taken off each end.
