@@ -5,11 +5,19 @@ namespace Termyn.App.Windows;
 /// </summary>
 /// <remarks>
 /// <see cref="FontFamily.GenericMonospace"/> hands back a new family — and a new GDI+ handle behind
-/// it — on every read, and both halves of the panel ask for it on a hot path: the editor on every
-/// pause in the typing, the rendered view on every run of code it draws. Each of those handles is
-/// then abandoned, so the finaliser thread is deleting them while the two halves are asking GDI+
-/// for the same family. Held here instead, so the face is resolved once and both halves draw code
-/// in the same one.
+/// it — on every read; it caches nothing. The rendered view asks for one on every run of code it
+/// draws, so a description of any size leaves a handful of handles behind for the finaliser to
+/// collect, which is the same waste the font cache next to it exists to avoid and is avoided here
+/// for the cost of one field.
+///
+/// The other half of it is that this is the one place saying what code is set in. The editor names
+/// the face in the RTF it builds and the view sets it on a selection, and the two are drawing the
+/// same description — so they have to agree about it, and pointing somewhere else one day should be
+/// a single edit rather than two that can be made separately.
+///
+/// It is worth saying what this is not for, since it was written under a theory that turned out to
+/// be wrong: it has nothing to do with the tests that fail in clusters on CI. Those were the caret
+/// not going where it was put, and no arrangement of font lookups was ever going to touch them.
 /// </remarks>
 internal static class Faces
 {
