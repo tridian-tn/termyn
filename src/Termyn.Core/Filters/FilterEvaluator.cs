@@ -10,11 +10,18 @@ namespace Termyn.Core.Filters;
 public sealed class FilterContext
 {
     private readonly IReadOnlyList<Project> _projects;
+    private readonly IReadOnlyList<Section> _sections;
     private readonly Dictionary<(string Name, bool IncludeSubProjects), HashSet<string>> _resolved = new();
+    private readonly Dictionary<string, HashSet<string>> _resolvedSections = new(StringComparer.OrdinalIgnoreCase);
 
-    public FilterContext(IReadOnlyList<Project> projects, DateOnly today, TimeZoneInfo zone)
+    public FilterContext(
+        IReadOnlyList<Project> projects,
+        DateOnly today,
+        TimeZoneInfo zone,
+        IReadOnlyList<Section>? sections = null)
     {
         _projects = projects;
+        _sections = sections ?? [];
         Today = today;
         Zone = zone;
     }
@@ -43,6 +50,30 @@ public sealed class FilterContext
         _resolved[(name, includeSubProjects)] = ids;
         return ids;
     }
+
+    /// <summary>
+    /// The sections a <c>/name</c> refers to.
+    /// </summary>
+    /// <remarks>
+    /// Every section of that name, in every project. Section names repeat far more than project
+    /// names do — half an account's projects can have a "Later" — and a filter naming one means all
+    /// of them, which is why narrowing it down is what the project term is for.
+    /// </remarks>
+    /// <param name="name">The name as the query wrote it</param>
+    /// <returns>The ids of every section called that</returns>
+    public HashSet<string> SectionIds(string name)
+    {
+        if (_resolvedSections.TryGetValue(name, out var cached))
+            return cached;
+
+        var ids = _sections
+            .Where(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Select(s => s.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        _resolvedSections[name] = ids;
+        return ids;
+    }
 }
 
 /// <summary>Applies a parsed filter to a task.</summary>
@@ -55,10 +86,19 @@ public static class FilterEvaluator
         FilterExpression.InProject e =>
             item.ProjectId is { } id && context.ProjectIds(e.Name, e.IncludeSubProjects).Contains(id),
 
+        FilterExpression.InSection e =>
+            item.SectionId is { } id && context.SectionIds(e.Name).Contains(id),
+
         FilterExpression.HasLabel e =>
             item.Labels.Contains(e.Name, StringComparer.OrdinalIgnoreCase),
 
+        FilterExpression.NoLabels => item.Labels.Count == 0,
+
         FilterExpression.HasPriority e => item.Priority == e.Priority,
+
+        FilterExpression.Recurring => item.IsRecurring,
+
+        FilterExpression.Subtask => item.ParentId is not null,
 
         // Today only. The Today smart view sweeps in overdue as well, but as a filter term the two
         // are separate — "today | overdue" is how you ask for both.
@@ -69,20 +109,30 @@ public static class FilterEvaluator
         // Read off the raw field, not the parsed date: a due date Termyn can't read is still a date.
         FilterExpression.NoDate => item.DueDate is null,
 
+        FilterExpression.NoDeadline => item.Deadline is null,
+
+        // A task with no date at all has no time of day either, and Todoist's own documented way of
+        // asking for "a date and a time" is "!no date & !no time" — which needs both halves only
+        // because this one lets the dateless through.
+        FilterExpression.NoTime => !SmartViews.DueHasTime(item),
+
         // N days counting today, so "next 7 days" ends six days out. Overdue isn't in the window.
         FilterExpression.NextDays e =>
             SmartViews.DueOn(item, context.Zone) is { } day
             && day >= context.Today
             && day <= context.Today.AddDays(e.Days - 1),
 
-        // A task the account has no creation date for matches none of these rather than all: the
-        // question is when it was added, and "no idea" isn't an answer to it.
-        FilterExpression.Created e => SmartViews.AddedOn(item, context.Zone) is { } added && e.Bound switch
-        {
-            DayBound.Before => added < e.Day.Resolve(context.Today),
-            DayBound.After => added > e.Day.Resolve(context.Today),
-            _ => added == e.Day.Resolve(context.Today),
-        },
+        // The same window the other way. Both count today, which is the day they share.
+        FilterExpression.LastDays e =>
+            SmartViews.DueOn(item, context.Zone) is { } day
+            && day <= context.Today
+            && day >= context.Today.AddDays(-(e.Days - 1)),
+
+        FilterExpression.Due e => On(SmartViews.DueOn(item, context.Zone), e.Bound, e.Day, context.Today),
+
+        FilterExpression.Deadline e => On(SmartViews.DeadlineOn(item, context.Zone), e.Bound, e.Day, context.Today),
+
+        FilterExpression.Created e => On(SmartViews.AddedOn(item, context.Zone), e.Bound, e.Day, context.Today),
 
         FilterExpression.Search e => item.Content.Contains(e.Text, StringComparison.OrdinalIgnoreCase),
 
@@ -96,4 +146,32 @@ public static class FilterEvaluator
         // harmless if one ever isn't: a term nobody evaluates should match nothing, not everything.
         _ => false,
     };
+
+    /// <summary>
+    /// Whether a day the task carries falls the named side of the day a term asks about.
+    /// </summary>
+    /// <remarks>
+    /// A task that hasn't got the day at all matches none of these rather than all of them: the
+    /// question is when something happens, and "never" isn't an answer to it. Asking the other way
+    /// round — for the tasks without one — is what the <c>no …</c> terms are for.
+    /// </remarks>
+    /// <param name="day">The day the task carries, or null when it hasn't got one</param>
+    /// <param name="bound">Which side of the term's day counts</param>
+    /// <param name="wanted">The day the term names</param>
+    /// <param name="today">Today in the account's timezone, which relative days are counted from</param>
+    /// <returns>Whether the task's day answers the term</returns>
+    private static bool On(DateOnly? day, DayBound bound, FilterDay wanted, DateOnly today)
+    {
+        if (day is not { } had)
+            return false;
+
+        var mark = wanted.Resolve(today);
+
+        return bound switch
+        {
+            DayBound.Before => had < mark,
+            DayBound.After => had > mark,
+            _ => had == mark,
+        };
+    }
 }

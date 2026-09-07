@@ -1602,7 +1602,7 @@ public sealed class MainPresenter
         if (filter is null)
             return _ => false;
 
-        var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels);
+        var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels, snapshot.Sections);
         var parsed = FilterParser.Parse(filter.Query, vocabulary);
 
         if (!parsed.IsSupported)
@@ -1615,7 +1615,7 @@ public sealed class MainPresenter
             return _ => false;
         }
 
-        var context = new FilterContext(snapshot.Projects, snapshot.Today, snapshot.TimeZone);
+        var context = new FilterContext(snapshot.Projects, snapshot.Today, snapshot.TimeZone, snapshot.Sections);
         return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
 

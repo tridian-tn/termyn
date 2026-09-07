@@ -11,6 +11,7 @@ public static class Projections
     public static TaskItem ToTaskItem(JsonObject o)
     {
         var due = o["due"] as JsonObject;
+        var deadline = o["deadline"] as JsonObject;
         return new TaskItem
         {
             Id = JsonRead.String(o, "id") ?? string.Empty,
@@ -28,6 +29,7 @@ public static class Projections
             // Todoist has used both field names across API versions; accept either.
             AddedAt = JsonRead.String(o, "added_at") ?? JsonRead.String(o, "date_added"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
+            Deadline = deadline is null ? null : JsonRead.String(deadline, "date"),
             DueText = due is null ? null : JsonRead.String(due, "string"),
             IsRecurring = due is not null && JsonRead.Bool(due, "is_recurring"),
         };

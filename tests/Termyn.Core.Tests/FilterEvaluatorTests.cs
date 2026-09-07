@@ -17,6 +17,17 @@ public class FilterEvaluatorTests
         new() { Id = "work2", Name = "Work" }, // Todoist allows two projects to share a name
     ];
 
+    /// <summary>
+    /// Sections across two projects. "Later" is in both on purpose: section names repeat far more
+    /// than project names do, and a term naming one has to mean every one of them.
+    /// </summary>
+    private static readonly Section[] Sections =
+    [
+        new() { Id = "later-work", Name = "Later", ProjectId = "work" },
+        new() { Id = "later-home", Name = "Later", ProjectId = "home" },
+        new() { Id = "meetings", Name = "Meetings", ProjectId = "work" },
+    ];
+
     [Fact]
     public void A_project_term_matches_that_project_only()
     {
@@ -197,6 +208,200 @@ public class FilterEvaluatorTests
         Assert.True(FilterEvaluator.Matches(parsed.Expression!, Item(due: "2026-07-30T23:00:00.000000Z"), context));
     }
 
+    // ---- Where a task is ---------------------------------------------------------------------------
+
+    [Fact]
+    public void A_section_term_matches_every_section_of_that_name()
+    {
+        // Two projects both have a "Later", and a filter naming it means both. Narrowing it down to
+        // one is what putting a project alongside is for.
+        Assert.True(Matches("/Later", Item(projectId: "work", sectionId: "later-work")));
+        Assert.True(Matches("/Later", Item(projectId: "home", sectionId: "later-home")));
+        Assert.False(Matches("/Later", Item(projectId: "work", sectionId: "meetings")));
+
+        Assert.True(Matches("#Work & /Later", Item(projectId: "work", sectionId: "later-work")));
+        Assert.False(Matches("#Work & /Later", Item(projectId: "home", sectionId: "later-home")));
+    }
+
+    [Fact]
+    public void A_task_in_no_section_is_in_no_section_term()
+        => Assert.False(Matches("/Later", Item(projectId: "work")));
+
+    [Fact]
+    public void A_subtask_is_one_filed_under_another_task()
+    {
+        Assert.True(Matches("subtask", Item(parentId: "parent")));
+        Assert.False(Matches("subtask", Item()));
+        Assert.True(Matches("!subtask", Item()));
+    }
+
+    [Fact]
+    public void Recurring_is_what_the_server_says_it_is()
+    {
+        Assert.True(Matches("recurring", Item(due: "2026-07-31", recurring: true)));
+        Assert.False(Matches("recurring", Item(due: "2026-07-31")));
+    }
+
+    // ---- Labels and priority -----------------------------------------------------------------------
+
+    [Fact]
+    public void The_label_sigils_are_both_read()
+    {
+        // Todoist writes "%home" now and is retiring "@home", so an account can hold either.
+        Assert.True(Matches("%home", Item(labels: ["home"])));
+        Assert.True(Matches("@home", Item(labels: ["home"])));
+    }
+
+    [Fact]
+    public void No_labels_is_a_task_carrying_none()
+    {
+        Assert.True(Matches("no labels", Item()));
+        Assert.False(Matches("no labels", Item(labels: ["home"])));
+    }
+
+    [Fact]
+    public void No_priority_is_the_lowest_one()
+    {
+        // Todoist gives every task a priority and calls the bottom of the four none.
+        Assert.True(Matches("no priority", Item(priority: Priority.P4)));
+        Assert.False(Matches("no priority", Item(priority: Priority.P1)));
+    }
+
+    // ---- Days --------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Tomorrow_and_yesterday_are_the_days_either_side()
+    {
+        Assert.True(Matches("tomorrow", Item(due: "2026-08-01")));
+        Assert.False(Matches("tomorrow", Item(due: "2026-07-31")));
+
+        Assert.True(Matches("yesterday", Item(due: "2026-07-30")));
+        Assert.False(Matches("yesterday", Item(due: "2026-07-31")));
+    }
+
+    [Fact]
+    public void Overdue_is_written_three_ways_and_means_one()
+    {
+        foreach (var query in new[] { "overdue", "over due", "od" })
+        {
+            Assert.True(Matches(query, Item(due: "2026-07-30")), query);
+            Assert.False(Matches(query, Item(due: "2026-07-31")), query);
+        }
+    }
+
+    [Fact]
+    public void A_due_term_reads_the_day_the_task_falls_on()
+    {
+        Assert.True(Matches("due: today", Item(due: "2026-07-31")));
+        Assert.True(Matches("due before: today", Item(due: "2026-07-30")));
+        Assert.True(Matches("due after: today", Item(due: "2026-08-01")));
+
+        Assert.False(Matches("due before: today", Item(due: "2026-07-31")));
+        Assert.False(Matches("due after: today", Item(due: "2026-07-31")));
+    }
+
+    [Fact]
+    public void Date_is_the_older_name_for_the_same_term()
+    {
+        Assert.True(Matches("date: 2026-08-01", Item(due: "2026-08-01")));
+        Assert.False(Matches("date: 2026-08-01", Item(due: "2026-07-31")));
+    }
+
+    [Fact]
+    public void A_weekday_is_the_coming_one()
+    {
+        // Today is a Friday, so "sat" is tomorrow and "wed" is five days out — not the Wednesday
+        // two days back. A weekday always looks forward.
+        Assert.True(Matches("due: sat", Item(due: "2026-08-01")));
+        Assert.True(Matches("due: saturday", Item(due: "2026-08-01")));
+        Assert.True(Matches("due: wed", Item(due: "2026-08-05")));
+        Assert.False(Matches("due: wed", Item(due: "2026-07-29")));
+    }
+
+    [Fact]
+    public void A_weekday_that_is_today_is_today()
+    {
+        // The coming Friday, when today is one, is this one — the same reading quick add gives it.
+        Assert.True(Matches("due: fri", Item(due: "2026-07-31")));
+        Assert.False(Matches("due: fri", Item(due: "2026-08-07")));
+    }
+
+    [Fact]
+    public void A_bare_day_is_the_day_it_is_due()
+    {
+        Assert.True(Matches("2026-08-01", Item(due: "2026-08-01")));
+        Assert.True(Matches("mon", Item(due: "2026-08-03")));
+        Assert.False(Matches("mon", Item(due: "2026-08-04")));
+    }
+
+    [Fact]
+    public void A_window_of_days_counts_today_at_both_ends()
+    {
+        // "3 days" is today and the two after it; "-3 days" is today and the two before. The day
+        // they share is today, which is what makes each of them three days rather than four.
+        Assert.True(Matches("3 days", Item(due: "2026-07-31")));
+        Assert.True(Matches("3 days", Item(due: "2026-08-02")));
+        Assert.False(Matches("3 days", Item(due: "2026-08-03")));
+        Assert.False(Matches("3 days", Item(due: "2026-07-30")));
+
+        Assert.True(Matches("-3 days", Item(due: "2026-07-31")));
+        Assert.True(Matches("-3 days", Item(due: "2026-07-29")));
+        Assert.False(Matches("-3 days", Item(due: "2026-07-28")));
+        Assert.False(Matches("-3 days", Item(due: "2026-08-01")));
+    }
+
+    [Fact]
+    public void No_time_is_a_date_without_an_hour()
+    {
+        // And a task with no date at all, which has no hour either — Todoist's own way of asking
+        // for "a date and a time" is "!no date & !no time", which needs both halves only because
+        // this one lets the dateless through.
+        Assert.True(Matches("no time", Item(due: "2026-07-31")));
+        Assert.True(Matches("no time", Item()));
+        Assert.False(Matches("no time", Item(due: "2026-07-31T09:00:00")));
+
+        Assert.True(Matches("!no date & !no time", Item(due: "2026-07-31T09:00:00")));
+        Assert.False(Matches("!no date & !no time", Item(due: "2026-07-31")));
+    }
+
+    // ---- Deadlines ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_deadline_term_reads_the_day_it_has_to_be_done_by()
+    {
+        Assert.True(Matches("deadline: today", Item(deadline: "2026-07-31")));
+        Assert.True(Matches("deadline before: today", Item(deadline: "2026-07-30")));
+        Assert.True(Matches("deadline after: today", Item(deadline: "2026-08-01")));
+        Assert.False(Matches("deadline: today", Item(deadline: "2026-08-01")));
+    }
+
+    [Fact]
+    public void A_deadline_is_read_apart_from_the_due_date()
+    {
+        // The two are different dates on the same task, and neither answers for the other.
+        var task = Item(due: "2026-08-15", deadline: "2026-07-31");
+
+        Assert.True(Matches("deadline: today", task));
+        Assert.False(Matches("today", task));
+    }
+
+    [Fact]
+    public void No_deadline_is_a_task_that_has_not_got_one()
+    {
+        Assert.True(Matches("no deadline", Item(due: "2026-07-31")));
+        Assert.False(Matches("no deadline", Item(deadline: "2026-07-31")));
+        Assert.True(Matches("!no deadline", Item(deadline: "2026-07-31")));
+    }
+
+    [Fact]
+    public void A_task_with_no_deadline_is_in_no_deadline_term()
+    {
+        // Not in "before" either, the same way an unknown creation date isn't an early one.
+        Assert.False(Matches("deadline: today", Item()));
+        Assert.False(Matches("deadline before: today", Item()));
+        Assert.False(Matches("deadline after: today", Item()));
+    }
+
     // ---- Booleans ----------------------------------------------------------------------------------
 
     [Fact]
@@ -252,16 +457,20 @@ public class FilterEvaluatorTests
         var parsed = FilterParser.Parse(query, Vocabulary());
         Assert.True(parsed.IsSupported, $"query not supported: {query}");
 
-        return FilterEvaluator.Matches(parsed.Expression!, item, new FilterContext(Projects, Today, TimeZoneInfo.Utc));
+        return FilterEvaluator.Matches(parsed.Expression!, item, new FilterContext(Projects, Today, TimeZoneInfo.Utc, Sections));
     }
 
     private static FilterVocabulary Vocabulary()
-        => new(Projects.Select(p => p.Name), ["home"]);
+        => new(Projects.Select(p => p.Name), ["home"], Sections.Select(s => s.Name));
 
     private static TaskItem Item(
         string content = "Task",
         string? projectId = null,
+        string? sectionId = null,
+        string? parentId = null,
         string? due = null,
+        string? deadline = null,
+        bool recurring = false,
         Priority priority = Priority.P4,
         string[]? labels = null,
         string? added = null)
@@ -270,7 +479,11 @@ public class FilterEvaluatorTests
             Id = "i",
             Content = content,
             ProjectId = projectId,
+            SectionId = sectionId,
+            ParentId = parentId,
             DueDate = due,
+            Deadline = deadline,
+            IsRecurring = recurring,
             Priority = priority,
             Labels = labels ?? [],
             AddedAt = added,

@@ -12,7 +12,7 @@ public class FilterParserTests
     /// there is nothing for it to prefer.
     /// </summary>
     private static readonly FilterVocabulary Vocabulary =
-        new(["Work", "Work Learning", "My Project"], ["home", "deep work"]);
+        new(["Work", "Work Learning", "My Project"], ["home", "deep work"], ["Later", "Next Up"]);
 
     // ---- Terms -------------------------------------------------------------------------------------
 
@@ -144,7 +144,6 @@ public class FilterParserTests
     [Theory]
     [InlineData("created")]
     [InlineData("created:")]
-    [InlineData("created: tomorrow")]
     [InlineData("created: 31-01-2026")]
     [InlineData("created since: today")]
     [InlineData("created before:")]
@@ -241,6 +240,157 @@ public class FilterParserTests
         Assert.IsType<FilterExpression.HasPriority>(and.Right);
     }
 
+    // ---- The rest of the grammar -------------------------------------------------------------------
+
+    [Fact]
+    public void A_label_is_read_under_either_sigil()
+    {
+        // Todoist moved labels from "@" to "%" and is retiring the old one, so a saved filter can
+        // be written either way and both have to keep working.
+        Assert.Equal("home", Assert.IsType<FilterExpression.HasLabel>(Parse("%home").Expression).Name);
+        Assert.Equal("deep work", Assert.IsType<FilterExpression.HasLabel>(Parse("%deep work").Expression).Name);
+    }
+
+    [Fact]
+    public void A_section_term_reads_its_name()
+    {
+        Assert.Equal("Later", Assert.IsType<FilterExpression.InSection>(Parse("/Later").Expression).Name);
+
+        // The same longest-known-name rule as a project: without the account's own names there is
+        // nothing to say whether "today" is part of the section or a term of its own.
+        Assert.Equal("Next Up", Assert.IsType<FilterExpression.InSection>(Parse("/Next Up").Expression).Name);
+
+        var and = Assert.IsType<FilterExpression.And>(Parse("/Next Up today").Expression);
+        Assert.Equal("Next Up", Assert.IsType<FilterExpression.InSection>(and.Left).Name);
+        Assert.IsType<FilterExpression.DueToday>(and.Right);
+    }
+
+    [Fact]
+    public void A_quoted_name_is_taken_whole()
+    {
+        // Which is how a name gets to hold a space without the parser having to recognise it, and
+        // the only way one can hold a character the grammar would otherwise take for itself.
+        Assert.Equal("My Project", Assert.IsType<FilterExpression.InProject>(Parse("""#"My Project" """).Expression).Name);
+        Assert.Equal("Next Up", Assert.IsType<FilterExpression.InSection>(Parse("""/"Next Up" """).Expression).Name);
+
+        var and = Assert.IsType<FilterExpression.And>(Parse("""#"Wed & Thu" & today""").Expression);
+        Assert.Equal("Wed & Thu", Assert.IsType<FilterExpression.InProject>(and.Left).Name);
+        Assert.IsType<FilterExpression.DueToday>(and.Right);
+    }
+
+    [Fact]
+    public void A_backslash_hands_the_next_character_to_the_name()
+    {
+        var project = Assert.IsType<FilterExpression.InProject>(Parse("""#Books\&Papers""").Expression);
+
+        Assert.Equal("Books&Papers", project.Name);
+    }
+
+    [Theory]
+    [InlineData("no labels")]
+    [InlineData("no label")]
+    public void No_labels_is_read(string query)
+        => Assert.IsType<FilterExpression.NoLabels>(Parse(query).Expression);
+
+    [Fact]
+    public void No_priority_is_the_lowest_one()
+        => Assert.Equal(Priority.P4, Assert.IsType<FilterExpression.HasPriority>(Parse("no priority").Expression).Priority);
+
+    [Theory]
+    [InlineData("no time", typeof(FilterExpression.NoTime))]
+    [InlineData("no deadline", typeof(FilterExpression.NoDeadline))]
+    [InlineData("recurring", typeof(FilterExpression.Recurring))]
+    [InlineData("subtask", typeof(FilterExpression.Subtask))]
+    [InlineData("overdue", typeof(FilterExpression.Overdue))]
+    [InlineData("over due", typeof(FilterExpression.Overdue))]
+    [InlineData("od", typeof(FilterExpression.Overdue))]
+    public void The_single_terms_are_read(string query, Type expected)
+        => Assert.IsType(expected, Parse(query).Expression);
+
+    [Theory]
+    [InlineData("tomorrow", 1)]
+    [InlineData("yesterday", -1)]
+    public void Tomorrow_and_yesterday_are_days_either_side_of_today(string query, int offset)
+    {
+        var due = Assert.IsType<FilterExpression.Due>(Parse(query).Expression);
+
+        Assert.Equal(DayBound.On, due.Bound);
+        Assert.Equal(offset, due.Day.DaysFromToday);
+    }
+
+    [Theory]
+    [InlineData("due:", DayBound.On)]
+    [InlineData("due before:", DayBound.Before)]
+    [InlineData("due after:", DayBound.After)]
+    [InlineData("date:", DayBound.On)]
+    [InlineData("date before:", DayBound.Before)]
+    public void A_due_term_reads_its_bound(string prefix, DayBound expected)
+    {
+        var due = Assert.IsType<FilterExpression.Due>(Parse($"{prefix} today").Expression);
+
+        Assert.Equal(expected, due.Bound);
+        Assert.Equal(FilterDay.Today, due.Day);
+    }
+
+    [Theory]
+    [InlineData("deadline: today", DayBound.On)]
+    [InlineData("deadline before: today", DayBound.Before)]
+    [InlineData("deadline after: today", DayBound.After)]
+    public void A_deadline_term_reads_its_bound(string query, DayBound expected)
+        => Assert.Equal(expected, Assert.IsType<FilterExpression.Deadline>(Parse(query).Expression).Bound);
+
+    [Theory]
+    [InlineData("due: sat", DayOfWeek.Saturday)]
+    [InlineData("due: saturday", DayOfWeek.Saturday)]
+    [InlineData("due: SUN", DayOfWeek.Sunday)]
+    [InlineData("due: thu", DayOfWeek.Thursday)]
+    [InlineData("due: tuesday", DayOfWeek.Tuesday)]
+    public void A_weekday_stays_a_weekday(string query, DayOfWeek expected)
+    {
+        // Rather than becoming an offset here: which day "sat" lands on depends on what today is,
+        // and a query is parsed once and then evaluated for as long as the view is open.
+        var due = Assert.IsType<FilterExpression.Due>(Parse(query).Expression);
+
+        Assert.Equal(expected, due.Day.Weekday);
+    }
+
+    [Fact]
+    public void A_day_can_be_written_the_long_way_round()
+    {
+        // "in 7 days" and "7 days" are the same day, and Todoist writes both.
+        var plain = Assert.IsType<FilterExpression.Due>(Parse("due: 7 days").Expression);
+        var spelled = Assert.IsType<FilterExpression.Due>(Parse("due: in 7 days").Expression);
+
+        Assert.Equal(7, plain.Day.DaysFromToday);
+        Assert.Equal(plain.Day, spelled.Day);
+    }
+
+    [Fact]
+    public void A_bare_window_of_days_reads_as_a_window()
+    {
+        // Not as the single day at the end of it, which is what the same words mean after "due:".
+        Assert.Equal(3, Assert.IsType<FilterExpression.NextDays>(Parse("3 days").Expression).Days);
+        Assert.Equal(3, Assert.IsType<FilterExpression.LastDays>(Parse("-3 days").Expression).Days);
+        Assert.Equal(1, Assert.IsType<FilterExpression.NextDays>(Parse("1 day").Expression).Days);
+    }
+
+    [Fact]
+    public void A_bare_day_is_a_due_date()
+    {
+        Assert.Equal(new DateOnly(2026, 1, 31), Assert.IsType<FilterExpression.Due>(Parse("2026-01-31").Expression).Day.Absolute);
+        Assert.Equal(DayOfWeek.Monday, Assert.IsType<FilterExpression.Due>(Parse("mon").Expression).Day.Weekday);
+    }
+
+    [Fact]
+    public void The_new_terms_compose_like_any_other()
+    {
+        var and = Assert.IsType<FilterExpression.And>(Parse("#Work & /Later & !subtask").Expression);
+
+        Assert.IsType<FilterExpression.InProject>(Assert.IsType<FilterExpression.And>(and.Left).Left);
+        Assert.IsType<FilterExpression.InSection>(Assert.IsType<FilterExpression.And>(and.Left).Right);
+        Assert.IsType<FilterExpression.Subtask>(Assert.IsType<FilterExpression.Not>(and.Right).Operand);
+    }
+
     // ---- Refusals ----------------------------------------------------------------------------------
 
     [Theory]
@@ -248,12 +398,18 @@ public class FilterParserTests
     [InlineData("   ")]
     [InlineData("assigned to: me")]     // collaborators are out of scope
     [InlineData(":to_me:")]             // the same thing in the spelling Todoist's own filter uses
-    [InlineData("tomorrow")]            // not in the normative date list
-    [InlineData("next week")]
+    [InlineData("next week")]           // what "next" means depends on where the account starts its week
+    [InlineData("first day")]
+    [InlineData("workspace: Home")]
+    [InlineData("shared")]
     [InlineData("next 0 days")]
+    [InlineData("0 days")]
     [InlineData("no")]
+    [InlineData("no idea")]
     [InlineData("#")]                   // names nothing
     [InlineData("@")]
+    [InlineData("%")]
+    [InlineData("/")]
     [InlineData("search:")]
     [InlineData("today &")]             // dangling operator
     [InlineData("| today")]
@@ -373,7 +529,7 @@ public class FilterParserTests
 
     [Fact]
     public void The_refused_fragment_is_reported()
-        => Assert.Contains("tomorrow", Parse("today & tomorrow").Unsupported);
+        => Assert.Contains("workspace:", Parse("today & workspace: Home").Unsupported);
 
     private static FilterParse Parse(string query) => FilterParser.Parse(query, Vocabulary);
 }
