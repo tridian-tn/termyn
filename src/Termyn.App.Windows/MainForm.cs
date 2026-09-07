@@ -293,6 +293,7 @@ internal sealed class MainForm : Form
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
+        _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.SelectedIndexChanged += (_, _) => FollowSelection();
 
         // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
@@ -916,6 +917,29 @@ internal sealed class MainForm : Form
     {
         _settings = _settings with { View = CurrentViewState() };
         return _shell.Store.Save(_settings);
+    }
+
+    /// <summary>
+    /// Hides or shows what is filed under a task, leaving the selection somewhere it can be seen.
+    /// </summary>
+    /// <remarks>
+    /// Folding over the selected task takes its row off the list, and the panel beside it empties —
+    /// so a glance at what is underneath something else would lose the user's place. The task that
+    /// was folded is what they were pointing at, so that is where the selection goes instead.
+    /// </remarks>
+    /// <param name="id">The task whose sub-tasks are being hidden or shown</param>
+    /// <param name="collapsed">True to hide them, false to show them again</param>
+    private void Collapse(string id, bool collapsed)
+    {
+        var was = _outline.SelectedId;
+
+        // The rows are republished from inside this, and the list has taken them by the time it
+        // returns — so the selection below is the one the fold left behind.
+        if (!_presenter.SetCollapsed(id, collapsed))
+            return;
+
+        if (was is not null && _outline.SelectedId is null)
+            _outline.SelectId(id);
     }
 
     // ---- Rendering -----------------------------------------------------------------------------
