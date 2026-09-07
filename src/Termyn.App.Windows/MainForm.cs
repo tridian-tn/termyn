@@ -975,6 +975,12 @@ internal sealed class MainForm : Form
         RenderSidebar();
         RenderCrumbs();
 
+        // The box follows the presenter rather than leading it. Opening a view drops the search,
+        // and the words that were typed have to go with it — left up they would sit there filtering
+        // nothing. Assigning what is already there raises nothing, so on every other render this is
+        // a comparison.
+        _search.Text = _presenter.SearchQuery;
+
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
         _outline.Rows = _presenter.Rows;

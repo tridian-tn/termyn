@@ -209,7 +209,15 @@ public sealed class MainPresenter
         Publish();
     }
 
-    /// <summary>Free-text filter applied to the rendered rows.</summary>
+    /// <summary>
+    /// Free-text filter applied to the rendered rows.
+    /// </summary>
+    /// <remarks>
+    /// Dropped by opening a view, because a search is a question about the whole account and
+    /// opening a view is a different question. Left on, the rows stayed the search's and the click
+    /// did nothing anyone could see — the view was open underneath and had nothing to show for it.
+    /// Whatever holds the words the user typed has to follow this rather than lead it.
+    /// </remarks>
     public string SearchQuery { get; private set; } = string.Empty;
 
     /// <summary>
@@ -440,10 +448,27 @@ public sealed class MainPresenter
 
     // ---- Navigation ----------------------------------------------------------------------------
 
-    public void Select(ViewSelection selection)
+    public void Select(ViewSelection selection) => Open(selection, selection.Key);
+
+    /// <summary>
+    /// Opens a view: what is selected, which row is lit, and the search let go of.
+    /// </summary>
+    /// <remarks>
+    /// The one place a view is opened, so every way of opening one behaves the same — clicking the
+    /// tree, stepping through it with the keyboard, and the palette. Doing it at each of them
+    /// instead is how they came to differ.
+    ///
+    /// The search goes because it is a question about the whole account and opening a view is a
+    /// different question. Left on, the rows stayed the search's and opening a view did nothing
+    /// anyone could see: it was open underneath with nothing to show for it.
+    /// </remarks>
+    /// <param name="selection">The view to open</param>
+    /// <param name="key">The sidebar row it was opened from, which a favourited project has two of</param>
+    private void Open(ViewSelection selection, string key)
     {
         Selection = selection;
-        SelectedKey = selection.Key;
+        SelectedKey = key;
+        SearchQuery = string.Empty;
         Publish();
     }
 
@@ -462,9 +487,7 @@ public sealed class MainPresenter
         if (key is null || Sidebar.FirstOrDefault(n => n.Key == key) is not { } node || node.Kind == SidebarKind.Header)
             return false;
 
-        Selection = SelectionOf(node);
-        SelectedKey = node.Key;
-        Publish();
+        Open(SelectionOf(node), node.Key);
         return true;
     }
 
@@ -489,9 +512,7 @@ public sealed class MainPresenter
             return false;
 
         var node = rows[next];
-        Selection = SelectionOf(node);
-        SelectedKey = node.Key;
-        Publish();
+        Open(SelectionOf(node), node.Key);
         return true;
     }
 
