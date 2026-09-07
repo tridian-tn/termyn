@@ -1686,8 +1686,17 @@ public sealed class MainPresenter
     /// </remarks>
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
 
-    /// <summary>The folded tasks, for saving alongside the rest of the view state.</summary>
-    public IReadOnlyList<string> CollapsedTasks => _collapsed.ToList();
+    /// <summary>
+    /// The folded tasks, for saving alongside the rest of the view state.
+    /// </summary>
+    /// <remarks>
+    /// In order, which a set has none of: what comes out of one is whatever its buckets happen to
+    /// hold, and that shifts as ids are added and removed. This is written into a file the user is
+    /// invited to open and edit, so the same folds have to come out the same way twice rather than
+    /// rearranging themselves on a restart that changed nothing.
+    /// </remarks>
+    public IReadOnlyList<string> CollapsedTasks
+        => _collapsed.OrderBy(id => id, StringComparer.Ordinal).ToList();
 
     /// <summary>
     /// Puts back the folds a previous session left.

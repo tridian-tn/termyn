@@ -258,6 +258,44 @@ public class SubtaskFoldingTests
         Assert.True(presenter.CanExpandAll);
     }
 
+    // ---- What gets written down ----------------------------------------------------------------
+
+    [Fact]
+    public void The_folds_come_out_in_the_same_order_however_they_went_in()
+    {
+        // They are saved into a file the user is invited to open and edit. Straight out of the set
+        // the order is whatever its buckets happen to hold, which shifts as ids are added and taken
+        // away — so the file would rearrange itself on a restart that changed nothing.
+        var one = Nested();
+        one.SetCollapsed("a", true);
+        one.SetCollapsed("b", true);
+        one.SetCollapsed("d", true);
+
+        var other = Nested();
+        other.SetCollapsed("d", true);
+        other.SetCollapsed("a", true);
+        other.SetCollapsed("b", true);
+
+        Assert.Equal(one.CollapsedTasks, other.CollapsedTasks);
+    }
+
+    [Fact]
+    public void Unfolding_one_and_folding_another_does_not_shuffle_the_rest()
+    {
+        // The case a set really does reorder on. An unfold leaves a gap and the next fold drops
+        // into it, so the newest id comes out where the oldest one used to be — which is how the
+        // file ends up rewritten with the same folds in a different order.
+        var presenter = Nested();
+        presenter.SetCollapsed("a", true);
+        presenter.SetCollapsed("b", true);
+        presenter.SetCollapsed("d", true);
+
+        presenter.SetCollapsed("a", false);
+        presenter.SetCollapsed("e", true);
+
+        Assert.Equal(new[] { "b", "d", "e" }, presenter.CollapsedTasks.ToArray());
+    }
+
     // ---- Where the selection goes --------------------------------------------------------------
 
     [Fact]
