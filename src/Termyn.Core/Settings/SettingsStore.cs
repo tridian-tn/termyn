@@ -205,6 +205,9 @@ public sealed class SettingsStore
             CollapsedKeys = Array(view, "collapsedKeys") is { } keys
                 ? keys.OfType<JsonValue>().Select(k => k.ToString()).ToList()
                 : defaults.CollapsedKeys,
+            CollapsedTasks = Array(view, "collapsedTasks") is { } folded
+                ? folded.OfType<JsonValue>().Select(t => t.ToString()).ToList()
+                : defaults.CollapsedTasks,
             SidebarWidth = Int(view, "sidebarWidth", defaults.SidebarWidth),
             ShowDescription = Flag(view, "showDescription", defaults.ShowDescription),
             DescriptionHeight = Int(view, "descriptionHeight", defaults.DescriptionHeight),

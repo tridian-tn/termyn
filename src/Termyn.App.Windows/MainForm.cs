@@ -888,6 +888,10 @@ internal sealed class MainForm : Form
         _restoreCollapsed = state.CollapsedKeys.Count > 0
             ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
             : null;
+
+        // Straight to the presenter rather than held like the sidebar's: which rows exist is its
+        // answer, so it needs these before it works the outline out rather than after.
+        _presenter.RestoreCollapsed(state.CollapsedTasks);
     }
 
     private ViewState CurrentViewState()
@@ -900,6 +904,7 @@ internal sealed class MainForm : Form
         {
             SelectedKey = _sidebarKey,
             CollapsedKeys = CollapsedKeys().ToList(),
+            CollapsedTasks = _presenter.CollapsedTasks,
             SidebarWidth = _split.SplitterDistance,
             ShowDescription = !_detail.Panel2Collapsed,
             DescriptionHeight = _descriptionHeight,

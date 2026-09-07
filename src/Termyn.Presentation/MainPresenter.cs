@@ -1676,15 +1676,37 @@ public sealed class MainPresenter
     /// Tasks whose sub-tasks are being kept out of sight.
     /// </summary>
     /// <remarks>
-    /// Held for as long as the window is open and no longer. It is where someone has got to in a
-    /// list rather than anything about the account, and a collapsed task read back on the next
-    /// start would be a list that opens up not showing work nobody remembers hiding.
+    /// Saved with the rest of the view state and put back on the next start, so a list somebody has
+    /// arranged stays arranged. It is theirs rather than the account's — nothing here is sent
+    /// anywhere, and a task folded on one machine is untouched on another.
     ///
     /// An id stays here after whatever was under it has gone — outdented, or deleted. Nothing reads
     /// it while the row has no children, and if the task is given sub-tasks again they start hidden,
     /// which is the last thing that was asked for.
     /// </remarks>
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+
+    /// <summary>The folded tasks, for saving alongside the rest of the view state.</summary>
+    public IReadOnlyList<string> CollapsedTasks => _collapsed.ToList();
+
+    /// <summary>
+    /// Puts back the folds a previous session left.
+    /// </summary>
+    /// <remarks>
+    /// Assigned rather than added to: this is how the list stood, not something laid on top of how
+    /// it stands now. Republished only when there is already something on screen — on a start this
+    /// runs before the first projection, and there is nothing yet for it to change.
+    /// </remarks>
+    /// <param name="ids">The tasks that were folded when the window last closed</param>
+    public void RestoreCollapsed(IEnumerable<string> ids)
+    {
+        _collapsed.Clear();
+        foreach (var id in ids)
+            _collapsed.Add(id);
+
+        if (_projectedFrom is not null)
+            Republish();
+    }
 
     /// <summary>Whether this task's sub-tasks are being kept out of sight.</summary>
     /// <param name="id">The task to ask about</param>
