@@ -260,19 +260,62 @@ public class ViewPathTests
     }
 
     [Fact]
-    public void Moving_to_another_list_while_searching_keeps_the_results_heading()
+    public void Moving_to_another_list_while_searching_heads_the_list_it_moved_to()
     {
-        // The search box still has its text, so the rows are still the results — and the path has
-        // to say so however the view underneath them was rebuilt.
+        // This used to hold the other way: the box still had its text, so the rows were still the
+        // results and the path said so. Opening a view drops the search now (#99), because leaving
+        // it on meant clicking a list did nothing anyone could see — the list was open underneath
+        // and the results were still on top of it.
         var presenter = NewPresenter(Store());
         presenter.Select(ViewSelection.OfProject("inner"));
         presenter.Search("task");
-
-        presenter.Select(ViewSelection.Of(SmartView.Today));
         Assert.Equal("Search results", Reads(presenter));
 
-        presenter.Search(string.Empty);
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+
         Assert.Equal("Today", Reads(presenter));
+        Assert.Equal(string.Empty, presenter.SearchQuery);
+    }
+
+    [Fact]
+    public void Opening_a_view_by_its_row_lets_the_search_go()
+    {
+        // How the tree opens one, which is what #99 is about: clicking a list while the results
+        // were up left the results up, so the click read as having done nothing.
+        var presenter = NewPresenter(Store());
+        presenter.Search("task");
+
+        var row = presenter.Sidebar.First(n => n.Kind != SidebarKind.Header);
+
+        Assert.True(presenter.SelectByKey(row.Key));
+        Assert.Equal(string.Empty, presenter.SearchQuery);
+    }
+
+    [Fact]
+    public void Stepping_through_the_views_lets_the_search_go_as_well()
+    {
+        // The keyboard's way to the same place. It behaving differently from a click is the sort of
+        // difference that comes of each way of opening a view doing its own housekeeping.
+        var presenter = NewPresenter(Store());
+        presenter.Search("task");
+
+        Assert.True(presenter.SelectAdjacent(1));
+        Assert.Equal(string.Empty, presenter.SearchQuery);
+    }
+
+    [Fact]
+    public void The_rows_come_back_from_the_view_rather_than_from_the_search()
+    {
+        // The point of the whole thing. Not just the box emptying — what is underneath has to be
+        // the list that was asked for.
+        var presenter = NewPresenter(Store());
+        presenter.Select(ViewSelection.OfProject("inner"));
+        presenter.Search("nothing matches this");
+        Assert.Empty(presenter.Rows);
+
+        presenter.Select(ViewSelection.OfProject("inner"));
+
+        Assert.NotEmpty(presenter.Rows);
     }
 
     [Fact]
