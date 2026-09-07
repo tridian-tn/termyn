@@ -464,6 +464,15 @@ internal sealed class MainForm : Form
         MainMenuStrip = bar;
         Controls.Add(bar);
 
+        // Said rather than left to fall out of the order these were added in, which is what decides
+        // it otherwise — and that order is about docking, so Tab began at the split and reached the
+        // search box third. It goes down the window now: the search, then the tree and the list and
+        // the panel, which follow from how those are nested inside the split.
+        _search.TabIndex = 0;
+        _split.TabIndex = 1;
+        _status.TabIndex = 2;
+        bar.TabIndex = 3;
+
         _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
 
         RestoreViewState(_settings.View);
