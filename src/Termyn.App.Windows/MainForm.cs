@@ -67,6 +67,14 @@ internal sealed class MainForm : Form
     /// <summary>True while a tab is being selected in code, so it isn't read as the user moving.</summary>
     private bool _switchingTabs;
 
+    /// <summary>True while the search box is being put back in step with the presenter.</summary>
+    /// <remarks>
+    /// Opening a view drops the search, and the box catching up would otherwise read as the user
+    /// having emptied it — asking the presenter for a search it has already let go of, and
+    /// republishing rows it has already published. The same shape as <see cref="_switchingTabs"/>.
+    /// </remarks>
+    private bool _syncingSearch;
+
     /// <summary>The row filled in while the tree hasn't got the focus, so it can be cleared again.</summary>
     private TreeNode? _markedRow;
     private readonly OutlineView _outline;
@@ -231,7 +239,13 @@ internal sealed class MainForm : Form
         KeyPreview = true;
 
         _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
-        _search.TextChanged += (_, _) => Guarded(() => _presenter.Search(_search.Text));
+        _search.TextChanged += (_, _) =>
+        {
+            if (_syncingSearch)
+                return;
+
+            Guarded(() => _presenter.Search(_search.Text));
+        };
 
         _sidebar = new BufferedTreeView
         {
@@ -979,7 +993,15 @@ internal sealed class MainForm : Form
         // and the words that were typed have to go with it — left up they would sit there filtering
         // nothing. Assigning what is already there raises nothing, so on every other render this is
         // a comparison.
-        _search.Text = _presenter.SearchQuery;
+        _syncingSearch = true;
+        try
+        {
+            _search.Text = _presenter.SearchQuery;
+        }
+        finally
+        {
+            _syncingSearch = false;
+        }
 
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
