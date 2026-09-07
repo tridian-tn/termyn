@@ -2317,6 +2317,21 @@ public sealed class SyncEngine
     /// </remarks>
     public event Action? Purged;
 
+    /// <summary>
+    /// Raised when a write has been queued, so whatever drives the sync loop can go now rather
+    /// than waiting for its own clock to come round.
+    /// </summary>
+    /// <remarks>
+    /// Every write goes into the outbox through one place, so this fires for all of them and no
+    /// caller has to remember to say so. Remembering is what went wrong before: the writes either
+    /// side of a comment asked for a sync and the comment didn't, so it sat under "Not sent yet"
+    /// for up to three quarters of a minute on a window that was online and idle.
+    ///
+    /// Raised while the engine is locked, like <see cref="Purged"/>, so a handler must not call
+    /// back into it. Waking a loop is what this is for.
+    /// </remarks>
+    public event Action? Queued;
+
     private void PurgeLocal()
     {
         _generation++;
@@ -2408,6 +2423,26 @@ public sealed class SyncEngine
         };
         _store.ApplyLocalWrite(cmd, upserts, deletes);
         _outbox.Add(cmd);
+
+        // Every write the engine takes passes through here, which is what makes this the one place
+        // that has to say so. Not the outbox being loaded from the store on the way up — that is
+        // the same writes being remembered, not new ones being made.
+        //
+        // Guarded the way the scheduler guards its own event, and for a sharper reason: by this
+        // point the write is in the store and in the outbox, so a subscriber that threw would
+        // unwind through the caller and have the window report a failure for a write that had
+        // already happened — and skip the refresh that would have shown it. The worst a swallowed
+        // one costs is the loop coming round on its own clock, which is where it was before any of
+        // this.
+        try
+        {
+            Queued?.Invoke();
+        }
+        catch
+        {
+            // A subscriber's failure must not turn a write that landed into one that looks lost.
+        }
+
         return cmd;
     }
 

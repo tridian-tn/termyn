@@ -74,6 +74,11 @@ internal static class Program
             fetcher: new AttachmentFetcher(api, secrets, attachments));
         var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
 
+        // Said once, here, rather than at every place a write is made. The engine queues all of
+        // them through one method and tells us from there, so a new kind of write cannot be added
+        // without the loop hearing about it — which is what a comment managed for a while.
+        engine.Queued += scheduler.NotifyWrite;
+
         var autoStart = new WindowsAutoStart();
         settings = StartupReconciliation.OnLaunch(settingsStore, settings, autoStart);
 
