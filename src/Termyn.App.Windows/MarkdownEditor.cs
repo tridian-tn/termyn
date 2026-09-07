@@ -155,7 +155,7 @@ internal sealed class MarkdownEditor : RichTextBox
         }
         finally
         {
-            Select(selection, length);
+            Restore(selection, length);
             ScrollTo(scroll);
 
             SendMessage(Handle, WmSetRedraw, 1, 0);
@@ -217,6 +217,35 @@ internal sealed class MarkdownEditor : RichTextBox
             rtf.Append(@"\par ");
 
         return rtf.Append('}').ToString();
+    }
+
+    /// <summary>How many times a selection that didn't take is set again before giving up.</summary>
+    private const int SelectionAttempts = 3;
+
+    /// <summary>
+    /// Puts the user's place back, and makes sure it went back.
+    /// </summary>
+    /// <remarks>
+    /// Asking is not enough. On a build agent this control has been left with its caret at nought
+    /// after being told to put it at twenty — which here means the user is typing in the middle of
+    /// a description, the styling catches up on a pause, and the caret jumps to the top. That is
+    /// the fault <see cref="Refill"/> exists to prevent, arriving by another road.
+    ///
+    /// Nothing is done about a selection that never takes after this. There is no better place to
+    /// put the caret than where the control has left it, and being wrong about where it is would
+    /// be worse than the jump.
+    /// </remarks>
+    /// <param name="start">Where the selection began</param>
+    /// <param name="length">How much of it there was</param>
+    private void Restore(int start, int length)
+    {
+        for (var attempt = 0; attempt < SelectionAttempts; attempt++)
+        {
+            Select(start, length);
+
+            if (SelectionStart == start && SelectionLength == length)
+                return;
+        }
     }
 
     /// <summary>Which entry of the colour table a style is drawn in.</summary>
