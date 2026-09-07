@@ -41,6 +41,8 @@ public enum AppCommand
     SyncNow,
     ToggleCompleted,
     SortDefault,
+    ExpandAll,
+    CollapseAll,
     ToggleDescription,
     EditDescription,
     ToggleComments,
@@ -97,7 +99,9 @@ public sealed record CommandContext(
     bool ShowingDescription = false,
     bool WritingDescription = false,
     bool ShowingComments = false,
-    bool Zoomed = false)
+    bool Zoomed = false,
+    bool CanExpandAll = false,
+    bool CanCollapseAll = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -204,6 +208,12 @@ public static class Commands
                 "Completed tasks",
                 true,
                 context.ShowingCompleted),
+            // Folding the whole view at once, which the expander on a row does one task at a time.
+            // Each is greyed when there is nothing left for it to do, which is also how the pair
+            // says which way the outline currently stands.
+            AppCommand.ExpandAll => new CommandState("Expand all", context.CanExpandAll),
+            AppCommand.CollapseAll => new CommandState("Collapse all", context.CanCollapseAll),
+
             // The way back from a sorted outline. Greyed when it is already in the account's own
             // order, which is also how the entry says which of the two you are looking at.
             AppCommand.SortDefault => new CommandState(

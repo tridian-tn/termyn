@@ -91,6 +91,19 @@ public sealed record ViewState
     /// <summary>Sidebar branches the user had closed, so a restart doesn't reopen them all.</summary>
     public IReadOnlyList<string> CollapsedKeys { get; init; } = [];
 
+    /// <summary>
+    /// Tasks whose sub-tasks the user had put away, so a restart doesn't open them all again.
+    /// </summary>
+    /// <remarks>
+    /// Ids rather than anything readable, because an id is what a task is known by and a rename
+    /// elsewhere must not lose the fold.
+    ///
+    /// An id for a task that has since gone stays here. Sweeping them would mean being sure a task
+    /// is really gone rather than merely not synced yet, and getting that wrong on a first start
+    /// would throw the lot away — where leaving it costs one string that matches nothing.
+    /// </remarks>
+    public IReadOnlyList<string> CollapsedTasks { get; init; } = [];
+
     public int SidebarWidth { get; init; } = 220;
 
     /// <summary>Whether the description panel under the outline is open.</summary>
@@ -134,7 +147,9 @@ public sealed record ViewState
            && WindowHeight == other.WindowHeight
            && Maximized == other.Maximized
            && CollapsedKeys.Count == other.CollapsedKeys.Count
-           && !CollapsedKeys.Except(other.CollapsedKeys, StringComparer.Ordinal).Any();
+           && !CollapsedKeys.Except(other.CollapsedKeys, StringComparer.Ordinal).Any()
+           && CollapsedTasks.Count == other.CollapsedTasks.Count
+           && !CollapsedTasks.Except(other.CollapsedTasks, StringComparer.Ordinal).Any();
 
     public override int GetHashCode()
     {
@@ -150,13 +165,23 @@ public sealed record ViewState
         hash.Add(Maximized);
 
         // Order-independent, to match the comparison: the keys come from a set walked in sidebar
-        // order, so renaming a project reorders them without changing what is collapsed.
-        hash.Add(CollapsedKeys.Count);
-        var keys = 0;
-        foreach (var key in CollapsedKeys)
-            keys ^= StringComparer.Ordinal.GetHashCode(key);
-        hash.Add(keys);
+        // order, so renaming a project reorders them without changing what is collapsed. The task
+        // ids come out of a set as well, which has an order of its own and no promise about it.
+        hash.Add(Unordered(CollapsedKeys));
+        hash.Add(Unordered(CollapsedTasks));
 
         return hash.ToHashCode();
+    }
+
+    /// <summary>A hash of what a list holds, taking no notice of the order it holds it in.</summary>
+    /// <param name="values">The strings to fold together</param>
+    /// <returns>The same answer for the same contents, however they are arranged</returns>
+    private static int Unordered(IReadOnlyList<string> values)
+    {
+        var folded = values.Count;
+        foreach (var value in values)
+            folded ^= StringComparer.Ordinal.GetHashCode(value);
+
+        return folded;
     }
 }

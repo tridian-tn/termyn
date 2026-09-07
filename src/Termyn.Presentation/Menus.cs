@@ -103,6 +103,11 @@ public static class Menus
             MenuEntry.Of(AppCommand.ZoomOut),
             MenuEntry.Of(AppCommand.ZoomReset),
 
+            // The whole outline at once. A row's own expander does one task; these do the view,
+            // and there is nowhere else to reach them from.
+            MenuEntry.AfterRule(AppCommand.ExpandAll),
+            MenuEntry.Of(AppCommand.CollapseAll),
+
             // Sorting is done by clicking a column header; this is the way back from it, and the
             // only part of it that needs somewhere to live.
             MenuEntry.AfterRule(AppCommand.SortDefault)),

@@ -17,6 +17,12 @@ namespace Termyn.Presentation;
 /// The day it actually falls on, for ordering by it. The shown text can't be sorted: a repeat reads
 /// "every Monday", and that lands nowhere near Monday among a column of dates.
 /// </param>
+/// <param name="HasChildren">
+/// Whether anything is filed under it, which is what decides that a row is offered an expander at
+/// all. Answered from the outline being built rather than from the task, so a sub-task filtered out
+/// of the view it is being shown in doesn't leave its parent claiming children nobody can see.
+/// </param>
+/// <param name="Collapsed">Whether what is filed under it is currently being kept out of sight.</param>
 public sealed record TaskRow(
     string Id,
     string Content,
@@ -29,7 +35,9 @@ public sealed record TaskRow(
     int ReminderCount = 0,
     bool Completed = false,
     DateOnly? DueOn = null,
-    int CommentCount = 0);
+    int CommentCount = 0,
+    bool HasChildren = false,
+    bool Collapsed = false);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -1480,7 +1488,7 @@ public sealed class MainPresenter
                 if (!emitted.Add(item.Id))
                     continue;
 
-                rows.Add(Row(item, depth));
+                rows.Add(Row(item, depth) with { HasChildren = byParent.ContainsKey(item.Id) });
                 Emit(item.Id, depth + 1);
             }
         }
@@ -1653,12 +1661,201 @@ public sealed class MainPresenter
                     r.Content.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     r.Project.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     r.Labels.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase)))
-                .Select(r => r with { Depth = 0 })
+                // Flat, and with no children claimed: what a match's sub-tasks do is nothing to do
+                // with the match, and an expander on a row whose children aren't in the list would
+                // offer to hide something that isn't there.
+                .Select(r => r with { Depth = 0, HasChildren = false })
                 .ToList();
         }
 
-        Rows = Ordered(rows);
+        Rows = Folded(Ordered(rows));
         Status = ComposeStatus(pending, failed);
+    }
+
+    /// <summary>
+    /// Tasks whose sub-tasks are being kept out of sight.
+    /// </summary>
+    /// <remarks>
+    /// Saved with the rest of the view state and put back on the next start, so a list somebody has
+    /// arranged stays arranged. It is theirs rather than the account's — nothing here is sent
+    /// anywhere, and a task folded on one machine is untouched on another.
+    ///
+    /// An id stays here after whatever was under it has gone — outdented, or deleted. Nothing reads
+    /// it while the row has no children, and if the task is given sub-tasks again they start hidden,
+    /// which is the last thing that was asked for.
+    /// </remarks>
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The folded tasks, for saving alongside the rest of the view state.
+    /// </summary>
+    /// <remarks>
+    /// In order, which a set has none of: what comes out of one is whatever its buckets happen to
+    /// hold, and that shifts as ids are added and removed. This is written into a file the user is
+    /// invited to open and edit, so the same folds have to come out the same way twice rather than
+    /// rearranging themselves on a restart that changed nothing.
+    /// </remarks>
+    public IReadOnlyList<string> CollapsedTasks
+        => _collapsed.OrderBy(id => id, StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// Puts back the folds a previous session left.
+    /// </summary>
+    /// <remarks>
+    /// Assigned rather than added to: this is how the list stood, not something laid on top of how
+    /// it stands now. Republished only when there is already something on screen — on a start this
+    /// runs before the first projection, and there is nothing yet for it to change.
+    /// </remarks>
+    /// <param name="ids">The tasks that were folded when the window last closed</param>
+    public void RestoreCollapsed(IEnumerable<string> ids)
+    {
+        _collapsed.Clear();
+        foreach (var id in ids)
+            _collapsed.Add(id);
+
+        if (_projectedFrom is not null)
+            Republish();
+    }
+
+    /// <summary>Whether this task's sub-tasks are being kept out of sight.</summary>
+    /// <param name="id">The task to ask about</param>
+    /// <returns>True when its sub-tasks are hidden</returns>
+    public bool IsCollapsed(string id) => _collapsed.Contains(id);
+
+    /// <summary>
+    /// Hides or shows what is filed under a task.
+    /// </summary>
+    /// <remarks>
+    /// Republished rather than rebuilt: which rows are on screen changes, but they are the rows
+    /// already projected — hiding some of them has no business going back to the account for them.
+    /// </remarks>
+    /// <param name="id">The task whose sub-tasks are being hidden or shown</param>
+    /// <param name="collapsed">True to hide them, false to show them again</param>
+    /// <returns>False when it was already that way, so the caller can leave the list alone</returns>
+    public bool SetCollapsed(string id, bool collapsed)
+    {
+        if (!(collapsed ? _collapsed.Add(id) : _collapsed.Remove(id)))
+            return false;
+
+        Republish();
+        return true;
+    }
+
+    /// <summary>Whether anything on screen could still be folded, or unfolded.</summary>
+    public bool CanCollapseAll => _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+
+    public bool CanExpandAll => _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+
+    /// <summary>
+    /// Folds, or unfolds, every task in the view that has anything under it.
+    /// </summary>
+    /// <remarks>
+    /// The view and nothing beyond it. Folds in projects that aren't open are left exactly as they
+    /// were: what is on screen is what was asked about, and a list nobody is looking at has no
+    /// business being rearranged by a menu entry aimed at this one.
+    ///
+    /// Every depth at once, which is what makes it recursive: the rows it walks are the whole
+    /// outline for the view, folded or not, so a task three levels down is as reachable as one at
+    /// the top. Only the ones with something under them are touched, so unfolding doesn't sweep up
+    /// a task whose sub-tasks aren't in this view to be shown.
+    /// </remarks>
+    /// <param name="collapsed">True to fold them all away, false to open them all up</param>
+    /// <returns>False when they were all that way already, so the caller can leave the list alone</returns>
+    public bool FoldAll(bool collapsed)
+    {
+        var changed = false;
+
+        foreach (var row in _allRows)
+            if (row.HasChildren)
+                changed |= collapsed ? _collapsed.Add(row.Id) : _collapsed.Remove(row.Id);
+
+        if (changed)
+            Republish();
+
+        return changed;
+    }
+
+    /// <summary>
+    /// The task standing in for one that a fold has taken off the screen — its nearest ancestor
+    /// that is still on it.
+    /// </summary>
+    /// <remarks>
+    /// For a selection that has just been folded away. Read from the whole outline, where the
+    /// nesting is all still there, against the rows actually on screen — so the answer is the row
+    /// the user's task has been folded into, however many levels up that turns out to be.
+    /// </remarks>
+    /// <param name="id">A task that was on screen and now isn't</param>
+    /// <returns>The nearest ancestor still on screen, or null when there is none</returns>
+    public string? NearestShown(string id)
+    {
+        var at = -1;
+        for (var i = 0; i < _allRows.Count; i++)
+            if (_allRows[i].Id == id)
+            {
+                at = i;
+                break;
+            }
+
+        if (at < 0)
+            return null;
+
+        var shown = Rows.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var depth = _allRows[at].Depth;
+
+        // Backwards up the chain rather than to the first shallower row: that one is the parent,
+        // and the parent can be folded away itself.
+        for (var i = at - 1; i >= 0; i--)
+        {
+            if (_allRows[i].Depth >= depth)
+                continue;
+
+            depth = _allRows[i].Depth;
+            if (shown.Contains(_allRows[i].Id))
+                return _allRows[i].Id;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Drops the rows sitting under a collapsed one, and marks the collapsed ones as such.
+    /// </summary>
+    /// <remarks>
+    /// One pass, because the rows arrive depth-first: everything under a task follows it and is
+    /// deeper than it, so a row is hidden exactly while the last collapsed row above it is still
+    /// shallower. Coming back out to that depth ends the stretch.
+    ///
+    /// A search result is already flat and carries no children, so nothing here finds anything to
+    /// hide in one — which is right, since the matches rarely share a parent to be folded into.
+    /// </remarks>
+    /// <param name="rows">The outline, depth-first</param>
+    /// <returns>The rows that should be on screen</returns>
+    private IReadOnlyList<TaskRow> Folded(IReadOnlyList<TaskRow> rows)
+    {
+        if (_collapsed.Count == 0)
+            return rows;
+
+        var shown = new List<TaskRow>(rows.Count);
+
+        // The depth of the collapsed row currently being hidden under, or none.
+        var under = int.MaxValue;
+
+        foreach (var row in rows)
+        {
+            if (row.Depth <= under)
+                under = int.MaxValue;
+
+            if (row.Depth > under)
+                continue;
+
+            var collapsed = row.HasChildren && _collapsed.Contains(row.Id);
+            shown.Add(collapsed ? row with { Collapsed = true } : row);
+
+            if (collapsed)
+                under = row.Depth;
+        }
+
+        return shown;
     }
 
     /// <summary>How the outline is ordered. The account's own order until a column is clicked.</summary>
