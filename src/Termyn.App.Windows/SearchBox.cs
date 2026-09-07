@@ -35,9 +35,24 @@ internal sealed class SearchBox : TextBox
             TextAlign = ContentAlignment.MiddleCenter,
             Cursor = Cursors.Hand,
             Visible = false,
+
+            // A cross says nothing read aloud. This is the only thing here that can be clicked,
+            // and it is the one thing a reader would have no other way of finding.
+            AccessibleName = "Clear search",
+            AccessibleRole = AccessibleRole.PushButton,
         };
 
         _reset.Click += (_, _) => Reset();
+
+        // Put back rather than set once. Applying a theme walks every control it can reach and
+        // paints a label the window's background, which is not the box's — so the cross would end
+        // up sitting on a strip of the wrong colour, and most visibly in the dark theme.
+        _reset.BackColorChanged += (_, _) =>
+        {
+            if (_reset.BackColor != BackColor)
+                _reset.BackColor = BackColor;
+        };
+
         Controls.Add(_reset);
     }
 
@@ -52,6 +67,9 @@ internal sealed class SearchBox : TextBox
 
     /// <summary>Whether the cross is on show, which is whenever there is something to clear.</summary>
     public bool ShowingReset => _reset.Visible;
+
+    /// <summary>What the cross is sitting on. Internal so a test can hold it to the box's own.</summary>
+    internal Color ResetBackColour => _reset.BackColor;
 
     /// <summary>
     /// Empties the box, as the cross does.

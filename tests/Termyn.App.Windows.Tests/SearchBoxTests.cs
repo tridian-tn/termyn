@@ -1,3 +1,5 @@
+using Termyn.Core.Settings;
+
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
@@ -52,6 +54,22 @@ public class SearchBoxTests
         box.Text = string.Empty;
 
         Assert.False(box.ShowingReset);
+    }
+
+    [Theory]
+    [InlineData(ThemePreference.Light)]
+    [InlineData(ThemePreference.Dark)]
+    public void The_cross_sits_on_the_box_rather_than_on_the_window(ThemePreference preference)
+    {
+        // Applying a theme walks every control it can reach and paints a label the window's
+        // background, which is not the box's. Left at that the cross sat on a strip of the wrong
+        // colour — invisible in the light theme, and not in the dark one.
+        using var box = Box();
+        box.Text = "milk";
+
+        Theme.Resolve(preference).Apply(box);
+
+        Assert.Equal(box.BackColor, box.ResetBackColour);
     }
 
     [Fact]
