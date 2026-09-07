@@ -57,6 +57,9 @@ public class TabOrderTests
         return order;
     }
 
+    /// <summary>One for the run. Nothing here reaches the network; the check just wants a client.</summary>
+    private static readonly HttpClient Http = new();
+
     private static MainForm Window()
     {
         var engine = new SyncEngine(new FakeApi(), new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
@@ -74,7 +77,7 @@ public class TabOrderTests
             new AutoStart(),
             new Notifier(),
             new Instance(),
-            new GitHubReleaseCheck(new HttpClient()));
+            new GitHubReleaseCheck(Http));
 
         var window = new MainForm(presenter, scheduler, shell);
         window.CreateControl();
@@ -93,9 +96,10 @@ public class TabOrderTests
 
     private sealed class Hotkey : IGlobalHotkey
     {
-        public event Action? Pressed;
+        public event Action? Pressed { add { } remove { } }
+
         public HotkeyBinding? Current => null;
-        public bool Register(HotkeyBinding binding) { Pressed?.Invoke(); return true; }
+        public bool Register(HotkeyBinding binding) => true;
         public void Unregister() { }
         public void Dispose() { }
     }
@@ -108,17 +112,19 @@ public class TabOrderTests
 
     private sealed class Notifier : INotifier
     {
-        public event Action? Activated;
+        public event Action? Activated { add { } remove { } }
+
         public bool Visible { get; set; }
-        public void SetStatus(string tooltip, int dueToday) => Activated?.Invoke();
+        public void SetStatus(string tooltip, int dueToday) { }
         public void SetCommands(IReadOnlyList<NotifierCommand> commands) { }
         public void Dispose() { }
     }
 
     private sealed class Instance : ISingleInstance
     {
-        public event Action<string>? SignalReceived;
-        public bool TryAcquire() { SignalReceived?.Invoke(string.Empty); return true; }
+        public event Action<string>? SignalReceived { add { } remove { } }
+
+        public bool TryAcquire() => true;
         public bool TrySignal(string message) => true;
         public void Dispose() { }
     }
