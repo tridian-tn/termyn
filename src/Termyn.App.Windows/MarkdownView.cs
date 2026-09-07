@@ -563,13 +563,23 @@ internal sealed class MarkdownView : RichTextBox
         {
             Select(_at, 0);
 
-            if (SelectionStart == _at)
-                return;
+            // The length as well as the place. What follows writes over the selection, so a
+            // selection left with anything in it replaces that text instead of adding to it —
+            // which would take the run before this one out of the description on the way past.
+            if (SelectionStart == _at && SelectionLength == 0)
+            {
+                // Once for the run rather than once for each go at it, which is what the name says
+                // and what anyone holding it against a scrambled rendering is counting.
+                if (attempt > 0)
+                    MisplacedRuns++;
 
-            // Counted whether or not the next attempt takes, so the tests can still say this
-            // happened at all — it is the measurement #115 turns on and the reason this exists.
-            MisplacedRuns++;
+                return;
+            }
         }
+
+        // Never took. Counted the same as one that took late, since both mean the caret did not go
+        // where it was put on the first ask.
+        MisplacedRuns++;
     }
 
     /// <summary>
@@ -583,7 +593,7 @@ internal sealed class MarkdownView : RichTextBox
     internal int Counted => _at;
 
     /// <summary>
-    /// How many runs were written somewhere other than where they were put.
+    /// How many runs had to ask twice for the caret, counted once each however many goes it took.
     /// </summary>
     /// <remarks>
     /// Nought on every machine this has been run on. It is here for the one it isn't: #115 has the
