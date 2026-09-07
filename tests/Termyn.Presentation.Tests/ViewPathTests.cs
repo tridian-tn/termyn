@@ -263,9 +263,9 @@ public class ViewPathTests
     public void Moving_to_another_list_while_searching_heads_the_list_it_moved_to()
     {
         // This used to hold the other way: the box still had its text, so the rows were still the
-        // results and the path said so. Opening a view drops the search now (#99), because leaving
-        // it on meant clicking a list did nothing anyone could see — the list was open underneath
-        // and the results were still on top of it.
+        // results and the path said so. Opening a view drops the search now, because leaving it on
+        // meant clicking a list did nothing anyone could see — the list was open underneath and the
+        // results were still on top of it.
         var presenter = NewPresenter(Store());
         presenter.Select(ViewSelection.OfProject("inner"));
         presenter.Search("task");
@@ -280,8 +280,8 @@ public class ViewPathTests
     [Fact]
     public void Opening_a_view_by_its_row_lets_the_search_go()
     {
-        // How the tree opens one, which is what #99 is about: clicking a list while the results
-        // were up left the results up, so the click read as having done nothing.
+        // How the tree opens one, and the case the search-dropping is for: clicking a list while
+        // the results were up left the results up, so the click read as having done nothing.
         var presenter = NewPresenter(Store());
         presenter.Search("task");
 

@@ -654,9 +654,10 @@ internal sealed class MarkdownView : RichTextBox
     /// front — the description comes out scrambled and every offset after it points at the wrong
     /// character. Two to four runs of a few hundred, so asking again is enough.
     ///
-    /// #108 fixed the other way of getting the place wrong, where the place itself was wrong
-    /// because the box was asked how much it was holding and answered nought. This is the place
-    /// being right and the caret not going to it.
+    /// There are two ways to get the place wrong and this is the second of them. The first is the
+    /// place itself being wrong, from asking the box how much it was holding and being told nought,
+    /// which is why the count is kept here instead. This one is the place being right and the caret
+    /// not going to it.
     /// </remarks>
     private void PlaceCaret()
     {
@@ -781,10 +782,10 @@ internal sealed class MarkdownView : RichTextBox
     /// How many runs had to ask twice for the caret, counted once each however many goes it took.
     /// </summary>
     /// <remarks>
-    /// Nought on every machine this has been run on. It is here for the one it isn't: #115 has the
-    /// rendering coming out scrambled on a build agent and never anywhere else, and this says
-    /// whether the caret refusing to move is how it happens. The tests carry it into their failure
-    /// messages so an occurrence reports it without anyone having to catch it live.
+    /// Nought on every machine this has been run on. It is here for the one it isn't: the rendering
+    /// comes out scrambled on a build agent and never anywhere else, and this is what says the
+    /// caret refusing to move is how that happens. The tests carry it into their failure messages,
+    /// so an occurrence reports itself without anyone having to catch it live.
     /// </remarks>
     internal int MisplacedRuns { get; private set; }
 
