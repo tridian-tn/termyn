@@ -90,6 +90,25 @@ public class FoldsAcrossRestartTests : IDisposable
     }
 
     [Fact]
+    public void Folding_the_whole_view_survives_the_restart_too()
+    {
+        // The menu entry goes through the same set as an expander does, so it is saved the same
+        // way — but the thing asked for was that it come back, and only this says it does.
+        using (var window = Window(out var first))
+        {
+            first.Select(ViewSelection.Of(SmartView.All));
+            first.FoldAll(collapsed: true);
+            window.Close();
+        }
+
+        using var second = Window(out var presenter);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.Equal(new[] { "Parent" }, presenter.Rows.Select(r => r.Content).ToArray());
+        Assert.True(presenter.CanExpandAll);
+    }
+
+    [Fact]
     public void A_window_that_was_never_folded_writes_none()
     {
         using (var window = Window(out var presenter))

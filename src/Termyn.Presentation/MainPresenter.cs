@@ -1732,6 +1732,82 @@ public sealed class MainPresenter
         return true;
     }
 
+    /// <summary>Whether anything on screen could still be folded, or unfolded.</summary>
+    public bool CanCollapseAll => _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+
+    public bool CanExpandAll => _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+
+    /// <summary>
+    /// Folds, or unfolds, every task in the view that has anything under it.
+    /// </summary>
+    /// <remarks>
+    /// The view and nothing beyond it. Folds in projects that aren't open are left exactly as they
+    /// were: what is on screen is what was asked about, and a list nobody is looking at has no
+    /// business being rearranged by a menu entry aimed at this one.
+    ///
+    /// Every depth at once, which is what makes it recursive: the rows it walks are the whole
+    /// outline for the view, folded or not, so a task three levels down is as reachable as one at
+    /// the top. Only the ones with something under them are touched, so unfolding doesn't sweep up
+    /// a task whose sub-tasks aren't in this view to be shown.
+    /// </remarks>
+    /// <param name="collapsed">True to fold them all away, false to open them all up</param>
+    /// <returns>False when they were all that way already, so the caller can leave the list alone</returns>
+    public bool FoldAll(bool collapsed)
+    {
+        var changed = false;
+
+        foreach (var row in _allRows)
+            if (row.HasChildren)
+                changed |= collapsed ? _collapsed.Add(row.Id) : _collapsed.Remove(row.Id);
+
+        if (changed)
+            Republish();
+
+        return changed;
+    }
+
+    /// <summary>
+    /// The task standing in for one that a fold has taken off the screen — its nearest ancestor
+    /// that is still on it.
+    /// </summary>
+    /// <remarks>
+    /// For a selection that has just been folded away. Read from the whole outline, where the
+    /// nesting is all still there, against the rows actually on screen — so the answer is the row
+    /// the user's task has been folded into, however many levels up that turns out to be.
+    /// </remarks>
+    /// <param name="id">A task that was on screen and now isn't</param>
+    /// <returns>The nearest ancestor still on screen, or null when there is none</returns>
+    public string? NearestShown(string id)
+    {
+        var at = -1;
+        for (var i = 0; i < _allRows.Count; i++)
+            if (_allRows[i].Id == id)
+            {
+                at = i;
+                break;
+            }
+
+        if (at < 0)
+            return null;
+
+        var shown = Rows.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var depth = _allRows[at].Depth;
+
+        // Backwards up the chain rather than to the first shallower row: that one is the parent,
+        // and the parent can be folded away itself.
+        for (var i = at - 1; i >= 0; i--)
+        {
+            if (_allRows[i].Depth >= depth)
+                continue;
+
+            depth = _allRows[i].Depth;
+            if (shown.Contains(_allRows[i].Id))
+                return _allRows[i].Id;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Drops the rows sitting under a collapsed one, and marks the collapsed ones as such.
     /// </summary>

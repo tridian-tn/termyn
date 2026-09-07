@@ -189,6 +189,34 @@ public class MenuTests
     }
 
     [Fact]
+    public void The_view_menu_offers_folding_the_whole_outline()
+    {
+        // The only way to reach these: a row's expander does one task, and nothing else in the
+        // window does the lot.
+        using var built = Build(Menus.Bar, new CommandContext(CanExpandAll: true, CanCollapseAll: true));
+
+        Assert.True(Find(built, "Expand all").Enabled);
+        Assert.True(Find(built, "Collapse all").Enabled);
+    }
+
+    [Fact]
+    public void Neither_folding_entry_is_offered_when_it_would_do_nothing()
+    {
+        // Greyed both ways, which between them is also how the pair says which way the outline
+        // currently stands: an all-folded view offers only the opening of it.
+        using var folded = Build(Menus.Bar, new CommandContext(CanExpandAll: true, CanCollapseAll: false));
+
+        Assert.True(Find(folded, "Expand all").Enabled);
+        Assert.False(Find(folded, "Collapse all").Enabled);
+
+        // And a view with no sub-tasks in it at all offers neither.
+        using var flat = Build(Menus.Bar, CommandContext.Empty);
+
+        Assert.False(Find(flat, "Expand all").Enabled);
+        Assert.False(Find(flat, "Collapse all").Enabled);
+    }
+
+    [Fact]
     public void A_task_at_the_top_level_is_not_offered_an_outdent()
     {
         using var built = BuildTaskMenu(OnTask(can: new TaskAbilities(CanIndent: true, CanOutdent: false)));

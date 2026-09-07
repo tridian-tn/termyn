@@ -935,16 +935,34 @@ internal sealed class MainForm : Form
     /// <param name="id">The task whose sub-tasks are being hidden or shown</param>
     /// <param name="collapsed">True to hide them, false to show them again</param>
     private void Collapse(string id, bool collapsed)
+        => Folding(() => _presenter.SetCollapsed(id, collapsed));
+
+    /// <summary>Folds or unfolds every task in the view at once, from the View menu.</summary>
+    /// <param name="collapsed">True to put them all away, false to open them all up</param>
+    private void FoldAll(bool collapsed) => Folding(() => _presenter.FoldAll(collapsed));
+
+    /// <summary>
+    /// Folds something, and leaves the selection somewhere it can still be seen.
+    /// </summary>
+    /// <remarks>
+    /// A fold that closes over the selected task takes its row off the list, and the panel beside
+    /// it empties — so a glance at what is under something else, or a collapse-all, would lose the
+    /// user's place. It goes to the nearest task still on screen that the selected one was folded
+    /// into, which is where they were looking.
+    ///
+    /// The rows are republished from inside the fold and the list has taken them by the time it
+    /// returns, so the selection read here is the one the fold left behind.
+    /// </remarks>
+    /// <param name="fold">The fold to carry out, answering whether it changed anything</param>
+    private void Folding(Func<bool> fold)
     {
         var was = _outline.SelectedId;
 
-        // The rows are republished from inside this, and the list has taken them by the time it
-        // returns — so the selection below is the one the fold left behind.
-        if (!_presenter.SetCollapsed(id, collapsed))
+        if (!fold() || was is null || _outline.SelectedId is not null)
             return;
 
-        if (was is not null && _outline.SelectedId is null)
-            _outline.SelectId(id);
+        if (_presenter.NearestShown(was) is { } instead)
+            _outline.SelectId(instead);
     }
 
     // ---- Rendering -----------------------------------------------------------------------------
@@ -2372,7 +2390,9 @@ internal sealed class MainForm : Form
         !_detail.Panel2Collapsed,
         _writingDescription,
         _showingComments,
-        Zoomed);
+        Zoomed,
+        _presenter.CanExpandAll,
+        _presenter.CanCollapseAll);
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -2642,6 +2662,14 @@ internal sealed class MainForm : Form
 
             case AppCommand.SortDefault:
                 Guarded(() => _presenter.ClearSort());
+                return false;
+
+            case AppCommand.ExpandAll:
+                Guarded(() => FoldAll(collapsed: false));
+                return false;
+
+            case AppCommand.CollapseAll:
+                Guarded(() => FoldAll(collapsed: true));
                 return false;
 
             case AppCommand.ToggleDescription:

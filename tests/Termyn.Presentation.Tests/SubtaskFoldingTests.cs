@@ -167,6 +167,130 @@ public class SubtaskFoldingTests
         Assert.Equal(new[] { "Parent" }, Shown(presenter));
     }
 
+    // ---- All at once ---------------------------------------------------------------------------
+
+    [Fact]
+    public void Folding_the_lot_reaches_every_depth()
+    {
+        // Recursive by nature rather than by recursing: what it walks is the whole outline for the
+        // view, so a task three levels down is as reachable as one at the top.
+        var presenter = Nested();
+
+        Assert.True(presenter.FoldAll(collapsed: true));
+
+        Assert.Equal(new[] { "Parent", "Other" }, Shown(presenter));
+        Assert.True(presenter.IsCollapsed("b"));
+    }
+
+    [Fact]
+    public void Unfolding_the_lot_opens_what_was_folded_at_any_depth()
+    {
+        var presenter = Nested();
+        presenter.FoldAll(collapsed: true);
+
+        Assert.True(presenter.FoldAll(collapsed: false));
+
+        Assert.Equal(new[] { "Parent", "Child", "Grandchild", "Other", "Other child" }, Shown(presenter));
+    }
+
+    [Fact]
+    public void Folding_the_lot_leaves_other_views_as_they_were()
+    {
+        // The thing that was asked for: this view and not the account. A project nobody has open
+        // has no business being rearranged by a menu entry aimed at the one that is.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Home","child_order":2}""");
+        store.PutResource("items", "w", """{"id":"w","content":"Work parent","project_id":"p1","child_order":1}""");
+        store.PutResource("items", "wc", """{"id":"wc","content":"Work child","project_id":"p1","parent_id":"w","child_order":1}""");
+        store.PutResource("items", "h", """{"id":"h","content":"Home parent","project_id":"p2","child_order":1}""");
+        store.PutResource("items", "hc", """{"id":"hc","content":"Home child","project_id":"p2","parent_id":"h","child_order":1}""");
+
+        var presenter = NewPresenter(store);
+
+        // Fold everything in Work, then go to Home and find it as it was left.
+        presenter.Select(ViewSelection.OfProject("p1"));
+        presenter.FoldAll(collapsed: true);
+
+        presenter.Select(ViewSelection.OfProject("p2"));
+        Assert.Equal(new[] { "Home parent", "Home child" }, Shown(presenter));
+
+        // And unfolding Home leaves Work folded, which is the same rule the other way round.
+        presenter.FoldAll(collapsed: false);
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        Assert.Equal(new[] { "Work parent" }, Shown(presenter));
+    }
+
+    [Fact]
+    public void Folding_the_lot_when_it_is_all_folded_changes_nothing()
+    {
+        var presenter = Nested();
+
+        Assert.True(presenter.FoldAll(collapsed: true));
+        Assert.False(presenter.FoldAll(collapsed: true));
+    }
+
+    [Fact]
+    public void There_is_nothing_to_fold_in_a_view_with_no_subtasks()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"Alone","project_id":"p","child_order":1}""");
+        var presenter = All(store);
+
+        Assert.False(presenter.CanCollapseAll);
+        Assert.False(presenter.CanExpandAll);
+        Assert.False(presenter.FoldAll(collapsed: true));
+    }
+
+    [Fact]
+    public void What_can_be_folded_says_which_way_the_view_stands()
+    {
+        // What greys the two menu entries, and between them they say whether anything is open.
+        var presenter = Nested();
+
+        Assert.True(presenter.CanCollapseAll);
+        Assert.False(presenter.CanExpandAll);
+
+        presenter.FoldAll(collapsed: true);
+
+        Assert.False(presenter.CanCollapseAll);
+        Assert.True(presenter.CanExpandAll);
+    }
+
+    // ---- Where the selection goes --------------------------------------------------------------
+
+    [Fact]
+    public void A_task_folded_out_of_sight_says_what_took_its_place()
+    {
+        var presenter = Nested();
+        presenter.SetCollapsed("a", true);
+
+        Assert.Equal("a", presenter.NearestShown("c"));
+    }
+
+    [Fact]
+    public void It_is_the_nearest_ancestor_still_on_screen_and_not_the_parent()
+    {
+        // The grandchild's parent is folded away itself, so answering with it would put the
+        // selection on a row that isn't there either.
+        var presenter = Nested();
+        presenter.SetCollapsed("b", true);
+        presenter.SetCollapsed("a", true);
+
+        Assert.Equal("a", presenter.NearestShown("c"));
+    }
+
+    [Fact]
+    public void A_task_still_on_screen_is_not_replaced_by_anything()
+    {
+        // Asked only of a task that has gone, but a top-level one has no ancestor to offer either.
+        var presenter = Nested();
+
+        Assert.Null(presenter.NearestShown("a"));
+        Assert.Null(presenter.NearestShown("nothing at all"));
+    }
+
     // ---- Searching -----------------------------------------------------------------------------
 
     [Fact]
