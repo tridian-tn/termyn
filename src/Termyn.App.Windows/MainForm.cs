@@ -52,7 +52,7 @@ internal sealed class MainForm : Form
     private readonly Shell _shell;
     private readonly CancellationTokenSource _cts = new();
 
-    private readonly TextBox _search;
+    private readonly SearchBox _search;
     private readonly TreeView _sidebar;
     private readonly LinkLabel _crumbs;
 
@@ -238,7 +238,7 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
-        _search = new TextBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
+        _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
         _search.TextChanged += (_, _) =>
         {
             if (_syncingSearch)
@@ -813,6 +813,10 @@ internal sealed class MainForm : Form
         _description.Theme = _theme;
         _comments.Theme = _theme;
         _panelHeader.Theme = _theme;
+
+        // Quiet, like the hint it sits beside: it is there to be found when wanted rather than to
+        // be read past on every glance at the box.
+        _search.ResetColour = _theme.Muted;
 
         // The step you are on is the one being read; the ones above it are offers, and drawn as
         // links so they read as such without needing to be hovered to find out.

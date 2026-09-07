@@ -31,9 +31,13 @@ public class TabOrderTests
         // hands its first panel over before its second.
         using var window = Window();
 
-        Assert.Equal(
-            ["TextBox", "SplitContainer"],
-            Order(window).Where(c => c.TabStop).Select(c => c.GetType().Name));
+        // By what each one is rather than by the name of its class, which said TextBox until the
+        // search box became one of its own and broke this for a reason that had nothing to do with
+        // the order.
+        Assert.Collection(
+            Order(window).Where(c => c.TabStop),
+            first => Assert.True(first is TextBox, $"the search box should come first, not {first.GetType().Name}"),
+            then => Assert.True(then is SplitContainer, $"the tree and list should come next, not {then.GetType().Name}"));
     }
 
     [Fact]
