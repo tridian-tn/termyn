@@ -58,6 +58,18 @@ internal sealed class MarkdownView : RichTextBox
     private readonly List<(int Start, int End, string Url)> _links = [];
 
     /// <summary>
+    /// The faces this has drawn with, kept rather than built again.
+    /// </summary>
+    /// <remarks>
+    /// There are only ever a handful. Two families, the body size and the three heading scales, and
+    /// the eight ways bold, italic and strikethrough combine — against which a full-length
+    /// description asked for a font seventeen hundred times and wanted two of them. Every one of
+    /// those carried a GDI+ handle until the finaliser came for it, on a path that runs on every
+    /// selection change and every sync, next to the box the user is typing in.
+    /// </remarks>
+    private readonly Dictionary<(string Family, float Size, FontStyle Style), Font> _faces = [];
+
+    /// <summary>
     /// Where each run of the rendered text came from in the markdown behind it.
     /// </summary>
     /// <remarks>
@@ -504,7 +516,7 @@ internal sealed class MarkdownView : RichTextBox
         if (style.Strike) font |= FontStyle.Strikeout;
 
         var family = style.Fixed ? Faces.FixedWidth : Font.FontFamily;
-        SelectionFont = new Font(family, Font.Size * (1f + style.Larger), font);
+        SelectionFont = Face(family, Font.Size * (1f + style.Larger), font);
         // Muted throughout when the pane can't be typed into, which is the only cue that carries in
         // both themes: the recessed background is a couple of units in the light one and invisible.
         // Links keep their colour — a completed task's description is still worth following out of, and
@@ -580,6 +592,80 @@ internal sealed class MarkdownView : RichTextBox
         // Never took. Counted the same as one that took late, since both mean the caret did not go
         // where it was put on the first ask.
         MisplacedRuns++;
+    }
+
+    /// <summary>
+    /// The face for a run, built the first time it is asked for and kept after that.
+    /// </summary>
+    /// <remarks>
+    /// Keyed by the family's name rather than by the family itself, which is a fresh object on
+    /// every read and would never match twice. Setting a selection's font reads it and sends the
+    /// control a character format; the control doesn't hold on to what it was given, so one of
+    /// these can be handed out as often as it is asked for.
+    /// </remarks>
+    /// <param name="family">The family to draw in</param>
+    /// <param name="size">How big, in points</param>
+    /// <param name="style">Bold, italic and strikethrough, in whatever combination</param>
+    /// <returns>The face, which this keeps ownership of</returns>
+    private Font Face(FontFamily family, float size, FontStyle style)
+    {
+        var key = (family.Name, size, style);
+        if (_faces.TryGetValue(key, out var kept))
+            return kept;
+
+        var made = new Font(family, size, style);
+        _faces[key] = made;
+        return made;
+    }
+
+    /// <summary>How many faces are being kept. Internal so a test can hold it to a handful.</summary>
+    internal int FacesKept => _faces.Count;
+
+    /// <summary>
+    /// Lets the kept faces go.
+    /// </summary>
+    /// <remarks>
+    /// Every size here is worked out from the control's own font, so a change to that leaves all of
+    /// them the wrong size and none of them worth keeping.
+    /// </remarks>
+    private void ForgetFaces()
+    {
+        foreach (var face in _faces.Values)
+            face.Dispose();
+
+        _faces.Clear();
+    }
+
+    /// <summary>
+    /// Drops the kept faces, which were all sized against the font that has just changed.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is redrawn here, which is what happened before as well: what is already in the box
+    /// keeps the sizes it was drawn with until something renders it again.
+    /// </remarks>
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        ForgetFaces();
+    }
+
+    /// <summary>
+    /// Lets go of what this owns: the faces it drew with, and the tip it shows an address in.
+    /// </summary>
+    /// <remarks>
+    /// The tip is a window of its own and belongs to nothing else — there is no components
+    /// container here to dispose it — so it lasted until the finaliser. One object against the
+    /// faces' seventeen hundred, and it goes here because this is where the letting go happens.
+    /// </remarks>
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            ForgetFaces();
+            _tip.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     /// <summary>

@@ -690,6 +690,29 @@ public class MarkdownViewTests
     }
 
     [Fact]
+    public void A_long_description_is_drawn_with_a_handful_of_faces()
+    {
+        // It used to build one font per run and let go of it: seventeen hundred of them for a
+        // description this length, of which two were different. Each carried a GDI+ handle until
+        // the finaliser came for it, on a path that runs on every selection change and every sync.
+        //
+        // Held to a handful rather than to a number, since what the ceiling is made of — two
+        // families, four sizes, eight ways of combining bold, italic and strikethrough — is allowed
+        // to change without this test being about it.
+        var big = string.Concat(Enumerable.Repeat("Some **bold** and a [link](https://example.com) here.\n\n", 400))[..16_383];
+        using var view = Render(big);
+
+        var afterOne = view.FacesKept;
+        Assert.InRange(afterOne, 1, 8);
+
+        // And a second description doesn't start the pile again, which is the half that matters:
+        // a window left open renders on every sync for as long as it is up.
+        view.Markdown = "# A heading\n\nSome `code` and **bold** and *italic* and ~~struck~~";
+
+        Assert.InRange(view.FacesKept, afterOne, 8);
+    }
+
+    [Fact]
     public void A_word_below_a_fenced_block_still_knows_where_it_was_written()
     {
         // A fenced block arrives as a single run carrying its own line endings, where every other
