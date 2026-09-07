@@ -58,6 +58,26 @@ public static class SmartViews
     public static DateOnly? AddedOn(TaskItem item, TimeZoneInfo zone) => DayOf(item.AddedAt, zone);
 
     /// <summary>
+    /// The day a task has to be finished by.
+    /// </summary>
+    /// <remarks>
+    /// The zone is taken and ignored, which is the honest way to say that a deadline needs none: it
+    /// is written as a plain calendar date and means the same day wherever it is read. Asking for it
+    /// the same way as the other two keeps the callers from having to know that.
+    /// </remarks>
+    public static DateOnly? DeadlineOn(TaskItem item, TimeZoneInfo zone) => DayOf(item.Deadline, zone);
+
+    /// <summary>
+    /// Whether a task's due date names an hour as well as a day.
+    /// </summary>
+    /// <remarks>
+    /// Todoist writes a whole-day date as the date alone and anything with a time as a datetime, so
+    /// the separator is the whole of the question. A task with no due date has no time of day
+    /// either, and this says so.
+    /// </remarks>
+    public static bool DueHasTime(TaskItem item) => item.DueDate is { } due && due.Contains('T');
+
+    /// <summary>
     /// The day a Todoist timestamp falls on in the account's timezone.
     /// </summary>
     /// <remarks>

@@ -25,6 +25,27 @@ public class ProjectionsTests
         Assert.Equal("Jul 30", item.DueText);
     }
 
+    [Fact]
+    public void Reads_the_deadline_off_its_own_object()
+    {
+        // The one step the filter tests can't reach: they build a task in code, so a "deadline:"
+        // term whose field never gets read off the JSON passes every one of them and then matches
+        // nothing at all against a real account. The due date and the deadline are separate fields
+        // and this asserts on both, since reading one into the other would look right in isolation.
+        var item = Projections.ToTaskItem(
+            Obj("""{"id":"i","due":{"date":"2026-08-15"},"deadline":{"date":"2026-07-31","lang":"en"}}"""));
+
+        Assert.Equal("2026-07-31", item.Deadline);
+        Assert.Equal("2026-08-15", item.DueDate);
+    }
+
+    [Theory]
+    [InlineData("""{"id":"i"}""")]
+    [InlineData("""{"id":"i","deadline":null}""")]
+    [InlineData("""{"id":"i","due":{"date":"2026-08-15"}}""")]
+    public void A_task_with_no_deadline_has_none(string json)
+        => Assert.Null(Projections.ToTaskItem(Obj(json)).Deadline);
+
     [Theory]
 
     // What the account sends today, and what it used to send. A "created:" filter reading neither

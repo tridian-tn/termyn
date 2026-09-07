@@ -29,6 +29,16 @@ public sealed class TaskItem
 
     public string? DueDate { get; init; }
 
+    /// <summary>
+    /// The day the task has to be finished by, as the server wrote it.
+    /// </summary>
+    /// <remarks>
+    /// A plain calendar date and never an instant, unlike a due date: a deadline is the day itself
+    /// with no time of day and no timezone attached, so it needs none of the conversion a due date
+    /// does. Null on a task that has no deadline, which is most of them.
+    /// </remarks>
+    public string? Deadline { get; init; }
+
     /// <summary>The schedule as it was written — "every Monday" — which is what a recurrence is.</summary>
     public string? DueText { get; init; }
 
