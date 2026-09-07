@@ -489,17 +489,7 @@ internal sealed class MarkdownView : RichTextBox
         if (from is { Length: > 0 } span && text.Length > 0)
             _sources.Add((_at, Shown(text), span.Start, span.Length));
 
-        Select(_at, 0);
-
-        // Asked back, because a run landing somewhere other than where it was put is what a
-        // mangled rendering looks like and there is nothing else that would notice. #108 fixed one
-        // way of getting the place wrong — the box being asked how much it held and answering
-        // nought — and left the other: the place being right and the caret not going there.
-        //
-        // Counted rather than corrected. Correcting it would hide whether it ever happens, and a
-        // fix for a cause nobody has confirmed is what #42 spent three rounds not doing.
-        if (SelectionStart != _at)
-            MisplacedRuns++;
+        PlaceCaret();
 
         // Paragraph settings, so every run of a paragraph has to agree about them. The air under
         // each one is what makes a description read as separate thoughts rather than as a wall —
@@ -546,6 +536,41 @@ internal sealed class MarkdownView : RichTextBox
     /// <param name="written">The text handed to the box</param>
     /// <returns>How many characters of it the box will hold</returns>
     private static int Shown(string written) => written.Length - written.AsSpan().Count("\r\n");
+
+    /// <summary>How many goes the caret gets at moving before this stops asking.</summary>
+    /// <remarks>
+    /// Three, which is two more than has ever been needed. What has been seen is two to four runs
+    /// of a render of several hundred, so whatever the reason is, it doesn't last.
+    /// </remarks>
+    private const int CaretAttempts = 3;
+
+    /// <summary>
+    /// Puts the caret where the next run goes, and makes sure it went there.
+    /// </summary>
+    /// <remarks>
+    /// Asking is not enough. On a build agent this control has been left with its caret at nought
+    /// after being told to put it elsewhere, and the run then written at the caret goes to the
+    /// front — the description comes out scrambled and every offset after it points at the wrong
+    /// character. Two to four runs of a few hundred, so asking again is enough.
+    ///
+    /// #108 fixed the other way of getting the place wrong, where the place itself was wrong
+    /// because the box was asked how much it was holding and answered nought. This is the place
+    /// being right and the caret not going to it.
+    /// </remarks>
+    private void PlaceCaret()
+    {
+        for (var attempt = 0; attempt < CaretAttempts; attempt++)
+        {
+            Select(_at, 0);
+
+            if (SelectionStart == _at)
+                return;
+
+            // Counted whether or not the next attempt takes, so the tests can still say this
+            // happened at all — it is the measurement #115 turns on and the reason this exists.
+            MisplacedRuns++;
+        }
+    }
 
     /// <summary>
     /// How much text the writing believes it has put in the box.

@@ -74,8 +74,34 @@ public class MarkdownEditorTests
         var at = editor.Text.IndexOf(needle, StringComparison.Ordinal);
         Assert.True(at >= 0, $"'{needle}' is not in the box: {editor.Text}");
 
-        editor.Select(at, needle.Length);
+        Pick(editor, at, needle.Length);
         return editor.SelectionFont!;
+    }
+
+    /// <summary>
+    /// Selects a stretch, and makes sure the selection went there.
+    /// </summary>
+    /// <remarks>
+    /// This is how #115 hid for so long. Setting a selection on one of these controls sometimes
+    /// doesn't take and leaves it at nought, and everything asked afterwards then answers about
+    /// character nought — so a monospace face came back as the body face, which the test read as
+    /// the styling being wrong rather than as its own question having gone astray. Asked again,
+    /// and said plainly when it still won't take.
+    /// </remarks>
+    private static void Pick(MarkdownEditor editor, int at, int length)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            editor.Select(at, length);
+
+            if (editor.SelectionStart == at && editor.SelectionLength == length)
+                return;
+        }
+
+        Assert.Fail(
+            $"asked for {length} characters at {at} and got {editor.SelectionLength} at "
+            + $"{editor.SelectionStart}. Nothing read from this selection would be about the right "
+            + $"place. In the box: '{Shown(editor.Text)}'");
     }
 
     private static Color ColourAt(MarkdownEditor editor, string needle)

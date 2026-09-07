@@ -31,8 +31,7 @@ public class MarkdownViewTests
         var at = view.Text.IndexOf(needle, StringComparison.Ordinal);
         Assert.True(at >= 0, $"'{needle}' is not in the rendered text: '{view.Text}'");
 
-        view.SelectionStart = at;
-        view.SelectionLength = needle.Length;
+        Pick(view, at, needle.Length);
 
         var font = view.SelectionFont;
         Assert.True(
@@ -47,6 +46,33 @@ public class MarkdownViewTests
     {
         FontAt(view, needle);
         return view.SelectionColor;
+    }
+
+    /// <summary>
+    /// Selects a stretch, and makes sure the selection went there.
+    /// </summary>
+    /// <remarks>
+    /// This is how #115 hid for so long. Setting a selection on one of these controls sometimes
+    /// doesn't take and leaves it at nought, and everything asked afterwards then answers about
+    /// character nought — so a monospace face came back as the body face and a heading came back
+    /// body-sized, and the test read that as the styling being wrong rather than as its own
+    /// question having gone astray. Asked again, and said plainly when it still won't take.
+    /// </remarks>
+    private static void Pick(MarkdownView view, int at, int length)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            view.SelectionStart = at;
+            view.SelectionLength = length;
+
+            if (view.SelectionStart == at && view.SelectionLength == length)
+                return;
+        }
+
+        Assert.Fail(
+            $"asked for {length} characters at {at} and got {view.SelectionLength} at {view.SelectionStart}. "
+            + $"Nothing read from this selection would be about the right place. "
+            + $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
     }
 
     // ---- What it reads as ----------------------------------------------------------------------
