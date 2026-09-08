@@ -25,7 +25,7 @@ public class DetailHeaderTests
         return shot;
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_rule_along_the_bottom_is_left_showing()
     {
         // The name fills the header, so the last row is held back by the header's own padding. Take
@@ -37,7 +37,7 @@ public class DetailHeaderTests
         Assert.Equal(header.Theme.Border, Color.FromArgb(255, shot.GetPixel(header.Width / 2, header.Height - 1)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_name_is_drawn_and_stays_inside_the_strip()
     {
         // Ink on the line, and none of it below the rule. A name long enough to need more room than
@@ -59,7 +59,7 @@ public class DetailHeaderTests
         Assert.True(ink > 0, "the name was not drawn");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_selected_leaves_the_strip_empty_rather_than_gone()
     {
         // Tempting to hide it — an empty line with a rule under it reads as something that failed to

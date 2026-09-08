@@ -19,7 +19,7 @@ namespace Termyn.App.Windows.Tests;
 /// </remarks>
 public class TabOrderTests
 {
-    [Fact]
+    [WinFormsFact]
     public void Tab_starts_at_the_search_box_and_then_goes_down_the_window()
     {
         // Order comes from TabIndex, and TabIndex falls out of the order controls were added in
@@ -40,7 +40,7 @@ public class TabOrderTests
             then => Assert.True(then is SplitContainer, $"the tree and list should come next, not {then.GetType().Name}"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_status_line_and_the_menu_bar_are_not_stops_on_the_way()
     {
         // Neither is somewhere a caret goes. The status is a label — the menu has its own key.

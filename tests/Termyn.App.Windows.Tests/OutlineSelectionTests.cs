@@ -42,7 +42,7 @@ public class OutlineSelectionTests
         return seen;
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_that_moves_up_the_list_is_never_reported_as_no_task_at_all()
     {
         // The selection is re-seated by clearing it and adding the new index, and the moment in
@@ -58,7 +58,7 @@ public class OutlineSelectionTests
         Assert.Equal("b", view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_that_moves_is_reported_once()
     {
         using var view = Outline();
@@ -70,7 +70,7 @@ public class OutlineSelectionTests
         Assert.Equal(["b"], seen);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_refresh_that_moves_nothing_says_nothing()
     {
         // The common case by far: a sync that changed something elsewhere in the account.
@@ -83,7 +83,7 @@ public class OutlineSelectionTests
         Assert.Empty(seen);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_selected_task_going_away_is_reported_once_as_nothing_selected()
     {
         using var view = Outline();
@@ -96,7 +96,7 @@ public class OutlineSelectionTests
         Assert.Null(view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Choosing_a_row_is_still_reported()
     {
         // The suppression is only for the re-seat. A real selection has to come through, or nothing
@@ -111,7 +111,7 @@ public class OutlineSelectionTests
 
     // ---- A task the server renames under us -----------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_renamed_by_the_server_keeps_its_selection()
     {
         // A task quick-added a moment ago is called t-… until the sync learns the server's name for
@@ -129,7 +129,7 @@ public class OutlineSelectionTests
         Assert.DoesNotContain(null, seen);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_that_really_went_away_is_still_reported_as_gone()
     {
         // The lookup answers with what it was given when nothing renamed it, so this has to stay
@@ -145,7 +145,7 @@ public class OutlineSelectionTests
         Assert.Null(view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Without_anything_to_ask_a_renamed_task_is_treated_as_gone()
     {
         // The callback is optional, and leaving it unset has to keep the behaviour it had.

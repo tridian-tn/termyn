@@ -12,7 +12,7 @@ supply.
 
 ```bash
 dotnet build Termyn.slnx
-dotnet test Termyn.slnx
+dotnet test --solution Termyn.slnx
 ```
 
 Requires the **.NET 10 SDK**. The build is framework-dependent and `win-x64`, so running it needs

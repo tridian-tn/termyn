@@ -6,6 +6,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Runs the tests in a single-threaded apartment with a Windows Forms synchronization context
+         — which is the apartment Windows Forms requires and the one the app itself runs in. -->
+    <PackageReference Include="Xunit.StaFact" Version="4.0.23" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Termyn.App.Windows\Termyn.App.Windows.csproj" />
     <ProjectReference Include="..\Termyn.TestSupport\Termyn.TestSupport.csproj" />
   </ItemGroup>

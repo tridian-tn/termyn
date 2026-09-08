@@ -16,7 +16,7 @@ public class UnsupportedNoticeTests
 
     private static Font Face() => new("Segoe UI", 9f);
 
-    [Fact]
+    [WinFormsFact]
     public void Two_lines_are_taller_than_one()
     {
         // The notice is always two: what it can't read, and the offer to open it elsewhere. The
@@ -29,7 +29,7 @@ public class UnsupportedNoticeTests
         Assert.True(two > one, $"two lines measured {two}, one measured {one}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_long_query_takes_more_room_in_a_narrow_window()
     {
         // A query comes off the account and is only cut down at eighty characters, which is wider
@@ -43,7 +43,7 @@ public class UnsupportedNoticeTests
         Assert.True(narrow > wide, $"narrow measured {narrow}, wide measured {wide}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_bigger_font_needs_more_height_for_the_same_words()
     {
         // Which is how the fixed height came to be wrong: it was two lines at the size it was
@@ -57,7 +57,7 @@ public class UnsupportedNoticeTests
             MainForm.NoticeHeight(text, large, 800, Room) > MainForm.NoticeHeight(text, small, 800, Room));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_strip_that_has_not_been_laid_out_yet_still_measures()
     {
         // Width zero, which is what a control is before its first layout. Subtracting the padding

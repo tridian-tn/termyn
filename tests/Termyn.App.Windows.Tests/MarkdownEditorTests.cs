@@ -19,7 +19,7 @@ public class MarkdownEditorTests
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
 
-    [Fact]
+    [WinFormsFact]
     public void Refilling_the_box_leaves_the_caret_where_it_was()
     {
         // Assigning Text collapses the caret to nought, and Restyle can't put it back — it saves
@@ -33,7 +33,7 @@ public class MarkdownEditorTests
         Assert.Equal(20, editor.SelectionStart);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Refilling_keeps_a_selection_and_not_only_a_caret()
     {
         using var editor = Editing("The quick brown fox jumps over the lazy dog");
@@ -45,7 +45,7 @@ public class MarkdownEditorTests
         Assert.Equal(5, editor.SelectionLength);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_place_past_the_end_of_shorter_text_lands_at_the_end_of_it()
     {
         // The place was measured against the text being replaced. A description cut down elsewhere
@@ -129,7 +129,7 @@ public class MarkdownEditorTests
     }
 
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_whose_description_matches_the_last_one_is_still_drawn()
     {
         // Styling is skipped when the text hasn't changed since it was last drawn, which is what
@@ -148,7 +148,7 @@ public class MarkdownEditorTests
 
     // ---- The text is never touched -------------------------------------------------------------
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData("Notes\n")]
     [InlineData("Notes\n\n")]
     [InlineData("Notes\n\n\n")]
@@ -164,7 +164,7 @@ public class MarkdownEditorTests
         Assert.Equal(markdown, editor.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Return_at_the_end_of_a_description_leaves_a_line_to_carry_on_typing_on()
     {
         // The fault as it was met: press Return at the end of a description — which is where it is
@@ -182,7 +182,7 @@ public class MarkdownEditorTests
     }
 
 
-    [Fact]
+    [WinFormsFact]
     public void Styling_changes_how_the_markdown_looks_and_not_what_it_says()
     {
         // The whole basis of drawing the source rather than a rendering of it: what is on screen is
@@ -198,7 +198,7 @@ public class MarkdownEditorTests
         Assert.Equal(markdown, editor.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_markers_stay_on_screen()
     {
         // A box whose text rearranges itself as you type is worse than one that doesn't. The
@@ -208,7 +208,7 @@ public class MarkdownEditorTests
         Assert.Contains("**", editor.Text);
     }
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(@"A brace } in the middle and a { too")]
     [InlineData(@"A backslash \ and a \\ pair")]
     [InlineData(@"Braces around {everything} at once")]
@@ -233,7 +233,7 @@ public class MarkdownEditorTests
         Assert.Equal(markdown + " more", editor.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_line_endings_the_account_stores_come_back_as_they_went_in()
     {
         // The offsets the rendered view hands over are into this text, and what gets saved is this
@@ -247,7 +247,7 @@ public class MarkdownEditorTests
 
     // ---- What it draws -------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void A_headings_words_are_larger_and_bold_and_its_hash_is_quiet()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
@@ -263,7 +263,7 @@ public class MarkdownEditorTests
         Assert.Equal(theme.Muted, ColourAt(editor, "#"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Each_heading_level_is_smaller_than_the_one_above_it()
     {
         using var editor = Editing("# one\n\n## two\n\n### three\n\nbody");
@@ -286,7 +286,7 @@ public class MarkdownEditorTests
     /// <summary>Text with its line endings written out, so a message stays on one line.</summary>
     private static string Shown(string text) => text.ReplaceLineEndings("\\n");
 
-    [Fact]
+    [WinFormsFact]
     public void Bold_is_bold_and_italic_is_italic_and_struck_is_struck()
     {
         using var editor = Editing("Some **bold** and *italic* and ~~struck~~ here");
@@ -311,7 +311,7 @@ public class MarkdownEditorTests
     private static string Drawn(string needle, Font font, string text)
         => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. Text in the box: '{text}'";
 
-    [Fact]
+    [WinFormsFact]
     public void A_links_words_are_coloured_and_its_address_is_not()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
@@ -322,7 +322,7 @@ public class MarkdownEditorTests
         Assert.NotEqual(theme.Accent, ColourAt(editor, "See"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_checkbox_is_not_drawn_as_a_link()
     {
         // The shape a description most often takes. Drawn as a link it is a page of things that
@@ -333,7 +333,7 @@ public class MarkdownEditorTests
         Assert.NotEqual(theme.Accent, ColourAt(editor, "[ ]"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Code_is_set_in_a_fixed_width_face()
     {
         using var editor = Editing("Run `dotnet build` first");
@@ -354,7 +354,7 @@ public class MarkdownEditorTests
             $"body should not be fixed width. {Drawn("Run", plain, text)}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Taking_the_markers_off_takes_the_boldness_with_them()
     {
         // Styling paints over what was there before rather than adding to it. Without the reset,
@@ -368,7 +368,7 @@ public class MarkdownEditorTests
         Assert.False(FontAt(editor, "bold").Bold);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Changing_the_theme_redraws_what_is_already_in_the_box()
     {
         using var editor = Editing("See [the docs](https://example.com) now");
@@ -380,7 +380,7 @@ public class MarkdownEditorTests
 
     // ---- Undo, which is the reason any of this is hand-rolled ----------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_controls_own_undo_queue_is_switched_off()
     {
         // The measured fact this whole design turns on: a rich edit control records applying a
@@ -402,7 +402,7 @@ public class MarkdownEditorTests
 
     // ---- Not losing the user's place -----------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_caret_is_where_it_was_after_a_restyle()
     {
         // It runs on a pause in the typing, which is to say while the user is sitting in the box.
@@ -419,7 +419,7 @@ public class MarkdownEditorTests
         Assert.Equal(0, editor.SelectionLength);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_selection_is_still_selected_after_a_restyle()
     {
         using var editor = Editing("Some **bold** and more words after it");
@@ -438,7 +438,7 @@ public class MarkdownEditorTests
 
     // ---- Not falling over, and not being slow ---------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void Markdown_nested_past_what_the_parser_will_take_is_still_shown()
     {
         // A description arrives by sync, so this is reachable without anyone having typed it here.
@@ -447,7 +447,7 @@ public class MarkdownEditorTests
         Assert.Contains("still here", editor.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_description_at_its_full_length_is_styled_faster_than_a_pause()
     {
         // It runs 300 ms after the typing stops, in the box the user is working in, so what it

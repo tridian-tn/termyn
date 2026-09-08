@@ -78,7 +78,7 @@ public class OutlineFoldingTests
 
     // ---- The arrow keys ------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void Left_folds_the_selected_task_and_right_opens_it_again()
     {
         using var view = Outline(Row("a", children: true), Row("b", depth: 1));
@@ -92,7 +92,7 @@ public class OutlineFoldingTests
         Assert.Equal([("a", false)], Asked(view, () => Press(view, Keys.Right)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_arrow_asks_for_nothing_when_it_is_already_that_way()
     {
         // Right on a task already open, and Left on one already folded. Asked for anyway, the list
@@ -107,7 +107,7 @@ public class OutlineFoldingTests
         Assert.Empty(Asked(folded, () => Press(folded, Keys.Left)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_with_nothing_under_it_answers_to_neither_arrow()
     {
         using var view = Outline(Row("a"));
@@ -117,7 +117,7 @@ public class OutlineFoldingTests
         Assert.Empty(Asked(view, () => Press(view, Keys.Right)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_arrow_with_nothing_selected_is_left_alone()
     {
         using var view = Outline(Row("a", children: true), Row("b", depth: 1));
@@ -125,7 +125,7 @@ public class OutlineFoldingTests
         Assert.Empty(Asked(view, () => Press(view, Keys.Left)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_arrow_this_has_no_use_for_is_left_for_something_else()
     {
         // A key swallowed by whatever happens to have the focus is the sort of thing nobody can
@@ -159,7 +159,7 @@ public class OutlineFoldingTests
     /// dispatch it rather than the thing that can be wrong — which is where the expander is. So
     /// these ask the control what is under a point, which is the question the press asks it.
     /// </remarks>
-    [Fact]
+    [WinFormsFact]
     public void The_expander_is_what_is_under_the_head_of_the_row()
     {
         using var view = Outline(Row("a", children: true), Row("b", depth: 1));
@@ -167,7 +167,7 @@ public class OutlineFoldingTests
         Assert.Equal("a", view.ExpanderAt(ExpanderOf(view, 0, depth: 0)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_expander_of_an_indented_row_moves_in_with_it()
     {
         // It sits at the head of the row's own words, so a sub-task's expander is where the
@@ -180,7 +180,7 @@ public class OutlineFoldingTests
         Assert.Null(view.ExpanderAt(ExpanderOf(view, 1, depth: 0)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_row_with_nothing_under_it_has_no_expander_to_hit()
     {
         using var view = Outline(Row("a"));
@@ -188,7 +188,7 @@ public class OutlineFoldingTests
         Assert.Null(view.ExpanderAt(ExpanderOf(view, 0, depth: 0)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_words_are_not_the_expander()
     {
         // Selecting a task has to stay something that can be done to one with sub-tasks under it.
@@ -198,7 +198,7 @@ public class OutlineFoldingTests
         Assert.Null(view.ExpanderAt(new Point(bounds.X + 80, bounds.Y + (bounds.Height / 2))));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_point_past_the_last_row_is_not_an_expander()
     {
         // A list is nearly always taller than the tasks in it, and the room below them belongs to

@@ -44,7 +44,7 @@ public class FoldsAcrossRestartTests : IDisposable
         return store;
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_fold_is_written_out_when_the_window_closes()
     {
         using (var window = Window(out var presenter))
@@ -58,7 +58,7 @@ public class FoldsAcrossRestartTests : IDisposable
         Assert.Contains("\"a\"", Saved());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_fold_is_read_back_in_on_the_next_start()
     {
         // Written by hand rather than by the run above, so this stands on its own: what a fresh
@@ -72,7 +72,7 @@ public class FoldsAcrossRestartTests : IDisposable
         Assert.Equal(new[] { "Parent" }, presenter.Rows.Select(r => r.Content).ToArray());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_fold_survives_the_round_trip_it_is_there_for()
     {
         // Both halves at once, which is the thing the user asked for: fold it, quit, come back.
@@ -89,7 +89,7 @@ public class FoldsAcrossRestartTests : IDisposable
         Assert.Equal(new[] { "Parent" }, presenter.Rows.Select(r => r.Content).ToArray());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Folding_the_whole_view_survives_the_restart_too()
     {
         // The menu entry goes through the same set as an expander does, so it is saved the same
@@ -108,7 +108,7 @@ public class FoldsAcrossRestartTests : IDisposable
         Assert.True(presenter.CanExpandAll);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_window_that_was_never_folded_writes_none()
     {
         using (var window = Window(out var presenter))
@@ -124,7 +124,7 @@ public class FoldsAcrossRestartTests : IDisposable
             $"nothing was folded, so nothing should have been written: {saved}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_file_that_says_nothing_about_folds_opens_everything()
     {
         File.WriteAllText(_config, """{"view":{"sidebarWidth":240}}""");

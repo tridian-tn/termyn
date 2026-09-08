@@ -30,7 +30,7 @@ jobs:
         run: dotnet build Termyn.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test Termyn.slnx -c Release --no-build --verbosity normal
+        run: dotnet test --solution Termyn.slnx -c Release --no-build
 
   package:
     name: package

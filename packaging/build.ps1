@@ -138,7 +138,7 @@ Write-Host "Termyn $version" -ForegroundColor Cyan
 
 if (-not $SkipTests) {
     Write-Host 'Running tests...' -ForegroundColor Cyan
-    dotnet test $root --nologo --verbosity quiet
+    dotnet test --solution (Join-Path $root 'Termyn.slnx')
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed; not packaging.' }
 }
 

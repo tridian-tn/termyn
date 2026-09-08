@@ -26,7 +26,7 @@ public class SidebarPaintTests
     /// <summary>LVS_EX_DOUBLEBUFFER.</summary>
     private const int LvsExDoubleBuffer = 0x00010000;
 
-    [Fact]
+    [WinFormsFact]
     public void The_outline_buffers_its_own_drawing()
     {
         // DoubleBuffered is what turns this on, which is worth holding down: on a list that flag
@@ -43,7 +43,7 @@ public class SidebarPaintTests
     /// <summary>WM_MOUSEMOVE.</summary>
     private const int WmMouseMove = 0x0200;
 
-    [Fact]
+    [WinFormsFact]
     public void The_pointer_crossing_a_row_redraws_it_through_a_paint()
     {
         // The style above is not enough on its own, which is the whole of why the outline still
