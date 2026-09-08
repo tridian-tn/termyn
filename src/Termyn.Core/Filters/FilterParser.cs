@@ -72,9 +72,10 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// <c>!</c> then <c>&amp;</c> then <c>|</c>/<c>,</c>, left-associative. Adjacent terms with no
 /// operator between them are an implicit <c>&amp;</c>, which is how "#Work today" reads.
 ///
-/// What's left out is what this client hasn't got the answer to: naming a person rather than
-/// yourself, which needs the account's collaborators, and which workspace a task is in. Those are
-/// refused by name rather than guessed at.
+/// Left out, and refused by name rather than guessed at: naming a person rather than yourself,
+/// which needs the account's collaborators; which workspace a task is in; the wildcard forms
+/// (<c>%email*</c>, <c>#\*name</c>, and the <c>!/*</c> that means "in no section"); and
+/// <c>uncompletable</c>, which no field here is known to answer.
 /// </remarks>
 public static class FilterParser
 {
