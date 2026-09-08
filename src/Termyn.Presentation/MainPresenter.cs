@@ -6,6 +6,7 @@ using Termyn.Core.Api;
 using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
+using Termyn.Core.History;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
@@ -130,12 +131,18 @@ public sealed class MainPresenter
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
     /// file works without one, which is what lets the presenter be tested without a download folder.
     /// </param>
-    public MainPresenter(SyncEngine engine, QuickAddParser parser, IClock? clock = null, AttachmentFetcher? fetcher = null)
+    public MainPresenter(
+        SyncEngine engine,
+        QuickAddParser parser,
+        IClock? clock = null,
+        AttachmentFetcher? fetcher = null,
+        IHistoryStore? history = null)
     {
         _engine = engine;
         _parser = parser;
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
+        History = new ActionHistory(history, _clock);
         Publish(); // reflect whatever the engine already has loaded
     }
 
@@ -271,6 +278,12 @@ public sealed class MainPresenter
         _syncing = true;
         PublishStatus();
 
+        // The history rides the same cadence rather than keeping a timer of its own: there is
+        // already something coming round every three quarters of a minute, and a second thread to
+        // write a handful of rows would be one for nothing. Before the round trip, so a sync that
+        // never comes back has still written what was waiting.
+        History.Flush();
+
         try
         {
             await _engine.SyncAsync(ct);
@@ -373,6 +386,11 @@ public sealed class MainPresenter
             _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
         }
 
+        // Said from the text rather than from the model: online the server parses it and what comes
+        // back is a task this hasn't seen yet, so the words the user typed are the only ones there
+        // are. A new id each time, so two captures are never folded into one.
+        History.Note($"Added “{text.Trim()}”", $"capture:{Guid.NewGuid():N}");
+
         Publish();
     }
 
@@ -404,10 +422,13 @@ public sealed class MainPresenter
         if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent)
             return null;
 
+        var under = Named(parentId);
         var parse = Placed(_parser.Parse(text));
         var id = _engine.AddItem(ItemFields.ForAdd(parse, parent.ProjectId, parent.SectionId, parentId));
 
         _collapsed.Remove(parentId);
+
+        History.Note($"Added “{parse.Content}” under {under}", $"subtask:{id}");
 
         Publish();
         return id;
@@ -517,7 +538,10 @@ public sealed class MainPresenter
     /// <summary>Reopens a completed task, moving it back among the active ones.</summary>
     public void Reopen(string id)
     {
+        var named = Named(id);
         _engine.ReopenItem(id);
+
+        History.Note($"Reopened {named}", $"reopen:{id}");
         Publish();
     }
 
@@ -611,7 +635,11 @@ public sealed class MainPresenter
 
     public void Rename(string id, string content)
     {
+        // The old name is the half worth saying: the new one is on the row in front of them.
+        var was = Named(id);
         _engine.UpdateItem(id, new JsonObject { ["content"] = content });
+
+        History.Note($"Renamed {was} to “{content}”", $"rename:{id}");
         Publish();
     }
 
@@ -655,6 +683,14 @@ public sealed class MainPresenter
             default:
                 return;
         }
+
+        // The one a run of writes is most likely to come from: typing sends one every time the
+        // typing pauses, so an afternoon on a description is a line rather than forty.
+        History.Note(
+            kind == SubjectKind.Task
+                ? $"Edited the description of {Named(id)}"
+                : $"Edited the description of a project",
+            $"description:{kind}:{id}");
 
         Publish();
     }
@@ -739,6 +775,11 @@ public sealed class MainPresenter
         if (_engine.AddComment(ownerId, content.Trim()) is null)
             return false;
 
+        // Not "on X". A comment hangs off a task or a project and the id alone doesn't say which —
+        // the same reason SetDescription is told the kind rather than guessing it. Naming it would
+        // mean plumbing that through here too, and until it is, saying nothing beats saying "a
+        // task" about a project. It reads alongside the edit and delete lines, which say no more.
+        History.Note("Added a comment", $"comment:add:{ownerId}");
         Publish();
         return true;
     }
@@ -751,6 +792,8 @@ public sealed class MainPresenter
             return false;
 
         _engine.EditComment(id, content.Trim());
+
+        History.Note("Edited a comment", $"comment:edit:{id}");
         Publish();
         return true;
     }
@@ -759,6 +802,8 @@ public sealed class MainPresenter
     public void DeleteComment(string id)
     {
         _engine.DeleteComment(id);
+
+        History.Note("Deleted a comment", $"comment:delete:{id}");
         Publish();
     }
 
@@ -858,16 +903,53 @@ public sealed class MainPresenter
         }
     }
 
+    /// <summary>A gentle list of what has been done to the account this session.</summary>
+    /// <remarks>
+    /// Given the presenter's own clock rather than reaching for one. The folding rule is about
+    /// elapsed time, and two time sources in here would mean a test could fix one and not the
+    /// other — which is a test that passes while saying nothing.
+    /// </remarks>
+    public ActionHistory History { get; }
+
+    /// <summary>
+    /// What a task is called, in the form a line of history quotes it.
+    /// </summary>
+    /// <remarks>
+    /// Asked before the change rather than after: a delete takes the name with it, and a rename
+    /// makes the old one the interesting half. A task the model has never heard of is quoted as
+    /// nothing at all, which reads better in a sentence than an id nobody recognises.
+    /// </remarks>
+    /// <param name="id">The task to name</param>
+    /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
+    private string Named(string id)
+        => _engine.Snapshot().Items.FirstOrDefault(i => i.Id == id) is { Content.Length: > 0 } item
+            ? $"“{item.Content}”"
+            : "a task";
+
     public void SetPriority(string id, Priority priority)
     {
+        var named = Named(id);
         _engine.UpdateItem(id, new JsonObject { ["priority"] = PriorityMap.ToApi(priority) });
+
+        History.Note(
+            priority == Priority.P4 ? $"Cleared the priority on {named}" : $"Set {named} to priority {(int)priority}",
+            $"priority:{id}");
+
         Publish();
     }
 
     /// <summary>Sets or, with a null date, clears the due date.</summary>
     public void SetDue(string id, DateOnly? date, TimeOnly? time = null)
     {
+        var named = Named(id);
         _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.Due(date, time) });
+
+        History.Note(
+            date is { } day
+                ? $"Set {named} due {day.ToString("d MMM", CultureInfo.InvariantCulture)}"
+                : $"Cleared the due date on {named}",
+            $"due:{id}");
+
         Publish();
     }
 
@@ -900,7 +982,10 @@ public sealed class MainPresenter
             return;
         }
 
+        var named = Named(id);
         _engine.SetItemDueString(id, text, parse.IsRecurrence || StartsARepeat(text));
+
+        History.Note($"Set {named} due “{text.Trim()}”", $"due:{id}");
         Publish();
     }
 
@@ -925,21 +1010,35 @@ public sealed class MainPresenter
 
     public void Complete(string id)
     {
+        var named = Named(id);
         _engine.CompleteItem(id);
+
+        History.Note($"Completed {named}", $"complete:{id}");
         Publish();
     }
 
     public void Delete(string id)
     {
+        // Named first: the delete is what takes the name away.
+        var named = Named(id);
         _engine.DeleteItem(id);
+
+        History.Note($"Deleted {named}", $"delete:{id}");
         Publish();
     }
 
     public bool Undo()
     {
         var undone = _engine.Undo();
+
         if (undone)
+        {
+            // Its own line rather than rubbing out the one before it. Taking something back is a
+            // thing that was done, and a list that quietly forgot it would be the less true account.
+            History.Note("Took back the last change", $"undo:{Guid.NewGuid():N}");
             Publish();
+        }
+
         return undone;
     }
 
@@ -965,18 +1064,31 @@ public sealed class MainPresenter
     /// <returns>False when it was already at that end, so the caller can skip a needless sync.</returns>
     public bool Move(string id, int offset)
     {
+        var named = Named(id);
         var moved = _engine.MoveItem(id, offset);
+
         if (moved)
+        {
+            // One line for a run of nudges: moving a row three places is three presses and one act.
+            History.Note($"Moved {named} {(offset < 0 ? "up" : "down")}", $"move:{id}");
             Publish();
+        }
+
         return moved;
     }
 
     /// <summary>Makes a task a child of the one above it.</summary>
     public bool Indent(string id)
     {
+        var named = Named(id);
         var indented = _engine.IndentItem(id);
+
         if (indented)
+        {
+            History.Note($"Indented {named}", $"nest:{id}");
             Publish();
+        }
+
         return indented;
     }
 
@@ -991,9 +1103,15 @@ public sealed class MainPresenter
     /// <summary>Promotes a sub-task alongside its parent.</summary>
     public bool Outdent(string id)
     {
+        var named = Named(id);
         var outdented = _engine.OutdentItem(id);
+
         if (outdented)
+        {
+            History.Note($"Outdented {named}", $"nest:{id}");
             Publish();
+        }
+
         return outdented;
     }
 
@@ -1048,8 +1166,13 @@ public sealed class MainPresenter
             return false;
 
         var added = _engine.AddRelativeReminder(itemId, minutesBefore) is not null;
+
         if (added)
+        {
+            History.Note($"Added a reminder to {Named(itemId)}", $"reminder:add:{itemId}");
             Publish();
+        }
+
         return added;
     }
 
@@ -1060,8 +1183,13 @@ public sealed class MainPresenter
             return false;
 
         var added = _engine.AddAbsoluteReminder(itemId, date, time) is not null;
+
         if (added)
+        {
+            History.Note($"Added a reminder to {Named(itemId)}", $"reminder:add:{itemId}");
             Publish();
+        }
+
         return added;
     }
 
@@ -1085,6 +1213,8 @@ public sealed class MainPresenter
     public void DeleteReminder(string id)
     {
         _engine.DeleteReminder(id);
+
+        History.Note("Removed a reminder", $"reminder:delete:{id}");
         Publish();
     }
 
@@ -1124,6 +1254,8 @@ public sealed class MainPresenter
             return existing.Name;
 
         _engine.AddLabel(trimmed);
+
+        History.Note($"Added the label “{trimmed}”", $"label:add:{trimmed}");
         Publish();
         return trimmed;
     }
@@ -1183,12 +1315,16 @@ public sealed class MainPresenter
     public void AddProject(string name)
     {
         _engine.AddProject(name);
+
+        History.Note($"Added the project “{name}”", $"project:add:{name}");
         Publish();
     }
 
     public void RenameProject(string id, string name)
     {
         _engine.RenameProject(id, name);
+
+        History.Note($"Renamed a project to “{name}”", $"project:rename:{id}");
         Publish();
     }
 
@@ -1212,7 +1348,10 @@ public sealed class MainPresenter
             .Select(s => s.Id)
             .ToHashSet();
 
+        var named = _engine.Snapshot().Projects.FirstOrDefault(p => p.Id == id)?.Name;
         _engine.DeleteProject(id);
+
+        History.Note(named is null ? "Deleted a project" : $"Deleted the project “{named}”", $"project:delete:{id}");
 
         // Don't leave the outline pointed at something that no longer exists.
         if ((Selection.ProjectId is { } selected && doomed.Contains(selected))
@@ -1230,18 +1369,24 @@ public sealed class MainPresenter
     public void AddSection(string name, string projectId)
     {
         _engine.AddSection(name, projectId);
+
+        History.Note($"Added the section “{name}”", $"section:add:{projectId}:{name}");
         Publish();
     }
 
     public void RenameSection(string id, string name)
     {
         _engine.RenameSection(id, name);
+        History.Note($"Renamed a section to “{name}”", $"section:rename:{id}");
         Publish();
     }
 
     public void DeleteSection(string id)
     {
+        var named = _engine.Snapshot().Sections.FirstOrDefault(x => x.Id == id)?.Name;
         _engine.DeleteSection(id);
+
+        History.Note(named is null ? "Deleted a section" : $"Deleted the section “{named}”", $"section:delete:{id}");
 
         if (Selection.SectionId == id)
             Selection = ViewSelection.Default;

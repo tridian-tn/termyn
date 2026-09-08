@@ -563,6 +563,11 @@ internal sealed class MainForm : Form
         }
 
         SaveViewState();
+
+        // The run still being added to is only in memory until now, so this is what stops the last
+        // thing somebody did going unrecorded.
+        _presenter.History.Dispose();
+
         _cts.Cancel();
     }
 
@@ -2661,6 +2666,10 @@ internal sealed class MainForm : Form
 
             case AppCommand.ToggleCompleted:
                 _ = ToggleCompletedAsync();
+                return false;
+
+            case AppCommand.History:
+                Guarded(() => HistoryForm.Show(this, _theme, _presenter.History.Recent, _presenter.History.Clear));
                 return false;
 
             case AppCommand.SortDefault:
