@@ -238,7 +238,7 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
-        _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = "Search…" };
+        _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = Strings.SearchPlaceholder };
         _search.TextChanged += (_, _) =>
         {
             if (_syncingSearch)

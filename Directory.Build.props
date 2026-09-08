@@ -6,6 +6,14 @@
     <!-- ICU is required: the account's timezone arrives as an IANA name, which cannot be resolved
          without it, and the smart views are defined against the account's date. -->
     <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- The language the strings in the .resx files are written in, and the one that lives in the
+         assembly itself rather than beside it. Nothing is translated yet; saying so is what lets a
+         machine set to any culture fall back to these without going looking for a satellite that
+         was never built.
+
+         NeutralLanguage and not NeutralResourcesLanguage: the second is what the attribute is
+         called and sets nothing at all from here, which is a quiet way to have none of this. -->
+    <NeutralLanguage>en-GB</NeutralLanguage>
   </PropertyGroup>
 
   <!-- The version a dev build stamps itself with, read back at runtime by the update check and

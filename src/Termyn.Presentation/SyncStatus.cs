@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Termyn.Presentation;
 
 /// <summary>Where the sync loop stands, as the status bar reports it.</summary>
@@ -38,7 +40,7 @@ public sealed record SyncStatus(
         var parts = new List<string>(3) { StateText() };
 
         if (Pending > 0)
-            parts.Add($"{Pending} pending");
+            parts.Add(string.Format(CultureInfo.CurrentCulture, Strings.SyncPending, Pending));
         if (Failed > 0)
             parts.Add(Failed == 1 ? "1 failed" : $"{Failed} failed");
 

@@ -17,6 +17,19 @@
     <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
+  <!-- Generated into obj/ on every build rather than checked in beside the .resx. A designer file
+       committed to the repo is one only an IDE regenerates, so it drifts the first time a string is
+       added from a terminal and nothing notices until a key is missing at runtime. -->
+  <ItemGroup>
+    <EmbeddedResource Update="Strings.resx">
+      <Generator>MSBuild:Compile</Generator>
+      <StronglyTypedFileName>$(IntermediateOutputPath)Strings.Designer.cs</StronglyTypedFileName>
+      <StronglyTypedLanguage>CSharp</StronglyTypedLanguage>
+      <StronglyTypedNamespace>Termyn.App.Windows</StronglyTypedNamespace>
+      <StronglyTypedClassName>Strings</StronglyTypedClassName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Parses the markdown a description is written in, for the rendered half of the notes panel.
          Only ever read from: the text the account holds is what gets saved, so nothing here can

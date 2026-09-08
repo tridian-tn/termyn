@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What Core says that a person reads. Everything else in this project is protocol — filter
+    keywords, quick-add keywords, SQL, JSON field names, the SQLite error text a corrupt cache is
+    recognised by — and none of that belongs here however much it looks like wording.
+  -->
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="CouldNotReachTodoist" xml:space="preserve">
+    <value>Could not reach Todoist.</value>
+    <comment>Shown when the network is down or the host cannot be resolved.</comment>
+  </data>
+</root>
