@@ -108,7 +108,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (HttpRequestException ex)
         {
-            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+            throw new TodoistNetworkException(Strings.CouldNotReachTodoist, ex);
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
@@ -163,7 +163,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (HttpRequestException ex)
         {
-            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+            throw new TodoistNetworkException(Strings.CouldNotReachTodoist, ex);
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
@@ -313,7 +313,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (HttpRequestException ex)
         {
-            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+            throw new TodoistNetworkException(Strings.CouldNotReachTodoist, ex);
         }
         catch (TaskCanceledException ex) when (!caller.IsCancellationRequested)
         {
@@ -344,7 +344,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (HttpRequestException ex)
         {
-            throw new TodoistNetworkException("Could not reach Todoist.", ex);
+            throw new TodoistNetworkException(Strings.CouldNotReachTodoist, ex);
         }
         catch (TaskCanceledException ex) when (!caller.IsCancellationRequested)
         {

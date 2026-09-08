@@ -5,6 +5,19 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!-- Generated into obj/ on every build rather than checked in beside the .resx. A designer file
+       committed to the repo is one only an IDE regenerates, so it drifts the first time a string is
+       added from a terminal and nothing notices until a key is missing at runtime. -->
+  <ItemGroup>
+    <EmbeddedResource Update="Strings.resx">
+      <Generator>MSBuild:Compile</Generator>
+      <StronglyTypedFileName>$(IntermediateOutputPath)Strings.Designer.cs</StronglyTypedFileName>
+      <StronglyTypedLanguage>CSharp</StronglyTypedLanguage>
+      <StronglyTypedNamespace>Termyn.Core</StronglyTypedNamespace>
+      <StronglyTypedClassName>Strings</StronglyTypedClassName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <!-- Override the vulnerable native SQLite (CVE-2025-6965, CVE-2025-70873) that Microsoft.Data.Sqlite
