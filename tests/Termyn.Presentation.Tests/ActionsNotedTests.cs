@@ -34,9 +34,9 @@ public class ActionsNotedTests
     }
 
     private static string[] Said(MainPresenter presenter)
-        => presenter.History.Entries.Select(e => e.Said).ToArray();
+        => presenter.History.Recent().Select(e => e.Said).ToArray();
 
-    private static string Newest(MainPresenter presenter) => presenter.History.Entries[0].Said;
+    private static string Newest(MainPresenter presenter) => presenter.History.Recent()[0].Said;
 
     // ---- The examples the request gave ---------------------------------------------------------
 
@@ -162,7 +162,7 @@ public class ActionsNotedTests
 
         presenter.Complete("t2");
 
-        Assert.Equal(Today, DateOnly.FromDateTime(presenter.History.Entries[0].At.UtcDateTime));
+        Assert.Equal(Today, DateOnly.FromDateTime(presenter.History.Recent()[0].At.UtcDateTime));
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public class ActionsNotedTests
         for (var i = 0; i < 5; i++)
             presenter.Move("t2", -1);
 
-        Assert.Single(presenter.History.Entries);
+        Assert.Single(presenter.History.Recent());
     }
 
     [Fact]
@@ -218,6 +218,6 @@ public class ActionsNotedTests
         presenter.SetCollapsed("t1", true);
         presenter.SortBy(TaskColumn.Content);
 
-        Assert.Empty(presenter.History.Entries);
+        Assert.Empty(presenter.History.Recent());
     }
 }

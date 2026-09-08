@@ -1,6 +1,7 @@
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
+using Termyn.Core.History;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
@@ -68,10 +69,16 @@ internal static class Program
         // machine that has switched accounts isn't still holding the previous one's documents.
         engine.Purged += () => attachments.Clear();
 
+        // Its own file beside the cache rather than a table in it: the cache is the account's data
+        // and is thrown away and rebuilt whenever the server says something surprising, and a
+        // record of what the user did has no business going with it.
+        using var history = new SqliteHistoryStore(Path.Combine(paths.CacheDirectory, "history.db"));
+
         var presenter = new MainPresenter(
             engine,
             new QuickAddParser(new SystemClock()),
-            fetcher: new AttachmentFetcher(api, secrets, attachments));
+            fetcher: new AttachmentFetcher(api, secrets, attachments),
+            history: history);
         var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
 
         // Said once, here, rather than at every place a write is made. The engine queues all of

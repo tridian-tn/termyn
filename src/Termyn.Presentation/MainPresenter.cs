@@ -6,6 +6,7 @@ using Termyn.Core.Api;
 using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
+using Termyn.Core.History;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
@@ -130,13 +131,18 @@ public sealed class MainPresenter
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
     /// file works without one, which is what lets the presenter be tested without a download folder.
     /// </param>
-    public MainPresenter(SyncEngine engine, QuickAddParser parser, IClock? clock = null, AttachmentFetcher? fetcher = null)
+    public MainPresenter(
+        SyncEngine engine,
+        QuickAddParser parser,
+        IClock? clock = null,
+        AttachmentFetcher? fetcher = null,
+        IHistoryStore? history = null)
     {
         _engine = engine;
         _parser = parser;
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
-        History = new ActionHistory(_clock);
+        History = new ActionHistory(history, _clock);
         Publish(); // reflect whatever the engine already has loaded
     }
 
@@ -271,6 +277,12 @@ public sealed class MainPresenter
 
         _syncing = true;
         PublishStatus();
+
+        // The history rides the same cadence rather than keeping a timer of its own: there is
+        // already something coming round every three quarters of a minute, and a second thread to
+        // write a handful of rows would be one for nothing. Before the round trip, so a sync that
+        // never comes back has still written what was waiting.
+        History.Flush();
 
         try
         {
