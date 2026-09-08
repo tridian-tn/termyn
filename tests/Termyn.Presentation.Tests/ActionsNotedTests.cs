@@ -129,6 +129,43 @@ public class ActionsNotedTests
     }
 
     [Fact]
+    public void A_comment_names_nothing_because_the_id_does_not_say_what_it_is_on()
+    {
+        // A comment hangs off a task or a project, and an id is only unique within its own kind —
+        // so naming it would mean guessing, and the wrong guess calls a project a task.
+        var presenter = Seeded();
+
+        presenter.AddComment("t1", "Worth a look");
+
+        Assert.Equal("Added a comment", Newest(presenter));
+    }
+
+    [Fact]
+    public void The_history_and_the_row_agree_about_a_due_date()
+    {
+        // Both written in the invariant culture, since what is being reproduced is the server's own
+        // wording. Read from a different one they would disagree about the same day.
+        var presenter = Seeded();
+
+        presenter.SetDue("t1", new DateOnly(2026, 8, 15));
+
+        Assert.Contains("15 Aug", Newest(presenter));
+        Assert.Equal("15 Aug", presenter.Rows.Single(r => r.Id == "t1").Due);
+    }
+
+    [Fact]
+    public void The_history_keeps_the_time_the_presenter_keeps()
+    {
+        // One clock, not two. The folding rule is about elapsed time, so a second source would let
+        // a test fix one and not the other — and pass while saying nothing.
+        var presenter = Seeded();
+
+        presenter.Complete("t2");
+
+        Assert.Equal(Today, DateOnly.FromDateTime(presenter.History.Entries[0].At.UtcDateTime));
+    }
+
+    [Fact]
     public void Structure_changes_are_said_too()
     {
         var presenter = Seeded();

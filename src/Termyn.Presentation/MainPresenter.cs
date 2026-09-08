@@ -136,6 +136,7 @@ public sealed class MainPresenter
         _parser = parser;
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
+        History = new ActionHistory(_clock);
         Publish(); // reflect whatever the engine already has loaded
     }
 
@@ -762,7 +763,11 @@ public sealed class MainPresenter
         if (_engine.AddComment(ownerId, content.Trim()) is null)
             return false;
 
-        History.Note($"Commented on {Named(ownerId)}", $"comment:add:{ownerId}");
+        // Not "on X". A comment hangs off a task or a project and the id alone doesn't say which —
+        // the same reason SetDescription is told the kind rather than guessing it. Naming it would
+        // mean plumbing that through here too, and until it is, saying nothing beats saying "a
+        // task" about a project. It reads alongside the edit and delete lines, which say no more.
+        History.Note("Added a comment", $"comment:add:{ownerId}");
         Publish();
         return true;
     }
@@ -887,7 +892,12 @@ public sealed class MainPresenter
     }
 
     /// <summary>A gentle list of what has been done to the account this session.</summary>
-    public ActionHistory History { get; } = new();
+    /// <remarks>
+    /// Given the presenter's own clock rather than reaching for one. The folding rule is about
+    /// elapsed time, and two time sources in here would mean a test could fix one and not the
+    /// other — which is a test that passes while saying nothing.
+    /// </remarks>
+    public ActionHistory History { get; }
 
     /// <summary>
     /// What a task is called, in the form a line of history quotes it.
@@ -923,7 +933,9 @@ public sealed class MainPresenter
         _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.Due(date, time) });
 
         History.Note(
-            date is { } day ? $"Set {named} due {day:d MMM}" : $"Cleared the due date on {named}",
+            date is { } day
+                ? $"Set {named} due {day.ToString("d MMM", CultureInfo.InvariantCulture)}"
+                : $"Cleared the due date on {named}",
             $"due:{id}");
 
         Publish();
