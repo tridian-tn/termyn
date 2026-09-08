@@ -20,7 +20,7 @@ public class HintTextBoxTests
         return box;
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_hint_is_up_while_the_box_is_empty_and_gone_once_it_is_not()
     {
         using var box = Box();
@@ -34,7 +34,7 @@ public class HintTextBoxTests
         Assert.True(box.ShowingHint);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_box_with_no_hint_to_show_shows_nothing()
     {
         using var box = new HintTextBox();

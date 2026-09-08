@@ -32,7 +32,7 @@ public class DialogTests
 
     // ---- The command palette -------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_command_palette_opens_with_the_caret_in_the_search_box()
     {
         // It opens to be typed at. With the focus on the results list instead, the first letters
@@ -44,7 +44,7 @@ public class DialogTests
 
     // ---- The settings dialog -------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void No_setting_has_its_words_cut_off()
     {
         // Worth having, but it can only ever measure against the font this machine happens to run
@@ -61,7 +61,7 @@ public class DialogTests
         Assert.Empty(clipped);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Every_modifier_is_named_in_full()
     {
         using var form = NewSettings();
@@ -74,7 +74,7 @@ public class DialogTests
         Assert.Contains("Win", boxes);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_modifiers_size_themselves_to_their_own_text()
     {
         // Which is what stops the truncation coming back the next time the font changes.
@@ -89,7 +89,7 @@ public class DialogTests
         Assert.All(modifiers, c => Assert.True(c.AutoSize, $"{c.Text} is sized by hand"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_hangs_off_the_edge_of_the_dialog()
     {
         using var form = NewSettings();
@@ -103,7 +103,7 @@ public class DialogTests
         Assert.Empty(outside);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_in_the_dialog_sits_on_top_of_anything_else()
     {
         using var form = NewSettings();
@@ -119,7 +119,7 @@ public class DialogTests
         Assert.Empty(overlapping.ToList());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_dialog_leaves_room_for_the_longest_thing_it_says()
     {
         // The line that appears when the chosen combination won't register is the widest text in

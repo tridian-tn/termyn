@@ -79,7 +79,7 @@ public class MarkdownViewTests
 
     // ---- What it reads as ----------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_markers_are_drawn_rather_than_shown()
     {
         using var view = Render("Some **bold** and some *italic* here");
@@ -87,7 +87,7 @@ public class MarkdownViewTests
         Assert.Equal("Some bold and some italic here", view.Text.Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Bold_is_bold_and_italic_is_italic()
     {
         // Every assertion here says what it saw. This is the one that failed on a build agent and
@@ -125,7 +125,7 @@ public class MarkdownViewTests
            + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
            + $"Rendered text: '{text}'";
 
-    [Fact]
+    [WinFormsFact]
     public void Strikethrough_is_struck_through()
     {
         // Todoist's own editor writes this one with two tildes, which plain markdown has no syntax
@@ -136,7 +136,7 @@ public class MarkdownViewTests
         Assert.Equal("This is gone now", view.Text.Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_heading_is_larger_and_bold()
     {
         using var view = Render("# A heading\n\nSome text");
@@ -149,7 +149,7 @@ public class MarkdownViewTests
         Assert.Equal("A heading", view.Text.Split('\n')[0].Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_bullet_list_gets_bullets_and_an_indent()
     {
         using var view = Render("- first\n- second");
@@ -163,7 +163,7 @@ public class MarkdownViewTests
         Assert.True(view.SelectionIndent > 0 || view.SelectionHangingIndent > 0);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_numbered_list_keeps_its_numbers()
     {
         using var view = Render("1. first\n2. second");
@@ -172,7 +172,7 @@ public class MarkdownViewTests
         Assert.Contains("2.", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_link_shows_its_words_and_not_its_address()
     {
         // A description pasted off a web page is mostly link text, and printing every target
@@ -183,7 +183,7 @@ public class MarkdownViewTests
         Assert.DoesNotContain("example.com", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_link_is_coloured_apart_from_the_words_around_it()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
@@ -193,7 +193,7 @@ public class MarkdownViewTests
         Assert.NotEqual(theme.Accent, ColourAt(view, "See"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_link_can_be_followed_from_the_words_it_is_on()
     {
         // Colour alone said nothing you could act on. The address is kept against the span the
@@ -206,7 +206,7 @@ public class MarkdownViewTests
         Assert.Equal("https://example.com/path", view.LinkAt(at + "the docs".Length - 1));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_words_either_side_of_a_link_are_not_part_of_it()
     {
         using var view = Render("See [the docs](https://example.com) for more");
@@ -215,7 +215,7 @@ public class MarkdownViewTests
         Assert.Null(view.LinkAt(view.Text.IndexOf("for more", StringComparison.Ordinal)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Several_links_each_keep_their_own_address()
     {
         using var view = Render("[first](https://one.example) and [second](https://two.example)");
@@ -224,7 +224,7 @@ public class MarkdownViewTests
         Assert.Equal("https://two.example/", view.LinkAt(view.Text.IndexOf("second", StringComparison.Ordinal)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_link_that_is_not_a_web_address_is_not_offered_as_one()
     {
         // A description syncs from an account and gets pasted into from anywhere. A scheme that
@@ -238,7 +238,7 @@ public class MarkdownViewTests
         Assert.Contains("a file", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_links_from_the_last_task_do_not_linger()
     {
         using var view = Render("[first task](https://one.example)");
@@ -248,7 +248,7 @@ public class MarkdownViewTests
         Assert.Null(view.LinkAt(0));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_links_colour_stops_where_its_words_do()
     {
         // The line ending after a link draws nothing, so a link-coloured one is invisible here —
@@ -263,7 +263,7 @@ public class MarkdownViewTests
         Assert.NotEqual(theme.Accent, view.SelectionColor);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Code_is_set_in_a_fixed_width_face()
     {
         using var view = Render("Run `dotnet build` first");
@@ -281,7 +281,7 @@ public class MarkdownViewTests
         Assert.Equal("Run dotnet build first", text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_fenced_block_keeps_its_lines()
     {
         using var view = Render("```\nfirst line\nsecond line\n```");
@@ -291,7 +291,7 @@ public class MarkdownViewTests
         Assert.DoesNotContain("```", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_bare_url_is_shown_as_it_was_typed()
     {
         // People paste these far more often than they write proper links.
@@ -308,7 +308,7 @@ public class MarkdownViewTests
 
     // ---- What used to vanish, and what used to throw -------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void Markdown_nested_past_what_the_parser_will_take_still_shows_its_words()
     {
         // The parser refuses this by throwing, and a description arrives by sync — so a description
@@ -319,7 +319,7 @@ public class MarkdownViewTests
         Assert.Contains("still here", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_list_nested_past_what_the_parser_will_take_still_shows_its_words()
     {
         // Lists give out sooner than quotes do — depth sixty-four rather than a hundred and
@@ -331,7 +331,7 @@ public class MarkdownViewTests
         Assert.Contains("level", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_pasted_block_of_html_shows_its_words_rather_than_disappearing()
     {
         // A leaf rather than a container, so it matched nothing and its text was dropped whole —
@@ -342,7 +342,7 @@ public class MarkdownViewTests
         Assert.Contains("and after it", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_angle_bracketed_link_is_shown_and_can_be_followed()
     {
         // The form markdown copied out of docs and READMEs uses. It was rendering as nothing at
@@ -353,7 +353,7 @@ public class MarkdownViewTests
         Assert.Equal("https://example.com/x", view.LinkAt(view.Text.IndexOf("https://example.com/x", StringComparison.Ordinal)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_email_in_angle_brackets_is_shown_but_not_offered_as_a_link()
     {
         using var view = Render("Mail <bob@example.com> about it");
@@ -362,7 +362,7 @@ public class MarkdownViewTests
         Assert.Null(view.LinkAt(view.Text.IndexOf("bob@example.com", StringComparison.Ordinal)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_escaped_character_is_shown_as_the_character()
     {
         // Anything that generates markdown out of HTML writes ampersands this way, and they were
@@ -373,7 +373,7 @@ public class MarkdownViewTests
         Assert.DoesNotContain("&amp;", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_link_that_is_not_a_web_address_is_not_coloured_as_one_either()
     {
         // It isn't clickable, so it shouldn't look clickable. Drawn in the link colour it invites
@@ -385,7 +385,7 @@ public class MarkdownViewTests
         Assert.NotEqual(theme.Accent, ColourAt(view, "a file"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_at_all_renders_to_nothing_at_all()
     {
         using var view = Render(string.Empty);
@@ -393,7 +393,7 @@ public class MarkdownViewTests
         Assert.Equal(string.Empty, view.Text.Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Plain_text_with_no_markdown_in_it_comes_through_unchanged()
     {
         using var view = Render("Just a sentence, with a comma and a full stop.");
@@ -401,7 +401,7 @@ public class MarkdownViewTests
         Assert.Equal("Just a sentence, with a comma and a full stop.", view.Text.Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Markdown_it_has_no_way_to_draw_still_shows_its_words()
     {
         // A table is beyond what Todoist's editor can produce, but not beyond what someone can
@@ -411,7 +411,7 @@ public class MarkdownViewTests
         Assert.Contains("After the table", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Text_set_before_there_was_a_window_is_drawn_once_there_is_one()
     {
         // The panel starts collapsed, so the first description usually arrives before this control
@@ -426,7 +426,7 @@ public class MarkdownViewTests
         Assert.Equal("Some bold text", view.Text.Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Moving_to_another_task_replaces_what_was_there()
     {
         using var view = Render("The first task's description");
@@ -439,7 +439,7 @@ public class MarkdownViewTests
 
     // ---- The rest of the grammar ---------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void A_checklist_keeps_its_boxes_ticked_and_unticked()
     {
         // The description shape Todoist users write most.
@@ -450,7 +450,7 @@ public class MarkdownViewTests
         Assert.Contains("still to do", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Each_heading_level_is_smaller_than_the_one_above_it()
     {
         using var view = Render("# one\n\n## two\n\n### three\n\nbody");
@@ -469,7 +469,7 @@ public class MarkdownViewTests
         Assert.True(three > body, $"h3 {three} should beat body {body}. {seen}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_nested_list_sits_in_from_the_one_it_belongs_to()
     {
         using var view = Render("- outer\n    - inner");
@@ -481,7 +481,7 @@ public class MarkdownViewTests
         Assert.True(view.SelectionIndent > outer, $"inner {view.SelectionIndent} should sit in from outer {outer}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_quote_sits_in_from_the_text_around_it()
     {
         // Its marker is dropped, so the indent is the only thing that says it is a quotation.
@@ -494,7 +494,7 @@ public class MarkdownViewTests
         Assert.True(view.SelectionIndent > body, $"quote {view.SelectionIndent} should sit in from body {body}");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_numbered_list_starts_where_it_says_it_does()
     {
         using var view = Render("3. third\n4. fourth");
@@ -503,7 +503,7 @@ public class MarkdownViewTests
         Assert.Contains("4.", view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_link_with_no_words_is_not_a_link_at_all()
     {
         // A zero-width span would make whatever follows it clickable.
@@ -512,7 +512,7 @@ public class MarkdownViewTests
         Assert.Null(view.LinkAt(0));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_rule_is_drawn_between_what_it_divides()
     {
         using var view = Render("above\n\n---\n\nbelow");
@@ -522,7 +522,7 @@ public class MarkdownViewTests
         Assert.Contains('—', view.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Changing_the_theme_redraws_what_is_already_on_screen()
     {
         // The only thing that recolours the panel when the app switches theme.
@@ -543,7 +543,7 @@ public class MarkdownViewTests
         => view.Text.ReplaceLineEndings("\n").TrimEnd('\n').Split('\n');
 
 
-    [Fact]
+    [WinFormsFact]
     public void A_line_typed_on_its_own_is_drawn_on_its_own()
     {
         // Markdown proper would run these together with a space between them. Todoist breaks the
@@ -555,7 +555,7 @@ public class MarkdownViewTests
         Assert.Equal("Azure.Storage.Blobs = 12.17.0", Lines(view)[0]);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_blank_line_still_starts_a_new_paragraph_rather_than_a_third_line()
     {
         // Breaking on every newline mustn't turn the blank line between two thoughts into a blank
@@ -565,7 +565,7 @@ public class MarkdownViewTests
         Assert.Equal(["First thought", "Second thought"], Lines(view));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_break_written_the_markdown_way_still_breaks_and_does_not_double()
     {
         // Two trailing spaces were already a line break, and now that a bare newline is one too
@@ -575,7 +575,7 @@ public class MarkdownViewTests
         Assert.Equal(["First line", "Second line"], Lines(view));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_run_of_blank_lines_reads_as_one_break_and_not_as_several()
     {
         // Long-standing and not part of the change, but worth writing down beside it: however many
@@ -639,7 +639,7 @@ public class MarkdownViewTests
     /// <summary>What is on screen, as one line-ending and without the one that closes the last run.</summary>
     private static string Shown(MarkdownView view) => view.Text.ReplaceLineEndings("\n").TrimEnd('\n');
 
-    [Fact]
+    [WinFormsFact]
     public void A_run_that_missed_its_place_scrambles_the_description()
     {
         // What the agent produced, made to happen on purpose: with only one go at drawing it, the
@@ -657,7 +657,7 @@ public class MarkdownViewTests
         Assert.NotEqual(FencedShown, Shown(view));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_render_that_lost_a_run_is_drawn_again()
     {
         // And the description that comes out is in the right order. It used to be handed over as
@@ -677,7 +677,7 @@ public class MarkdownViewTests
         MapsBack(view, Fenced, "block");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_render_is_never_drawn_more_often_than_it_is_allowed()
     {
         // The other half of it: this runs on every keystroke in a description, so a control having
@@ -691,7 +691,7 @@ public class MarkdownViewTests
         Assert.InRange(view.Renders, 1, EveryRender);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_rendering_that_cannot_be_got_right_is_shown_as_written()
     {
         // Three goes and every one of them lost a run. The markdown itself is truthful and always
@@ -703,7 +703,7 @@ public class MarkdownViewTests
         Assert.Equal(Fenced, Shown(view));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_text_shown_as_written_still_knows_where_a_click_lands()
     {
         // It is the markdown on screen, so a character is where it says it is. Unmapped, every
@@ -716,7 +716,7 @@ public class MarkdownViewTests
         Assert.Equal(at, view.SourceAt(at));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_render_drawn_again_does_not_keep_what_the_lost_one_said()
     {
         // Each go throws the last one away: the box, the links, the offsets and the count. A
@@ -733,7 +733,7 @@ public class MarkdownViewTests
         Assert.Equal("A link and some code", Shown(view));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_word_in_the_rendering_knows_where_it_was_written()
     {
         // What puts the caret where the user was pointing when they ask to type. Without it the
@@ -747,7 +747,7 @@ public class MarkdownViewTests
         Assert.Equal(markdown.IndexOf("text", StringComparison.Ordinal), SourceOf(view, "text"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_offset_inside_a_word_maps_through_it_rather_than_to_its_start()
     {
         const string markdown = "abcdefgh";
@@ -758,7 +758,7 @@ public class MarkdownViewTests
         Assert.Equal(7, view.SourceAt(7));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_line_below_the_first_maps_past_the_lines_above_it()
     {
         // The rendering drops markers, so the two texts drift apart as they go — which is the whole
@@ -769,7 +769,7 @@ public class MarkdownViewTests
         MapsBack(view, markdown, "body");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_word_after_a_broken_line_still_knows_where_it_was_written()
     {
         // A soft break used to be drawn as a space and is now drawn as a line ending, which is a
@@ -782,7 +782,7 @@ public class MarkdownViewTests
         Assert.Equal(markdown.IndexOf("third", StringComparison.Ordinal), SourceOf(view, "third"));
     }
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData("plain words")]
     [InlineData("a\nb\nc")]
     [InlineData("```\nfirst line\nsecond line\nthird line\n```")]
@@ -796,7 +796,7 @@ public class MarkdownViewTests
         Assert.Equal(view.TextLength, view.Counted);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_return_the_parser_never_saw_is_counted_as_the_box_holds_it()
     {
         // Markdown nested past what the parser will take is written through exactly as the account
@@ -809,7 +809,7 @@ public class MarkdownViewTests
         Assert.Equal(view.TextLength, view.Counted);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_long_description_is_drawn_with_a_handful_of_faces()
     {
         // It used to build one font per run and let go of it: seventeen hundred of them for a
@@ -832,7 +832,7 @@ public class MarkdownViewTests
         Assert.InRange(view.FacesKept, afterOne, 8);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_word_below_a_fenced_block_still_knows_where_it_was_written()
     {
         // A fenced block arrives as a single run carrying its own line endings, where every other
@@ -854,7 +854,7 @@ public class MarkdownViewTests
         MapsBack(view, markdown, "block");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_words_of_a_link_map_to_the_words_and_not_to_the_address()
     {
         // The address isn't drawn at all, so an offset that landed in it would put the caret
@@ -865,7 +865,7 @@ public class MarkdownViewTests
         Assert.Equal(markdown.IndexOf("the docs", StringComparison.Ordinal), SourceOf(view, "the docs"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Code_maps_to_the_code_and_not_to_the_backtick_in_front_of_it()
     {
         // The backticks are written and not drawn, so mapping the whole span would put the first
@@ -877,7 +877,7 @@ public class MarkdownViewTests
         MapsBack(view, markdown, "dotnet");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_angle_bracketed_url_maps_to_the_url_and_not_to_the_bracket()
     {
         const string markdown = "See <https://example.com/x> for more";
@@ -886,7 +886,7 @@ public class MarkdownViewTests
         Assert.Equal(markdown.IndexOf("https", StringComparison.Ordinal), SourceOf(view, "https"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_bullet_maps_to_the_item_it_marks_rather_than_to_the_line_before_it()
     {
         // The marker is drawn rather than written, so it belongs to no run of the markdown. Landing
@@ -901,7 +901,7 @@ public class MarkdownViewTests
         Assert.Equal(markdown.IndexOf("the item", StringComparison.Ordinal), view.SourceAt(bullet));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_offset_past_everything_lands_at_the_end_of_the_markdown()
     {
         // Clicking in the empty space below a short description. The end is where a caret goes when
@@ -912,7 +912,7 @@ public class MarkdownViewTests
         Assert.Equal(markdown.Length, view.SourceAt(view.TextLength + 500));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_at_all_maps_to_the_start()
     {
         using var view = Render(string.Empty);
@@ -921,7 +921,7 @@ public class MarkdownViewTests
         Assert.Equal(0, view.SourceAt(40));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_offsets_from_the_last_task_do_not_linger()
     {
         // Same failure the links had: a map left over from the task before points the caret into a
@@ -933,7 +933,7 @@ public class MarkdownViewTests
         Assert.Equal("short".Length, view.SourceAt(500));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_box_is_read_only()
     {
         // The account's text is what gets saved. A rendering that could be edited would have to be
@@ -945,7 +945,7 @@ public class MarkdownViewTests
 
     // ---- Looking like something you can't type into ----------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void An_inert_pane_is_recessed_onto_the_background()
     {
         // The pane is kept out of use by being read-only rather than disabled — disabling a control
@@ -962,7 +962,7 @@ public class MarkdownViewTests
         Assert.NotEqual(theme.Panel, theme.Background);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Coming_back_into_use_looks_like_the_pane_it_was()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
@@ -974,7 +974,7 @@ public class MarkdownViewTests
         Assert.Equal(theme.Panel, view.BackColor);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Changing_the_theme_keeps_it_looking_inert()
     {
         // The theme pass runs over every control in the window and would otherwise put the pane
@@ -987,7 +987,7 @@ public class MarkdownViewTests
         Assert.Equal(Theme.Resolve(ThemePreference.Dark).Background, view.BackColor);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_inert_pane_is_still_not_disabled()
     {
         // Enabled = false is the thing this must never become: it hands the focus to the next
@@ -999,7 +999,7 @@ public class MarkdownViewTests
         Assert.True(view.Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_line_can_be_shown_over_an_empty_pane()
     {
         using var view = Render(string.Empty);
@@ -1010,7 +1010,7 @@ public class MarkdownViewTests
         Assert.Equal(string.Empty, view.Text.Trim());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_inert_pane_draws_its_words_muted()
     {
         // The cue that actually carries. The recessed background is two units in the light palette
@@ -1025,7 +1025,7 @@ public class MarkdownViewTests
         Assert.Equal(theme.Muted, ColourAt(view, "some description"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void An_inert_panes_links_keep_their_colour()
     {
         // A completed task's description is still worth following out of, and drawing a link dead while
@@ -1039,7 +1039,7 @@ public class MarkdownViewTests
         Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("the docs", StringComparison.Ordinal)));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Coming_back_into_use_puts_the_words_back()
     {
         var theme = Theme.Resolve(ThemePreference.Light);

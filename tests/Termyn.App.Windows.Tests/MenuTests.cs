@@ -53,7 +53,7 @@ public class MenuTests
 
     // ---- What is offered -----------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_Task_menu_and_the_right_click_menu_hold_the_same_actions()
     {
         // Requirement, not coincidence: they are the same list, so an action can't be added to one
@@ -65,7 +65,7 @@ public class MenuTests
             Menus.Commands(bar.Children ?? []).ToArray());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Every_action_the_outline_takes_on_a_task_is_in_the_task_menu()
     {
         Assert.Equal(
@@ -89,13 +89,13 @@ public class MenuTests
             Menus.Commands(Menus.TaskContext).ToArray());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_menu_bar_is_laid_out_in_the_expected_order()
         => Assert.Equal(
             ["&File", "&Edit", "&View", "&Task", "&Organise", "&Help"],
             Menus.Bar.Select(e => e.Heading ?? string.Empty).ToArray());
 
-    [Fact]
+    [WinFormsFact]
     public void Every_command_the_app_can_run_is_somewhere_in_the_menu_bar()
     {
         // The bar is meant to be the whole of what the app does, so that nothing is reachable only
@@ -113,7 +113,7 @@ public class MenuTests
 
     // ---- Naming and ticking --------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_still_to_do_is_offered_completion()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -121,7 +121,7 @@ public class MenuTests
         Assert.Contains(Every(built.Menu.Items), i => i.Text == "Complete");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_already_done_is_offered_reopening_instead()
     {
         using var built = BuildTaskMenu(OnTask(Row(completed: true)));
@@ -132,7 +132,7 @@ public class MenuTests
         Assert.DoesNotContain("Complete", labels);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_priority_the_task_is_on_is_ticked()
     {
         using var built = BuildTaskMenu(OnTask(Row(Priority.P2)));
@@ -140,7 +140,7 @@ public class MenuTests
         Assert.Equal("Priority 2 — high", Assert.Single(Every(built.Menu.Items), i => i.Checked).Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_sidebar_actions_are_named_for_what_is_selected()
     {
         using var project = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Project)));
@@ -152,7 +152,7 @@ public class MenuTests
         Assert.Contains(Every(label.Menu.Items), i => i.Text == "Delete label");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_favourite_entry_says_which_way_it_would_go()
     {
         using var plain = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Project)));
@@ -164,7 +164,7 @@ public class MenuTests
 
     // ---- What is greyed ------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void With_no_task_selected_nothing_in_the_task_menu_can_be_run()
     {
         using var built = BuildTaskMenu(CommandContext.Empty);
@@ -174,7 +174,7 @@ public class MenuTests
         Assert.All(runnable, i => Assert.False(i.Enabled, $"{i.Text} was offered with no task selected"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_submenu_with_nothing_runnable_in_it_is_greyed_too()
     {
         using var built = BuildTaskMenu(CommandContext.Empty);
@@ -184,7 +184,7 @@ public class MenuTests
         Assert.False(Find(built, "&Priority").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_at_the_bottom_of_its_list_is_not_offered_a_move_down()
     {
         using var built = BuildTaskMenu(OnTask(can: new TaskAbilities(CanMoveUp: true, CanMoveDown: false)));
@@ -193,7 +193,7 @@ public class MenuTests
         Assert.False(Find(built, "Move down").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_as_deep_as_Todoist_holds_is_not_offered_another_level()
     {
         // Four levels below a top-level task is what Todoist takes, so a task already at four can
@@ -206,7 +206,7 @@ public class MenuTests
         Assert.False(Find(deepest, "New sub-task…").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_already_done_is_not_offered_a_sub_task()
     {
         // Work filed under something ticked off, which nothing on screen would ever show as due.
@@ -215,7 +215,7 @@ public class MenuTests
         Assert.False(Find(built, "New sub-task…").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_view_menu_offers_folding_the_whole_outline()
     {
         // The only way to reach these: a row's expander does one task, and nothing else in the
@@ -226,7 +226,7 @@ public class MenuTests
         Assert.True(Find(built, "Collapse all").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Neither_folding_entry_is_offered_when_it_would_do_nothing()
     {
         // Greyed both ways, which between them is also how the pair says which way the outline
@@ -243,7 +243,7 @@ public class MenuTests
         Assert.False(Find(flat, "Collapse all").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_task_at_the_top_level_is_not_offered_an_outdent()
     {
         using var built = BuildTaskMenu(OnTask(can: new TaskAbilities(CanIndent: true, CanOutdent: false)));
@@ -252,7 +252,7 @@ public class MenuTests
         Assert.False(Find(built, "Outdent").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void What_can_be_done_to_a_task_does_not_grey_what_is_always_possible()
     {
         // A task that can't move anywhere can still be renamed, dated and deleted.
@@ -265,7 +265,7 @@ public class MenuTests
         Assert.False(Find(built, "Move up").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Undo_is_greyed_when_there_is_nothing_to_take_back()
     {
         using var nothing = Build(Edit, CommandContext.Empty);
@@ -275,7 +275,7 @@ public class MenuTests
         Assert.True(Find(something, "Undo").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_new_section_needs_a_project_to_put_it_in()
     {
         using var nowhere = Build(File, CommandContext.Empty);
@@ -285,7 +285,7 @@ public class MenuTests
         Assert.True(Find(project, "New section").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_section_has_no_star_to_take_off()
     {
         using var built = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Section)));
@@ -295,7 +295,7 @@ public class MenuTests
         Assert.False(Find(built, "Add to favourites").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_in_the_sidebar_menu_is_offered_over_a_smart_view()
     {
         using var built = Build(Organise, new CommandContext(Selection: Node(SidebarKind.SmartView)));
@@ -303,7 +303,7 @@ public class MenuTests
         Assert.All(Every(built.Menu.Items), i => Assert.False(i.Enabled, $"{i.Text} was offered over Today"));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_way_back_to_the_default_order_is_offered_only_once_there_is_one()
     {
         using var unsorted = Build(View, CommandContext.Empty);
@@ -315,7 +315,7 @@ public class MenuTests
         Assert.True(Find(sorted, "Default order").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_panel_entry_keeps_one_name_and_is_ticked_while_the_panel_is_open()
     {
         // It used to read "Show description" and then "Hide description", which is a different
@@ -330,7 +330,7 @@ public class MenuTests
         Assert.True(Find(open, "Details").Checked);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Editing_the_description_is_offered_only_while_the_panel_it_happens_in_is_open()
     {
         using var closed = Build(View, CommandContext.Empty);
@@ -346,7 +346,7 @@ public class MenuTests
         Assert.True(Find(writing, "Edit description").Checked);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_comments_entry_is_ticked_while_the_pane_is_showing_them()
     {
         using var description = Build(View, new CommandContext(ShowingDescription: true));
@@ -356,7 +356,7 @@ public class MenuTests
         Assert.True(Find(comments, "Comments").Checked);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Zooming_sits_in_the_View_menu_and_follows_the_panel()
     {
         // The wheel has always zoomed the panel and nothing said so. These are that, written down.
@@ -369,7 +369,7 @@ public class MenuTests
         Assert.True(Find(open, "Zoom out").Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Editing_the_description_is_offered_from_the_comments_and_crosses_to_it()
     {
         // It used to be greyed here. That was right when the two shared one pane and writing would
@@ -384,7 +384,7 @@ public class MenuTests
         Assert.False(Find(comments, "Edit description").Checked);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Editing_is_ticked_only_while_the_markdown_is_the_thing_in_front()
     {
         using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
@@ -394,7 +394,7 @@ public class MenuTests
         Assert.False(Find(behindComments, "Edit description").Checked);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_in_the_menus_offers_a_projects_comments_any_more()
     {
         // They were an entry of their own — Organise / Comments on project — because the pane could
@@ -407,7 +407,7 @@ public class MenuTests
             item => item.Text is { } text && text.StartsWith("Comments on", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Completed_tasks_keeps_one_name_and_is_ticked_while_they_are_showing()
     {
         // A menu has a tick, so the entry has no reason to rename itself and every reason not to.
@@ -420,7 +420,7 @@ public class MenuTests
 
     // ---- Shortcuts and wiring ------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_shortcuts_shown_are_the_ones_the_outline_answers_to()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -441,7 +441,7 @@ public class MenuTests
         Assert.Equal("Del", shown["Delete"]);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void No_shortcut_is_bound_to_a_menu_item_itself()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -451,7 +451,7 @@ public class MenuTests
         Assert.All(Every(built.Menu.Items), i => Assert.Equal(Keys.None, i.ShortcutKeys));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Clicking_an_entry_runs_that_entry_and_not_the_last_one_built()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -464,7 +464,7 @@ public class MenuTests
         Assert.Equal(Menus.Commands(Menus.TaskContext).ToArray(), built.Ran.ToArray());
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Clicking_a_heading_runs_nothing()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -477,7 +477,7 @@ public class MenuTests
 
     // ---- Layout --------------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_groups_are_ruled_off_from_one_another()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -489,7 +489,7 @@ public class MenuTests
         Assert.IsNotType<ToolStripSeparator>(built.Menu.Items[^1]);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_priorities_are_a_submenu_rather_than_four_more_rows()
     {
         using var built = BuildTaskMenu(OnTask());
@@ -500,7 +500,7 @@ public class MenuTests
         Assert.Equal(4, priorities.DropDownItems.Count);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void No_menu_opens_on_a_separator()
     {
         // A leading rule draws itself against the top edge of the menu.
@@ -511,7 +511,7 @@ public class MenuTests
         }
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Every_entry_in_every_menu_is_labelled()
     {
         foreach (var group in Menus.Bar)

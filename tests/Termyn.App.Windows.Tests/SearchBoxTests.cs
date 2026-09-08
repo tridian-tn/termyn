@@ -22,7 +22,7 @@ public class SearchBoxTests
         return box;
     }
 
-    [Fact]
+    [WinFormsFact]
     public void There_is_nothing_to_clear_until_something_is_typed()
     {
         using var box = Box();
@@ -33,7 +33,7 @@ public class SearchBoxTests
         Assert.True(box.ShowingReset);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Clearing_it_takes_the_cross_away_with_the_words()
     {
         using var box = Box();
@@ -45,7 +45,7 @@ public class SearchBoxTests
         Assert.False(box.ShowingReset);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Emptying_it_by_hand_takes_the_cross_away_too()
     {
         // The cross follows what is in the box rather than how it came to be empty, so selecting
@@ -58,7 +58,7 @@ public class SearchBoxTests
         Assert.False(box.ShowingReset);
     }
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(ThemePreference.Light)]
     [InlineData(ThemePreference.Dark)]
     public void The_cross_sits_on_the_box_rather_than_on_the_window(ThemePreference preference)
@@ -76,7 +76,7 @@ public class SearchBoxTests
         Assert.Equal(box.BackColor, box.ResetBackColour);
     }
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(ThemePreference.Light)]
     [InlineData(ThemePreference.Dark)]
     public void The_cross_lights_under_the_pointer_and_goes_quiet_again(ThemePreference preference)
@@ -101,7 +101,7 @@ public class SearchBoxTests
         Assert.Equal(box.BackColor, box.ResetBackColour);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_cross_left_lit_comes_back_quiet()
     {
         // The pointer never leaves a control that vanishes under it, so nothing would put it back.
@@ -115,7 +115,7 @@ public class SearchBoxTests
         Assert.Equal(Light.Muted, box.ResetColour);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_cross_is_a_glyph_this_knows_it_can_draw()
     {
         // Which of the two it lands on is a fact about the machine rather than about the code, so
@@ -137,7 +137,7 @@ public class SearchBoxTests
         return box.PreProcessMessage(ref message);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Escape_empties_the_box()
     {
         using var box = Box();
@@ -149,7 +149,7 @@ public class SearchBoxTests
         Assert.False(box.ShowingReset);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Escape_in_an_empty_box_is_left_for_something_else()
     {
         // Nothing else in the window wants it while this has the focus, but a key swallowed by
@@ -160,7 +160,7 @@ public class SearchBoxTests
         Assert.False(Press(box, Keys.Escape));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Whitespace_is_something_to_clear()
     {
         // A box of spaces isn't a search — the outline shows the view for one — but it is not an

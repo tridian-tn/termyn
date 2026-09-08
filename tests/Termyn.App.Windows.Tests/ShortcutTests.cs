@@ -8,7 +8,7 @@ namespace Termyn.App.Windows.Tests;
 /// </summary>
 public class ShortcutTests
 {
-    [Fact]
+    [WinFormsFact]
     public void Every_action_on_a_task_has_a_shortcut_to_print()
     {
         // The task menu is meant to teach the keyboard. An action reachable only by mouse would
@@ -20,7 +20,7 @@ public class ShortcutTests
         Assert.Empty(missing);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Every_shortcut_a_menu_prints_is_one_some_surface_answers_to()
     {
         // Printed and bound become two different truths the moment they are allowed to part
@@ -40,7 +40,7 @@ public class ShortcutTests
         }
     }
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(Keys.Space, AppCommand.ToggleComplete)]
     [InlineData(Keys.Control | Keys.Enter, AppCommand.ToggleComplete)]
     [InlineData(Keys.F2, AppCommand.Rename)]
@@ -58,14 +58,14 @@ public class ShortcutTests
     public void The_outline_answers_to_the_keys_it_always_did(Keys keys, AppCommand expected)
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Outline));
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(Keys.F2, AppCommand.RenameSelection)]
     [InlineData(Keys.Delete, AppCommand.DeleteSelection)]
     [InlineData(Keys.Control | Keys.Shift | Keys.F, AppCommand.ToggleFavourite)]
     public void The_sidebar_answers_to_its_own(Keys keys, AppCommand expected)
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Sidebar));
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(Keys.Control | Keys.N, AppCommand.NewTask)]
     [InlineData(Keys.Insert, AppCommand.NewTask)]
     [InlineData(Keys.Control | Keys.Alt | Keys.Shift | Keys.N, AppCommand.NewProject)]
@@ -79,7 +79,7 @@ public class ShortcutTests
     public void The_window_answers_to_the_ones_that_work_anywhere(Keys keys, AppCommand expected)
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Window));
 
-    [Fact]
+    [WinFormsFact]
     public void The_panel_is_shown_by_F4_and_written_in_by_the_key_everyone_reaches_for()
     {
         // Ctrl+E used to put the panel on screen, which is the smaller of the two things and had
@@ -91,7 +91,7 @@ public class ShortcutTests
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.F4, MainForm.Scope.Outline));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_same_key_means_a_different_thing_in_each_list()
     {
         // F2 and Delete belong to both lists, and which one is meant is decided by where the user
@@ -107,7 +107,7 @@ public class ShortcutTests
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Delete, MainForm.Scope.Window));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Undo_is_not_claimed_window_wide()
     {
         // Taken window-wide it would reach the capture and search boxes, where Ctrl+Z has to go on
@@ -116,7 +116,7 @@ public class ShortcutTests
         Assert.Equal(AppCommand.Undo, MainForm.CommandFor(Keys.Control | Keys.Z, MainForm.Scope.Outline));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_keystroke_that_means_nothing_there_asks_for_nothing()
     {
         // A Fact rather than a Theory of scopes: the scope is internal to the window, and a public
@@ -130,7 +130,7 @@ public class ShortcutTests
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.D, MainForm.Scope.Sidebar));
     }
 
-    [Theory]
+    [WinFormsTheory]
     [InlineData(Keys.Control | Keys.D1, "Ctrl+1")]
     [InlineData(Keys.Control | Keys.D4, "Ctrl+4")]
     [InlineData(Keys.Shift | Keys.Tab, "Shift+Tab")]
@@ -145,7 +145,7 @@ public class ShortcutTests
     public void A_shortcut_is_written_the_way_a_menu_writes_it(Keys keys, string expected)
         => Assert.Equal(expected, MainForm.ShortcutText(keys));
 
-    [Fact]
+    [WinFormsFact]
     public void The_shortcut_printed_for_completing_is_the_bare_key_not_the_second_binding()
     {
         // Space and Ctrl+Enter both tick a task off. A menu has room for one, and it should be the
@@ -153,7 +153,7 @@ public class ShortcutTests
         Assert.Equal("Space", MainForm.ShortcutFor(AppCommand.ToggleComplete));
     }
 
-    [Fact]
+    [WinFormsFact]
     public void New_section_prints_no_shortcut_of_its_own()
     {
         // Ctrl+N reaches it, but only from the sidebar and only over a project — printed beside

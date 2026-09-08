@@ -35,7 +35,7 @@ public class CommentsViewTests
 
     // ---- What it shows --------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_last_comment_is_the_one_it_lands_on()
     {
         // The newest is the one being replied to. Landing on the oldest would mean scrolling past
@@ -45,7 +45,7 @@ public class CommentsViewTests
         Assert.Equal("n3", view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Nothing_is_selected_when_there_is_nothing_to_select()
     {
         using var view = Realised();
@@ -53,7 +53,7 @@ public class CommentsViewTests
         Assert.Null(view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Sitting_on_the_newest_it_follows_the_conversation_on()
     {
         // Which is what makes posting one visible: the pane lands on the newest, so the comment you
@@ -65,7 +65,7 @@ public class CommentsViewTests
         Assert.Equal("n3", view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Having_gone_back_up_the_conversation_it_stays_where_it_was_put()
     {
         // A sync republishes these every forty-five seconds. Reading an older comment and having the
@@ -80,7 +80,7 @@ public class CommentsViewTests
         Assert.Equal("n1", view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Scrolling_up_without_touching_the_selection_still_counts_as_having_gone_back()
     {
         // The wheel and the scrollbar move the view and leave the selection alone, so the selection
@@ -101,7 +101,7 @@ public class CommentsViewTests
         Assert.Equal("n30", view.SelectedId);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_comment_that_has_gone_does_not_leave_the_selection_on_it()
     {
         using var view = Realised(Comment("n1", "first"), Comment("n2", "second"));
@@ -113,7 +113,7 @@ public class CommentsViewTests
 
     // ---- The box ---------------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void The_box_is_there_when_a_comment_can_be_added_and_gone_when_it_cannot()
     {
         using var view = Realised(Comment("n1", "first"));
@@ -126,7 +126,7 @@ public class CommentsViewTests
         Assert.True(view.CanComment);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Turning_the_box_on_gives_it_a_height_to_be_seen_in()
     {
         // It starts hidden precisely so that the first time it is turned on counts as a change. Left
@@ -144,7 +144,7 @@ public class CommentsViewTests
 
     // ---- What it says when there is nothing ------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void An_empty_conversation_says_so_where_the_list_would_have_been()
     {
         using var view = Realised();
@@ -154,7 +154,7 @@ public class CommentsViewTests
         Assert.True(empty.Visible, "the empty-state line is hidden, so the pane draws as blank");
     }
 
-    [Fact]
+    [WinFormsFact]
     public void The_line_goes_once_there_is_something_to_read()
     {
         using var view = Realised();
@@ -168,7 +168,7 @@ public class CommentsViewTests
 
     // ---- Attachments ------------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void Attaching_is_off_while_a_file_is_already_moving()
     {
         // One line to report a transfer in, so two at once would leave the user unable to tell which
@@ -185,7 +185,7 @@ public class CommentsViewTests
         Assert.True(attach.Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void A_transfer_owns_the_hint_line_while_it_runs()
     {
         using var view = Realised(Comment("n1", "first"));
@@ -198,7 +198,7 @@ public class CommentsViewTests
         Assert.Contains("Ctrl+Enter", hint.Text);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Attaching_is_off_when_nothing_can_be_commented_on_at_all()
     {
         using var view = Realised(Comment("n1", "first"));
@@ -209,7 +209,7 @@ public class CommentsViewTests
         Assert.False(attach.Enabled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void Escape_calls_a_transfer_off_and_otherwise_means_what_it_did()
     {
         // A download is the one thing in this window the user waits on, so the key that stops
@@ -228,7 +228,7 @@ public class CommentsViewTests
         Assert.Equal(1, cancelled);
     }
 
-    [Fact]
+    [WinFormsFact]
     public void What_was_typed_survives_an_upload_that_failed()
     {
         // The box is only emptied once the comment has actually been posted. Clearing it first would
@@ -245,7 +245,7 @@ public class CommentsViewTests
 
     // ---- Height ----------------------------------------------------------------------------------
 
-    [Fact]
+    [WinFormsFact]
     public void A_comment_of_many_lines_is_given_more_room_than_one_of_a_few_words()
     {
         // A fixed row height would either clip most comments or waste a short panel on the brief
