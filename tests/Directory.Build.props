@@ -6,11 +6,18 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
-  <!-- Shared helpers, not a test project: pulling in the test SDK would spin up a test host for it. -->
+  <!-- A v3 test project runs itself rather than waiting to be loaded by a runner, so it builds as
+       an executable. `dotnet test` reaches it through the testing platform named in global.json,
+       which is the only way the .NET 10 SDK will run one of these — the old VSTest route is gone,
+       and with it the two packages that bridged to it. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'Termyn.TestSupport'">
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!-- Shared helpers, not a test project: xunit would make it one, and a test host would be spun
+       up for a project holding nothing but fakes. -->
   <ItemGroup Condition="'$(MSBuildProjectName)' != 'Termyn.TestSupport'">
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.0" />
     <Using Include="Xunit" />
   </ItemGroup>
 

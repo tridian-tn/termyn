@@ -112,7 +112,7 @@ The automated budget checks are regression gates rather than benchmarks, and run
 the suite:
 
 ```bash
-dotnet test tests/Termyn.Perf.Tests -c Release
+dotnet test --project tests/Termyn.Perf.Tests -c Release
 ```
 
 They warm each path past tiered compilation before measuring — an unwarmed measurement read three

@@ -22,7 +22,8 @@ public class TodoistApiClientTests
 
         // Raced against a clock rather than simply awaited: without the deadline it never returns at
         // all, and a test that hangs forever is a worse thing to leave in CI than one that fails.
-        var running = Record.ExceptionAsync(() => client.SyncAsync("tok", "*", ["items"], []));
+        // As a Task, because racing it against a timer needs one and this hands back a ValueTask.
+        var running = Record.ExceptionAsync(() => client.SyncAsync("tok", "*", ["items"], [])).AsTask();
         var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10)));
 
         Assert.Same(running, finished);
