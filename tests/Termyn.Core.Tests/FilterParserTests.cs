@@ -367,6 +367,57 @@ public class FilterParserTests
         Assert.Equal(offset, due.Day.DaysFromToday);
     }
 
+    [Fact]
+    public void Next_week_is_a_day_the_account_names_rather_than_the_query()
+    {
+        var due = Assert.IsType<FilterExpression.Due>(Parse("due before: next week").Expression);
+
+        Assert.Equal(DayBound.Before, due.Bound);
+        Assert.Equal(DayAnchor.NextWeek, due.Day.Anchor);
+
+        // Nothing is decided here. Which day it is comes off the account at evaluation time, so the
+        // query mustn't carry a day of its own.
+        Assert.Null(due.Day.Absolute);
+        Assert.Null(due.Day.Weekday);
+    }
+
+    [Theory]
+    [InlineData("due before: 1 week after next week", 7)]
+    [InlineData("due before: 2 weeks after next week", 14)]
+    public void The_far_end_of_a_week_is_counted_from_next_week(string query, int offset)
+    {
+        // Todoist's own way of saying "next week and no further" — the count is written as a count,
+        // so it's read as one rather than taken literally as the only number allowed.
+        var due = Assert.IsType<FilterExpression.Due>(Parse(query).Expression);
+
+        Assert.Equal(DayAnchor.NextWeek, due.Day.Anchor);
+        Assert.Equal(offset, due.Day.DaysFromToday);
+    }
+
+    [Fact]
+    public void First_day_is_the_start_of_a_month()
+        => Assert.Equal(
+            DayAnchor.FirstOfMonth,
+            Assert.IsType<FilterExpression.Due>(Parse("due before: first day").Expression).Day.Anchor);
+
+    [Fact]
+    public void The_week_reads_the_same_after_every_dated_term()
+    {
+        // The day is shared by all of them, so a form read after "due:" and not after "deadline:"
+        // would be a gap nobody would think to look for.
+        Assert.Equal(DayAnchor.NextWeek, Assert.IsType<FilterExpression.Deadline>(Parse("deadline: next week").Expression).Day.Anchor);
+        Assert.Equal(DayAnchor.NextWeek, Assert.IsType<FilterExpression.Created>(Parse("created before: next week").Expression).Day.Anchor);
+        Assert.Equal(DayAnchor.FirstOfMonth, Assert.IsType<FilterExpression.Deadline>(Parse("deadline before: first day").Expression).Day.Anchor);
+    }
+
+    [Fact]
+    public void The_week_long_window_Todoist_writes_parses_whole()
+    {
+        // The filter its own help page gives for "due next week", and the reason the "N weeks after"
+        // form exists at all. If either half were refused the whole query would be.
+        Assert.True(Parse("(due: next week | due after: next week) & due before: 1 week after next week").IsSupported);
+    }
+
     [Theory]
     [InlineData("due:", DayBound.On)]
     [InlineData("due before:", DayBound.Before)]
@@ -451,9 +502,13 @@ public class FilterParserTests
     [InlineData("assigned by: others")] // Todoist has no such term, and inventing one is a fiction
     [InlineData("added by: others")]
     [InlineData("added")]               // half a term
-    [InlineData("next week")]           // what "next" means depends on where the account starts its week
-    [InlineData("first day")]
     [InlineData("workspace: Home")]
+    [InlineData("next fortnight")]      // not a term, and "next" alone must not become one
+    [InlineData("first")]
+    [InlineData("first week")]
+    [InlineData("1 week after next")]   // half the phrase
+    [InlineData("1 week after today")]  // Todoist counts weeks from next week and nothing else
+    [InlineData("0 weeks after next week")]
     [InlineData("next 0 days")]
     [InlineData("0 days")]
     [InlineData("no")]

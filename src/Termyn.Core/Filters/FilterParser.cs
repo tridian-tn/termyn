@@ -64,15 +64,18 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// <c>shared</c>.
 ///
 /// Days are written as <c>today</c>, a weekday, <c>yyyy-MM-dd</c>, or a count like <c>-30 days</c>.
+/// Two more are named by something other than the query: <c>next week</c> — the day the account
+/// puts things off until, with <c>N weeks after next week</c> closing a week-long window — and
+/// <c>first day</c>, the start of the coming month.
 ///
 /// Terms combine with <c>&amp;</c>, <c>|</c>, <c>,</c>, <c>!</c> and parentheses. Precedence is
 /// <c>!</c> then <c>&amp;</c> then <c>|</c>/<c>,</c>, left-associative. Adjacent terms with no
 /// operator between them are an implicit <c>&amp;</c>, which is how "#Work today" reads.
 ///
-/// What's left out is what this client hasn't got the answer to: naming a person rather than
-/// yourself, which needs the account's collaborators; which workspace a task is in; and the
-/// week-relative days (<c>next week</c>, <c>first day</c>) whose meaning depends on where the
-/// account starts its week. Those are refused by name rather than guessed at.
+/// Left out, and refused by name rather than guessed at: naming a person rather than yourself,
+/// which needs the account's collaborators; which workspace a task is in; the wildcard forms
+/// (<c>%email*</c>, <c>#\*name</c>, and the <c>!/*</c> that means "in no section"); and
+/// <c>uncompletable</c>, which no field here is known to answer.
 /// </remarks>
 public static class FilterParser
 {
@@ -94,6 +97,9 @@ public static class FilterParser
     /// <summary>Longest window <c>next N days</c> may ask for, in days.</summary>
     /// <remarks>Beyond this the window runs off the end of the calendar and the date maths throws.</remarks>
     private const int MaxDays = 3650;
+
+    /// <summary>How far past "next week" the <c>N weeks after</c> form may reach, for the same reason.</summary>
+    private const int MaxWeeks = MaxDays / 7;
 
     public static FilterParse Parse(string? query, FilterVocabulary vocabulary)
     {
@@ -622,6 +628,9 @@ public static class FilterParser
             return FilterDay.OnWeekday(weekday);
         }
 
+        if (TryReadAnchoredDay(tokens, from, ref at) is { } anchored)
+            return anchored;
+
         if (DateOnly.TryParseExact(tokens[from], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
         {
             at = from + 1;
@@ -635,6 +644,51 @@ public static class FilterParser
         {
             at = from + 2;
             return FilterDay.FromToday(days);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the days something other than the query names: <c>next week</c>, <c>first day</c>, and
+    /// the <c>N weeks after next week</c> that closes a week-long window.
+    /// </summary>
+    /// <remarks>
+    /// "next week" is a setting, not a date — the day Todoist puts a task off until, which each
+    /// account picks for itself. "first day" is the first of the coming month, which is what makes
+    /// "before first day" the current calendar month.
+    ///
+    /// The count in "1 week after next week" is read as a count rather than taken literally, since
+    /// it's written as one. Nothing else takes "N weeks after": Todoist has no "2 weeks after
+    /// today", and offering one would mean a query that works here and fails there.
+    /// </remarks>
+    /// <param name="tokens">The query</param>
+    /// <param name="from">Where the day starts, past any leading "in"</param>
+    /// <param name="at">Advanced past what was read, when something was</param>
+    /// <returns>The day, or null when nothing there names one</returns>
+    private static FilterDay? TryReadAnchoredDay(List<string> tokens, int from, ref int at)
+    {
+        if (Word(tokens, from, "next") && Word(tokens, from + 1, "week"))
+        {
+            at = from + 2;
+            return FilterDay.NextWeek();
+        }
+
+        if (Word(tokens, from, "first") && Word(tokens, from + 1, "day"))
+        {
+            at = from + 2;
+            return FilterDay.FirstOfMonth;
+        }
+
+        if (int.TryParse(tokens[from], NumberStyles.None, CultureInfo.InvariantCulture, out var weeks)
+            && weeks is > 0 and <= MaxWeeks
+            && (Word(tokens, from + 1, "weeks") || Word(tokens, from + 1, "week"))
+            && Word(tokens, from + 2, "after")
+            && Word(tokens, from + 3, "next")
+            && Word(tokens, from + 4, "week"))
+        {
+            at = from + 5;
+            return FilterDay.NextWeek(weeks);
         }
 
         return null;

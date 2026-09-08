@@ -67,6 +67,29 @@ public static class Projections
         => user is null ? null : JsonRead.String(user, "id");
 
     /// <summary>
+    /// Reads the day the account calls "next week".
+    /// </summary>
+    /// <remarks>
+    /// The setting behind Todoist's own "next week" — the day a task lands on when it's put off that
+    /// far — and the day the filter term of the same name resolves to. Todoist numbers the week from
+    /// Monday, which is one off <see cref="DayOfWeek"/>'s own count from Sunday.
+    ///
+    /// Null when the account hasn't said, and no default stands in for it: Monday would be right for
+    /// most accounts and quietly wrong for the rest, which is a filter answering with the wrong week
+    /// rather than admitting it can't answer.
+    /// </remarks>
+    /// <param name="user">The user resource, or null when it hasn't been synced</param>
+    /// <returns>The day, or null when there isn't one to give</returns>
+    public static DayOfWeek? ToNextWeek(JsonObject? user)
+    {
+        if (user is null)
+            return null;
+
+        var day = JsonRead.Int(user, "next_week");
+        return day is >= 1 and <= 7 ? (DayOfWeek)(day % 7) : null;
+    }
+
+    /// <summary>
     /// Reads the account's timezone name. Todoist reports it under <c>tz_info</c>, and the client
     /// falls back to the machine's own zone when it is missing or unrecognised.
     /// </summary>

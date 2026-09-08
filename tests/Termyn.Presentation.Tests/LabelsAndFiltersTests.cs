@@ -209,6 +209,62 @@ public class LabelsAndFiltersTests
     }
 
     [Fact]
+    public void A_filter_naming_next_week_runs_once_the_account_has_said_which_day_that_is()
+    {
+        // Today is a Friday, and this account turns its week on a Monday.
+        var store = Seeded();
+        store.PutResource("user", "user", """{"id":"u-me","next_week":1}""");
+        store.PutResource("filters", "f4", """{"id":"f4","name":"Soon","query":"due: next week","item_order":4}""");
+        store.PutResource(
+            "items",
+            "i4",
+            """{"id":"i4","content":"Soon","project_id":"p1","child_order":4,"due":{"date":"2026-08-03"}}""");
+
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfFilter("f4"));
+
+        Assert.Equal(["Soon"], presenter.Rows.Select(r => r.Content));
+        Assert.Null(presenter.UnsupportedFilter);
+    }
+
+    [Fact]
+    public void A_filter_naming_next_week_is_refused_while_the_day_is_unknown()
+    {
+        // The same query and the same task, with the account's own setting missing. Running it would
+        // mean choosing a day on the account's behalf and answering about whichever week that made.
+        var store = Seeded();
+        store.PutResource("filters", "f4", """{"id":"f4","name":"Soon","query":"due: next week","item_order":4}""");
+        store.PutResource(
+            "items",
+            "i4",
+            """{"id":"i4","content":"Soon","project_id":"p1","child_order":4,"due":{"date":"2026-08-03"}}""");
+
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfFilter("f4"));
+
+        Assert.Empty(presenter.Rows);
+        Assert.Equal("due: next week", presenter.UnsupportedFilter!.Query);
+    }
+
+    [Fact]
+    public void A_filter_naming_first_day_needs_nothing_from_the_account()
+    {
+        // The calendar says when a month starts, so this one runs with no user resource at all.
+        var store = Seeded();
+        store.PutResource("filters", "f4", """{"id":"f4","name":"Month","query":"due before: first day","item_order":4}""");
+        store.PutResource(
+            "items",
+            "i4",
+            """{"id":"i4","content":"Month","project_id":"p1","child_order":4,"due":{"date":"2026-07-31"}}""");
+
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfFilter("f4"));
+
+        Assert.Equal(["Month"], presenter.Rows.Select(r => r.Content));
+        Assert.Null(presenter.UnsupportedFilter);
+    }
+
+    [Fact]
     public void A_filter_that_asks_nothing_about_me_runs_without_the_account()
     {
         // "shared" is answered by the project, so a missing user resource mustn't refuse it too.

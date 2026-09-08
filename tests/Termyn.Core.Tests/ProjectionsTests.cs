@@ -111,6 +111,31 @@ public class ProjectionsTests
         => Assert.Null(Projections.ToUserId(null));
 
     [Theory]
+
+    // Todoist counts the week from Monday and .NET counts it from Sunday, so the two agree on five
+    // days out of seven and part company at the ends. Both ends are here for that reason.
+    [InlineData(1, DayOfWeek.Monday)]
+    [InlineData(6, DayOfWeek.Saturday)]
+    [InlineData(7, DayOfWeek.Sunday)]
+    public void Reads_the_day_the_account_calls_next_week(int stored, DayOfWeek expected)
+        => Assert.Equal(expected, Projections.ToNextWeek(Obj($$"""{"id":"u","next_week":{{stored}}}""")));
+
+    [Theory]
+    [InlineData("""{"id":"u"}""")]
+    [InlineData("""{"id":"u","next_week":0}""")]
+    [InlineData("""{"id":"u","next_week":8}""")]
+    public void A_next_week_day_outside_the_week_is_no_day_at_all(string json)
+    {
+        // Not Monday by default: a filter answering about the wrong week looks exactly like one
+        // answering about the right one.
+        Assert.Null(Projections.ToNextWeek(Obj(json)));
+    }
+
+    [Fact]
+    public void With_no_user_synced_there_is_no_week_either()
+        => Assert.Null(Projections.ToNextWeek(null));
+
+    [Theory]
     [InlineData("""{"id":"i","priority":4}""", Priority.P1)]
     [InlineData("""{"id":"i","priority":1}""", Priority.P4)]
     [InlineData("""{"id":"i"}""", Priority.P4)]

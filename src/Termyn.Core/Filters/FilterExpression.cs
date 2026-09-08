@@ -10,6 +10,19 @@ public enum DayBound
     After,
 }
 
+/// <summary>A day something other than the query itself names.</summary>
+public enum DayAnchor
+{
+    /// <summary>The query says which day it means.</summary>
+    None,
+
+    /// <summary>The day the account calls "next week", which is a setting rather than a date.</summary>
+    NextWeek,
+
+    /// <summary>The first of the coming month, which Todoist writes <c>first day</c>.</summary>
+    FirstOfMonth,
+}
+
 /// <summary>
 /// A day a filter term names: a date outright, or a number of days either side of today.
 /// </summary>
@@ -21,7 +34,12 @@ public enum DayBound
 /// <param name="Absolute">The day named outright, or null when it is counted from today</param>
 /// <param name="DaysFromToday">How many days either side of today, when it is counted</param>
 /// <param name="Weekday">The day of the week named, when it is named that way</param>
-public sealed record FilterDay(DateOnly? Absolute, int DaysFromToday, DayOfWeek? Weekday = null)
+/// <param name="Anchor">What names the day, when the query doesn't name it itself</param>
+public sealed record FilterDay(
+    DateOnly? Absolute,
+    int DaysFromToday,
+    DayOfWeek? Weekday = null,
+    DayAnchor Anchor = DayAnchor.None)
 {
     public static FilterDay Today { get; } = new(null, 0);
 
@@ -32,10 +50,32 @@ public sealed record FilterDay(DateOnly? Absolute, int DaysFromToday, DayOfWeek?
     /// <summary>A day named by its place in the week, which is the third way Todoist writes one.</summary>
     public static FilterDay OnWeekday(DayOfWeek day) => new(null, 0, day);
 
-    /// <summary>The day this names, given what today is.</summary>
+    /// <summary>
+    /// The day the account calls "next week", optionally some whole weeks further on.
+    /// </summary>
+    /// <remarks>
+    /// The weeks are how Todoist writes the far end of a week-long window — "1 week after next
+    /// week" — which is the only way to say "next week and no further" in its grammar.
+    /// </remarks>
+    /// <param name="weeksAfter">How many whole weeks past it, for the <c>N weeks after</c> form</param>
+    /// <returns>The day</returns>
+    public static FilterDay NextWeek(int weeksAfter = 0) => new(null, weeksAfter * 7, null, DayAnchor.NextWeek);
+
+    /// <summary>The first of the coming month, which is what bounds "this calendar month".</summary>
+    public static FilterDay FirstOfMonth { get; } = new(null, 0, null, DayAnchor.FirstOfMonth);
+
+    /// <summary>
+    /// The day this names, given what today is.
+    /// </summary>
+    /// <remarks>
+    /// Null only when the day is the account's own "next week" and the account hasn't said which day
+    /// that is. The caller refuses such a filter rather than running it, so this is the second line
+    /// of the same defence: no day at all beats a day picked for the account by this client.
+    /// </remarks>
     /// <param name="today">Today in the account's timezone</param>
-    /// <returns>The day itself</returns>
-    public DateOnly Resolve(DateOnly today)
+    /// <param name="nextWeek">The day the account calls "next week", when it has said</param>
+    /// <returns>The day itself, or null when it can't be worked out</returns>
+    public DateOnly? Resolve(DateOnly today, DayOfWeek? nextWeek = null)
     {
         if (Absolute is { } date)
             return date;
@@ -44,6 +84,18 @@ public sealed record FilterDay(DateOnly? Absolute, int DaysFromToday, DayOfWeek?
         // add gives a weekday, so "sat" means one day in this app rather than two.
         if (Weekday is { } weekday)
             return today.AddDays(((int)weekday - (int)today.DayOfWeek + 7) % 7);
+
+        // Always the next one, never today: putting something off until next week has to move it,
+        // and a window from "next week" to a week later would otherwise be this week on that day.
+        if (Anchor is DayAnchor.NextWeek)
+            return nextWeek is not { } start
+                ? null
+                : today.AddDays(((int)start - (int)today.DayOfWeek + 6) % 7 + 1).AddDays(DaysFromToday);
+
+        // The coming first, never this month's: "before first day" means the whole of this calendar
+        // month, and on the first of it that has to still be true.
+        if (Anchor is DayAnchor.FirstOfMonth)
+            return new DateOnly(today.Year, today.Month, 1).AddMonths(1);
 
         return today.AddDays(DaysFromToday);
     }
@@ -151,22 +203,42 @@ public abstract record FilterExpression
     public sealed record Or(FilterExpression Left, FilterExpression Right) : FilterExpression;
 
     /// <summary>
-    /// Whether anything in here asks who the account is.
+    /// What a filter has to know about the account before it can be answered.
     /// </summary>
     /// <remarks>
-    /// Which matters before the user resource has synced, or if its shape ever drifts: "assigned to:
-    /// me" with no "me" to compare against would quietly match nothing, and an empty list reads as
-    /// an answer — "you have none" — rather than as the question it couldn't ask. So the caller
-    /// checks this and refuses the filter instead, the same as one whose grammar it can't read.
+    /// Both of these come off the <c>user</c> resource, and neither is knowable before it has
+    /// synced or if its shape ever drifts. "assigned to: me" with no "me" to compare against would
+    /// quietly match nothing, and an empty list reads as an answer — "you have none" — rather than
+    /// as the question it couldn't ask. So the caller checks this and refuses the filter instead,
+    /// the same as one whose grammar it can't read.
     /// </remarks>
     /// <param name="expression">The parsed filter</param>
-    /// <returns>Whether any term in it names the account</returns>
-    public static bool NamesTheAccount(FilterExpression expression) => expression switch
+    /// <returns>Everything in the account the filter would need</returns>
+    public static AccountFacts Needs(FilterExpression expression) => expression switch
     {
-        AssignedToMe or AssignedToOthers or AssignedByMe or AddedByMe => true,
-        Not e => NamesTheAccount(e.Operand),
-        And e => NamesTheAccount(e.Left) || NamesTheAccount(e.Right),
-        Or e => NamesTheAccount(e.Left) || NamesTheAccount(e.Right),
-        _ => false,
+        AssignedToMe or AssignedToOthers or AssignedByMe or AddedByMe => AccountFacts.UserId,
+        Due e => Needs(e.Day),
+        Deadline e => Needs(e.Day),
+        Created e => Needs(e.Day),
+        Not e => Needs(e.Operand),
+        And e => Needs(e.Left) | Needs(e.Right),
+        Or e => Needs(e.Left) | Needs(e.Right),
+        _ => AccountFacts.None,
     };
+
+    private static AccountFacts Needs(FilterDay day)
+        => day.Anchor is DayAnchor.NextWeek ? AccountFacts.NextWeek : AccountFacts.None;
+}
+
+/// <summary>What a filter needs to know about the account before it means anything.</summary>
+[Flags]
+public enum AccountFacts
+{
+    None = 0,
+
+    /// <summary>Who the account belongs to, which is what <c>me</c> stands for.</summary>
+    UserId = 1,
+
+    /// <summary>The day the account calls "next week".</summary>
+    NextWeek = 2,
 }
