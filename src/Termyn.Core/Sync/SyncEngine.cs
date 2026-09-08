@@ -18,6 +18,7 @@ public sealed record ModelSnapshot(
     PlanLimits? PlanLimits,
     DateOnly Today,
     TimeZoneInfo TimeZone,
+    string? UserId,
     int PendingCount,
     int FailedCount,
     IReadOnlyList<TaskItem> CompletedItems,
@@ -169,7 +170,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
+            var user = Model.Get(ResourceType.User, ResourceType.User);
+            var zone = Projections.ToTimeZone(user);
 
             // Projected once and shared with the completed list. Reading the items twice meant
             // parsing every task's JSON twice on every publish, and a publish happens on every
@@ -186,6 +188,7 @@ public sealed class SyncEngine
                 Model.PlanLimits(),
                 DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime),
                 zone,
+                Projections.ToUserId(user),
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed),
                 CompletedItems(items),

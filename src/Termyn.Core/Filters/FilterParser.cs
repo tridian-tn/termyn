@@ -59,16 +59,20 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// <c>-N days</c>, and <c>due:</c>, <c>date:</c>, <c>deadline:</c>, <c>created:</c> with their
 /// <c>before:</c> and <c>after:</c> forms. Plus <c>no deadline</c> and <c>search: text</c>.
 ///
+/// Who it's for: <c>assigned</c>, <c>assigned to: me</c> (or <c>:to_me:</c>), <c>assigned to:
+/// others</c> (or <c>:to_others:</c>), <c>assigned by: me</c>, <c>added by: me</c>, and
+/// <c>shared</c>.
+///
 /// Days are written as <c>today</c>, a weekday, <c>yyyy-MM-dd</c>, or a count like <c>-30 days</c>.
 ///
 /// Terms combine with <c>&amp;</c>, <c>|</c>, <c>,</c>, <c>!</c> and parentheses. Precedence is
 /// <c>!</c> then <c>&amp;</c> then <c>|</c>/<c>,</c>, left-associative. Adjacent terms with no
 /// operator between them are an implicit <c>&amp;</c>, which is how "#Work today" reads.
 ///
-/// What's left out is what a task can't answer by itself: who a task is assigned to or was added
-/// by, whether its project is shared, which workspace it's in, and the week-relative days
-/// (<c>next week</c>, <c>first day</c>) whose meaning depends on where the account starts its week.
-/// Those are refused by name rather than guessed at.
+/// What's left out is what this client hasn't got the answer to: naming a person rather than
+/// yourself, which needs the account's collaborators; which workspace a task is in; and the
+/// week-relative days (<c>next week</c>, <c>first day</c>) whose meaning depends on where the
+/// account starts its week. Those are refused by name rather than guessed at.
 /// </remarks>
 public static class FilterParser
 {
@@ -261,6 +265,12 @@ public static class FilterParser
         if (Names(word, "deadline"))
             return ReadDated(tokens, ref at, out failed, (bound, day) => new FilterExpression.Deadline(bound, day));
 
+        if (TryReadWho(tokens, ref at, out failed) is { } who)
+            return who;
+
+        if (failed is not null)
+            return null;
+
         if (TryReadNothing(tokens, ref at) is { } nothing)
             return nothing;
 
@@ -281,6 +291,58 @@ public static class FilterParser
 
         failed = word;
         return null;
+    }
+
+    /// <summary>
+    /// Reads the terms about people: <c>assigned to:</c>, <c>assigned by:</c>, <c>added by:</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>me</c> and <c>others</c>. Naming anyone else needs the account's collaborators, which
+    /// this client doesn't sync — so a person's name is refused with the term named rather than
+    /// answered with a guess about which Sam.
+    ///
+    /// Which pairs exist follows Todoist rather than symmetry: it has no "assigned by: others" and
+    /// no "added by: others", so neither is read here. Inventing them would mean a query that works
+    /// in Termyn and fails in Todoist, which is the wrong way round for a client to differ.
+    /// </remarks>
+    /// <param name="tokens">The query</param>
+    /// <param name="at">Where to read from, advanced past what was read</param>
+    /// <param name="failed">The fragment that couldn't be read, when it couldn't</param>
+    /// <returns>The term, or null when this isn't one</returns>
+    private static FilterExpression? TryReadWho(List<string> tokens, ref int at, out string? failed)
+    {
+        failed = null;
+
+        var assigned = Word(tokens, at, "assigned");
+        if (!assigned && !Word(tokens, at, "added"))
+            return null;
+
+        // "assigned" on its own is a term of its own, read elsewhere; this one wants the pair.
+        var to = Word(tokens, at + 1, "to:");
+        var by = Word(tokens, at + 1, "by:");
+        if (!to && !by)
+            return null;
+
+        var who = at + 2 < tokens.Count ? tokens[at + 2].ToLowerInvariant() : string.Empty;
+
+        FilterExpression? term = (assigned, to, who) switch
+        {
+            (true, true, "me") => new FilterExpression.AssignedToMe(),
+            (true, true, "others") => new FilterExpression.AssignedToOthers(),
+            (true, false, "me") => new FilterExpression.AssignedByMe(),
+            (false, false, "me") => new FilterExpression.AddedByMe(),
+            _ => null,
+        };
+
+        if (term is null)
+        {
+            // Named with the person in it, so the notice says which part it couldn't answer.
+            failed = string.Join(' ', tokens[at..Math.Min(tokens.Count, at + 3)]);
+            return null;
+        }
+
+        at += 3;
+        return term;
     }
 
     /// <summary>
@@ -309,6 +371,14 @@ public static class FilterParser
             "overdue" or "od" => new FilterExpression.Overdue(),
             "recurring" => new FilterExpression.Recurring(),
             "subtask" => new FilterExpression.Subtask(),
+            "assigned" => new FilterExpression.Assigned(),
+            "shared" => new FilterExpression.Shared(),
+
+            // Not in the help pages, but it's what Todoist writes into the saved filters it gives
+            // every account — so an account arrives holding two filters spelled this way, and
+            // refusing them would leave the app unable to read what it was handed on day one.
+            ":to_me:" => new FilterExpression.AssignedToMe(),
+            ":to_others:" => new FilterExpression.AssignedToOthers(),
             _ => null,
         };
 

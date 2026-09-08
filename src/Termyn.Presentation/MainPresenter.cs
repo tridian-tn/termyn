@@ -1833,7 +1833,13 @@ public sealed class MainPresenter
         var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels, snapshot.Sections);
         var parsed = FilterParser.Parse(filter.Query, vocabulary);
 
-        if (!parsed.IsSupported)
+        // A filter naming "me" can't be answered until the account itself has synced, and answering
+        // it with nothing would look like the answer rather than the gap it is.
+        var unknownAccount = parsed.Expression is { } e
+            && snapshot.UserId is null
+            && FilterExpression.NamesTheAccount(e);
+
+        if (!parsed.IsSupported || unknownAccount)
         {
             // Nothing, not everything. A full task list looks like a filter that ran and matched
             // broadly, which is the mistake this whole path exists to avoid.
@@ -1843,7 +1849,12 @@ public sealed class MainPresenter
             return _ => false;
         }
 
-        var context = new FilterContext(snapshot.Projects, snapshot.Today, snapshot.TimeZone, snapshot.Sections);
+        var context = new FilterContext(
+            snapshot.Projects,
+            snapshot.Today,
+            snapshot.TimeZone,
+            snapshot.Sections,
+            snapshot.UserId);
         return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
 

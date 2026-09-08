@@ -13,22 +13,48 @@ public sealed class FilterContext
     private readonly IReadOnlyList<Section> _sections;
     private readonly Dictionary<(string Name, bool IncludeSubProjects), HashSet<string>> _resolved = new();
     private readonly Dictionary<string, HashSet<string>> _resolvedSections = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string>? _shared;
 
     public FilterContext(
         IReadOnlyList<Project> projects,
         DateOnly today,
         TimeZoneInfo zone,
-        IReadOnlyList<Section>? sections = null)
+        IReadOnlyList<Section>? sections = null,
+        string? userId = null)
     {
         _projects = projects;
         _sections = sections ?? [];
         Today = today;
         Zone = zone;
+        UserId = userId;
     }
 
     public DateOnly Today { get; }
 
     public TimeZoneInfo Zone { get; }
+
+    /// <summary>
+    /// Who the account belongs to, as Todoist's user id — the "me" the assignment terms name.
+    /// </summary>
+    /// <remarks>
+    /// Null until the user resource has synced. A filter that names the account is refused before it
+    /// gets this far, so terms needing it match nothing here rather than falling back on a guess.
+    /// </remarks>
+    public string? UserId { get; }
+
+    /// <summary>
+    /// Whether a project is one somebody else can see.
+    /// </summary>
+    /// <remarks>
+    /// The server's word, not worked out from the collaborators — which this client doesn't sync.
+    /// </remarks>
+    /// <param name="projectId">The project the task is filed in</param>
+    /// <returns>Whether it's shared</returns>
+    public bool IsShared(string projectId)
+    {
+        _shared ??= _projects.Where(p => p.IsShared).Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+        return _shared.Contains(projectId);
+    }
 
     /// <summary>
     /// The projects a <c>#name</c> refers to. Names aren't unique in Todoist, so every project of
@@ -135,6 +161,22 @@ public static class FilterEvaluator
         FilterExpression.Created e => On(SmartViews.AddedOn(item, context.Zone), e.Bound, e.Day, context.Today),
 
         FilterExpression.Search e => item.Content.Contains(e.Text, StringComparison.OrdinalIgnoreCase),
+
+        // Assigned to anybody at all, which is the term "!assigned" turns into the tasks nobody owns.
+        FilterExpression.Assigned => item.ResponsibleUid is not null,
+
+        FilterExpression.AssignedToMe => context.UserId is { } me && item.ResponsibleUid == me,
+
+        // Assigned, and to somebody else. An unassigned task isn't assigned to others, so both
+        // halves have to hold — and without a "me" to compare against, neither can be told apart.
+        FilterExpression.AssignedToOthers =>
+            item.ResponsibleUid is { } holder && context.UserId is { } me && holder != me,
+
+        FilterExpression.AssignedByMe => context.UserId is { } me && item.AssignedByUid == me,
+
+        FilterExpression.AddedByMe => context.UserId is { } me && item.AddedByUid == me,
+
+        FilterExpression.Shared => item.ProjectId is { } project && context.IsShared(project),
 
         FilterExpression.Not e => !Matches(e.Operand, item, context),
 

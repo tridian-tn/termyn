@@ -28,6 +28,10 @@ public static class Projections
 
             // Todoist has used both field names across API versions; accept either.
             AddedAt = JsonRead.String(o, "added_at") ?? JsonRead.String(o, "date_added"),
+
+            ResponsibleUid = JsonRead.String(o, "responsible_uid"),
+            AssignedByUid = JsonRead.String(o, "assigned_by_uid"),
+            AddedByUid = JsonRead.String(o, "added_by_uid"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
             Deadline = deadline is null ? null : JsonRead.String(deadline, "date"),
             DueText = due is null ? null : JsonRead.String(due, "string"),
@@ -45,8 +49,22 @@ public static class Projections
         IsInboxProject = JsonRead.Bool(o, "is_inbox_project") || JsonRead.Bool(o, "inbox_project"),
         IsFavorite = JsonRead.Bool(o, "is_favorite"),
         IsArchived = JsonRead.Bool(o, "is_archived"),
+        IsShared = JsonRead.Bool(o, "is_shared"),
         ChildOrder = JsonRead.Int(o, "child_order"),
     };
+
+    /// <summary>
+    /// Reads the account's own user id, which is the whole of what "me" means in a filter.
+    /// </summary>
+    /// <remarks>
+    /// Without it "assigned to: me" has nobody to be. Null where the user resource hasn't arrived
+    /// yet, which is a first start before the first sync — and a term that can't be answered is
+    /// refused rather than guessed at, so the filter says so instead of quietly matching nothing.
+    /// </remarks>
+    /// <param name="user">The user resource, or null when it hasn't been synced</param>
+    /// <returns>The id, or null when there isn't one to give</returns>
+    public static string? ToUserId(JsonObject? user)
+        => user is null ? null : JsonRead.String(user, "id");
 
     /// <summary>
     /// Reads the account's timezone name. Todoist reports it under <c>tz_info</c>, and the client

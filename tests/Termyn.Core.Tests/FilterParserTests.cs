@@ -316,8 +316,45 @@ public class FilterParserTests
     [InlineData("overdue", typeof(FilterExpression.Overdue))]
     [InlineData("over due", typeof(FilterExpression.Overdue))]
     [InlineData("od", typeof(FilterExpression.Overdue))]
+    [InlineData("assigned", typeof(FilterExpression.Assigned))]
+    [InlineData("shared", typeof(FilterExpression.Shared))]
     public void The_single_terms_are_read(string query, Type expected)
         => Assert.IsType(expected, Parse(query).Expression);
+
+    [Theory]
+    [InlineData("assigned to: me", typeof(FilterExpression.AssignedToMe))]
+    [InlineData("ASSIGNED TO: ME", typeof(FilterExpression.AssignedToMe))]
+
+    // The spelling Todoist puts in the saved filters it gives every account, so a real account
+    // arrives with two filters written this way and neither may be refused.
+    [InlineData(":to_me:", typeof(FilterExpression.AssignedToMe))]
+    [InlineData(":to_others:", typeof(FilterExpression.AssignedToOthers))]
+    [InlineData("assigned to: others", typeof(FilterExpression.AssignedToOthers))]
+    [InlineData("assigned by: me", typeof(FilterExpression.AssignedByMe))]
+    [InlineData("added by: me", typeof(FilterExpression.AddedByMe))]
+    public void The_terms_about_people_are_read(string query, Type expected)
+        => Assert.IsType(expected, Parse(query).Expression);
+
+    [Fact]
+    public void Assigned_on_its_own_still_reads_when_something_follows_it()
+    {
+        // The word starts two different terms, and the longer one only claims it when "to:" or
+        // "by:" comes next — otherwise "assigned & p1" would be eaten looking for a person.
+        var and = Assert.IsType<FilterExpression.And>(Parse("assigned & p1").Expression);
+
+        Assert.IsType<FilterExpression.Assigned>(and.Left);
+        Assert.IsType<FilterExpression.HasPriority>(and.Right);
+    }
+
+    [Fact]
+    public void The_tasks_nobody_owns_are_the_negation_of_assigned()
+    {
+        // Todoist's own documented way of asking for them, so it has to compose with "!".
+        var and = Assert.IsType<FilterExpression.And>(Parse("shared & !assigned").Expression);
+
+        Assert.IsType<FilterExpression.Shared>(and.Left);
+        Assert.IsType<FilterExpression.Assigned>(Assert.IsType<FilterExpression.Not>(and.Right).Operand);
+    }
 
     [Theory]
     [InlineData("tomorrow", 1)]
@@ -408,12 +445,15 @@ public class FilterParserTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("assigned to: me")]     // collaborators are out of scope
-    [InlineData(":to_me:")]             // the same thing in the spelling Todoist's own filter uses
+    [InlineData("assigned to: Sam")]    // collaborators are out of scope, so only "me" can be named
+    [InlineData("assigned by: Sam")]
+    [InlineData("added by: Sam")]
+    [InlineData("assigned by: others")] // Todoist has no such term, and inventing one is a fiction
+    [InlineData("added by: others")]
+    [InlineData("added")]               // half a term
     [InlineData("next week")]           // what "next" means depends on where the account starts its week
     [InlineData("first day")]
     [InlineData("workspace: Home")]
-    [InlineData("shared")]
     [InlineData("next 0 days")]
     [InlineData("0 days")]
     [InlineData("no")]
@@ -456,7 +496,7 @@ public class FilterParserTests
     public void A_refused_fragment_is_reported_on_one_line()
     {
         // A saved filter can carry newlines, and the notice showing this is a single line.
-        var parsed = Parse("today &\r\nassigned to:\nme");
+        var parsed = Parse("today &\r\nworkspace:\nHome");
 
         Assert.False(parsed.IsSupported);
         Assert.DoesNotContain('\n', parsed.Unsupported!);
@@ -534,7 +574,7 @@ public class FilterParserTests
     public void One_unreadable_term_refuses_the_whole_query()
     {
         // Dropping the part it can't read would return a plausible but wrong set of tasks.
-        var parsed = Parse("today & assigned to: me");
+        var parsed = Parse("today & assigned to: Sam");
 
         Assert.False(parsed.IsSupported);
     }
@@ -542,6 +582,13 @@ public class FilterParserTests
     [Fact]
     public void The_refused_fragment_is_reported()
         => Assert.Contains("workspace:", Parse("today & workspace: Home").Unsupported);
+
+    [Fact]
+    public void A_refused_person_is_named_in_the_refusal()
+    {
+        // "Termyn can't read this filter: assigned" would send the reader looking at the wrong word.
+        Assert.Contains("Sam", Parse("assigned to: Sam").Unsupported);
+    }
 
     private static FilterParse Parse(string query) => FilterParser.Parse(query, Vocabulary);
 }
