@@ -108,6 +108,27 @@ public abstract record FilterExpression
 
     public sealed record NoDeadline : FilterExpression;
 
+    /// <summary>Who a task is for, or who put it there.</summary>
+    /// <remarks>
+    /// Only ever about the account itself. Naming anyone else would mean holding the collaborators,
+    /// which this client doesn't sync — so "assigned to: Sam" is refused whole rather than answered
+    /// with a guess about which Sam.
+    /// </remarks>
+    public sealed record AssignedToMe : FilterExpression;
+
+    /// <summary>Assigned, and to somebody who isn't you.</summary>
+    public sealed record AssignedToOthers : FilterExpression;
+
+    /// <summary>Assigned to anybody at all.</summary>
+    public sealed record Assigned : FilterExpression;
+
+    public sealed record AssignedByMe : FilterExpression;
+
+    public sealed record AddedByMe : FilterExpression;
+
+    /// <summary>In a project somebody else can see, which is what makes assignment mean anything.</summary>
+    public sealed record Shared : FilterExpression;
+
     /// <summary>Tasks whose date names no hour. A task with no date at all names no hour either.</summary>
     public sealed record NoTime : FilterExpression;
 
@@ -128,4 +149,24 @@ public abstract record FilterExpression
     public sealed record And(FilterExpression Left, FilterExpression Right) : FilterExpression;
 
     public sealed record Or(FilterExpression Left, FilterExpression Right) : FilterExpression;
+
+    /// <summary>
+    /// Whether anything in here asks who the account is.
+    /// </summary>
+    /// <remarks>
+    /// Which matters before the user resource has synced, or if its shape ever drifts: "assigned to:
+    /// me" with no "me" to compare against would quietly match nothing, and an empty list reads as
+    /// an answer — "you have none" — rather than as the question it couldn't ask. So the caller
+    /// checks this and refuses the filter instead, the same as one whose grammar it can't read.
+    /// </remarks>
+    /// <param name="expression">The parsed filter</param>
+    /// <returns>Whether any term in it names the account</returns>
+    public static bool NamesTheAccount(FilterExpression expression) => expression switch
+    {
+        AssignedToMe or AssignedToOthers or AssignedByMe or AddedByMe => true,
+        Not e => NamesTheAccount(e.Operand),
+        And e => NamesTheAccount(e.Left) || NamesTheAccount(e.Right),
+        Or e => NamesTheAccount(e.Left) || NamesTheAccount(e.Right),
+        _ => false,
+    };
 }

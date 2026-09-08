@@ -161,14 +161,67 @@ public class LabelsAndFiltersTests
         // Showing every task would read as a filter that ran and matched broadly.
         var presenter = NewPresenter(Seeded());
 
-        presenter.Select(ViewSelection.OfFilter("f2")); // "assigned to: me"
+        presenter.Select(ViewSelection.OfFilter("f2")); // "workspace: Home"
 
         Assert.Empty(presenter.Rows);
-        Assert.Equal("assigned to: me", presenter.UnsupportedFilter!.Query);
+        Assert.Equal("workspace: Home", presenter.UnsupportedFilter!.Query);
 
         // And the way out goes to this filter rather than to the page listing all of them, which
         // left the user to find again the one they had just clicked on.
         Assert.Equal("https://app.todoist.com/app/filter/mine-f2", presenter.UnsupportedFilter.Link);
+    }
+
+    [Fact]
+    public void A_filter_naming_me_runs_once_the_account_has_synced()
+    {
+        var store = Seeded();
+        store.PutResource("user", "user", """{"id":"u-me","full_name":"Me"}""");
+        store.PutResource("filters", "f4", """{"id":"f4","name":"Mine","query":"assigned to: me","item_order":4}""");
+        store.PutResource(
+            "items",
+            "i4",
+            """{"id":"i4","content":"Mine","project_id":"p1","child_order":4,"responsible_uid":"u-me"}""");
+
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfFilter("f4"));
+
+        Assert.Equal(["Mine"], presenter.Rows.Select(r => r.Content));
+        Assert.Null(presenter.UnsupportedFilter);
+    }
+
+    [Fact]
+    public void A_filter_naming_me_is_refused_while_the_account_is_unknown()
+    {
+        // Without the user resource there's no "me" to compare against, and an empty list would
+        // read as "nothing is assigned to you" rather than as the question it couldn't ask.
+        var store = Seeded();
+        store.PutResource("filters", "f4", """{"id":"f4","name":"Mine","query":"assigned to: me","item_order":4}""");
+        store.PutResource(
+            "items",
+            "i4",
+            """{"id":"i4","content":"Mine","project_id":"p1","child_order":4,"responsible_uid":"u-me"}""");
+
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfFilter("f4"));
+
+        Assert.Empty(presenter.Rows);
+        Assert.Equal("assigned to: me", presenter.UnsupportedFilter!.Query);
+    }
+
+    [Fact]
+    public void A_filter_that_asks_nothing_about_me_runs_without_the_account()
+    {
+        // "shared" is answered by the project, so a missing user resource mustn't refuse it too.
+        var store = Seeded();
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Team","child_order":2,"is_shared":true}""");
+        store.PutResource("filters", "f4", """{"id":"f4","name":"Ours","query":"shared","item_order":4}""");
+        store.PutResource("items", "i4", """{"id":"i4","content":"Ours","project_id":"p2","child_order":4}""");
+
+        var presenter = NewPresenter(store);
+        presenter.Select(ViewSelection.OfFilter("f4"));
+
+        Assert.Equal(["Ours"], presenter.Rows.Select(r => r.Content));
+        Assert.Null(presenter.UnsupportedFilter);
     }
 
     [Fact]
@@ -195,7 +248,7 @@ public class LabelsAndFiltersTests
         Assert.NotEmpty(presenter.Rows);
 
         presenter.Search(string.Empty);
-        Assert.Equal("assigned to: me", presenter.UnsupportedFilter!.Query);
+        Assert.Equal("workspace: Home", presenter.UnsupportedFilter!.Query);
     }
 
     [Fact]
@@ -437,7 +490,7 @@ public class LabelsAndFiltersTests
         store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1,"is_favorite":true}""");
         store.PutResource("labels", "l2", """{"id":"l2","name":"errand","item_order":2}""");
         store.PutResource("filters", "f1", """{"id":"f1","name":"Hot","query":"@home & p1","item_order":1,"is_favorite":true}""");
-        store.PutResource("filters", "f2", """{"id":"f2","name":"Mine","query":"assigned to: me","item_order":2}""");
+        store.PutResource("filters", "f2", """{"id":"f2","name":"Mine","query":"workspace: Home","item_order":2}""");
         store.PutResource("filters", "f3", """{"id":"f3","name":"Job","query":"#Work","item_order":3}""");
         store.PutResource("items", "i1", """{"id":"i1","content":"Chores","project_id":"p1","child_order":1,"priority":4,"labels":["home"]}""");
         store.PutResource("items", "i2", """{"id":"i2","content":"Shopping","child_order":2,"labels":["home","errand"]}""");

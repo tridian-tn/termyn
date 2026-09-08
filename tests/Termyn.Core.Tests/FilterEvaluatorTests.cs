@@ -15,7 +15,11 @@ public class FilterEvaluatorTests
         new() { Id = "deep", Name = "Deep", ParentId = "admin" },
         new() { Id = "home", Name = "Home" },
         new() { Id = "work2", Name = "Work" }, // Todoist allows two projects to share a name
+        new() { Id = "team", Name = "Team", IsShared = true },
     ];
+
+    /// <summary>The account these tests run as. Everyone else is somebody else.</summary>
+    private const string Me = "u-me";
 
     /// <summary>
     /// Sections across two projects. "Later" is in both on purpose: section names repeat far more
@@ -442,6 +446,79 @@ public class FilterEvaluatorTests
         Assert.False(Matches(query, Item(due: "2026-07-31")));                    // today without the label
     }
 
+    // ---- Who a task is for ------------------------------------------------------------------------
+
+    [Fact]
+    public void Assigned_is_anybody_at_all()
+    {
+        Assert.True(Matches("assigned", Item(responsible: Me)));
+        Assert.True(Matches("assigned", Item(responsible: "u-sam")));
+        Assert.False(Matches("assigned", Item()));
+
+        // How Todoist writes "in a shared list and nobody has picked it up".
+        Assert.True(Matches("!assigned", Item()));
+    }
+
+    [Fact]
+    public void Assigned_to_me_is_this_account_and_nobody_else()
+    {
+        Assert.True(Matches("assigned to: me", Item(responsible: Me)));
+        Assert.False(Matches("assigned to: me", Item(responsible: "u-sam")));
+        Assert.False(Matches("assigned to: me", Item()));
+    }
+
+    [Fact]
+    public void Assigned_to_others_needs_an_assignment_as_well_as_somebody_else()
+    {
+        // An unassigned task isn't assigned to others, which is the half that's easy to drop.
+        Assert.True(Matches("assigned to: others", Item(responsible: "u-sam")));
+        Assert.False(Matches("assigned to: others", Item(responsible: Me)));
+        Assert.False(Matches("assigned to: others", Item()));
+    }
+
+    [Fact]
+    public void Who_assigned_it_and_who_added_it_are_read_off_their_own_fields()
+    {
+        // Three fields, three questions. A task somebody else handed me was assigned by them and
+        // added by them, and is still assigned to me — so no one of these answers another.
+        var handedToMe = Item(responsible: Me, assignedBy: "u-sam", addedBy: "u-sam");
+
+        Assert.True(Matches("assigned to: me", handedToMe));
+        Assert.False(Matches("assigned by: me", handedToMe));
+        Assert.False(Matches("added by: me", handedToMe));
+
+        var handedOut = Item(responsible: "u-sam", assignedBy: Me, addedBy: Me);
+
+        Assert.False(Matches("assigned to: me", handedOut));
+        Assert.True(Matches("assigned by: me", handedOut));
+        Assert.True(Matches("added by: me", handedOut));
+    }
+
+    [Fact]
+    public void Shared_is_the_project_the_task_sits_in()
+    {
+        Assert.True(Matches("shared", Item(projectId: "team")));
+        Assert.False(Matches("shared", Item(projectId: "work")));
+
+        // A task with no project can't be in a shared one.
+        Assert.False(Matches("shared", Item()));
+    }
+
+    [Fact]
+    public void With_no_account_synced_the_terms_naming_me_match_nothing()
+    {
+        // The caller refuses a filter like this outright rather than running it. If one ever gets
+        // this far, matching nothing is the harmless answer — matching everything assigned is not.
+        Assert.False(Matches("assigned to: me", Item(responsible: Me), userId: null));
+        Assert.False(Matches("assigned to: others", Item(responsible: "u-sam"), userId: null));
+        Assert.False(Matches("assigned by: me", Item(assignedBy: Me), userId: null));
+        Assert.False(Matches("added by: me", Item(addedBy: Me), userId: null));
+
+        // Neither of these asks who the account is, so both still answer.
+        Assert.True(Matches("assigned", Item(responsible: "u-sam"), userId: null));
+        Assert.True(Matches("shared", Item(projectId: "team"), userId: null));
+    }
+
     [Fact]
     public void Parentheses_change_the_answer()
     {
@@ -452,12 +529,13 @@ public class FilterEvaluatorTests
         Assert.False(Matches("(overdue | today) & @home", Item(due: "2026-07-30")));
     }
 
-    private static bool Matches(string query, TaskItem item)
+    private static bool Matches(string query, TaskItem item, string? userId = Me)
     {
         var parsed = FilterParser.Parse(query, Vocabulary());
         Assert.True(parsed.IsSupported, $"query not supported: {query}");
 
-        return FilterEvaluator.Matches(parsed.Expression!, item, new FilterContext(Projects, Today, TimeZoneInfo.Utc, Sections));
+        var context = new FilterContext(Projects, Today, TimeZoneInfo.Utc, Sections, userId);
+        return FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
 
     private static FilterVocabulary Vocabulary()
@@ -473,7 +551,10 @@ public class FilterEvaluatorTests
         bool recurring = false,
         Priority priority = Priority.P4,
         string[]? labels = null,
-        string? added = null)
+        string? added = null,
+        string? responsible = null,
+        string? assignedBy = null,
+        string? addedBy = null)
         => new()
         {
             Id = "i",
@@ -487,5 +568,8 @@ public class FilterEvaluatorTests
             Priority = priority,
             Labels = labels ?? [],
             AddedAt = added,
+            ResponsibleUid = responsible,
+            AssignedByUid = assignedBy,
+            AddedByUid = addedBy,
         };
 }

@@ -27,6 +27,20 @@ public sealed class TaskItem
     /// <summary>When the task was created, as the server wrote it — a UTC instant.</summary>
     public string? AddedAt { get; init; }
 
+    /// <summary>
+    /// Who the task is assigned to, who assigned it, and who added it, as Todoist's own user ids.
+    /// </summary>
+    /// <remarks>
+    /// Only ever filled in for a task in a shared project; a list nobody else can see has nobody to
+    /// assign anything to. Ids and not names — this client doesn't sync collaborators, so the only
+    /// person it can name is the one whose account it is.
+    /// </remarks>
+    public string? ResponsibleUid { get; init; }
+
+    public string? AssignedByUid { get; init; }
+
+    public string? AddedByUid { get; init; }
+
     public string? DueDate { get; init; }
 
     /// <summary>
@@ -129,6 +143,9 @@ public sealed class Project
 
     public string? ParentId { get; init; }
     public bool IsInboxProject { get; init; }
+
+    /// <summary>Whether anyone else can see it, which is what makes assignment mean anything.</summary>
+    public bool IsShared { get; init; }
     public bool IsFavorite { get; init; }
     public bool IsArchived { get; init; }
     public int ChildOrder { get; init; }

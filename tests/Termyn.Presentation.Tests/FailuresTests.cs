@@ -229,7 +229,7 @@ public class FailuresTests
     // ---- Fixtures --------------------------------------------------------------------------------
 
     private static ModelSnapshot Empty()
-        => new([], [], [], [], [], [], null, Today, TimeZoneInfo.Utc, 0, 0, [], new Dictionary<string, int>());
+        => new([], [], [], [], [], [], null, Today, TimeZoneInfo.Utc, null, 0, 0, [], new Dictionary<string, int>());
 
     /// <summary>A presenter over one project and one task, with nothing refused yet.</summary>
     private static async Task<(MainPresenter Presenter, SyncEngine Engine, FakeApi Api)> Loaded()
@@ -374,5 +374,5 @@ public class FailuresTests
         => new(
             [new TaskItem { Id = "i1", Content = "Task", ProjectId = "p1" }],
             [new Project { Id = "p1", Name = "Work" }],
-            [], [], [], [], null, Today, TimeZoneInfo.Utc, 0, 0, [], new Dictionary<string, int>());
+            [], [], [], [], null, Today, TimeZoneInfo.Utc, null, 0, 0, [], new Dictionary<string, int>());
 }

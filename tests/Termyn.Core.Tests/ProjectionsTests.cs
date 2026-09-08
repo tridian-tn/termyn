@@ -70,6 +70,46 @@ public class ProjectionsTests
         Assert.Null(item.DueText);
     }
 
+    [Fact]
+    public void Reads_the_three_people_a_task_names()
+    {
+        // Three separate fields with three separate meanings, asserted together because reading any
+        // one of them into another would look right on its own and answer the wrong question — and
+        // because a term whose field never gets read passes every parser and evaluator test there is.
+        var item = Projections.ToTaskItem(
+            Obj("""{"id":"i","responsible_uid":"1","assigned_by_uid":"2","added_by_uid":"3"}"""));
+
+        Assert.Equal("1", item.ResponsibleUid);
+        Assert.Equal("2", item.AssignedByUid);
+        Assert.Equal("3", item.AddedByUid);
+    }
+
+    [Fact]
+    public void A_task_in_a_list_nobody_shares_names_nobody()
+    {
+        var item = Projections.ToTaskItem(Obj("""{"id":"i"}"""));
+
+        Assert.Null(item.ResponsibleUid);
+        Assert.Null(item.AssignedByUid);
+        Assert.Null(item.AddedByUid);
+    }
+
+    [Theory]
+    [InlineData("""{"id":"p","name":"Work","is_shared":true}""", true)]
+    [InlineData("""{"id":"p","name":"Work","is_shared":1}""", true)]
+    [InlineData("""{"id":"p","name":"Work","is_shared":false}""", false)]
+    [InlineData("""{"id":"p","name":"Work"}""", false)]
+    public void Reads_whether_a_project_is_shared(string json, bool expected)
+        => Assert.Equal(expected, Projections.ToProject(Obj(json)).IsShared);
+
+    [Fact]
+    public void Reads_the_account_id_off_the_user()
+        => Assert.Equal("42", Projections.ToUserId(Obj("""{"id":"42","email":"a@b.c"}""")));
+
+    [Fact]
+    public void With_no_user_synced_there_is_no_account_id()
+        => Assert.Null(Projections.ToUserId(null));
+
     [Theory]
     [InlineData("""{"id":"i","priority":4}""", Priority.P1)]
     [InlineData("""{"id":"i","priority":1}""", Priority.P4)]
