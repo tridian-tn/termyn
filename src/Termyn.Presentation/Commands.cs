@@ -41,6 +41,7 @@ public enum AppCommand
     QuickAdd,
     SyncNow,
     ToggleCompleted,
+    History,
     SortDefault,
     ExpandAll,
     CollapseAll,
@@ -222,6 +223,10 @@ public static class Commands
 
             AppCommand.QuickAdd => Always("Quick add…"),
             AppCommand.SyncNow => Always("Sync now"),
+
+            // Always offered, empty or not: a window that says "nothing yet" answers the question,
+            // and a greyed entry leaves the user wondering what would fill it.
+            AppCommand.History => Always("What you've done…"),
             AppCommand.ToggleCompleted => new CommandState(
                 "Completed tasks",
                 true,

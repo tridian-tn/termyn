@@ -2663,6 +2663,10 @@ internal sealed class MainForm : Form
                 _ = ToggleCompletedAsync();
                 return false;
 
+            case AppCommand.History:
+                Guarded(() => HistoryForm.Show(this, _theme, () => _presenter.History.Entries, _presenter.History.Clear));
+                return false;
+
             case AppCommand.SortDefault:
                 Guarded(() => _presenter.ClearSort());
                 return false;
