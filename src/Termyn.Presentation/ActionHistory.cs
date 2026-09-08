@@ -47,10 +47,11 @@ public sealed class ActionHistory : IDisposable
 
     /// <summary>How often the housekeeping is worth doing.</summary>
     /// <remarks>
-    /// A month is a long time to be wrong about, so there is no hurry. Done on the way up and then
-    /// once an hour, which for a window left open all week is a handful of deletes.
+    /// A month is a long time to be wrong about, so there is no hurry at all. Done on the way up
+    /// and then once a day, which for a window left open all week is six deletes — and a window
+    /// closed each evening never reaches the second one, because starting up is the other trigger.
     /// </remarks>
-    private static readonly TimeSpan Sweeping = TimeSpan.FromHours(1);
+    private static readonly TimeSpan Sweeping = TimeSpan.FromDays(1);
 
     /// <summary>How many may wait in memory before they are written whatever the clock says.</summary>
     /// <remarks>

@@ -303,21 +303,26 @@ public class ActionHistoryTests
     [Fact]
     public void It_does_not_tidy_on_every_flush()
     {
-        // A month is a long time to be wrong about, so there is no hurry — and the flush itself
-        // comes round every three quarters of a minute.
+        // A month is a long time to be wrong about, so there is no hurry at all — and the flush
+        // itself comes round every three quarters of a minute.
         var clock = new Moving();
         var store = new Recording();
         var history = new ActionHistory(store, clock);
 
-        // Twenty flushes over an hour and a half, which is more than an hour and nowhere near
-        // twenty of them.
-        for (var i = 0; i < 20; i++)
+        // A working day of them.
+        for (var i = 0; i < 60; i++)
         {
             history.Flush();
-            clock.Pass(TimeSpan.FromMinutes(5));
+            clock.Pass(TimeSpan.FromMinutes(8));
         }
 
-        // The one on the way up, and one more once the hour was up.
+        // Just the one on the way up: eight hours of flushing is not a day.
+        Assert.Equal(1, store.Sweeps.Count);
+
+        // And a day later it comes round, without having been asked any differently.
+        clock.Pass(TimeSpan.FromDays(1));
+        history.Flush();
+
         Assert.Equal(2, store.Sweeps.Count);
     }
 
