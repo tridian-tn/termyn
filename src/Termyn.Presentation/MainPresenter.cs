@@ -1833,11 +1833,14 @@ public sealed class MainPresenter
         var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels, snapshot.Sections);
         var parsed = FilterParser.Parse(filter.Query, vocabulary);
 
-        // A filter naming "me" can't be answered until the account itself has synced, and answering
-        // it with nothing would look like the answer rather than the gap it is.
-        var unknownAccount = parsed.Expression is { } e
-            && snapshot.UserId is null
-            && FilterExpression.NamesTheAccount(e);
+        // Some terms need the account itself — who "me" is, or which day it calls "next week" — and
+        // neither is known until the user resource has synced. Answering with nothing would look
+        // like the answer rather than the gap it is.
+        var needs = parsed.Expression is { } e ? FilterExpression.Needs(e) : AccountFacts.None;
+
+        var unknownAccount =
+            (needs.HasFlag(AccountFacts.UserId) && snapshot.UserId is null)
+            || (needs.HasFlag(AccountFacts.NextWeek) && snapshot.NextWeek is null);
 
         if (!parsed.IsSupported || unknownAccount)
         {
@@ -1854,7 +1857,8 @@ public sealed class MainPresenter
             snapshot.Today,
             snapshot.TimeZone,
             snapshot.Sections,
-            snapshot.UserId);
+            snapshot.UserId,
+            snapshot.NextWeek);
         return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
 

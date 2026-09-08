@@ -446,6 +446,98 @@ public class FilterEvaluatorTests
         Assert.False(Matches(query, Item(due: "2026-07-31")));                    // today without the label
     }
 
+    // ---- The week the account keeps ----------------------------------------------------------------
+
+    [Fact]
+    public void Next_week_is_the_coming_day_the_account_named()
+    {
+        // Tuesday, with the account's "next week" set to Monday: six days on, not the Monday just
+        // gone and not the one after.
+        var tuesday = new DateOnly(2026, 9, 8);
+
+        Assert.True(Matches("due: next week", Item(due: "2026-09-14"), tuesday, DayOfWeek.Monday));
+        Assert.False(Matches("due: next week", Item(due: "2026-09-07"), tuesday, DayOfWeek.Monday));
+        Assert.False(Matches("due: next week", Item(due: "2026-09-21"), tuesday, DayOfWeek.Monday));
+    }
+
+    [Fact]
+    public void On_the_day_itself_next_week_is_still_the_one_after()
+    {
+        // Monday, with "next week" set to Monday. Putting something off until next week has to move
+        // it, and the week-long window would otherwise be this week rather than the coming one.
+        var monday = new DateOnly(2026, 9, 14);
+
+        Assert.False(Matches("due: next week", Item(due: "2026-09-14"), monday, DayOfWeek.Monday));
+        Assert.True(Matches("due: next week", Item(due: "2026-09-21"), monday, DayOfWeek.Monday));
+    }
+
+    [Fact]
+    public void The_account_decides_which_day_the_week_turns_on()
+    {
+        // The same Tuesday answered two ways, which is the whole reason this comes off the account
+        // rather than being written into the client.
+        var tuesday = new DateOnly(2026, 9, 8);
+
+        Assert.True(Matches("due: next week", Item(due: "2026-09-14"), tuesday, DayOfWeek.Monday));
+        Assert.True(Matches("due: next week", Item(due: "2026-09-13"), tuesday, DayOfWeek.Sunday));
+    }
+
+    [Fact]
+    public void The_week_long_window_holds_exactly_seven_days()
+    {
+        // Todoist's own filter for "due next week", run over the days either side of it.
+        const string week = "(due: next week | due after: next week) & due before: 1 week after next week";
+        var tuesday = new DateOnly(2026, 9, 8);
+
+        Assert.False(Matches(week, Item(due: "2026-09-13"), tuesday, DayOfWeek.Monday));
+        Assert.True(Matches(week, Item(due: "2026-09-14"), tuesday, DayOfWeek.Monday));
+        Assert.True(Matches(week, Item(due: "2026-09-20"), tuesday, DayOfWeek.Monday));
+        Assert.False(Matches(week, Item(due: "2026-09-21"), tuesday, DayOfWeek.Monday));
+    }
+
+    [Fact]
+    public void First_day_is_the_start_of_the_coming_month()
+    {
+        var september = new DateOnly(2026, 9, 8);
+
+        Assert.True(Matches("due: first day", Item(due: "2026-10-01"), september, DayOfWeek.Monday));
+        Assert.False(Matches("due: first day", Item(due: "2026-09-01"), september, DayOfWeek.Monday));
+    }
+
+    [Fact]
+    public void Before_first_day_is_the_whole_of_this_month_on_every_day_of_it()
+    {
+        // Including the first, where taking the current month's own start would leave the filter
+        // answering with nothing for a day and then working again.
+        foreach (var day in new[] { new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30) })
+        {
+            Assert.True(Matches("due before: first day", Item(due: "2026-09-01"), day, DayOfWeek.Monday));
+            Assert.True(Matches("due before: first day", Item(due: "2026-09-30"), day, DayOfWeek.Monday));
+            Assert.False(Matches("due before: first day", Item(due: "2026-10-01"), day, DayOfWeek.Monday));
+        }
+    }
+
+    [Fact]
+    public void A_month_end_rolls_into_the_next_year()
+    {
+        var december = new DateOnly(2026, 12, 15);
+
+        Assert.True(Matches("due: first day", Item(due: "2027-01-01"), december, DayOfWeek.Monday));
+    }
+
+    [Fact]
+    public void With_no_week_setting_the_terms_that_need_one_match_nothing()
+    {
+        // The caller refuses such a filter outright. If one gets this far, matching nothing beats
+        // picking a day for the account and answering about the wrong week.
+        var tuesday = new DateOnly(2026, 9, 8);
+
+        Assert.False(Matches("due: next week", Item(due: "2026-09-14"), tuesday, nextWeek: null));
+
+        // "first day" is the calendar's, not the account's, so it still answers.
+        Assert.True(Matches("due: first day", Item(due: "2026-10-01"), tuesday, nextWeek: null));
+    }
+
     // ---- Who a task is for ------------------------------------------------------------------------
 
     [Fact]
@@ -530,11 +622,19 @@ public class FilterEvaluatorTests
     }
 
     private static bool Matches(string query, TaskItem item, string? userId = Me)
+        => Matches(query, item, Today, DayOfWeek.Monday, userId);
+
+    private static bool Matches(
+        string query,
+        TaskItem item,
+        DateOnly today,
+        DayOfWeek? nextWeek,
+        string? userId = Me)
     {
         var parsed = FilterParser.Parse(query, Vocabulary());
         Assert.True(parsed.IsSupported, $"query not supported: {query}");
 
-        var context = new FilterContext(Projects, Today, TimeZoneInfo.Utc, Sections, userId);
+        var context = new FilterContext(Projects, today, TimeZoneInfo.Utc, Sections, userId, nextWeek);
         return FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
 

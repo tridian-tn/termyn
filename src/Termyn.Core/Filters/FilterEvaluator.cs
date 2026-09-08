@@ -20,13 +20,15 @@ public sealed class FilterContext
         DateOnly today,
         TimeZoneInfo zone,
         IReadOnlyList<Section>? sections = null,
-        string? userId = null)
+        string? userId = null,
+        DayOfWeek? nextWeek = null)
     {
         _projects = projects;
         _sections = sections ?? [];
         Today = today;
         Zone = zone;
         UserId = userId;
+        NextWeek = nextWeek;
     }
 
     public DateOnly Today { get; }
@@ -41,6 +43,17 @@ public sealed class FilterContext
     /// gets this far, so terms needing it match nothing here rather than falling back on a guess.
     /// </remarks>
     public string? UserId { get; }
+
+    /// <summary>
+    /// The day the account calls "next week" — the one Todoist puts a task off until.
+    /// </summary>
+    /// <remarks>
+    /// Null until the user resource has synced, and no default stands in: which day it is decides
+    /// which week a filter answers about, and picking one for the account would be a week's worth
+    /// of wrong tasks presented as the right ones. A filter needing it is refused before it gets
+    /// this far.
+    /// </remarks>
+    public DayOfWeek? NextWeek { get; }
 
     /// <summary>
     /// Whether a project is one somebody else can see.
@@ -154,11 +167,11 @@ public static class FilterEvaluator
             && day <= context.Today
             && day >= context.Today.AddDays(-(e.Days - 1)),
 
-        FilterExpression.Due e => On(SmartViews.DueOn(item, context.Zone), e.Bound, e.Day, context.Today),
+        FilterExpression.Due e => On(SmartViews.DueOn(item, context.Zone), e.Bound, e.Day, context),
 
-        FilterExpression.Deadline e => On(SmartViews.DeadlineOn(item, context.Zone), e.Bound, e.Day, context.Today),
+        FilterExpression.Deadline e => On(SmartViews.DeadlineOn(item, context.Zone), e.Bound, e.Day, context),
 
-        FilterExpression.Created e => On(SmartViews.AddedOn(item, context.Zone), e.Bound, e.Day, context.Today),
+        FilterExpression.Created e => On(SmartViews.AddedOn(item, context.Zone), e.Bound, e.Day, context),
 
         FilterExpression.Search e => item.Content.Contains(e.Text, StringComparison.OrdinalIgnoreCase),
 
@@ -200,14 +213,17 @@ public static class FilterEvaluator
     /// <param name="day">The day the task carries, or null when it hasn't got one</param>
     /// <param name="bound">Which side of the term's day counts</param>
     /// <param name="wanted">The day the term names</param>
-    /// <param name="today">Today in the account's timezone, which relative days are counted from</param>
+    /// <param name="context">The account the days are worked out against</param>
     /// <returns>Whether the task's day answers the term</returns>
-    private static bool On(DateOnly? day, DayBound bound, FilterDay wanted, DateOnly today)
+    private static bool On(DateOnly? day, DayBound bound, FilterDay wanted, FilterContext context)
     {
         if (day is not { } had)
             return false;
 
-        var mark = wanted.Resolve(today);
+        // A day the account itself names — "next week" — is unknowable until the account has
+        // synced, and nothing it hasn't said can be answered.
+        if (wanted.Resolve(context.Today, context.NextWeek) is not { } mark)
+            return false;
 
         return bound switch
         {
