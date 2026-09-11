@@ -70,13 +70,35 @@ public class OutlineFoldingTests
     /// <summary>WM_KEYDOWN, and a press of one key at the list the way the message loop delivers it.</summary>
     private const int WmKeyDown = 0x0100;
 
-    private static bool Press(OutlineView view, Keys key)
-    {
-        var message = Message.Create(view.Handle, WmKeyDown, (nint)key, 0);
-        return view.PreProcessMessage(ref message);
-    }
+    /// <summary>
+    /// The keystroke, said outright.
+    /// </summary>
+    /// <remarks>
+    /// This went through PreProcessMessage, which builds the key it dispatches as
+    /// <c>(Keys)msg.WParam | ModifierKeys</c> — the machine's real keyboard. So a Ctrl or a Shift
+    /// held anywhere at that instant turned Left into Ctrl+Left, the fold rule quite correctly
+    /// declined it, and the test failed for a reason nothing in the repository could account for.
+    /// </remarks>
+    private static bool Press(OutlineView view, Keys key) => view.Fold(key);
 
     // ---- The arrow keys ------------------------------------------------------------------------
+
+    [WinFormsFact]
+    public void A_modifier_held_elsewhere_cannot_reach_these()
+    {
+        // The whole reason the fold is asked for by name. Ctrl+Left is the outline's outdent, and
+        // a row that folded on it as well would make one keystroke do two things — so the rule is
+        // right to decline it, and the old route through PreProcessMessage was wrong to hand it one
+        // key while the test believed it had handed over another.
+        using var view = Outline(Row("a", children: true), Row("b", depth: 1));
+        Pick(view, "a");
+
+        Assert.Empty(Asked(view, () => view.Fold(Keys.Control | Keys.Left)));
+        Assert.Empty(Asked(view, () => view.Fold(Keys.Shift | Keys.Right)));
+
+        // And the bare key still folds, so what is being held out is the modifier and not the key.
+        Assert.Equal([("a", true)], Asked(view, () => view.Fold(Keys.Left)));
+    }
 
     [WinFormsTheory]
     [InlineData(Keys.Left, true)]
