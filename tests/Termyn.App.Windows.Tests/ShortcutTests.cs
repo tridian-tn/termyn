@@ -49,13 +49,13 @@ public class ShortcutTests
     [InlineData(Keys.Control | Keys.D4, AppCommand.Priority4)]
     [InlineData(Keys.Control | Keys.L, AppCommand.Labels)]
     [InlineData(Keys.Control | Keys.R, AppCommand.Reminders)]
-    [InlineData(Keys.Tab, AppCommand.Indent)]
-    [InlineData(Keys.Shift | Keys.Tab, AppCommand.Outdent)]
-    [InlineData(Keys.Alt | Keys.Up, AppCommand.MoveUp)]
-    [InlineData(Keys.Alt | Keys.Down, AppCommand.MoveDown)]
+    [InlineData(Keys.Control | Keys.Right, AppCommand.Indent)]
+    [InlineData(Keys.Control | Keys.Left, AppCommand.Outdent)]
+    [InlineData(Keys.Control | Keys.Up, AppCommand.MoveUp)]
+    [InlineData(Keys.Control | Keys.Down, AppCommand.MoveDown)]
     [InlineData(Keys.Delete, AppCommand.Delete)]
     [InlineData(Keys.Control | Keys.Z, AppCommand.Undo)]
-    public void The_outline_answers_to_the_keys_it_always_did(Keys keys, AppCommand expected)
+    public void The_outline_answers_to_its_own_keys(Keys keys, AppCommand expected)
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Outline));
 
     [WinFormsTheory]
@@ -73,22 +73,49 @@ public class ShortcutTests
     [InlineData(Keys.Control | Keys.H, AppCommand.ToggleCompleted)]
     [InlineData(Keys.Control | Keys.F, AppCommand.Search)]
     [InlineData(Keys.Control | Keys.K, AppCommand.Palette)]
-    [InlineData(Keys.Control | Keys.Up, AppCommand.PreviousView)]
-    [InlineData(Keys.Control | Keys.Down, AppCommand.NextView)]
+    [InlineData(Keys.Alt | Keys.Up, AppCommand.PreviousView)]
+    [InlineData(Keys.Alt | Keys.Down, AppCommand.NextView)]
     [InlineData(Keys.Control | Keys.Oemcomma, AppCommand.Settings)]
     public void The_window_answers_to_the_ones_that_work_anywhere(Keys keys, AppCommand expected)
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Window));
 
     [WinFormsFact]
-    public void The_panel_is_shown_by_F4_and_written_in_by_the_key_everyone_reaches_for()
+    public void The_panel_is_shown_by_F4_and_its_tabs_picked_by_their_own_keys()
     {
-        // Ctrl+E used to put the panel on screen, which is the smaller of the two things and had
-        // the better key. It writes in it now, and F4 does the showing.
-        Assert.Equal(AppCommand.EditDescription, MainForm.CommandFor(Keys.Control | Keys.E, MainForm.Scope.Window));
+        // F4 is the only toggle of the three; the other two name a tab.
         Assert.Equal(AppCommand.ToggleDescription, MainForm.CommandFor(Keys.F4, MainForm.Scope.Window));
+        Assert.Equal(AppCommand.ViewDescription, MainForm.CommandFor(Keys.Control | Keys.E, MainForm.Scope.Window));
+        Assert.Equal(AppCommand.ViewComments, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Window));
 
         // F4 in the outline is nothing, so the window's own answer is the one that stands there.
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.F4, MainForm.Scope.Outline));
+    }
+
+    [WinFormsFact]
+    public void An_arrow_means_the_task_with_Ctrl_and_the_view_with_Alt()
+    {
+        // Moving a task is done often and from the outline; changing view is rarer and has to work
+        // from anywhere. The two were the other way round, which put the commoner move on the key
+        // that had to reach across the whole window.
+        Assert.Equal(AppCommand.MoveUp, MainForm.CommandFor(Keys.Control | Keys.Up, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.PreviousView, MainForm.CommandFor(Keys.Alt | Keys.Up, MainForm.Scope.Window));
+
+        // And neither has kept the other's key anywhere.
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Alt | Keys.Up, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.Up, MainForm.Scope.Window));
+    }
+
+    [WinFormsFact]
+    public void Tab_is_left_to_move_the_focus()
+    {
+        // It indented here once, which is what a to-do list does and what every other window in
+        // Windows does not. Ctrl and an arrow says the same thing without taking the one key a
+        // keyboard user needs to get out of a list.
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Tab, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Shift | Keys.Tab, MainForm.Scope.Outline));
+
+        Assert.Equal(AppCommand.Indent, MainForm.CommandFor(Keys.Control | Keys.Right, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.Outdent, MainForm.CommandFor(Keys.Control | Keys.Left, MainForm.Scope.Outline));
     }
 
     [WinFormsFact]
@@ -133,7 +160,8 @@ public class ShortcutTests
     [WinFormsTheory]
     [InlineData(Keys.Control | Keys.D1, "Ctrl+1")]
     [InlineData(Keys.Control | Keys.D4, "Ctrl+4")]
-    [InlineData(Keys.Shift | Keys.Tab, "Shift+Tab")]
+    [InlineData(Keys.Control | Keys.Right, "Ctrl+→")]
+    [InlineData(Keys.Control | Keys.Left, "Ctrl+←")]
     [InlineData(Keys.Alt | Keys.Up, "Alt+↑")]
     [InlineData(Keys.Alt | Keys.Down, "Alt+↓")]
     [InlineData(Keys.Delete, "Del")]

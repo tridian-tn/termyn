@@ -331,29 +331,49 @@ public class MenuTests
     }
 
     [WinFormsFact]
-    public void Editing_the_description_is_offered_only_while_the_panel_it_happens_in_is_open()
+    public void The_two_tabs_are_offered_whatever_the_panel_is_doing()
     {
+        // Neither names a state, so neither has a state to be greyed by. Asking for the tab already
+        // in front does nothing, which is a thing the command decides rather than the menu — and an
+        // entry that came and went with the panel would be harder to find than one that is always
+        // there.
         using var closed = Build(View, CommandContext.Empty);
         using var reading = Build(View, new CommandContext(ShowingDescription: true));
-        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
+        using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
 
-        Assert.False(Find(closed, "Edit description").Enabled);
-        Assert.True(Find(reading, "Edit description").Enabled);
-        Assert.False(Find(reading, "Edit description").Checked);
-
-        // Ticked while the markdown is on show, since that is the state you leave rather than the
-        // one the panel rests in. Ticked and not renamed — the tick is the only thing that moves.
-        Assert.True(Find(writing, "Edit description").Checked);
+        foreach (var built in new[] { closed, reading, comments })
+        {
+            Assert.True(Find(built, "View description").Enabled);
+            Assert.True(Find(built, "Comments").Enabled);
+        }
     }
 
     [WinFormsFact]
-    public void The_comments_entry_is_ticked_while_the_pane_is_showing_them()
+    public void Neither_tab_entry_carries_a_tick()
     {
+        // The tab strip already says which one is in front. A tick would be the same fact said a
+        // second time, and two ways of saying it are two things that can disagree.
         using var description = Build(View, new CommandContext(ShowingDescription: true));
         using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
+        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
 
+        Assert.False(Find(description, "View description").Checked);
         Assert.False(Find(description, "Comments").Checked);
-        Assert.True(Find(comments, "Comments").Checked);
+        Assert.False(Find(comments, "View description").Checked);
+        Assert.False(Find(comments, "Comments").Checked);
+        Assert.False(Find(writing, "View description").Checked);
+    }
+
+    [WinFormsFact]
+    public void The_panel_itself_still_says_whether_it_is_open()
+    {
+        // Details is the toggle of the three and keeps its tick: it is the only one of them that
+        // is on or off rather than naming somewhere to go.
+        using var closed = Build(View, CommandContext.Empty);
+        using var open = Build(View, new CommandContext(ShowingDescription: true));
+
+        Assert.False(Find(closed, "Details").Checked);
+        Assert.True(Find(open, "Details").Checked);
     }
 
     [WinFormsFact]
@@ -367,31 +387,6 @@ public class MenuTests
         Assert.False(Find(closed, "Zoom out").Enabled);
         Assert.True(Find(open, "Zoom in").Enabled);
         Assert.True(Find(open, "Zoom out").Enabled);
-    }
-
-    [WinFormsFact]
-    public void Editing_the_description_is_offered_from_the_comments_and_crosses_to_it()
-    {
-        // It used to be greyed here. That was right when the two shared one pane and writing would
-        // have gone on behind the comments; with a tab each it is a way across as well as a way in,
-        // and greying it would be right only if the comments were somewhere you couldn't leave.
-        using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
-
-        Assert.True(Find(comments, "Edit description").Enabled);
-
-        // Not ticked from over there, though: the tick says the markdown is on show, and what is on
-        // show is the comments.
-        Assert.False(Find(comments, "Edit description").Checked);
-    }
-
-    [WinFormsFact]
-    public void Editing_is_ticked_only_while_the_markdown_is_the_thing_in_front()
-    {
-        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
-        using var behindComments = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true, ShowingComments: true));
-
-        Assert.True(Find(writing, "Edit description").Checked);
-        Assert.False(Find(behindComments, "Edit description").Checked);
     }
 
     [WinFormsFact]
@@ -434,10 +429,10 @@ public class MenuTests
         Assert.Equal("Ctrl+D", shown["Due date…"]);
         Assert.Equal("Ctrl+L", shown["Labels…"]);
         Assert.Equal("Ctrl+R", shown["Reminders…"]);
-        Assert.Equal("Tab", shown["Indent"]);
-        Assert.Equal("Shift+Tab", shown["Outdent"]);
-        Assert.Equal("Alt+↑", shown["Move up"]);
-        Assert.Equal("Alt+↓", shown["Move down"]);
+        Assert.Equal("Ctrl+→", shown["Indent"]);
+        Assert.Equal("Ctrl+←", shown["Outdent"]);
+        Assert.Equal("Ctrl+↑", shown["Move up"]);
+        Assert.Equal("Ctrl+↓", shown["Move down"]);
         Assert.Equal("Del", shown["Delete"]);
     }
 

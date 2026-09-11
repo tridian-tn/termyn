@@ -97,8 +97,8 @@ public static class Menus
             MenuEntry.Of(AppCommand.NextView),
             MenuEntry.AfterRule(AppCommand.ToggleCompleted),
             MenuEntry.AfterRule(AppCommand.ToggleDescription),
-            MenuEntry.Of(AppCommand.EditDescription),
-            MenuEntry.Of(AppCommand.ToggleComments),
+            MenuEntry.Of(AppCommand.ViewDescription),
+            MenuEntry.Of(AppCommand.ViewComments),
             MenuEntry.Of(AppCommand.History),
 
             // The description panel's own size, which the wheel has always changed and nothing has

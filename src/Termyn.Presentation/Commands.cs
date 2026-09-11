@@ -46,8 +46,8 @@ public enum AppCommand
     ExpandAll,
     CollapseAll,
     ToggleDescription,
-    EditDescription,
-    ToggleComments,
+    ViewDescription,
+    ViewComments,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -253,24 +253,17 @@ public static class Commands
                 true,
                 context.ShowingDescription),
 
-            // Only worth offering while the panel it belongs to is open. Ticked while the markdown
-            // is on show, since that is the state you leave rather than the one the panel rests in
-            // — and ticked is all it says, the name standing still like every other entry's.
+            // The two tabs the panel holds, each named for what it puts in front. Neither is a
+            // toggle: asking for the one already in front does nothing, the same as clicking the
+            // tab you are already on, and neither carries a tick. The tab strip itself says which
+            // is showing — a tick here would be that fact said a second time, and two ways of
+            // saying it are two things that can disagree.
             //
-            // Offered from the comments tab as well, where it crosses to the description and opens
-            // it for writing in one go. Greying it there would be right only if the comments were
-            // somewhere you couldn't leave.
-            AppCommand.EditDescription => new CommandState(
-                "Edit description",
-                context.ShowingDescription,
-                context.WritingDescription && !context.ShowingComments),
-
-            // The same pane, showing a third thing. Ticked while the comments are the thing it is
-            // showing, so the entry says which of the two you are looking at.
-            AppCommand.ToggleComments => new CommandState(
-                "Comments",
-                true,
-                context.ShowingComments),
+            // Left enabled on the tab you are already on rather than greyed. Greying is the tick
+            // again in another costume, and an entry that comes and goes is harder to find than one
+            // that is always there and sometimes does nothing.
+            AppCommand.ViewDescription => Always("View description"),
+            AppCommand.ViewComments => Always("Comments"),
 
             // The description panel already zooms to the wheel; these are the same thing said out
             // loud, for anybody who doesn't know the wheel does it. Offered on the same terms as

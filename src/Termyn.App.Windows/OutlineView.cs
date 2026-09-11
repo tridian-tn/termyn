@@ -303,16 +303,6 @@ internal sealed class OutlineView : ListView
         return -1;
     }
 
-    /// <summary>
-    /// Tab and Shift+Tab indent and outdent here rather than moving focus out of the list — but only
-    /// with a row to act on, and never with Ctrl held, so there is always a way to tab out.
-    /// </summary>
-    protected override bool IsInputKey(Keys keyData)
-        => ((keyData & Keys.KeyCode) == Keys.Tab
-            && (keyData & Keys.Control) == 0
-            && SelectedIndices.Count > 0)
-           || base.IsInputKey(keyData);
-
     /// <summary>Asks for a task's sub-tasks to be hidden, or shown again.</summary>
     /// <remarks>The task's id, and whether it should end up collapsed.</remarks>
     public event Action<string, bool>? CollapseRequested;
@@ -368,7 +358,7 @@ internal sealed class OutlineView : ListView
     /// </remarks>
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
     {
-        if (keyData is Keys.Left or Keys.Right
+        if (FoldsOn(keyData)
             && SelectedRow is { HasChildren: true } row
             && row.Collapsed != (keyData == Keys.Left))
         {
@@ -378,6 +368,18 @@ internal sealed class OutlineView : ListView
 
         return base.ProcessCmdKey(ref message, keyData);
     }
+
+    /// <summary>
+    /// Whether a keystroke is one of the two that fold a row.
+    /// </summary>
+    /// <remarks>
+    /// The arrows on their own and no modified form of them: Ctrl and an arrow indents the task or
+    /// moves it, and folding the row as well would make one keystroke do two things. Its own method
+    /// so a test can ask, since the alternative is holding Ctrl down on a build agent.
+    /// </remarks>
+    /// <param name="keyData">The keystroke, modifiers and all</param>
+    /// <returns>Whether it asks for a fold</returns>
+    internal static bool FoldsOn(Keys keyData) => keyData is Keys.Left or Keys.Right;
 
     protected override void OnRetrieveVirtualItem(RetrieveVirtualItemEventArgs e)
     {
