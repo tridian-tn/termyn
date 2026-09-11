@@ -78,6 +78,21 @@ public class OutlineFoldingTests
 
     // ---- The arrow keys ------------------------------------------------------------------------
 
+    [WinFormsTheory]
+    [InlineData(Keys.Left, true)]
+    [InlineData(Keys.Right, true)]
+    [InlineData(Keys.Control | Keys.Left, false)]
+    [InlineData(Keys.Control | Keys.Right, false)]
+    [InlineData(Keys.Shift | Keys.Left, false)]
+    [InlineData(Keys.Alt | Keys.Right, false)]
+    public void Only_a_bare_arrow_folds_a_row(Keys keys, bool folds)
+    {
+        // Ctrl and an arrow outdents the task or indents it. Folding the row as well would make one
+        // keystroke do two things, and the one it did would depend on whether the row had children.
+        Assert.Equal(folds, OutlineView.FoldsOn(keys));
+    }
+
+
     [WinFormsFact]
     public void Left_folds_the_selected_task_and_right_opens_it_again()
     {

@@ -521,24 +521,51 @@ internal sealed class MainForm : Form
         // sitting in the window: not queued, so not on the phone, and not there at all if the
         // process went without closing.
         Deactivate += (_, _) => SaveDescription();
-        FormClosed += (_, _) =>
-        {
-            _presenter.RowsChanged -= OnRowsChanged;
-            _presenter.StatusChanged -= OnStatusChanged;
-            _scheduler.SyncFailed -= OnSyncFailed;
-            _shell.Hotkey.Pressed -= OnHotkey;
-            _shell.Notifier.Activated -= OnTrayActivated;
-            if (_signalsWired)
-                _shell.Instance.SignalReceived -= OnInstanceSignal;
+        FormClosed += (_, _) => Teardown();
+    }
 
-            _renderIdle.Dispose();
-            _saveIdle.Dispose();
-            _quickAdd?.AllowClose();
-            _quickAdd?.Dispose();
-            _headerFont?.Dispose();
-            _taskMenu.Dispose();
-            _cts.Dispose();
-        };
+    /// <summary>Whether the window has already let go of everything it holds.</summary>
+    private bool _tornDown;
+
+    /// <summary>
+    /// Lets go of the timers, the subscriptions and the windows this one owns.
+    /// </summary>
+    /// <remarks>
+    /// Reached from closing and from disposing both, because a window can be disposed without ever
+    /// having been shown and FormClosed doesn't fire for one that wasn't. Hung off closing alone it
+    /// left the idle timers running — and a timer with no window left to draw on goes on posting to
+    /// whatever thread it was started on.
+    /// </remarks>
+    private void Teardown()
+    {
+        if (_tornDown)
+            return;
+
+        _tornDown = true;
+
+        _presenter.RowsChanged -= OnRowsChanged;
+        _presenter.StatusChanged -= OnStatusChanged;
+        _scheduler.SyncFailed -= OnSyncFailed;
+        _shell.Hotkey.Pressed -= OnHotkey;
+        _shell.Notifier.Activated -= OnTrayActivated;
+        if (_signalsWired)
+            _shell.Instance.SignalReceived -= OnInstanceSignal;
+
+        _renderIdle.Dispose();
+        _saveIdle.Dispose();
+        _quickAdd?.AllowClose();
+        _quickAdd?.Dispose();
+        _headerFont?.Dispose();
+        _taskMenu.Dispose();
+        _cts.Dispose();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            Teardown();
+
+        base.Dispose(disposing);
     }
 
     // ---- Shell ---------------------------------------------------------------------------------
@@ -1773,6 +1800,42 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
+    /// Whether the panel is open, and which of its tabs is in front. Internal so a test can ask
+    /// without reading a control's private state.
+    /// </summary>
+    internal (bool Open, bool Comments) PanelTab => (!_detail.Panel2Collapsed, _showingComments);
+
+    /// <summary>
+    /// Puts one of the panel's two tabs in front, opening the panel if it was shut.
+    /// </summary>
+    /// <remarks>
+    /// Nothing at all when that tab is already the one showing. These name a tab rather than toggle
+    /// one, so asking for where you already are is a question already answered — and the old
+    /// behaviour, which toggled, meant the same keystroke took you off the description as often as
+    /// it took you to it.
+    ///
+    /// Editing isn't started here any more, whatever the tab was left on. The description is opened
+    /// for writing from inside it — Enter, F2, or a double-click — which keeps a key called "view"
+    /// from being the one that starts changing things.
+    /// </remarks>
+    /// <param name="comments">True for the comments, false for the description</param>
+    internal void ShowPanelTab(bool comments)
+    {
+        var closed = _detail.Panel2Collapsed;
+
+        // Already looking at it, so there is nothing to ask for.
+        if (!closed && _showingComments == comments)
+            return;
+
+        // A shut panel always reopens on the description, so asking for either tab has to open it
+        // first — otherwise the description would be the one request that quietly did nothing.
+        if (closed)
+            ShowDescriptionPanel(shown: true);
+
+        ShowComments(comments);
+    }
+
+    /// <summary>
     /// Follows the user clicking a tab, so the panel's own state agrees with what is in front.
     /// </summary>
     /// <remarks>
@@ -2280,10 +2343,13 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.D4, AppCommand.Priority4, Scope.Outline),
         (Keys.Control | Keys.L, AppCommand.Labels, Scope.Outline),
         (Keys.Control | Keys.R, AppCommand.Reminders, Scope.Outline),
-        (Keys.Tab, AppCommand.Indent, Scope.Outline),
-        (Keys.Shift | Keys.Tab, AppCommand.Outdent, Scope.Outline),
-        (Keys.Alt | Keys.Up, AppCommand.MoveUp, Scope.Outline),
-        (Keys.Alt | Keys.Down, AppCommand.MoveDown, Scope.Outline),
+        // Ctrl and an arrow, all four of them: the two that change a task's depth and the two
+        // that change its place, laid out the way the outline itself is. Tab is left to move
+        // the focus, which is the one thing every other window in Windows uses it for.
+        (Keys.Control | Keys.Right, AppCommand.Indent, Scope.Outline),
+        (Keys.Control | Keys.Left, AppCommand.Outdent, Scope.Outline),
+        (Keys.Control | Keys.Up, AppCommand.MoveUp, Scope.Outline),
+        (Keys.Control | Keys.Down, AppCommand.MoveDown, Scope.Outline),
         (Keys.Delete, AppCommand.Delete, Scope.Outline),
 
         // Kept off the window, where it would take Ctrl+Z away from every text box in it — undoing
@@ -2306,12 +2372,10 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.Alt | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
         (Keys.F5, AppCommand.SyncNow, Scope.Window),
         (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
-        // F4 shows and hides the panel; Ctrl+E goes straight to writing in it. The other way round
-        // until the two were one panel, when the key everyone reaches for stopped belonging to the
-        // thing that merely puts it on screen.
+        // F4 shows and hides the panel; the other two pick which of its tabs is in front.
         (Keys.F4, AppCommand.ToggleDescription, Scope.Window),
-        (Keys.Control | Keys.E, AppCommand.EditDescription, Scope.Window),
-        (Keys.Control | Keys.M, AppCommand.ToggleComments, Scope.Window),
+        (Keys.Control | Keys.E, AppCommand.ViewDescription, Scope.Window),
+        (Keys.Control | Keys.M, AppCommand.ViewComments, Scope.Window),
 
         // The key the menu shows first, then the number pad's own, which people reach for without
         // thinking and which is a different key code entirely.
@@ -2323,8 +2387,11 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.NumPad0, AppCommand.ZoomReset, Scope.Window),
         (Keys.Control | Keys.F, AppCommand.Search, Scope.Window),
         (Keys.Control | Keys.K, AppCommand.Palette, Scope.Window),
-        (Keys.Control | Keys.Up, AppCommand.PreviousView, Scope.Window),
-        (Keys.Control | Keys.Down, AppCommand.NextView, Scope.Window),
+        // Alt and an arrow, since Ctrl and one now moves the task under the cursor. Moving a
+        // task is the thing done often and from the outline; changing view is the rarer move
+        // and has to work from anywhere, which is what earns it the window-wide binding.
+        (Keys.Alt | Keys.Up, AppCommand.PreviousView, Scope.Window),
+        (Keys.Alt | Keys.Down, AppCommand.NextView, Scope.Window),
         (Keys.Control | Keys.Oemcomma, AppCommand.Settings, Scope.Window),
     ];
 
@@ -2368,6 +2435,8 @@ internal sealed class MainForm : Form
             >= Keys.D0 and <= Keys.D9 => ((char)('0' + (code - Keys.D0))).ToString(),
             Keys.Up => "↑",
             Keys.Down => "↓",
+            Keys.Left => "←",
+            Keys.Right => "→",
             Keys.Delete => "Del",
             Keys.Oemcomma => ",",
 
@@ -2688,28 +2757,12 @@ internal sealed class MainForm : Form
                 Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
-            case AppCommand.EditDescription:
-                Guarded(() =>
-                {
-                    // From the comments this is a way across as well as a way in: come off that tab
-                    // and start writing, rather than toggling whatever the description was left on
-                    // — which from over there would as likely stop an edit as start one.
-                    if (_showingComments)
-                    {
-                        ShowComments(showing: false);
-                        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
-                        return;
-                    }
-
-                    if (_writingDescription)
-                        StopWriting();
-                    else
-                        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
-                });
+            case AppCommand.ViewDescription:
+                Guarded(() => ShowPanelTab(comments: false));
                 return false;
 
-            case AppCommand.ToggleComments:
-                Guarded(() => ShowComments(!_showingComments));
+            case AppCommand.ViewComments:
+                Guarded(() => ShowPanelTab(comments: true));
                 return false;
 
             case AppCommand.ZoomIn:
@@ -2912,8 +2965,8 @@ internal sealed class MainForm : Form
         if (command == AppCommand.None)
             return;
 
-        // A task command with no row under the cursor was never handled here, and letting the key
-        // through is what keeps Tab moving the focus on out of an empty list.
+        // A task command with no row under the cursor was never handled here: swallowing the key
+        // would leave an empty list eating keystrokes that mean nothing in it.
         if (Presentation.Commands.IsTaskCommand(command) && _outline.SelectedId is null)
             return;
 
@@ -3023,7 +3076,12 @@ internal sealed class MainForm : Form
     /// <returns>True when a task was queued</returns>
     private bool AddSubtask(string parentId)
     {
-        var text = InputDialog.Ask(this, "New sub-task", "Sub-task:");
+        // Named rather than left to be remembered. Raised by the keystroke there is no menu open
+        // over the row to say which task it was, and the row itself can be scrolled out of sight by
+        // the time the dialog is up — so the prompt says what it is about to hang the sub-task on.
+        var parent = _outline.Rows.FirstOrDefault(r => r.Id == parentId)?.Content;
+
+        var text = InputDialog.AskForSubtask(this, parent);
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
