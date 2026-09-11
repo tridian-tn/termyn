@@ -127,10 +127,6 @@ public class SearchBoxTests
         Assert.Contains(box.ResetGlyph, new[] { native, plain });
     }
 
-    /// <summary>WM_KEYDOWN, and the virtual key for Escape.</summary>
-    private const int WmKeyDown = 0x0100;
-
-    /// <summary>Presses a key at the box the way the message loop would, so the binding runs.</summary>
     /// <summary>
     /// The keystroke, said outright rather than left to PreProcessMessage to mix with whatever
     /// modifier the real keyboard is holding.

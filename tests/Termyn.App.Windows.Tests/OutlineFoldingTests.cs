@@ -67,9 +67,6 @@ public class OutlineFoldingTests
         Assert.Fail($"'{id}' would not select — the list says {view.SelectedId ?? "nothing"} is selected.");
     }
 
-    /// <summary>WM_KEYDOWN, and a press of one key at the list the way the message loop delivers it.</summary>
-    private const int WmKeyDown = 0x0100;
-
     /// <summary>
     /// The keystroke, said outright.
     /// </summary>
