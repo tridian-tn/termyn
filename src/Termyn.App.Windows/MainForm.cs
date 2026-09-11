@@ -3076,9 +3076,9 @@ internal sealed class MainForm : Form
     /// <returns>True when a task was queued</returns>
     private bool AddSubtask(string parentId)
     {
-        // Named rather than left to be remembered. The command reaches here from the palette and
-        // from a keystroke as well as from a menu opened over the row, so which task is about to
-        // gain a child isn't always the one the user was last looking at.
+        // Named rather than left to be remembered. Raised by the keystroke there is no menu open
+        // over the row to say which task it was, and the row itself can be scrolled out of sight by
+        // the time the dialog is up — so the prompt says what it is about to hang the sub-task on.
         var parent = _outline.Rows.FirstOrDefault(r => r.Id == parentId)?.Content;
 
         var text = InputDialog.AskForSubtask(this, parent);

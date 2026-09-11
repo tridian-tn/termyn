@@ -56,6 +56,20 @@ public class DialogTests
     }
 
     [WinFormsFact]
+    public void An_ampersand_in_a_task_name_is_a_character_and_not_an_accelerator()
+    {
+        // What a task is called is the account's text. Left to WinForms defaults, "Books & Papers"
+        // is drawn "Books Papers" with the P underlined — a name the user never gave it.
+        using var dialog = InputDialog.Subtask("Books & Papers");
+        dialog.CreateControl();
+
+        var line = Every(dialog).OfType<Label>().Single(l => l.Text.StartsWith("Under:", StringComparison.Ordinal));
+
+        Assert.Equal("Under: Books & Papers", line.Text);
+        Assert.False(line.UseMnemonic, "the line would eat the ampersand");
+    }
+
+    [WinFormsFact]
     public void A_prompt_with_nothing_to_name_says_nothing()
     {
         // Every other caller has one thing it could be acting on and has already said so in the

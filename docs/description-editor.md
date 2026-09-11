@@ -170,7 +170,8 @@ code for architectures this build doesn't target. Prunable, but somebody has to 
 The panel is a single pane showing the rendering. `Enter`, `F2` or a double-click opens the markdown
 to type into, with the caret where the reading was pointing; `Escape` or the focus leaving puts it
 back and saves. A single click still selects and still follows a link. A task with no description opens
-ready to write. `Ctrl+E` opens and closes the panel; `showPreview` and `previewWidth` retire.
+ready to write. `F4` opens and closes the panel; `Ctrl+E` and `Ctrl+M` pick which of its two tabs is in front.
+`showPreview` and `previewWidth` retire.
 
 The case turns on how much of the highlighting the control can be left to do. Configured, Lexilla
 does most of it — but not checklists, not bare URLs, and not a list or quotation opening a

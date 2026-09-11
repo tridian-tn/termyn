@@ -38,6 +38,11 @@ internal sealed class InputDialog : Form
                 Size = new Size(392, 20),
                 ForeColor = SystemColors.GrayText,
                 AutoEllipsis = true,
+
+                // What a task is called is the account's text, not a caption this window wrote, so
+                // an ampersand in it is a character and not the mark of an accelerator. Left on, a
+                // task called "Books & Papers" reads "Books Papers" with the P underlined.
+                UseMnemonic = false,
             });
         }
 
