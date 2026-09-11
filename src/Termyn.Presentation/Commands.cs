@@ -254,16 +254,18 @@ public static class Commands
                 context.ShowingDescription),
 
             // The two tabs the panel holds, each named for what it puts in front. Neither is a
-            // toggle: asking for the one already in front does nothing, the same as clicking the
-            // tab you are already on, and neither carries a tick. The tab strip itself says which
-            // is showing — a tick here would be that fact said a second time, and two ways of
-            // saying it are two things that can disagree.
+            // toggle and neither carries a tick: they say where to go rather than what is on.
             //
-            // Left enabled on the tab you are already on rather than greyed. Greying is the tick
-            // again in another costume, and an entry that comes and goes is harder to find than one
-            // that is always there and sometimes does nothing.
-            AppCommand.ViewDescription => Always("View description"),
-            AppCommand.ViewComments => Always("Comments"),
+            // Greyed on the tab already in front, which is the rule every other entry here is
+            // greyed by — running it now would do nothing. A shut panel greys neither, since from
+            // there both have somewhere to take you.
+            AppCommand.ViewDescription => new CommandState(
+                "View description",
+                !context.ShowingDescription || context.ShowingComments),
+
+            AppCommand.ViewComments => new CommandState(
+                "View comments",
+                !context.ShowingDescription || !context.ShowingComments),
 
             // The description panel already zooms to the wheel; these are the same thing said out
             // loud, for anybody who doesn't know the wheel does it. Offered on the same terms as
@@ -298,11 +300,16 @@ public static class Commands
 
         // Only the three kinds the sidebar lets you rename or delete; a smart view or a saved
         // filter is not ours to change from here.
+        //
+        // Greyed over one of those, and named for a project while it is. "Rename item" left the
+        // reader to work out which item, and over Today the answer was none — so the greyed entry
+        // read as a thing that should have worked. Naming the commonest of the three says what the
+        // entry is for at the same time as saying it can't be used on this.
         CommandState Selection(string format)
         {
             var kind = NameOf(context.Selection?.Kind);
             return new CommandState(
-                string.Format(format, kind ?? "item"),
+                string.Format(format, kind ?? "project"),
                 kind is not null);
         }
     }

@@ -295,6 +295,26 @@ public class MenuTests
         Assert.False(Find(built, "Add to favourites").Enabled);
     }
 
+    [WinFormsTheory]
+    [InlineData(SidebarKind.SmartView)]
+    [InlineData(SidebarKind.Filter)]
+    [InlineData(SidebarKind.Header)]
+    [InlineData(null)]
+    public void Over_something_it_cannot_rename_the_entry_still_names_a_project(SidebarKind? kind)
+    {
+        // "Rename item" left the reader to work out which item, and over Today the answer was none
+        // — so the greyed entry read as something that ought to have worked. Naming the commonest
+        // of the three kinds says what the entry is for while saying it can't be used on this.
+        var context = kind is null
+            ? CommandContext.Empty
+            : new CommandContext(Selection: Node(kind.Value));
+
+        using var built = Build(Organise, context);
+
+        Assert.False(Find(built, "Rename project").Enabled);
+        Assert.False(Find(built, "Delete project").Enabled);
+    }
+
     [WinFormsFact]
     public void Nothing_in_the_sidebar_menu_is_offered_over_a_smart_view()
     {
@@ -331,37 +351,54 @@ public class MenuTests
     }
 
     [WinFormsFact]
-    public void The_two_tabs_are_offered_whatever_the_panel_is_doing()
+    public void Each_tab_entry_is_greyed_on_the_tab_it_names()
     {
-        // Neither names a state, so neither has a state to be greyed by. Asking for the tab already
-        // in front does nothing, which is a thing the command decides rather than the menu — and an
-        // entry that came and went with the panel would be harder to find than one that is always
-        // there.
-        using var closed = Build(View, CommandContext.Empty);
+        // The rule every other entry here is greyed by: running it now would do nothing. And it is
+        // what says which of the two is in front, now that neither carries a tick.
         using var reading = Build(View, new CommandContext(ShowingDescription: true));
         using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
 
-        foreach (var built in new[] { closed, reading, comments })
-        {
-            Assert.True(Find(built, "View description").Enabled);
-            Assert.True(Find(built, "Comments").Enabled);
-        }
+        Assert.False(Find(reading, "View description").Enabled);
+        Assert.True(Find(reading, "View comments").Enabled);
+
+        Assert.True(Find(comments, "View description").Enabled);
+        Assert.False(Find(comments, "View comments").Enabled);
+    }
+
+    [WinFormsFact]
+    public void A_shut_panel_greys_neither_of_them()
+    {
+        // From there both have somewhere to take you, so greying either would be refusing a move
+        // that works.
+        using var closed = Build(View, CommandContext.Empty);
+
+        Assert.True(Find(closed, "View description").Enabled);
+        Assert.True(Find(closed, "View comments").Enabled);
+    }
+
+    [WinFormsFact]
+    public void Writing_in_the_description_is_still_the_description_tab()
+    {
+        // The markdown and its rendering are two faces of one tab, not a third thing. Typing into
+        // it mustn't make "View description" offer to take you somewhere you already are.
+        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
+
+        Assert.False(Find(writing, "View description").Enabled);
+        Assert.True(Find(writing, "View comments").Enabled);
     }
 
     [WinFormsFact]
     public void Neither_tab_entry_carries_a_tick()
     {
-        // The tab strip already says which one is in front. A tick would be the same fact said a
-        // second time, and two ways of saying it are two things that can disagree.
+        // The greying says which is in front. A tick as well would be the same fact kept in two
+        // places, and two ways of saying it are two things that can disagree.
         using var description = Build(View, new CommandContext(ShowingDescription: true));
         using var comments = Build(View, new CommandContext(ShowingDescription: true, ShowingComments: true));
-        using var writing = Build(View, new CommandContext(ShowingDescription: true, WritingDescription: true));
 
         Assert.False(Find(description, "View description").Checked);
-        Assert.False(Find(description, "Comments").Checked);
+        Assert.False(Find(description, "View comments").Checked);
         Assert.False(Find(comments, "View description").Checked);
-        Assert.False(Find(comments, "Comments").Checked);
-        Assert.False(Find(writing, "View description").Checked);
+        Assert.False(Find(comments, "View comments").Checked);
     }
 
     [WinFormsFact]
