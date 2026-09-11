@@ -1451,7 +1451,7 @@ internal sealed class MainForm : Form
         // The same rule the Organise menu greys by, asked of the same place: a smart view isn't
         // ours to rename, and a section has no star to take off.
         var node = _sidebar.SelectedNode?.Tag as SidebarNode;
-        if (!Presentation.Commands.StateOf(command, new CommandContext(Selection: node)).Enabled)
+        if (!Presentation.Commands.StateOf(command, NewContext(node)).Enabled)
             return;
 
         e.Handled = true;
@@ -2364,6 +2364,12 @@ internal sealed class MainForm : Form
         // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
         (Keys.Control | Keys.Shift | Keys.F, AppCommand.ToggleFavourite, Scope.Sidebar),
 
+        // Shift as well as Ctrl, where a task makes do with Ctrl. Reordering the sidebar is a rare
+        // and deliberate thing, and the harder reach is the point: a project shifted by a stray
+        // finger is a change nobody sees happen and nobody thinks to look for.
+        (Keys.Control | Keys.Shift | Keys.Up, AppCommand.MoveSelectionUp, Scope.Sidebar),
+        (Keys.Control | Keys.Shift | Keys.Down, AppCommand.MoveSelectionDown, Scope.Sidebar),
+
         // Anywhere in the window.
         (Keys.Control | Keys.N, AppCommand.NewTask, Scope.Window),
         (Keys.Insert, AppCommand.NewTask, Scope.Window),
@@ -2457,10 +2463,23 @@ internal sealed class MainForm : Form
     /// What the menus should be reading from right now — what is selected where, and what can be
     /// done to it. Gathered per open, so nothing has to be kept in step between times.
     /// </summary>
-    private CommandContext Context() => new(
+    private CommandContext Context()
+    {
+        var selection = _sidebar.SelectedNode?.Tag as SidebarNode;
+
+        return NewContext(selection);
+    }
+
+    /// <summary>
+    /// The same, for a row that isn't the one selected. Internal so a test can ask what a menu
+    /// would say over a given row without driving the tree to stand on it.
+    /// </summary>
+    /// <param name="selection">The sidebar row to answer about, or null for none</param>
+    /// <returns>What the menus would read from</returns>
+    internal CommandContext NewContext(SidebarNode? selection) => new(
         _outline.SelectedRow,
         _presenter.AbilitiesFor(_outline.SelectedId),
-        _sidebar.SelectedNode?.Tag as SidebarNode,
+        selection,
         _presenter.ShowingCompleted,
         _presenter.CanUndo,
         _presenter.Sort,
@@ -2469,7 +2488,8 @@ internal sealed class MainForm : Form
         _showingComments,
         Zoomed,
         _presenter.CanExpandAll,
-        _presenter.CanCollapseAll);
+        _presenter.CanCollapseAll,
+        _presenter.SelectionAbilitiesFor(selection));
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -2837,8 +2857,32 @@ internal sealed class MainForm : Form
             AppCommand.RenameSelection => RenameStructure(node),
             AppCommand.DeleteSelection => DeleteStructure(node),
             AppCommand.ToggleFavourite => ToggleFavourite(node),
+            AppCommand.MoveSelectionUp => MoveStructure(node, -1),
+            AppCommand.MoveSelectionDown => MoveStructure(node, 1),
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Moves a project or a section one place, and keeps the tree's cursor on it.
+    /// </summary>
+    /// <remarks>
+    /// The sidebar is rebuilt from the presenter after a write, and it finds its row again by key —
+    /// which a move doesn't change. So nothing has to be put back here; what would go wrong without
+    /// saying so is the focus, since a rebuild hands it nowhere in particular.
+    /// </remarks>
+    /// <param name="node">The row to move</param>
+    /// <param name="offset">How far, and which way</param>
+    /// <returns>True when it wrote</returns>
+    private bool MoveStructure(SidebarNode node, int offset)
+    {
+        var moved = false;
+        Guarded(() => moved = _presenter.MoveSelection(node, offset));
+
+        if (moved)
+            _sidebar.Focus();
+
+        return moved;
     }
 
     /// <summary>Stars a project or a label, or takes the star off.</summary>

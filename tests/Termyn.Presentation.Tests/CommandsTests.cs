@@ -61,15 +61,65 @@ public class CommandsTests
     }
 
     [Fact]
-    public void The_selection_commands_are_the_ones_that_need_a_sidebar_row()
+    public void No_selection_command_is_offered_without_a_sidebar_row()
     {
         Assert.All(
             Enum.GetValues<AppCommand>().Where(Commands.IsSelectionCommand),
-            c =>
-            {
-                Assert.False(State(c).Enabled);
-                Assert.True(State(c, new CommandContext(Selection: Node(SidebarKind.Project))).Enabled);
-            });
+            c => Assert.False(State(c).Enabled, $"{c} was offered with nothing selected"));
+    }
+
+    [Fact]
+    public void A_project_is_something_every_selection_command_can_act_on()
+    {
+        // The two that move it want somewhere to move to as well, which the row alone can't say —
+        // so they are given it here rather than left out of the sweep.
+        var anywhere = new TaskAbilities(CanMoveUp: true, CanMoveDown: true);
+        var context = new CommandContext(Selection: Node(SidebarKind.Project), SelectionAbilities: anywhere);
+
+        Assert.All(
+            Enum.GetValues<AppCommand>().Where(Commands.IsSelectionCommand),
+            c => Assert.True(State(c, context).Enabled, $"{c} was refused over a project"));
+    }
+
+    [Fact]
+    public void Moving_a_row_is_greyed_at_the_end_it_has_reached()
+    {
+        // The top of the list and the bottom, which is also how the pair says where the row sits.
+        var top = new CommandContext(
+            Selection: Node(SidebarKind.Project),
+            SelectionAbilities: new TaskAbilities(CanMoveDown: true));
+
+        Assert.False(State(AppCommand.MoveSelectionUp, top).Enabled);
+        Assert.True(State(AppCommand.MoveSelectionDown, top).Enabled);
+    }
+
+    [Theory]
+    [InlineData(SidebarKind.Project, "Move project up", "Move project down")]
+    [InlineData(SidebarKind.Section, "Move section up", "Move section down")]
+    public void Moving_a_row_names_what_it_would_shift(SidebarKind kind, string up, string down)
+    {
+        // "Move up" over a sidebar holding six kinds of row doesn't say what is about to shift.
+        var context = new CommandContext(
+            Selection: Node(kind),
+            SelectionAbilities: new TaskAbilities(CanMoveUp: true, CanMoveDown: true));
+
+        Assert.Equal(up, State(AppCommand.MoveSelectionUp, context).Label);
+        Assert.Equal(down, State(AppCommand.MoveSelectionDown, context).Label);
+    }
+
+    [Theory]
+    [InlineData(SidebarKind.Label)]
+    [InlineData(SidebarKind.Filter)]
+    [InlineData(SidebarKind.SmartView)]
+    public void A_row_with_no_order_of_its_own_is_not_something_to_move(SidebarKind kind)
+    {
+        // A label is sorted by the account and a smart view is in a list nobody chose. Neither has
+        // a place for a keystroke to change, and both still name a project while saying so.
+        var context = new CommandContext(Selection: Node(kind));
+
+        Assert.False(State(AppCommand.MoveSelectionUp, context).Enabled);
+        Assert.False(State(AppCommand.MoveSelectionDown, context).Enabled);
+        Assert.Equal("Move project up", State(AppCommand.MoveSelectionUp, context).Label);
     }
 
     // ---- Labels that move ----------------------------------------------------------------------

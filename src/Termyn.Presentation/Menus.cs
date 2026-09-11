@@ -125,7 +125,12 @@ public static class Menus
             "&Organise",
             MenuEntry.Of(AppCommand.RenameSelection),
             MenuEntry.Of(AppCommand.DeleteSelection),
-            MenuEntry.AfterRule(AppCommand.ToggleFavourite)),
+            MenuEntry.AfterRule(AppCommand.ToggleFavourite),
+
+            // Their own group at the end. Moving a project is a rare and deliberate thing, and it
+            // has no business sitting next to the entry that renames one.
+            MenuEntry.AfterRule(AppCommand.MoveSelectionUp),
+            MenuEntry.Of(AppCommand.MoveSelectionDown)),
 
         MenuEntry.Group(
             "&Help",

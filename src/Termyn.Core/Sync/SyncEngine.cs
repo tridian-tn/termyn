@@ -735,6 +735,34 @@ public sealed class SyncEngine
     }
 
     /// <summary>
+    /// How one kind of thing is reordered: what the command is called, and what it calls the array
+    /// and the position inside it.
+    /// </summary>
+    /// <remarks>
+    /// Three near-identical commands differing in four words, so the words are the data and the
+    /// work is written once. It also gives the outbox something to ask: a queued reorder owns the
+    /// positions it names until it lands, and a cancelled one has to put them back, and both of
+    /// those had to know what a reorder looked like.
+    /// </remarks>
+    /// <param name="Command">The Todoist command type</param>
+    /// <param name="Field">What its args call the array of things being placed</param>
+    /// <param name="Order">What each entry calls its new position</param>
+    /// <param name="Resource">Which resource the ids inside it belong to</param>
+    private sealed record Reorder(string Command, string Field, string Order, string Resource)
+    {
+        public static readonly Reorder Items = new("item_reorder", "items", "child_order", ResourceType.Items);
+
+        public static readonly Reorder Projects = new("project_reorder", "projects", "child_order", ResourceType.Projects);
+
+        public static readonly Reorder Sections = new("section_reorder", "sections", "section_order", ResourceType.Sections);
+
+        public static readonly IReadOnlyList<Reorder> All = [Items, Projects, Sections];
+
+        /// <summary>The kind a queued command is, or null when it isn't a reorder at all.</summary>
+        public static Reorder? For(string command) => All.FirstOrDefault(r => r.Command == command);
+    }
+
+    /// <summary>
     /// Moves a task one place up or down among its siblings — the tasks sharing its project and
     /// parent — and queues an <c>item_reorder</c>. Ordering is computed over the whole sibling set,
     /// never over a filtered view, so hidden tasks keep their positions.
@@ -750,13 +778,10 @@ public sealed class SyncEngine
                 return false;
 
             var (_, siblings, from) = placement;
-            if (MoveTarget(siblings, from, offset) is not { } to)
+            if (MoveTarget(siblings, from, offset, i => i.Completed) is not { } to)
                 return false;
 
-            var ids = siblings.Select(i => i.Id).ToList();
-            ids.RemoveAt(from);
-            ids.Insert(to, id);
-            ReorderLocked(ids);
+            ReorderLocked(Reorder.Items, Moved(siblings.Select(i => i.Id).ToList(), from, to));
             return true;
         }
     }
@@ -768,9 +793,120 @@ public sealed class SyncEngine
         {
             id = Promoted(id);
 
-            return Placement(id) is { } p && MoveTarget(p.Siblings, p.Index, offset) is not null;
+            return Placement(id) is { } p && MoveTarget(p.Siblings, p.Index, offset, i => i.Completed) is not null;
         }
 
+    }
+
+    /// <summary>
+    /// Moves a project one place up or down among the projects sharing its parent, and queues a
+    /// <c>project_reorder</c>.
+    /// </summary>
+    /// <remarks>
+    /// The Inbox is left out of the reckoning and can't be moved itself: Todoist keeps it at the
+    /// head of the list wherever its order says it should be, so letting it take part would send
+    /// the server positions it quietly ignores and leave the sidebar disagreeing with the app.
+    /// </remarks>
+    /// <param name="id">The project to move</param>
+    /// <param name="offset">How far, and which way — negative is up the list</param>
+    /// <returns>False when it's already at that end, or isn't ours to move</returns>
+    public bool MoveProject(string id, int offset) => MoveStructure(Reorder.Projects, id, offset, act: true);
+
+    /// <summary>Whether <see cref="MoveProject"/> would move it.</summary>
+    public bool CanMoveProject(string id, int offset) => MoveStructure(Reorder.Projects, id, offset, act: false);
+
+    /// <summary>
+    /// Moves a section one place up or down within its project, and queues a <c>section_reorder</c>.
+    /// </summary>
+    /// <param name="id">The section to move</param>
+    /// <param name="offset">How far, and which way — negative is up the list</param>
+    /// <returns>False when it's already at that end, or isn't ours to move</returns>
+    public bool MoveSection(string id, int offset) => MoveStructure(Reorder.Sections, id, offset, act: true);
+
+    /// <summary>Whether <see cref="MoveSection"/> would move it.</summary>
+    public bool CanMoveSection(string id, int offset) => MoveStructure(Reorder.Sections, id, offset, act: false);
+
+    /// <summary>
+    /// The move and the question of whether there is one to make, which are the same walk.
+    /// </summary>
+    /// <param name="kind">Which of the two structures is being moved</param>
+    /// <param name="id">The project or section to move</param>
+    /// <param name="offset">How far, and which way</param>
+    /// <param name="act">Whether to queue the reorder, or only report that it could be made</param>
+    /// <returns>Whether the move is one that can be made</returns>
+    private bool MoveStructure(Reorder kind, string id, int offset, bool act)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+
+            var siblings = kind == Reorder.Projects ? ProjectSiblings(id) : SectionSiblings(id);
+            var from = siblings.IndexOf(id);
+            if (from < 0)
+                return false;
+
+            if (MoveTarget(siblings, from, offset, _ => false) is not { } to)
+                return false;
+
+            if (act)
+                ReorderLocked(kind, Moved(siblings, from, to));
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The projects a given one sits among: those sharing its parent, in the order they are shown.
+    /// </summary>
+    /// <remarks>
+    /// Archived projects are left out along with the Inbox. They aren't in the sidebar, so counting
+    /// them would let a keypress swap a project with something nobody can see.
+    /// </remarks>
+    /// <param name="id">The project whose neighbours are wanted</param>
+    /// <returns>Their ids in order, or empty when the project isn't one that moves</returns>
+    private List<string> ProjectSiblings(string id)
+    {
+        var projects = Model.Projects().Where(p => !p.IsArchived && !p.IsInboxProject).ToList();
+
+        if (projects.FirstOrDefault(p => p.Id == id) is not { } project)
+            return [];
+
+        return projects
+            .Where(p => p.ParentId == project.ParentId)
+            .OrderBy(p => p.ChildOrder)
+            .ThenBy(p => p.Id, StringComparer.Ordinal)
+            .Select(p => p.Id)
+            .ToList();
+    }
+
+    /// <summary>The sections a given one sits among: the rest of its project's, in shown order.</summary>
+    /// <param name="id">The section whose neighbours are wanted</param>
+    /// <returns>Their ids in order, or empty when the section isn't held</returns>
+    private List<string> SectionSiblings(string id)
+    {
+        var sections = Model.Sections().Where(s => !s.IsArchived).ToList();
+
+        if (sections.FirstOrDefault(s => s.Id == id) is not { } section)
+            return [];
+
+        // Tie-broken by name, which is what the sidebar does. By id instead, two sections the
+        // server hasn't ordered yet would be shown in one order and moved in another — and the row
+        // that appeared to swap would be whichever the two lists disagreed about.
+        return sections
+            .Where(s => s.ProjectId == section.ProjectId)
+            .OrderBy(s => s.SectionOrder)
+            .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(s => s.Id)
+            .ToList();
+    }
+
+    /// <summary>The same list with one entry lifted out and put back somewhere else.</summary>
+    private static List<string> Moved(List<string> ids, int from, int to)
+    {
+        var id = ids[from];
+        ids.RemoveAt(from);
+        ids.Insert(to, id);
+        return ids;
     }
 
     /// <summary>
@@ -778,10 +914,14 @@ public sealed class SyncEngine
     /// the end. Asked by both the move and the question of whether there is one to make, so the
     /// answer and the act can't come apart.
     /// </summary>
-    private static int? MoveTarget(List<TaskItem> siblings, int from, int offset)
+    /// <param name="siblings">Everything at that level, in the order they are held</param>
+    /// <param name="from">Where the thing being moved currently sits</param>
+    /// <param name="offset">How many places, and which way</param>
+    /// <param name="hidden">Which neighbours aren't on screen and so shouldn't be swapped with</param>
+    private static int? MoveTarget<T>(IReadOnlyList<T> siblings, int from, int offset, Func<T, bool> hidden)
     {
-        // Step over completed siblings: they aren't on screen, so swapping with one would look
-        // like the keypress did nothing.
+        // Step over neighbours nobody can see: swapping with one would look like the keypress did
+        // nothing. A completed task is the case that needs it; a project or a section has none.
         var step = Math.Sign(offset);
         var to = from;
 
@@ -791,7 +931,7 @@ public sealed class SyncEngine
             {
                 to += step;
             }
-            while (to >= 0 && to < siblings.Count && siblings[to].Completed);
+            while (to >= 0 && to < siblings.Count && hidden(siblings[to]));
 
             if (to < 0 || to >= siblings.Count)
                 return null;
@@ -1740,10 +1880,10 @@ public sealed class SyncEngine
     public void ReorderItems(IReadOnlyList<string> orderedIds)
     {
         lock (_gate)
-            ReorderLocked(orderedIds);
+            ReorderLocked(Reorder.Items, orderedIds);
     }
 
-    private void ReorderLocked(IReadOnlyList<string> orderedIds)
+    private void ReorderLocked(Reorder kind, IReadOnlyList<string> orderedIds)
     {
         var entries = new JsonArray();
         var upserts = new List<StoredResource>();
@@ -1754,31 +1894,31 @@ public sealed class SyncEngine
         foreach (var id in orderedIds.Distinct(StringComparer.Ordinal))
         {
             // Skip ids we no longer hold: sending them would fail forever in the outbox.
-            if (Model.Get(ResourceType.Items, id) is not { } existing)
+            if (Model.Get(kind.Resource, id) is not { } existing)
                 continue;
 
             order++;
 
-            // Only the tasks whose position actually changed need sending. Without this a one-place
-            // move rewrites and re-persists every sibling in the project.
-            if (JsonRead.Int(existing, "child_order") == order)
+            // Only the ones whose position actually changed need sending. Without this a one-place
+            // move rewrites and re-persists every sibling there is.
+            if (JsonRead.Int(existing, kind.Order) == order)
                 continue;
 
-            entries.Add(new JsonObject { ["id"] = id, ["child_order"] = order });
+            entries.Add(new JsonObject { ["id"] = id, [kind.Order] = order });
             priors.Add(existing.DeepClone());
 
             var clone = existing.DeepClone().AsObject();
-            clone["child_order"] = order;
-            upserts.Add(new StoredResource(ResourceType.Items, id, clone.ToJsonString()));
+            clone[kind.Order] = order;
+            upserts.Add(new StoredResource(kind.Resource, id, clone.ToJsonString()));
             updated.Add((id, clone));
         }
 
         if (entries.Count == 0)
             return;
 
-        Persist("item_reorder", new JsonObject { ["items"] = entries }, null, priors.ToJsonString(), upserts, []);
+        Persist(kind.Command, new JsonObject { [kind.Field] = entries }, null, priors.ToJsonString(), upserts, []);
         foreach (var (id, json) in updated)
-            Model.Upsert(ResourceType.Items, id, json);
+            Model.Upsert(kind.Resource, id, json);
     }
 
     /// <summary>
@@ -2088,10 +2228,15 @@ public sealed class SyncEngine
                     }
                 }
 
-                // A reorder holds its ids in an array; missing these would send the server a temp id.
-                if (args["items"] is JsonArray items)
+                // A reorder holds its ids in an array; missing these would send the server a temp
+                // id. All three arrays, since a project or a section can be added and then moved
+                // before the server has named it, the same as a task.
+                foreach (var kind in Reorder.All)
                 {
-                    foreach (var entry in items)
+                    if (args[kind.Field] is not JsonArray placed)
+                        continue;
+
+                    foreach (var entry in placed)
                     {
                         if (entry is JsonObject o && o["id"] is JsonValue entryId && entryId.ToString() == temp)
                         {
@@ -2197,7 +2342,7 @@ public sealed class SyncEngine
         foreach (var change in response.Changes)
         {
             var key = new ResourceKey(change.ResourceType, change.Id);
-            var held = pendingKeys.Contains(key) || reorderedKeys.Contains(key);
+            var held = pendingKeys.Contains(key) || reorderedKeys.ContainsKey(key);
 
             // Hold the deletion until the local write that covers this resource resolves; a queued
             // command must not be left naming a task the server has already removed.
@@ -2223,11 +2368,12 @@ public sealed class SyncEngine
                 var clone = change.Json.DeepClone().AsObject();
 
                 // A pending reorder only owns the position, so take everything else the server sends
-                // rather than dropping the change — the token advances past it either way.
-                if (reorderedKeys.Contains(key)
-                    && Model.Get(change.ResourceType, change.Id)?["child_order"] is { } localOrder)
+                // rather than dropping the change — the token advances past it either way. Which
+                // field the position lives in comes with the key, since the three kinds disagree.
+                if (reorderedKeys.TryGetValue(key, out var placedIn)
+                    && Model.Get(change.ResourceType, change.Id)?[placedIn] is { } localOrder)
                 {
-                    clone["child_order"] = localOrder.DeepClone();
+                    clone[placedIn] = localOrder.DeepClone();
                 }
 
                 Model.Upsert(change.ResourceType, change.Id, clone);
@@ -2252,7 +2398,7 @@ public sealed class SyncEngine
                 foreach (var id in Model.Keys(type))
                 {
                     var stale = new ResourceKey(type, id);
-                    if (live.Contains(stale) || pendingKeys.Contains(stale) || reorderedKeys.Contains(stale))
+                    if (live.Contains(stale) || pendingKeys.Contains(stale) || reorderedKeys.ContainsKey(stale))
                         continue;
 
                     if (Model.Remove(type, id))
@@ -2264,7 +2410,7 @@ public sealed class SyncEngine
         for (var i = _deferredDeletes.Count - 1; i >= 0; i--)
         {
             var deferred = _deferredDeletes[i];
-            if (pendingKeys.Contains(deferred) || reorderedKeys.Contains(deferred))
+            if (pendingKeys.Contains(deferred) || reorderedKeys.ContainsKey(deferred))
                 continue;
             _deferredDeletes.RemoveAt(i);
             Forget(deferred.Type, deferred.Id);
@@ -2310,8 +2456,8 @@ public sealed class SyncEngine
         {
             // A cancelled reorder's other tasks keep a position the server will never be told about,
             // so put them back — except the ones being rolled back here anyway.
-            if (d.Type == "item_reorder" && d.PriorJson is { } priors)
-                RestorePositions(priors, doomedIds);
+            if (Reorder.For(d.Type) is { } kind && d.PriorJson is { } priors)
+                RestorePositions(kind, priors, doomedIds);
 
             if (IsCreate(d) && d.TempId is { } temp)
                 RemoveObject(temp);
@@ -2321,7 +2467,7 @@ public sealed class SyncEngine
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());
     }
 
-    private void RestorePositions(string priorJson, HashSet<string> skip)
+    private void RestorePositions(Reorder kind, string priorJson, HashSet<string> skip)
     {
         JsonNode? node;
         try
@@ -2342,12 +2488,12 @@ public sealed class SyncEngine
                 continue;
 
             var id = idValue.ToString();
-            if (skip.Contains(id) || Model.Get(ResourceType.Items, id) is null)
+            if (skip.Contains(id) || Model.Get(kind.Resource, id) is null)
                 continue;
 
             var copy = obj.DeepClone().AsObject();
-            _store.PutResource(ResourceType.Items, id, copy.ToJsonString());
-            Model.Upsert(ResourceType.Items, id, copy);
+            _store.PutResource(kind.Resource, id, copy.ToJsonString());
+            Model.Upsert(kind.Resource, id, copy);
         }
     }
 
@@ -2378,27 +2524,60 @@ public sealed class SyncEngine
     }
 
     /// <summary>
-    /// Tasks named by a queued reorder. Their position is ours until it lands, but nothing else
-    /// about them is, so they are tracked apart from resources with a genuine pending edit.
+    /// What a queued reorder has placed, and which field holds the position it placed it in.
     /// </summary>
-    private HashSet<ResourceKey> PendingReorderKeys()
+    /// <remarks>
+    /// The position is ours until the command lands, but nothing else about the resource is, so
+    /// these are tracked apart from resources with a genuine pending edit.
+    ///
+    /// The field comes back with the key because it isn't the same field for all three: a section
+    /// keeps its place in <c>section_order</c>. Held as one name, a pending section reorder would
+    /// protect a <c>child_order</c> it doesn't have and lose the order it does.
+    /// </remarks>
+    /// <returns>Each placed resource, against the name of the field holding its position</returns>
+    private Dictionary<ResourceKey, string> PendingReorderKeys()
     {
-        var keys = new HashSet<ResourceKey>();
+        var held = new Dictionary<ResourceKey, string>();
+
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
-            foreach (var id in NestedIds(ParseArgs(c)))
-                keys.Add(new ResourceKey(ResourceTypeFor(c), id));
-        return keys;
+        {
+            var args = ParseArgs(c);
+
+            foreach (var kind in Reorder.All)
+            {
+                if (args[kind.Field] is not JsonArray placed)
+                    continue;
+
+                foreach (var entry in placed)
+                    if (entry is JsonObject o && o["id"] is JsonValue id)
+                        held[new ResourceKey(ResourceTypeFor(c), id.ToString())] = kind.Order;
+            }
+        }
+
+        return held;
     }
 
-    /// <summary>Ids carried in a command's <c>items</c> array, as a reorder does.</summary>
+    /// <summary>
+    /// Ids a reorder carries in its array, whichever of the three arrays that is.
+    /// </summary>
+    /// <remarks>
+    /// All three field names are looked for rather than the one belonging to this command's type.
+    /// Nothing else queued uses any of them, and asking by type would mean the caller knowing which
+    /// kind of reorder it had before it could find out whether it had one at all.
+    /// </remarks>
+    /// <param name="args">A queued command's arguments</param>
+    /// <returns>The ids it places, or nothing when it places none</returns>
     private static IEnumerable<string> NestedIds(JsonObject args)
     {
-        if (args["items"] is not JsonArray items)
-            yield break;
+        foreach (var kind in Reorder.All)
+        {
+            if (args[kind.Field] is not JsonArray placed)
+                continue;
 
-        foreach (var entry in items)
-            if (entry is JsonObject o && o["id"] is JsonValue id)
-                yield return id.ToString();
+            foreach (var entry in placed)
+                if (entry is JsonObject o && o["id"] is JsonValue id)
+                    yield return id.ToString();
+        }
     }
 
     /// <summary>

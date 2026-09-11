@@ -1381,6 +1381,62 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>
+    /// Moves a project or a section one place up or down among the rows it sits with.
+    /// </summary>
+    /// <remarks>
+    /// A favourited project is two rows in the sidebar and one project underneath, so a move made
+    /// from either row moves the same thing. What it looks like from the Favourites copy is the
+    /// list under Projects reordering, which is the truthful answer: the star is a second place to
+    /// find it, not a second place for it to live.
+    /// </remarks>
+    /// <param name="node">The sidebar row to move</param>
+    /// <param name="offset">How far, and which way — negative is up the list</param>
+    /// <returns>False when it was already at that end, so the caller can skip a needless sync</returns>
+    public bool MoveSelection(SidebarNode node, int offset)
+    {
+        var moved = node.Kind switch
+        {
+            SidebarKind.Project => _engine.MoveProject(node.Id, offset),
+            SidebarKind.Section => _engine.MoveSection(node.Id, offset),
+            _ => false,
+        };
+
+        if (!moved)
+            return false;
+
+        var kind = node.Kind == SidebarKind.Section ? "section" : "project";
+        var way = offset < 0 ? "up" : "down";
+
+        // One line for a run of nudges, the same as moving a task: shifting a project three places
+        // is three presses and one act.
+        History.Note($"Moved the {kind} “{node.Label}” {way}", $"{kind}:move:{node.Id}");
+        Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a sidebar row has anywhere to go, so a menu can grey out what it can't do.
+    /// </summary>
+    /// <remarks>
+    /// Only the up and down of <see cref="TaskAbilities"/> are filled in. Indenting a project is a
+    /// different operation with a different command behind it, and nothing offers it yet.
+    /// </remarks>
+    /// <param name="node">The sidebar row in question, or null when there is none</param>
+    /// <returns>Where it could move to</returns>
+    public TaskAbilities SelectionAbilitiesFor(SidebarNode? node) => node?.Kind switch
+    {
+        SidebarKind.Project => new TaskAbilities(
+            CanMoveUp: _engine.CanMoveProject(node.Id, -1),
+            CanMoveDown: _engine.CanMoveProject(node.Id, 1)),
+
+        SidebarKind.Section => new TaskAbilities(
+            CanMoveUp: _engine.CanMoveSection(node.Id, -1),
+            CanMoveDown: _engine.CanMoveSection(node.Id, 1)),
+
+        _ => TaskAbilities.None,
+    };
+
     public void DeleteSection(string id)
     {
         var named = _engine.Snapshot().Sections.FirstOrDefault(x => x.Id == id)?.Name;

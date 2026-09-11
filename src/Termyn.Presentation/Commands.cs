@@ -33,6 +33,8 @@ public enum AppCommand
     RenameSelection,
     DeleteSelection,
     ToggleFavourite,
+    MoveSelectionUp,
+    MoveSelectionDown,
 
     // ---- Anywhere ----
     NewTask,
@@ -103,13 +105,24 @@ public sealed record CommandContext(
     bool ShowingComments = false,
     bool Zoomed = false,
     bool CanExpandAll = false,
-    bool CanCollapseAll = false)
+    bool CanCollapseAll = false,
+    TaskAbilities? SelectionAbilities = null)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
 
     /// <summary>What the task can do, or nothing at all when there is no task.</summary>
     public TaskAbilities Can => Task is null ? TaskAbilities.None : Abilities ?? TaskAbilities.None;
+
+    /// <summary>
+    /// What the sidebar row can do, or nothing at all when there is no row.
+    /// </summary>
+    /// <remarks>
+    /// The same record the outline uses, since the question is the same one — is there anywhere
+    /// left to go in that direction — and only two of its four answers apply here.
+    /// </remarks>
+    public TaskAbilities SelectionCan
+        => Selection is null ? TaskAbilities.None : SelectionAbilities ?? TaskAbilities.None;
 }
 
 /// <summary>
@@ -157,7 +170,7 @@ public static class Commands
 
     /// <summary>The commands that act on whichever row the sidebar is on.</summary>
     public static bool IsSelectionCommand(AppCommand command)
-        => command is >= AppCommand.RenameSelection and <= AppCommand.ToggleFavourite;
+        => command is >= AppCommand.RenameSelection and <= AppCommand.MoveSelectionDown;
 
     /// <summary>The priority a command sets, or null when it sets none.</summary>
     public static Priority? PriorityOf(AppCommand command) => command switch
@@ -212,6 +225,17 @@ public static class Commands
             AppCommand.RenameSelection => Selection("Rename {0}"),
             AppCommand.DeleteSelection => Selection("Delete {0}"),
             AppCommand.ToggleFavourite => Favourite(context.Selection),
+
+            // Named for the thing rather than "Move up", which over a sidebar holding six kinds of
+            // row doesn't say what is about to shift. Greyed at the ends of the list, and over
+            // anything that isn't a project or a section, the same as the two above.
+            AppCommand.MoveSelectionUp => new CommandState(
+                Structure("Move {0} up"),
+                context.SelectionCan.CanMoveUp),
+
+            AppCommand.MoveSelectionDown => new CommandState(
+                Structure("Move {0} down"),
+                context.SelectionCan.CanMoveDown),
 
             AppCommand.NewTask => Always("New task"),
             AppCommand.NewProject => Always("New project"),
@@ -305,6 +329,13 @@ public static class Commands
         // reader to work out which item, and over Today the answer was none — so the greyed entry
         // read as a thing that should have worked. Naming the commonest of the three says what the
         // entry is for at the same time as saying it can't be used on this.
+        // The two kinds that have an order of their own. A label is sorted by the account and a
+        // smart view is in a list nobody chose, so neither is something to move.
+        string Structure(string format)
+            => string.Format(
+                format,
+                context.Selection?.Kind is SidebarKind.Section ? "section" : "project");
+
         CommandState Selection(string format)
         {
             var kind = NameOf(context.Selection?.Kind);

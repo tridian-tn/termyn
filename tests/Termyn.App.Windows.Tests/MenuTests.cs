@@ -153,6 +153,17 @@ public class MenuTests
     }
 
     [WinFormsFact]
+    public void Moving_a_row_is_in_the_Organise_menu_and_nowhere_else()
+    {
+        // It belongs with the sidebar's own actions, in a group of its own at the end — moving a
+        // project has no business sitting next to the entry that renames one.
+        var moves = new[] { AppCommand.MoveSelectionUp, AppCommand.MoveSelectionDown };
+
+        Assert.All(moves, c => Assert.Contains(c, Menus.Commands(Organise)));
+        Assert.All(moves, c => Assert.DoesNotContain(c, Menus.Commands(Menus.TaskContext)));
+    }
+
+    [WinFormsFact]
     public void The_favourite_entry_says_which_way_it_would_go()
     {
         using var plain = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Project)));
