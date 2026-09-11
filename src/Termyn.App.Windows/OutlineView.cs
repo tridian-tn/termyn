@@ -357,16 +357,30 @@ internal sealed class OutlineView : ListView
     /// already decided the key was none of its business.
     /// </remarks>
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        => Fold(keyData) || base.ProcessCmdKey(ref message, keyData);
+
+    /// <summary>
+    /// Folds the selected row if that is what the keystroke asks for.
+    /// </summary>
+    /// <remarks>
+    /// Split out from the override so a test can say which keystroke it means. Going in through
+    /// PreProcessMessage instead means going in through <c>(Keys)msg.WParam | ModifierKeys</c> —
+    /// the real keyboard — so a Ctrl held anywhere on the machine at that instant turns Left into
+    /// Ctrl+Left and the control answers a question nobody asked.
+    /// </remarks>
+    /// <param name="keyData">The keystroke, modifiers and all</param>
+    /// <returns>Whether it was this control's to answer</returns>
+    internal bool Fold(Keys keyData)
     {
-        if (FoldsOn(keyData)
-            && SelectedRow is { HasChildren: true } row
-            && row.Collapsed != (keyData == Keys.Left))
+        if (!FoldsOn(keyData)
+            || SelectedRow is not { HasChildren: true } row
+            || row.Collapsed == (keyData == Keys.Left))
         {
-            CollapseRequested?.Invoke(row.Id, keyData == Keys.Left);
-            return true;
+            return false;
         }
 
-        return base.ProcessCmdKey(ref message, keyData);
+        CollapseRequested?.Invoke(row.Id, keyData == Keys.Left);
+        return true;
     }
 
     /// <summary>

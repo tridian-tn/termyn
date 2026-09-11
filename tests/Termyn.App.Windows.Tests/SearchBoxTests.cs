@@ -127,14 +127,28 @@ public class SearchBoxTests
         Assert.Contains(box.ResetGlyph, new[] { native, plain });
     }
 
-    /// <summary>WM_KEYDOWN, and the virtual key for Escape.</summary>
-    private const int WmKeyDown = 0x0100;
+    /// <summary>
+    /// The keystroke, said outright rather than left to PreProcessMessage to mix with whatever
+    /// modifier the real keyboard is holding.
+    /// </summary>
+    private static bool Press(SearchBox box, Keys key) => box.TakeEscape(key);
 
-    /// <summary>Presses a key at the box the way the message loop would, so the binding runs.</summary>
-    private static bool Press(SearchBox box, Keys key)
+    [WinFormsFact]
+    public void A_modifier_held_elsewhere_cannot_reach_this()
     {
-        var message = Message.Create(box.Handle, WmKeyDown, (nint)key, 0);
-        return box.PreProcessMessage(ref message);
+        // Ctrl+Escape is the Start menu and Alt+Escape cycles windows; neither is this box's to
+        // take, and the exact match on Keys.Escape is what keeps them out. The old test route built
+        // its key as "Escape or whatever the real keyboard is holding", so on a machine where
+        // something held Ctrl it asked for the one thing the box is right to refuse.
+        using var box = Box();
+        box.Text = "milk";
+
+        Assert.False(box.TakeEscape(Keys.Control | Keys.Escape));
+        Assert.False(box.TakeEscape(Keys.Shift | Keys.Escape));
+        Assert.Equal("milk", box.Text);
+
+        Assert.True(box.TakeEscape(Keys.Escape));
+        Assert.Equal(string.Empty, box.Text);
     }
 
     [WinFormsFact]

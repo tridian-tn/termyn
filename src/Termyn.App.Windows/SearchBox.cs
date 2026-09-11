@@ -155,14 +155,25 @@ internal sealed class SearchBox : TextBox
     /// through — the description goes back to reading, a comment stops being edited.
     /// </summary>
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
-    {
-        if (keyData == Keys.Escape && TakesEscape)
-        {
-            Reset();
-            return true;
-        }
+        => TakeEscape(keyData) || base.ProcessCmdKey(ref message, keyData);
 
-        return base.ProcessCmdKey(ref message, keyData);
+    /// <summary>
+    /// Empties the box if that is what the keystroke asks for.
+    /// </summary>
+    /// <remarks>
+    /// Split out from the override for the same reason the outline's fold is: a test can say which
+    /// keystroke it means, where PreProcessMessage would mix in whatever modifier the real keyboard
+    /// happens to be holding and ask about a different key entirely.
+    /// </remarks>
+    /// <param name="keyData">The keystroke, modifiers and all</param>
+    /// <returns>Whether it was this box's to answer</returns>
+    internal bool TakeEscape(Keys keyData)
+    {
+        if (keyData != Keys.Escape || !TakesEscape)
+            return false;
+
+        Reset();
+        return true;
     }
 
     protected override void OnTextChanged(EventArgs e)
