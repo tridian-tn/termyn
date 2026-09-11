@@ -25,10 +25,11 @@ internal static class TestWindow
     /// Builds a window and lays it out, without showing it.
     /// </summary>
     /// <param name="settingsName">A file name of its own, so two suites can't share one</param>
+    /// <param name="store">What the account holds, or null for an empty one</param>
     /// <returns>The window, which the caller disposes</returns>
-    internal static MainForm Build(string settingsName)
+    internal static MainForm Build(string settingsName, InMemorySnapshotStore? store = null)
     {
-        var engine = new SyncEngine(new FakeApi(), new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
+        var engine = new SyncEngine(new FakeApi(), store ?? new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
         engine.Load();
 
         var clock = new SystemClock();

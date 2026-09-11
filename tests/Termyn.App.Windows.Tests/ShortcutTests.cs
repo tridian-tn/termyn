@@ -62,6 +62,8 @@ public class ShortcutTests
     [InlineData(Keys.F2, AppCommand.RenameSelection)]
     [InlineData(Keys.Delete, AppCommand.DeleteSelection)]
     [InlineData(Keys.Control | Keys.Shift | Keys.F, AppCommand.ToggleFavourite)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Up, AppCommand.MoveSelectionUp)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Down, AppCommand.MoveSelectionDown)]
     public void The_sidebar_answers_to_its_own(Keys keys, AppCommand expected)
         => Assert.Equal(expected, MainForm.CommandFor(keys, MainForm.Scope.Sidebar));
 
@@ -103,6 +105,24 @@ public class ShortcutTests
         // And neither has kept the other's key anywhere.
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Alt | Keys.Up, MainForm.Scope.Outline));
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.Up, MainForm.Scope.Window));
+    }
+
+    [WinFormsFact]
+    public void Moving_a_project_asks_for_more_than_moving_a_task()
+    {
+        // Shift as well as Ctrl, and only from the sidebar. Reordering the sidebar is rare and
+        // deliberate, and the harder reach is the point — a project shifted by a stray finger is a
+        // change nobody sees happen and nobody thinks to look for.
+        Assert.Equal(AppCommand.MoveSelectionUp, MainForm.CommandFor(Keys.Control | Keys.Shift | Keys.Up, MainForm.Scope.Sidebar));
+        Assert.Equal(AppCommand.MoveSelectionDown, MainForm.CommandFor(Keys.Control | Keys.Shift | Keys.Down, MainForm.Scope.Sidebar));
+
+        // Not from the outline, where the same fingers a shift away move the task instead, and not
+        // window-wide, where it would fire over whatever had the focus.
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.Shift | Keys.Up, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.Shift | Keys.Up, MainForm.Scope.Window));
+
+        // And the sidebar doesn't answer to the task's own binding.
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.Up, MainForm.Scope.Sidebar));
     }
 
     [WinFormsFact]
@@ -161,6 +181,7 @@ public class ShortcutTests
     [InlineData(Keys.Control | Keys.D1, "Ctrl+1")]
     [InlineData(Keys.Control | Keys.D4, "Ctrl+4")]
     [InlineData(Keys.Control | Keys.Right, "Ctrl+→")]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Up, "Ctrl+Shift+↑")]
     [InlineData(Keys.Control | Keys.Left, "Ctrl+←")]
     [InlineData(Keys.Alt | Keys.Up, "Alt+↑")]
     [InlineData(Keys.Alt | Keys.Down, "Alt+↓")]

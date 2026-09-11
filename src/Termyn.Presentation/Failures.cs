@@ -109,6 +109,8 @@ public static class Failures
         "item_uncomplete" => "Reopening a task",
         "item_move" => "Moving a task",
         "item_reorder" => "Reordering tasks",
+        "project_reorder" => "Reordering projects",
+        "section_reorder" => "Reordering sections",
         "project_add" => "Adding a project",
         "section_add" => "Adding a section",
         "label_add" => "Adding a label",
