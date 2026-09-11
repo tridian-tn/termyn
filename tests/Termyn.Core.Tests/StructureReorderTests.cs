@@ -243,6 +243,74 @@ public class StructureReorderTests
         Assert.DoesNotContain(engine.Outbox, c => c.Type == "project_reorder");
     }
 
+    [Fact]
+    public async Task A_pending_section_reorder_keeps_the_order_field_a_section_uses()
+    {
+        // The same guard as the project one above, and the reason it is worth writing twice: a
+        // section keeps its place in section_order, and a guard that knew only child_order would
+        // protect a field the section hasn't got while losing the one it has.
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"One","project_id":"p","section_order":1}""");
+        store.PutResource("sections", "s2", """{"id":"s2","name":"Two","project_id":"p","section_order":2}""");
+        var engine = Loaded(store, api);
+
+        engine.MoveSection("s2", -1);
+
+        api.Next = _ => Resp(
+            "s1",
+            [Json.Change("sections", "s2", """{"id":"s2","name":"Renamed","project_id":"p","section_order":2}""")]);
+        await engine.SyncAsync();
+
+        var moved = engine.Snapshot().Sections.Single(x => x.Id == "s2");
+        Assert.Equal("Renamed", moved.Name);
+        Assert.Equal(1, moved.SectionOrder);
+    }
+
+    [Fact]
+    public async Task A_temp_id_inside_a_queued_project_reorder_is_remapped()
+    {
+        // A project can be added and then moved before the server has named it, the same as a task.
+        // Left as a temp id, the reorder names something the server has never heard of and fails
+        // for good — after the add it depended on had already succeeded.
+        var api = new FakeApi();
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "a", """{"id":"a","name":"A","child_order":1}""");
+        var engine = Loaded(store, api);
+
+        var temp = engine.AddProject("New");
+        Assert.True(engine.MoveProject(temp, 1));
+
+        api.Next = cmds =>
+        {
+            var add = cmds.First(c => c.Type == "project_add");
+            return Resp("s1", status: (add.Uuid, true), temp: (temp, "real1"));
+        };
+        await engine.SyncAsync();
+
+        var reorder = engine.Outbox.Single(c => c.Type == "project_reorder");
+        var ids = Args(reorder)["projects"]!.AsArray().Select(e => e!["id"]!.ToString()).ToList();
+
+        Assert.Contains("real1", ids);
+        Assert.DoesNotContain(temp, ids);
+    }
+
+    [Fact]
+    public void Sections_with_no_order_yet_move_the_way_the_sidebar_shows_them()
+    {
+        // Two sections the server hasn't ordered both read as nought, so what settles them is the
+        // tie-break — and the sidebar breaks it by name. By id instead, the row that appeared to
+        // swap would be whichever of the two lists disagreed about.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("sections", "zzz", """{"id":"zzz","name":"Alpha","project_id":"p"}""");
+        store.PutResource("sections", "aaa", """{"id":"aaa","name":"Beta","project_id":"p"}""");
+        var engine = Loaded(store);
+
+        // "Alpha" is shown first though its id sorts last, so it is the one with nowhere above it.
+        Assert.False(engine.CanMoveSection("zzz", -1));
+        Assert.True(engine.CanMoveSection("aaa", -1));
+    }
+
     // ---- Fixtures ----------------------------------------------------------------------------------
 
     private static SyncEngine Projects(params (string Id, int Order)[] projects)
@@ -283,7 +351,8 @@ public class StructureReorderTests
     private static SyncResponse Resp(
         string? token,
         IReadOnlyList<ResourceChange>? changes = null,
-        (string Uuid, bool Ok)? status = null)
+        (string Uuid, bool Ok)? status = null,
+        (string Temp, string Real)? temp = null)
         => new()
         {
             SyncToken = token,
@@ -291,6 +360,8 @@ public class StructureReorderTests
             SyncStatus = status is { } s
                 ? new Dictionary<string, CommandResult> { [s.Uuid] = new(s.Ok, null, s.Ok ? null : "err") }
                 : new Dictionary<string, CommandResult>(),
-            TempIdMapping = new Dictionary<string, string>(),
+            TempIdMapping = temp is { } t
+                ? new Dictionary<string, string> { [t.Temp] = t.Real }
+                : new Dictionary<string, string>(),
         };
 }

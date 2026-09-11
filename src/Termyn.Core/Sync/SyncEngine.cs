@@ -889,10 +889,13 @@ public sealed class SyncEngine
         if (sections.FirstOrDefault(s => s.Id == id) is not { } section)
             return [];
 
+        // Tie-broken by name, which is what the sidebar does. By id instead, two sections the
+        // server hasn't ordered yet would be shown in one order and moved in another — and the row
+        // that appeared to swap would be whichever the two lists disagreed about.
         return sections
             .Where(s => s.ProjectId == section.ProjectId)
             .OrderBy(s => s.SectionOrder)
-            .ThenBy(s => s.Id, StringComparer.Ordinal)
+            .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
             .Select(s => s.Id)
             .ToList();
     }
@@ -2225,10 +2228,15 @@ public sealed class SyncEngine
                     }
                 }
 
-                // A reorder holds its ids in an array; missing these would send the server a temp id.
-                if (args["items"] is JsonArray items)
+                // A reorder holds its ids in an array; missing these would send the server a temp
+                // id. All three arrays, since a project or a section can be added and then moved
+                // before the server has named it, the same as a task.
+                foreach (var kind in Reorder.All)
                 {
-                    foreach (var entry in items)
+                    if (args[kind.Field] is not JsonArray placed)
+                        continue;
+
+                    foreach (var entry in placed)
                     {
                         if (entry is JsonObject o && o["id"] is JsonValue entryId && entryId.ToString() == temp)
                         {
@@ -2334,7 +2342,7 @@ public sealed class SyncEngine
         foreach (var change in response.Changes)
         {
             var key = new ResourceKey(change.ResourceType, change.Id);
-            var held = pendingKeys.Contains(key) || reorderedKeys.Contains(key);
+            var held = pendingKeys.Contains(key) || reorderedKeys.ContainsKey(key);
 
             // Hold the deletion until the local write that covers this resource resolves; a queued
             // command must not be left naming a task the server has already removed.
@@ -2360,11 +2368,12 @@ public sealed class SyncEngine
                 var clone = change.Json.DeepClone().AsObject();
 
                 // A pending reorder only owns the position, so take everything else the server sends
-                // rather than dropping the change — the token advances past it either way.
-                if (reorderedKeys.Contains(key)
-                    && Model.Get(change.ResourceType, change.Id)?["child_order"] is { } localOrder)
+                // rather than dropping the change — the token advances past it either way. Which
+                // field the position lives in comes with the key, since the three kinds disagree.
+                if (reorderedKeys.TryGetValue(key, out var placedIn)
+                    && Model.Get(change.ResourceType, change.Id)?[placedIn] is { } localOrder)
                 {
-                    clone["child_order"] = localOrder.DeepClone();
+                    clone[placedIn] = localOrder.DeepClone();
                 }
 
                 Model.Upsert(change.ResourceType, change.Id, clone);
@@ -2389,7 +2398,7 @@ public sealed class SyncEngine
                 foreach (var id in Model.Keys(type))
                 {
                     var stale = new ResourceKey(type, id);
-                    if (live.Contains(stale) || pendingKeys.Contains(stale) || reorderedKeys.Contains(stale))
+                    if (live.Contains(stale) || pendingKeys.Contains(stale) || reorderedKeys.ContainsKey(stale))
                         continue;
 
                     if (Model.Remove(type, id))
@@ -2401,7 +2410,7 @@ public sealed class SyncEngine
         for (var i = _deferredDeletes.Count - 1; i >= 0; i--)
         {
             var deferred = _deferredDeletes[i];
-            if (pendingKeys.Contains(deferred) || reorderedKeys.Contains(deferred))
+            if (pendingKeys.Contains(deferred) || reorderedKeys.ContainsKey(deferred))
                 continue;
             _deferredDeletes.RemoveAt(i);
             Forget(deferred.Type, deferred.Id);
@@ -2515,16 +2524,37 @@ public sealed class SyncEngine
     }
 
     /// <summary>
-    /// Tasks named by a queued reorder. Their position is ours until it lands, but nothing else
-    /// about them is, so they are tracked apart from resources with a genuine pending edit.
+    /// What a queued reorder has placed, and which field holds the position it placed it in.
     /// </summary>
-    private HashSet<ResourceKey> PendingReorderKeys()
+    /// <remarks>
+    /// The position is ours until the command lands, but nothing else about the resource is, so
+    /// these are tracked apart from resources with a genuine pending edit.
+    ///
+    /// The field comes back with the key because it isn't the same field for all three: a section
+    /// keeps its place in <c>section_order</c>. Held as one name, a pending section reorder would
+    /// protect a <c>child_order</c> it doesn't have and lose the order it does.
+    /// </remarks>
+    /// <returns>Each placed resource, against the name of the field holding its position</returns>
+    private Dictionary<ResourceKey, string> PendingReorderKeys()
     {
-        var keys = new HashSet<ResourceKey>();
+        var held = new Dictionary<ResourceKey, string>();
+
         foreach (var c in _outbox.Where(c => c.State == OutboxState.Pending))
-            foreach (var id in NestedIds(ParseArgs(c)))
-                keys.Add(new ResourceKey(ResourceTypeFor(c), id));
-        return keys;
+        {
+            var args = ParseArgs(c);
+
+            foreach (var kind in Reorder.All)
+            {
+                if (args[kind.Field] is not JsonArray placed)
+                    continue;
+
+                foreach (var entry in placed)
+                    if (entry is JsonObject o && o["id"] is JsonValue id)
+                        held[new ResourceKey(ResourceTypeFor(c), id.ToString())] = kind.Order;
+            }
+        }
+
+        return held;
     }
 
     /// <summary>
