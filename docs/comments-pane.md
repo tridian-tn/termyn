@@ -14,7 +14,7 @@ opens at 260 px, which is about nine lines, and splitting it again leaves two ha
 too short to be worth reading. The comments take the whole panel while they are showing, and leaving
 them puts back whichever of the other two was there.
 
-`Ctrl+M` toggles it. Leaving the description mid-edit saves it first, as closing the panel does —
+`F7` brings it to the front. Leaving the description mid-edit saves it first, as closing the panel does —
 switching away is the box losing the user as surely as the focus leaving it.
 
 ## A list, not one rendered document

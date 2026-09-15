@@ -53,6 +53,7 @@ public class ShortcutTests
     [InlineData(Keys.Control | Keys.Left, AppCommand.Outdent)]
     [InlineData(Keys.Control | Keys.Up, AppCommand.MoveUp)]
     [InlineData(Keys.Control | Keys.Down, AppCommand.MoveDown)]
+    [InlineData(Keys.Control | Keys.M, AppCommand.MoveTo)]
     [InlineData(Keys.Delete, AppCommand.Delete)]
     [InlineData(Keys.Control | Keys.Z, AppCommand.Undo)]
     public void The_outline_answers_to_its_own_keys(Keys keys, AppCommand expected)
@@ -86,11 +87,16 @@ public class ShortcutTests
     {
         // F4 is the only toggle of the three; the other two name a tab.
         Assert.Equal(AppCommand.ToggleDescription, MainForm.CommandFor(Keys.F4, MainForm.Scope.Window));
-        Assert.Equal(AppCommand.ViewDescription, MainForm.CommandFor(Keys.Control | Keys.E, MainForm.Scope.Window));
-        Assert.Equal(AppCommand.ViewComments, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Window));
+        Assert.Equal(AppCommand.ViewDescription, MainForm.CommandFor(Keys.F6, MainForm.Scope.Window));
+        Assert.Equal(AppCommand.ViewComments, MainForm.CommandFor(Keys.F7, MainForm.Scope.Window));
 
         // F4 in the outline is nothing, so the window's own answer is the one that stands there.
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.F4, MainForm.Scope.Outline));
+
+        // And the keys the tabs had before are theirs no longer. Still claimed window-wide, Ctrl+M
+        // would be answered before the outline ever saw it, and the move it now means wouldn't run.
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.E, MainForm.Scope.Window));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Window));
     }
 
     [WinFormsFact]
@@ -155,6 +161,16 @@ public class ShortcutTests
     }
 
     [WinFormsFact]
+    public void Moving_a_task_elsewhere_answers_only_in_the_outline()
+    {
+        // Where there's a task under the cursor to move. Window-wide it would fire over the
+        // description editor and the comment box as well, and open the picker on a task nobody was
+        // looking at.
+        Assert.Equal(AppCommand.MoveTo, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Sidebar));
+    }
+
+    [WinFormsFact]
     public void Undo_is_not_claimed_window_wide()
     {
         // Taken window-wide it would reach the capture and search boxes, where Ctrl+Z has to go on
@@ -188,6 +204,8 @@ public class ShortcutTests
     [InlineData(Keys.Delete, "Del")]
     [InlineData(Keys.Space, "Space")]
     [InlineData(Keys.F2, "F2")]
+    [InlineData(Keys.F6, "F6")]
+    [InlineData(Keys.Control | Keys.M, "Ctrl+M")]
     [InlineData(Keys.Control | Keys.Oemcomma, "Ctrl+,")]
     [InlineData(Keys.Control | Keys.Shift | Keys.N, "Ctrl+Shift+N")]
     [InlineData(Keys.Control | Keys.Enter, "Ctrl+Enter")]

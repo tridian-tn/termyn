@@ -326,6 +326,42 @@ internal sealed class MarkdownEditor : RichTextBox
         base.OnTextChanged(e);
     }
 
+    /// <summary>
+    /// The control's own formatting keys, which change how the text looks and never what it says.
+    /// </summary>
+    /// <remarks>
+    /// Alignment, line spacing and subscript. None of it is markdown and none of it is saved — the
+    /// account only ever gets the text — but it stayed on screen until the next edit restyled the
+    /// box, so a slip of a finger centred a paragraph and left it looking as if that meant something.
+    ///
+    /// Found by pressing every Ctrl, Shift and Alt combination at a rich edit control and keeping
+    /// the ones that changed its formatting and left its text alone. The ones that change the text —
+    /// cut, paste, deleting a word, Ctrl+I's tab — go on doing it.
+    /// </remarks>
+    private static readonly HashSet<Keys> FormattingOnly =
+    [
+        Keys.Control | Keys.E,                      // centre
+        Keys.Control | Keys.J,                      // justify
+        Keys.Control | Keys.L,                      // left
+        Keys.Control | Keys.R,                      // right
+        Keys.Control | Keys.D1,                     // single spacing
+        Keys.Control | Keys.D2,                     // double spacing
+        Keys.Control | Keys.D5,                     // one and a half
+        Keys.Control | Keys.Oemplus,                // subscript
+        Keys.Control | Keys.Shift | Keys.Oemplus,   // subscript again
+    ];
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        // Handled and not suppressed, and matched on the whole chord. The control never sees the
+        // key, but a character the key makes still arrives — Ctrl+Alt is AltGr, and Ctrl+Alt+E is
+        // an é to type rather than a paragraph to centre.
+        if (FormattingOnly.Contains(e.KeyData))
+            e.Handled = true;
+    }
+
     protected override void OnFontChanged(EventArgs e)
     {
         base.OnFontChanged(e);

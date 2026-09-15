@@ -1246,6 +1246,15 @@ public sealed class SyncEngine
     }
 
     /// <summary>Moves a task to another project, keeping it top level there.</summary>
+    /// <remarks>
+    /// The project has to be one the model holds, and it's asked here under the same lock as the
+    /// move. Asked beforehand by the caller, a sync could take the project away in between, and the
+    /// task would be filed under something no view shows and the server can only refuse.
+    ///
+    /// Outdenting doesn't come this way. It moves to whatever project the task was already in,
+    /// which is the task's own word for where it lives rather than a choice to be checked.
+    /// </remarks>
+    /// <returns>False when it's already top level in that project, or either isn't held</returns>
     public bool MoveItemToProject(string id, string projectId)
     {
         lock (_gate)
@@ -1253,9 +1262,20 @@ public sealed class SyncEngine
             id = Promoted(id);
             projectId = Promoted(projectId);
 
-            return MoveTo(id, projectId: projectId);
+            return Model.Get(ResourceType.Projects, projectId) is not null
+                   && MoveTo(id, projectId: projectId);
         }
 
+    }
+
+    /// <summary>Moves a task into a section, keeping it top level there.</summary>
+    /// <returns>False when it's already top level in that section, or either isn't held</returns>
+    public bool MoveItemToSection(string id, string sectionId)
+    {
+        lock (_gate)
+        {
+            return MoveTo(id, sectionId: sectionId);
+        }
     }
 
     /// <summary>
@@ -1263,6 +1283,15 @@ public sealed class SyncEngine
     /// in each case puts the task last where it lands — the local copy is updated to match, so the
     /// row doesn't sit somewhere it won't stay.
     /// </summary>
+    /// <remarks>
+    /// Its sub-tasks go with it. The server moves them itself and says nothing about it until the
+    /// next sync, so without following suit here they'd sit in the old project as tasks with no
+    /// parent in view — and the parent would turn up in the new one with nothing under it.
+    ///
+    /// A move into the project or section a task is already top level in gets turned away rather
+    /// than sent. The server would take it and file the task last, which is a reorder nobody asked
+    /// for.
+    /// </remarks>
     private bool MoveTo(string id, string? parentId = null, string? sectionId = null, string? projectId = null)
     {
         // Where it is going is as likely to have been renamed as the thing going there — indenting
@@ -1275,7 +1304,7 @@ public sealed class SyncEngine
         if (Model.Get(ResourceType.Items, id) is not { } existing)
             return false;
 
-        var prior = existing.ToJsonString();
+        var current = Projections.ToTaskItem(existing);
         var moved = existing.DeepClone().AsObject();
         var args = new JsonObject { ["id"] = id };
 
@@ -1299,6 +1328,9 @@ public sealed class SyncEngine
             if (Model.Sections().FirstOrDefault(s => s.Id == sectionId) is not { } section)
                 return false;
 
+            if (current.ParentId is null && current.SectionId == sectionId)
+                return false;
+
             args["section_id"] = sectionId;
             moved["parent_id"] = null;
             moved["section_id"] = sectionId;
@@ -1306,6 +1338,13 @@ public sealed class SyncEngine
         }
         else if (projectId is not null)
         {
+            // A task with no project is in the Inbox — one captured without naming a project has
+            // none until the server gives it the Inbox's — so that's where it already is.
+            var inProject = current.ProjectId ?? Model.Projects().FirstOrDefault(p => p.IsInboxProject)?.Id;
+
+            if (current.ParentId is null && current.SectionId is null && inProject == projectId)
+                return false;
+
             args["project_id"] = projectId;
             moved["parent_id"] = null;
             moved["section_id"] = null; // the server drops the section when moving to a project
@@ -1316,11 +1355,77 @@ public sealed class SyncEngine
             return false;
         }
 
-        moved["child_order"] = NextOrderAt(Projections.ToTaskItem(moved), id);
+        var landed = Projections.ToTaskItem(moved);
+        moved["child_order"] = NextOrderAt(landed, id);
 
-        Persist("item_move", args, null, prior, [new StoredResource(ResourceType.Items, id, moved.ToJsonString())], []);
+        // An array even when it's only the one task, the way a reorder keeps its priors: a rollback
+        // reads either shape, and one shape is less to get wrong than two.
+        var priors = new JsonArray { existing.DeepClone() };
+        var upserts = new List<StoredResource> { new(ResourceType.Items, id, moved.ToJsonString()) };
+        var carried = new List<(string Id, JsonObject Json)>();
+
+        // Nothing to carry when the task stays in the project and section it was in, which is nearly
+        // every indent and outdent — and not walking the account for each of those is worth the check.
+        var relocated = landed.ProjectId != current.ProjectId || landed.SectionId != current.SectionId;
+
+        foreach (var child in relocated ? DescendantsOf(id) : [])
+        {
+            if (Model.Get(ResourceType.Items, child) is not { } json)
+                continue;
+
+            var task = Projections.ToTaskItem(json);
+            if (task.ProjectId == landed.ProjectId && task.SectionId == landed.SectionId)
+                continue;
+
+            var follows = json.DeepClone().AsObject();
+            follows["project_id"] = landed.ProjectId;
+            follows["section_id"] = landed.SectionId;
+
+            priors.Add(json.DeepClone());
+            upserts.Add(new StoredResource(ResourceType.Items, child, follows.ToJsonString()));
+            carried.Add((child, follows));
+        }
+
+        Persist("item_move", args, null, priors.ToJsonString(), upserts, []);
         Model.Upsert(ResourceType.Items, id, moved);
+
+        foreach (var (child, json) in carried)
+            Model.Upsert(ResourceType.Items, child, json);
+
         return true;
+    }
+
+    /// <summary>
+    /// Every task filed under this one, however deep.
+    /// </summary>
+    /// <remarks>
+    /// Walked a level at a time with each task counted once, the same as <see cref="HeightOf"/>, so
+    /// a parent cycle in the data runs out rather than round.
+    /// </remarks>
+    /// <param name="id">The task to start from, which isn't itself included</param>
+    /// <returns>The ids under it, nearest first</returns>
+    private List<string> DescendantsOf(string id)
+    {
+        var byParent = Model.Items()
+            .Where(i => i.ParentId is not null)
+            .GroupBy(i => i.ParentId!)
+            .ToDictionary(g => g.Key, g => g.Select(i => i.Id).ToList(), StringComparer.Ordinal);
+
+        var seen = new HashSet<string>(StringComparer.Ordinal) { id };
+        var found = new List<string>();
+        var level = new List<string> { id };
+
+        while (level.Count > 0)
+        {
+            level = level
+                .SelectMany(p => byParent.TryGetValue(p, out var kids) ? kids : [])
+                .Where(seen.Add)
+                .ToList();
+
+            found.AddRange(level);
+        }
+
+        return found;
     }
 
     /// <summary>The position a task takes when the server files it last among its new siblings.</summary>
@@ -2517,8 +2622,21 @@ public sealed class SyncEngine
             // Only a command that actually mutated a local copy has something to protect. A command
             // aimed at a resource we never held must not shadow the server's version of it, which
             // would be dropped for good once the sync token advances past that change.
-            if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
-                keys.Add(new ResourceKey(ResourceTypeFor(c), v.ToString()));
+            if (c.PriorJson is null || ParseArgs(c)["id"] is not JsonValue v)
+                continue;
+
+            keys.Add(new ResourceKey(ResourceTypeFor(c), v.ToString()));
+
+            // A move carries the sub-tasks with it, and they're in its priors because it changed
+            // them. Left unowned, the server's word on one arrives before it has moved them and
+            // pulls the sub-task back to where it was; and a tombstone taken meanwhile is undone
+            // when a refused move puts its priors back, for good, since no second one is sent.
+            if (c.Type == "item_move" && TryParseNode(c.PriorJson) is JsonArray priors)
+            {
+                foreach (var prior in priors)
+                    if (prior is JsonObject o && o["id"] is JsonValue carried)
+                        keys.Add(new ResourceKey(ResourceTypeFor(c), carried.ToString()));
+            }
         }
         return keys;
     }

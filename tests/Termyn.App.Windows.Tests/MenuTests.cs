@@ -17,7 +17,7 @@ public class MenuTests
         TaskAbilities? can = null,
         bool completed = false,
         int depth = 0)
-        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true));
+        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true));
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -84,9 +84,29 @@ public class MenuTests
                 AppCommand.Outdent,
                 AppCommand.MoveUp,
                 AppCommand.MoveDown,
+                AppCommand.MoveTo,
                 AppCommand.Delete,
             ],
             Menus.Commands(Menus.TaskContext).ToArray());
+    }
+
+    [WinFormsFact]
+    public void Moving_a_task_elsewhere_sits_with_the_moves_in_both_task_menus()
+    {
+        // Asked for in the Task menu and on the right-click, which are one list — so checking both
+        // here is checking that stays true rather than checking two things.
+        var bar = Menus.Bar.Single(e => e.Heading == "&Task");
+
+        Assert.Contains(AppCommand.MoveTo, Menus.Commands(Menus.TaskContext));
+        Assert.Contains(AppCommand.MoveTo, Menus.Commands(bar.Children ?? []));
+
+        using var built = BuildTaskMenu(OnTask());
+        var items = built.Menu.Items.Cast<ToolStripItem>().ToList();
+        var move = items.IndexOf(Find(built, "Move to…"));
+
+        // In the group that says where a task sits, and not ruled off from it.
+        Assert.Equal("Move down", items[move - 1].Text);
+        Assert.IsType<ToolStripSeparator>(items[move + 1]);
     }
 
     [WinFormsFact]
@@ -274,6 +294,16 @@ public class MenuTests
         Assert.True(Find(built, "Due date…").Enabled);
         Assert.True(Find(built, "Delete").Enabled);
         Assert.False(Find(built, "Move up").Enabled);
+    }
+
+    [WinFormsFact]
+    public void A_task_the_account_no_longer_holds_is_not_offered_somewhere_else_to_go()
+    {
+        using var archived = BuildTaskMenu(OnTask(can: new TaskAbilities()));
+        using var held = BuildTaskMenu(OnTask(can: new TaskAbilities(CanMoveTo: true)));
+
+        Assert.False(Find(archived, "Move to…").Enabled);
+        Assert.True(Find(held, "Move to…").Enabled);
     }
 
     [WinFormsFact]
@@ -481,6 +511,7 @@ public class MenuTests
         Assert.Equal("Ctrl+←", shown["Outdent"]);
         Assert.Equal("Ctrl+↑", shown["Move up"]);
         Assert.Equal("Ctrl+↓", shown["Move down"]);
+        Assert.Equal("Ctrl+M", shown["Move to…"]);
         Assert.Equal("Del", shown["Delete"]);
     }
 

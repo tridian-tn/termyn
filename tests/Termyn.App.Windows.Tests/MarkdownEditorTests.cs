@@ -59,9 +59,19 @@ public class MarkdownEditorTests
         Assert.Equal(0, editor.SelectionLength);
     }
 
-    private static MarkdownEditor Editing(string markdown)
+    /// <param name="host">
+    /// A window to put it in, for a test that presses keys at it. Left on its own the control has no
+    /// form above it, and a key held with Alt never reaches it the way it would in the app
+    /// </param>
+    private static MarkdownEditor Editing(string markdown, Form? host = null)
     {
         var editor = new MarkdownEditor { Theme = Theme.Resolve(ThemePreference.Light) };
+        if (host is not null)
+        {
+            host.Controls.Add(editor);
+            host.CreateControl();
+        }
+
         editor.CreateControl();
         editor.Text = markdown;
         editor.Restyle();
@@ -398,6 +408,145 @@ public class MarkdownEditorTests
 
         Assert.Equal("some **bold** words", editor.Text);
         Assert.True(FontAt(editor, "bold").Bold);
+    }
+
+    // ---- Keys that would only change how it looks ----------------------------------------------
+
+    [WinFormsTheory]
+    [InlineData(Keys.Control | Keys.E)]
+    [InlineData(Keys.Control | Keys.J)]
+    [InlineData(Keys.Control | Keys.L)]
+    [InlineData(Keys.Control | Keys.R)]
+    [InlineData(Keys.Control | Keys.D1)]
+    [InlineData(Keys.Control | Keys.D2)]
+    [InlineData(Keys.Control | Keys.D5)]
+    [InlineData(Keys.Control | Keys.Oemplus)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Oemplus)]
+    public void A_formatting_key_the_control_brings_with_it_changes_nothing(Keys keys)
+    {
+        // Alignment, line spacing and subscript. None of it is markdown, none of it is saved, and
+        // all of it stayed on screen until the next edit.
+        //
+        // From a centred paragraph as well as a plain one, since a key that sets what the text
+        // already has would change nothing either way — Ctrl+L on text already to the left.
+        foreach (var centred in new[] { false, true })
+        {
+            using var host = new Form();
+            using var editor = Editing("Some **bold** words\nand a second line", host);
+            if (centred)
+            {
+                editor.SelectAll();
+                editor.SelectionAlignment = HorizontalAlignment.Center;
+            }
+
+            Pick(editor, 5, 8);
+            var before = editor.Rtf;
+
+            Press(editor, keys);
+
+            Assert.Equal("Some **bold** words\nand a second line", editor.Text);
+            Assert.Equal(before, editor.Rtf);
+        }
+    }
+
+    [WinFormsFact]
+    public void A_key_that_changes_the_words_still_changes_them()
+    {
+        // What keeps the test above honest: pressed the same way, a key the control acts on does
+        // reach it. Without this, a harness that delivered nothing would pass every one of those.
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Control | Keys.Back);
+
+        Assert.Equal("Some bold ", editor.Text);
+    }
+
+    [WinFormsTheory]
+    [InlineData(Keys.Control | Keys.Alt | Keys.E)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.J)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.L)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.R)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.D1)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.D2)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.D5)]
+    [InlineData(Keys.Control | Keys.Alt | Keys.Oemplus)]
+    public void AltGr_on_a_turned_away_key_still_types_what_it_types(Keys keys)
+    {
+        // Ctrl+Alt is AltGr, so each of the keys above with Alt added is a character on some layout
+        // — é on a UK one, for Ctrl+E's. Turning the formatting away mustn't take that with it. So
+        // whatever a plain box makes of the press, on whatever layout this runs under, the
+        // description box has to make the same.
+        using var plainHost = new Form();
+        var plain = new RichTextBox { Text = "Some bold words" };
+        plainHost.Controls.Add(plain);
+        plainHost.CreateControl();
+        plain.CreateControl();
+        plain.Select(5, 4);
+
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        Pick(editor, 5, 4);
+
+        Press(plain, keys);
+        Press(editor, keys);
+
+        Assert.Equal(plain.Text, editor.Text);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetKeyboardState(byte[] state);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(nint window, int message, nint wParam, nint lParam);
+
+    private const int WmSysKeyDown = 0x0104;
+    private const int WmSysKeyUp = 0x0105;
+
+    /// <summary>
+    /// Presses a key with its modifiers held, through the message loop the way a keyboard does.
+    /// </summary>
+    /// <remarks>
+    /// Posted and pumped rather than sent, so it takes the whole road a real press does: the
+    /// window's key filtering, the translation into a character, and the control's own handling.
+    /// The modifiers are set in the thread's key state, which is where both this app and the control
+    /// read them from, and cleared again afterwards whatever happens.
+    ///
+    /// A system key only for Alt without Ctrl, which is how Windows sends them. Posted as a system
+    /// key, Ctrl+Alt is a press no keyboard makes, and AltGr's character never arrives — so the
+    /// test that it still does would pass whether or not anything here had eaten it.
+    /// </remarks>
+    private static void Press(RichTextBox box, Keys keys)
+    {
+        var code = keys & Keys.KeyCode;
+        var system = keys.HasFlag(Keys.Alt) && !keys.HasFlag(Keys.Control);
+        var context = keys.HasFlag(Keys.Alt) ? 1 << 29 : 0;
+        var state = new byte[256];
+
+        if (keys.HasFlag(Keys.Control))
+            state[0x11] = state[0xA2] = 0x80;
+        if (keys.HasFlag(Keys.Shift))
+            state[0x10] = state[0xA0] = 0x80;
+        if (keys.HasFlag(Keys.Alt))
+            state[0x12] = state[0xA4] = 0x80;
+
+        try
+        {
+            state[(int)code] = 0x80;
+            SetKeyboardState(state);
+            PostMessage(box.Handle, system ? WmSysKeyDown : WmKeyDown, (nint)code, 1 | context);
+            Application.DoEvents();
+
+            state[(int)code] = 0;
+            SetKeyboardState(state);
+            PostMessage(box.Handle, system ? WmSysKeyUp : WmKeyUp, (nint)code, unchecked((int)0xC0000001) | context);
+            Application.DoEvents();
+        }
+        finally
+        {
+            SetKeyboardState(new byte[256]);
+        }
     }
 
     // ---- Not losing the user's place -----------------------------------------------------------

@@ -64,6 +64,7 @@ public static class Menus
         MenuEntry.Of(AppCommand.Outdent),
         MenuEntry.Of(AppCommand.MoveUp),
         MenuEntry.Of(AppCommand.MoveDown),
+        MenuEntry.Of(AppCommand.MoveTo),
 
         // Its own group at the bottom, away from anything the user meant to click.
         MenuEntry.AfterRule(AppCommand.Delete),

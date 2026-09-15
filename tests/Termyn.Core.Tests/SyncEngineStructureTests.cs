@@ -178,6 +178,7 @@ public class SyncEngineStructureTests
     public void Moving_a_task_to_another_project_clears_its_old_section()
     {
         var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "other", """{"id":"other","name":"Other"}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","section_id":"s1","child_order":1}""");
         var engine = NewEngine(store);
 
@@ -198,6 +199,254 @@ public class SyncEngineStructureTests
         var moved = engine.Snapshot().Items.Single(i => i.Id == "c");
         Assert.Equal("other", moved.ProjectId);
         Assert.Null(moved.ParentId);
+    }
+
+    // ---- Moving elsewhere ----------------------------------------------------------------------
+
+    [Fact]
+    public void Moving_a_task_into_a_section_files_it_there_and_in_that_sections_project()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("sections", "s9", """{"id":"s9","name":"Admin","project_id":"q"}""");
+        store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.True(engine.MoveItemToSection("c", "s9"));
+
+        var moved = engine.Snapshot().Items.Single();
+        Assert.Equal("s9", moved.SectionId);
+        Assert.Equal("q", moved.ProjectId);
+
+        var cmd = engine.Outbox.Single();
+        Assert.Equal("item_move", cmd.Type);
+        Assert.Equal("s9", Args(cmd)["section_id"]!.ToString());
+    }
+
+    [Fact]
+    public void A_sub_task_moved_into_a_section_comes_out_from_under_its_parent()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p"}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
+        store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""");
+        var engine = NewEngine(store);
+
+        // The section it's already in, which is still a move: it's top level there afterwards.
+        Assert.True(engine.MoveItemToSection("c", "s1"));
+
+        Assert.Null(engine.Snapshot().Items.Single(i => i.Id == "c").ParentId);
+    }
+
+    [Fact]
+    public void A_sub_task_moved_to_its_own_project_comes_out_from_under_its_parent()
+    {
+        var engine = ParentAndChild();
+
+        Assert.True(engine.MoveItemToProject("c", "p"));
+
+        Assert.Null(engine.Snapshot().Items.Single(i => i.Id == "c").ParentId);
+    }
+
+    [Fact]
+    public void A_section_the_model_lacks_is_nowhere_to_move_to()
+    {
+        var engine = TwoSiblings();
+
+        Assert.False(engine.MoveItemToSection("a", "gone"));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void A_project_the_model_lacks_is_nowhere_to_move_to()
+    {
+        // Asked under the same lock as the move. Checked beforehand instead, a sync could take the
+        // project away in between and the task would be filed under something no view shows.
+        var engine = TwoSiblings();
+
+        Assert.False(engine.MoveItemToProject("a", "gone"));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void An_inbox_task_with_no_project_yet_is_not_sent_to_the_inbox_again()
+    {
+        // A task captured without naming a project has none until the server gives it the Inbox's,
+        // and it's in the Inbox all the same.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "inbox", """{"id":"inbox","name":"Inbox","is_inbox_project":true}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.False(engine.MoveItemToProject("a", "inbox"));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void A_task_already_top_level_in_a_project_is_not_sent_there_again()
+    {
+        // The server would take it and file the task last, which is a reorder nobody asked for.
+        var engine = TwoSiblings();
+
+        Assert.False(engine.MoveItemToProject("a", "p"));
+
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Equal(1, engine.Snapshot().Items.Single(i => i.Id == "a").ChildOrder);
+    }
+
+    [Fact]
+    public void A_task_already_top_level_in_a_section_is_not_sent_there_again()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p"}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.False(engine.MoveItemToSection("a", "s1"));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void A_task_in_a_section_moved_to_its_own_project_leaves_the_section()
+    {
+        // In the project already, but not top level in it: the section is somewhere else to be.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p"}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.True(engine.MoveItemToProject("a", "p"));
+        Assert.Null(engine.Snapshot().Items.Single().SectionId);
+    }
+
+    [Fact]
+    public void A_moved_task_takes_its_sub_tasks_with_it()
+    {
+        // The server moves them itself and doesn't say so until the next sync. Left behind here they
+        // would show in the old project as tasks with no parent, under a parent shown with no children.
+        var engine = NewEngine(Family());
+
+        Assert.True(engine.MoveItemToProject("a", "q"));
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("q", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Null(items[id].SectionId));
+
+        // Still filed under each other, which a move of the top one doesn't change.
+        Assert.Equal("a", items["b"].ParentId);
+        Assert.Equal("b", items["c"].ParentId);
+
+        // And a task that was only ever a neighbour stays where it was.
+        Assert.Equal("p", items["n"].ProjectId);
+    }
+
+    [Fact]
+    public void A_task_moved_into_a_section_takes_its_sub_tasks_into_it()
+    {
+        var store = Family();
+        store.PutResource("sections", "s9", """{"id":"s9","name":"Admin","project_id":"q"}""");
+        var engine = NewEngine(store);
+
+        Assert.True(engine.MoveItemToSection("a", "s9"));
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["b", "c"], id => Assert.Equal("s9", items[id].SectionId));
+        Assert.All(["b", "c"], id => Assert.Equal("q", items[id].ProjectId));
+    }
+
+    [Fact]
+    public void Indenting_under_a_task_in_another_section_takes_the_sub_tasks_into_it()
+    {
+        // The rarer indent, where the sibling above sits in a different section of the same project.
+        // The indented task takes its new parent's section, and what's under it has to follow.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s2","child_order":2}""");
+        store.PutResource("items", "b1", """{"id":"b1","content":"B1","project_id":"p","section_id":"s2","parent_id":"b","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.True(engine.IndentItem("b"));
+
+        Assert.Equal("s1", engine.Snapshot().Items.Single(i => i.Id == "b1").SectionId);
+    }
+
+    [Fact]
+    public void Reverting_a_move_puts_its_sub_tasks_back_as_well()
+    {
+        var engine = NewEngine(Family());
+        engine.MoveItemToProject("a", "q");
+
+        engine.Revert(engine.Outbox.Single().Uuid);
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Equal("s1", items[id].SectionId));
+    }
+
+    [Fact]
+    public async Task A_move_the_server_refuses_puts_its_sub_tasks_back_as_well()
+    {
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+        engine.MoveItemToProject("a", "q");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+        };
+        await engine.SyncAsync();
+
+        // The server never moved them, and won't resend what never changed there — so nothing but
+        // this would ever bring them home.
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.Equal(1, engine.FailedCount);
+    }
+
+    [Fact]
+    public async Task A_sub_task_carried_by_a_pending_move_isnt_pulled_back_by_the_server()
+    {
+        // The server hasn't moved it yet, so anything it says about the sub-task meanwhile still has
+        // it in the old project. Taken, that leaves it behind under a parent that has gone elsewhere.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 5);
+        engine.Load();
+        engine.MoveItemToProject("a", "q");
+
+        // No verdict on the move, so it's still pending once this lands.
+        api.Next = _ => new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [Json.Change("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""")],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal(1, engine.PendingCount);
+        Assert.Equal("q", engine.Snapshot().Items.Single(i => i.Id == "b").ProjectId);
+    }
+
+    [Fact]
+    public async Task A_sub_task_deleted_while_its_move_was_pending_stays_deleted_when_the_move_is_refused()
+    {
+        // The refusal puts back what the move carried. A tombstone taken before then would be undone
+        // by it — and the server doesn't send a tombstone twice, so the sub-task would be back for good.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 2);
+        engine.Load();
+        engine.MoveItemToProject("a", "q");
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands), Changes = [Json.Deleted("items", "c")] };
+        await engine.SyncAsync();
+
+        api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.DoesNotContain("c", items.Keys);
+        Assert.Equal("p", items["b"].ProjectId);
+        Assert.Equal(1, engine.FailedCount);
     }
 
     [Fact]
@@ -409,7 +658,7 @@ public class SyncEngineStructureTests
 
     private static SyncEngine TwoSiblings()
     {
-        var store = new InMemorySnapshotStore();
+        var store = Projects();
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
         store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
         return NewEngine(store);
@@ -417,10 +666,35 @@ public class SyncEngineStructureTests
 
     private static SyncEngine ParentAndChild()
     {
-        var store = new InMemorySnapshotStore();
+        var store = Projects();
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","parent_id":"a","child_order":1}""");
         return NewEngine(store);
+    }
+
+    /// <summary>A store holding the projects the helpers below file their tasks in and move them to.</summary>
+    private static InMemorySnapshotStore Projects()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
+        store.PutResource("projects", "q", """{"id":"q","name":"Home","child_order":2}""");
+        store.PutResource("projects", "other", """{"id":"other","name":"Other","child_order":3}""");
+        return store;
+    }
+
+    private static Dictionary<string, CommandResult> Refused(IReadOnlyList<Command> commands)
+        => commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected"));
+
+    /// <summary>A task with a child and a grandchild, in a section, beside one that's none of theirs.</summary>
+    private static InMemorySnapshotStore Family()
+    {
+        var store = Projects();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Reports","project_id":"p"}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""");
+        store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","section_id":"s1","parent_id":"b","child_order":1}""");
+        store.PutResource("items", "n", """{"id":"n","content":"N","project_id":"p","section_id":"s1","child_order":2}""");
+        return store;
     }
 
     private static JsonObject Args(OutboxCommand cmd) => (JsonObject)JsonNode.Parse(cmd.ArgsJson)!;

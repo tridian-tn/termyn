@@ -1,4 +1,5 @@
 using Termyn.Core.Settings;
+using Termyn.Presentation;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -111,6 +112,148 @@ public class DialogTests
         using var palette = new CommandPaletteForm(_ => [], AnyTheme);
 
         Assert.IsType<TextBox>(palette.ActiveControl);
+    }
+
+    // ---- The move picker -----------------------------------------------------------------------
+
+    private static readonly MoveDestination[] Places =
+    [
+        new(SidebarKind.Project, "work", "Work", "Work", 0),
+        new(SidebarKind.Section, "admin", "Admin", "Work / Admin", 1, Here: true),
+        new(SidebarKind.Project, "home", "Home", "Home", 0),
+        new(SidebarKind.Section, "garden", "Garden", "Home / Garden", 1),
+    ];
+
+    private static MoveTaskForm NewPicker(string task = "Write it up", IReadOnlyList<MoveDestination>? places = null)
+    {
+        var form = new MoveTaskForm(task, places ?? Places, AnyTheme);
+        form.CreateControl();
+        return form;
+    }
+
+    private static Button MoveButton(Form form) => Every(form).OfType<Button>().Single(b => b.Text == "Move");
+
+    [WinFormsFact]
+    public void The_move_picker_opens_with_the_caret_in_the_box()
+    {
+        using var picker = NewPicker();
+
+        Assert.IsType<TextBox>(picker.ActiveControl);
+    }
+
+    [WinFormsFact]
+    public void The_move_picker_opens_on_where_the_task_already_is_with_Move_greyed()
+    {
+        // Which says where that is, and means a bare Enter on opening sends the task nowhere.
+        using var picker = NewPicker();
+
+        Assert.Equal("admin", picker.Selected?.Id);
+        Assert.False(picker.CanMove);
+        Assert.False(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void A_task_already_nowhere_opens_on_nothing()
+    {
+        // A sub-task, for which every place is a move. Picking the first for it would make Enter
+        // send it to whichever project happens to sort to the top.
+        using var picker = NewPicker(places: Places.Select(p => p with { Here = false }).ToList());
+
+        Assert.Null(picker.Selected);
+        Assert.False(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void Typing_picks_the_best_match_and_offers_the_move()
+    {
+        using var picker = NewPicker();
+
+        Every(picker).OfType<TextBox>().Single().Text = "gard";
+
+        Assert.Equal("garden", picker.Selected?.Id);
+        Assert.True(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void Typing_passes_over_where_the_task_already_is_for_the_next_best_match()
+    {
+        // Two sections called Admin, and the task is in the first. Landing on that one left Enter
+        // doing nothing with the other match sitting right under it.
+        using var picker = NewPicker(places:
+        [
+            new(SidebarKind.Section, "admin", "Admin", "Work / Admin", 1, Here: true),
+            new(SidebarKind.Section, "hadmin", "Admin", "Home / Admin", 1),
+        ]);
+
+        Every(picker).OfType<TextBox>().Single().Text = "adm";
+
+        Assert.Equal("hadmin", picker.Selected?.Id);
+        Assert.True(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void Typing_only_where_the_task_already_is_rests_there_with_Move_greyed()
+    {
+        using var picker = NewPicker();
+
+        Every(picker).OfType<TextBox>().Single().Text = "adm";
+
+        Assert.Equal("admin", picker.Selected?.Id);
+        Assert.False(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void Typing_something_nothing_is_called_leaves_nothing_to_move_to()
+    {
+        using var picker = NewPicker();
+
+        Every(picker).OfType<TextBox>().Single().Text = "zzz";
+
+        Assert.Null(picker.Selected);
+        Assert.False(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void Clearing_the_box_goes_back_to_where_the_task_is()
+    {
+        using var picker = NewPicker();
+        var box = Every(picker).OfType<TextBox>().Single();
+
+        box.Text = "gard";
+        box.Text = string.Empty;
+
+        Assert.Equal("admin", picker.Selected?.Id);
+        Assert.False(MoveButton(picker).Enabled);
+    }
+
+    [WinFormsFact]
+    public void The_move_picker_names_the_task_with_its_ampersands_intact()
+    {
+        using var picker = NewPicker("Books & Papers");
+
+        var line = Every(picker).OfType<Label>().Single(l => l.Text == "Books & Papers");
+
+        Assert.False(line.UseMnemonic, "the line would eat the ampersand");
+    }
+
+    [WinFormsFact]
+    public void Nothing_in_the_move_picker_hangs_off_the_edge_or_sits_on_anything_else()
+    {
+        using var picker = NewPicker();
+
+        var laid = Every(picker).Where(c => c.Parent == picker).ToList();
+
+        Assert.All(laid, c => Assert.True(
+            c.Right <= picker.ClientSize.Width && c.Bottom <= picker.ClientSize.Height,
+            $"{c.GetType().Name} '{c.Text}' at {c.Bounds}"));
+
+        var overlapping =
+            from a in laid
+            from b in laid
+            where !ReferenceEquals(a, b) && a.Bounds.IntersectsWith(b.Bounds)
+            select $"'{a.Text}' {a.Bounds} over '{b.Text}' {b.Bounds}";
+
+        Assert.Empty(overlapping.ToList());
     }
 
     // ---- The settings dialog -------------------------------------------------------------------
