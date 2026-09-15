@@ -27,6 +27,7 @@ public enum AppCommand
     Outdent,
     MoveUp,
     MoveDown,
+    MoveTo,
     Delete,
 
     // ---- On the selected sidebar row ----
@@ -68,11 +69,16 @@ public enum AppCommand
 /// What a task can be made to do from where it currently sits, so a menu can grey out what would
 /// only fail. Worked out by the engine, which owns the ordering these answers come from.
 /// </summary>
+/// <param name="CanMoveTo">
+/// Whether it can be sent to another project or section. False for a completed task fetched out of
+/// the archive, which the account no longer holds anywhere a move could reach
+/// </param>
 public sealed record TaskAbilities(
     bool CanIndent = false,
     bool CanOutdent = false,
     bool CanMoveUp = false,
-    bool CanMoveDown = false)
+    bool CanMoveDown = false,
+    bool CanMoveTo = false)
 {
     /// <summary>No task in hand, so nothing is on offer.</summary>
     public static readonly TaskAbilities None = new();
@@ -211,6 +217,7 @@ public static class Commands
             AppCommand.Outdent => new CommandState("Outdent", can.CanOutdent),
             AppCommand.MoveUp => new CommandState("Move up", can.CanMoveUp),
             AppCommand.MoveDown => new CommandState("Move down", can.CanMoveDown),
+            AppCommand.MoveTo => new CommandState("Move to…", can.CanMoveTo),
             AppCommand.Delete => Task("Delete"),
 
             // Not on a task that is finished with — a sub-task of one would be work filed under

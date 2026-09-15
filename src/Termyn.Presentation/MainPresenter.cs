@@ -1058,7 +1058,8 @@ public sealed class MainPresenter
                 _engine.CanIndentItem(id),
                 _engine.CanOutdentItem(id),
                 _engine.CanMoveItem(id, -1),
-                _engine.CanMoveItem(id, 1));
+                _engine.CanMoveItem(id, 1),
+                _engine.Holds(id));
 
     /// <summary>Moves a task one place up or down among its siblings.</summary>
     /// <returns>False when it was already at that end, so the caller can skip a needless sync.</returns>
@@ -1113,6 +1114,46 @@ public sealed class MainPresenter
         }
 
         return outdented;
+    }
+
+    /// <summary>
+    /// Everywhere a task could be moved to, in the order the sidebar lists them, with the place it
+    /// already sits marked.
+    /// </summary>
+    /// <param name="id">The task about to move</param>
+    /// <returns>Every project and section the sidebar shows</returns>
+    public IReadOnlyList<MoveDestination> DestinationsFor(string id)
+        => MoveDestinations.From(Sidebar, _engine.Snapshot().Items.FirstOrDefault(i => i.Id == id));
+
+    /// <summary>
+    /// Moves a task to the top level of a project or a section, taking its sub-tasks with it.
+    /// </summary>
+    /// <remarks>
+    /// The project is checked for here and the section isn't, because the engine already turns
+    /// away a section it doesn't hold. A project it doesn't hold it would send the task to anyway,
+    /// and one deleted by a sync while the picker was open is a move the server can only refuse.
+    /// </remarks>
+    /// <param name="id">The task to move</param>
+    /// <param name="destination">Where to, from <see cref="DestinationsFor"/></param>
+    /// <returns>False when it was already there, or the task or the destination has gone</returns>
+    public bool MoveTo(string id, MoveDestination destination)
+    {
+        var named = Named(id);
+        var moved = destination.Kind switch
+        {
+            SidebarKind.Project => _engine.HoldsProject(destination.Id) && _engine.MoveItemToProject(id, destination.Id),
+            SidebarKind.Section => _engine.MoveItemToSection(id, destination.Id),
+            _ => false,
+        };
+
+        if (!moved)
+            return false;
+
+        // Its own run rather than the nudges' one. Moving a row up and then sending it to another
+        // project are two things done, and folding them would leave only the second.
+        History.Note($"Moved {named} to “{destination.Path}”", $"move:to:{id}");
+        Publish();
+        return true;
     }
 
     // ---- Reminder intents ----------------------------------------------------------------------

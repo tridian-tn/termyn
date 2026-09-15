@@ -2350,6 +2350,10 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.Left, AppCommand.Outdent, Scope.Outline),
         (Keys.Control | Keys.Up, AppCommand.MoveUp, Scope.Outline),
         (Keys.Control | Keys.Down, AppCommand.MoveDown, Scope.Outline),
+
+        // M for move. Only in the outline, where there's a task under the cursor to send somewhere:
+        // window-wide it would fire over the description editor and the comment box as well.
+        (Keys.Control | Keys.M, AppCommand.MoveTo, Scope.Outline),
         (Keys.Delete, AppCommand.Delete, Scope.Outline),
 
         // Kept off the window, where it would take Ctrl+Z away from every text box in it — undoing
@@ -2378,10 +2382,10 @@ internal sealed class MainForm : Form
         (Keys.Control | Keys.Alt | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
         (Keys.F5, AppCommand.SyncNow, Scope.Window),
         (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
-        // F4 shows and hides the panel; the other two pick which of its tabs is in front.
+        // F4 shows and hides the panel; F6 and F7 pick which of its tabs is in front.
         (Keys.F4, AppCommand.ToggleDescription, Scope.Window),
-        (Keys.Control | Keys.E, AppCommand.ViewDescription, Scope.Window),
-        (Keys.Control | Keys.M, AppCommand.ViewComments, Scope.Window),
+        (Keys.F6, AppCommand.ViewDescription, Scope.Window),
+        (Keys.F7, AppCommand.ViewComments, Scope.Window),
 
         // The key the menu shows first, then the number pad's own, which people reach for without
         // thinking and which is a different key code entirely.
@@ -2988,6 +2992,10 @@ internal sealed class MainForm : Form
                 });
                 return wrote;
 
+            case AppCommand.MoveTo:
+                Guarded(() => wrote = MoveElsewhere(id));
+                return wrote;
+
             // Deliberately unconfirmed: Ctrl+Z brings the task back, and Windows asks for a
             // confirmation only where it can't offer that — the same reason deleting a file to the
             // Recycle Bin doesn't stop to ask. A dialog on every delete is one people learn to
@@ -3223,6 +3231,49 @@ internal sealed class MainForm : Form
     /// <returns>True when one was added or removed.</returns>
     private bool ShowReminders(string id)
         => _outline.SelectedRow is { } row && ReminderForm.Show(this, _presenter, id, row.Content);
+
+    /// <summary>
+    /// Asks which project or section a task should go to, and sends it there.
+    /// </summary>
+    /// <remarks>
+    /// The view can then stop showing it, and usually will: moving a task out of the project on
+    /// screen is most of what this is for. A row that vanishes reads as a task that was deleted, so
+    /// it says where it went. One the view still shows is put back under the cursor, since it'll
+    /// have landed last among its new siblings and could be anywhere in the list.
+    /// </remarks>
+    /// <param name="id">The task to move</param>
+    /// <returns>True when it was moved</returns>
+    private bool MoveElsewhere(string id)
+    {
+        if (_outline.SelectedRow is not { } row)
+            return false;
+
+        // Greyed in the menus, but the keystroke reaches this without one having opened. Said before
+        // the picker rather than after it, so nobody chooses somewhere only to be told it was no use.
+        if (!_presenter.HasTask(id))
+        {
+            _status.Text = "Tasks from the completed history can't be moved.";
+            return false;
+        }
+
+        if (MoveTaskForm.Pick(this, row.Content, _presenter.DestinationsFor(id), _theme) is not { } destination)
+            return false;
+
+        // Only reached when something changed while the picker was open: it won't confirm the place
+        // the task already sits, so what's gone is the task or where it was going.
+        if (!_presenter.MoveTo(id, destination))
+        {
+            _status.Text = "Not moved — the task or where it was going is no longer there.";
+            return false;
+        }
+
+        if (_outline.Rows.Any(r => r.Id == id))
+            _outline.SelectId(id);
+        else
+            _status.Text = $"Moved to {destination.Path}, which this view doesn't show.";
+
+        return true;
+    }
 
     /// <summary>Ticks the labels on a task, creating any the account doesn't have yet.</summary>
     private bool PickLabels(string id)

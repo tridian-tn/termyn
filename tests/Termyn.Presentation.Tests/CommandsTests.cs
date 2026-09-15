@@ -54,7 +54,7 @@ public class CommandsTests
         // silently joins or leaves the group. This is what notices.
         var needsATask = Enum.GetValues<AppCommand>()
             .Where(c => c != AppCommand.None)
-            .Where(c => !State(c).Enabled && State(c, new CommandContext(Row(), new TaskAbilities(true, true, true, true))).Enabled)
+            .Where(c => !State(c).Enabled && State(c, new CommandContext(Row(), new TaskAbilities(true, true, true, true, true))).Enabled)
             .ToList();
 
         Assert.Equal(needsATask, needsATask.Where(Commands.IsTaskCommand).ToList());
@@ -226,14 +226,28 @@ public class CommandsTests
     }
 
     [Fact]
+    public void A_task_that_cannot_go_elsewhere_is_not_offered_the_picker()
+    {
+        // A completed task fetched out of the archive, which the account no longer holds anywhere a
+        // move could reach. Still named, so the greyed entry says what it would have done.
+        var archived = new CommandContext(Row(completed: true), new TaskAbilities());
+        var held = new CommandContext(Row(), new TaskAbilities(CanMoveTo: true));
+
+        Assert.False(State(AppCommand.MoveTo, archived).Enabled);
+        Assert.True(State(AppCommand.MoveTo, held).Enabled);
+        Assert.Equal("Move to…", State(AppCommand.MoveTo, archived).Label);
+    }
+
+    [Fact]
     public void Abilities_without_a_task_count_for_nothing()
     {
         // Nothing selected, but the abilities of the row that was: a stale pairing must not leave
         // Move up offered over an empty outline.
-        var stale = new CommandContext(Task: null, Abilities: new TaskAbilities(true, true, true, true));
+        var stale = new CommandContext(Task: null, Abilities: new TaskAbilities(true, true, true, true, true));
 
         Assert.False(State(AppCommand.MoveUp, stale).Enabled);
         Assert.False(State(AppCommand.Indent, stale).Enabled);
+        Assert.False(State(AppCommand.MoveTo, stale).Enabled);
     }
 
     [Theory]
@@ -290,8 +304,8 @@ public class CommandsTests
         var first = presenter.AbilitiesFor("a");
         var second = presenter.AbilitiesFor("b");
 
-        Assert.Equal(new TaskAbilities(CanIndent: false, CanOutdent: false, CanMoveUp: false, CanMoveDown: true), first);
-        Assert.Equal(new TaskAbilities(CanIndent: true, CanOutdent: false, CanMoveUp: true, CanMoveDown: false), second);
+        Assert.Equal(new TaskAbilities(CanIndent: false, CanOutdent: false, CanMoveUp: false, CanMoveDown: true, CanMoveTo: true), first);
+        Assert.Equal(new TaskAbilities(CanIndent: true, CanOutdent: false, CanMoveUp: true, CanMoveDown: false, CanMoveTo: true), second);
     }
 
     [Fact]
