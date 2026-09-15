@@ -40,8 +40,12 @@ public static class MoveDestinations
     /// </remarks>
     /// <param name="sidebar">The sidebar as the presenter last built it</param>
     /// <param name="task">The task about to move, or null when the account doesn't hold it</param>
+    /// <param name="inboxProjectId">The account's Inbox, where a task naming no project is</param>
     /// <returns>Every project and section, outermost first</returns>
-    public static IReadOnlyList<MoveDestination> From(IReadOnlyList<SidebarNode> sidebar, TaskItem? task)
+    public static IReadOnlyList<MoveDestination> From(
+        IReadOnlyList<SidebarNode> sidebar,
+        TaskItem? task,
+        string? inboxProjectId = null)
     {
         var destinations = new List<MoveDestination>();
         var above = new List<string>();
@@ -60,7 +64,7 @@ public static class MoveDestinations
                 above.RemoveAt(above.Count - 1);
 
             var path = string.Join(Separator, above.Append(node.Label));
-            destinations.Add(new MoveDestination(node.Kind, node.Id, node.Label, path, depth, IsHere(task, node)));
+            destinations.Add(new MoveDestination(node.Kind, node.Id, node.Label, path, depth, IsHere(task, node, inboxProjectId)));
 
             above.Add(node.Label);
         }
@@ -74,13 +78,17 @@ public static class MoveDestinations
     /// <remarks>
     /// Top level and not merely inside. A sub-task moved to the section it's already in comes out
     /// from under its parent, which is a move worth making — so nowhere is "here" for one of those.
+    ///
+    /// A task naming no project is in the Inbox. One captured without a project has none until the
+    /// server gives it the Inbox's, and the engine turns a move there away all the same.
     /// </remarks>
-    private static bool IsHere(TaskItem? task, SidebarNode node) => task is { ParentId: null } && node.Kind switch
-    {
-        SidebarKind.Section => task.SectionId == node.Id,
-        SidebarKind.Project => task.SectionId is null && task.ProjectId == node.Id,
-        _ => false,
-    };
+    private static bool IsHere(TaskItem? task, SidebarNode node, string? inboxProjectId)
+        => task is { ParentId: null } && node.Kind switch
+        {
+            SidebarKind.Section => task.SectionId == node.Id,
+            SidebarKind.Project => task.SectionId is null && (task.ProjectId ?? inboxProjectId) == node.Id,
+            _ => false,
+        };
 
     /// <summary>
     /// The destinations that match what's been typed, best first.

@@ -178,6 +178,7 @@ public class SyncEngineStructureTests
     public void Moving_a_task_to_another_project_clears_its_old_section()
     {
         var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "other", """{"id":"other","name":"Other"}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","section_id":"s1","child_order":1}""");
         var engine = NewEngine(store);
 
@@ -256,6 +257,31 @@ public class SyncEngineStructureTests
     }
 
     [Fact]
+    public void A_project_the_model_lacks_is_nowhere_to_move_to()
+    {
+        // Asked under the same lock as the move. Checked beforehand instead, a sync could take the
+        // project away in between and the task would be filed under something no view shows.
+        var engine = TwoSiblings();
+
+        Assert.False(engine.MoveItemToProject("a", "gone"));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public void An_inbox_task_with_no_project_yet_is_not_sent_to_the_inbox_again()
+    {
+        // A task captured without naming a project has none until the server gives it the Inbox's,
+        // and it's in the Inbox all the same.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "inbox", """{"id":"inbox","name":"Inbox","is_inbox_project":true}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","child_order":1}""");
+        var engine = NewEngine(store);
+
+        Assert.False(engine.MoveItemToProject("a", "inbox"));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
     public void A_task_already_top_level_in_a_project_is_not_sent_there_again()
     {
         // The server would take it and file the task last, which is a reorder nobody asked for.
@@ -284,6 +310,7 @@ public class SyncEngineStructureTests
     {
         // In the project already, but not top level in it: the section is somewhere else to be.
         var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");
         store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p"}""");
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
         var engine = NewEngine(store);
@@ -375,6 +402,50 @@ public class SyncEngineStructureTests
         // this would ever bring them home.
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.Equal(1, engine.FailedCount);
+    }
+
+    [Fact]
+    public async Task A_sub_task_carried_by_a_pending_move_isnt_pulled_back_by_the_server()
+    {
+        // The server hasn't moved it yet, so anything it says about the sub-task meanwhile still has
+        // it in the old project. Taken, that leaves it behind under a parent that has gone elsewhere.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 5);
+        engine.Load();
+        engine.MoveItemToProject("a", "q");
+
+        // No verdict on the move, so it's still pending once this lands.
+        api.Next = _ => new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = [Json.Change("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""")],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal(1, engine.PendingCount);
+        Assert.Equal("q", engine.Snapshot().Items.Single(i => i.Id == "b").ProjectId);
+    }
+
+    [Fact]
+    public async Task A_sub_task_deleted_while_its_move_was_pending_stays_deleted_when_the_move_is_refused()
+    {
+        // The refusal puts back what the move carried. A tombstone taken before then would be undone
+        // by it — and the server doesn't send a tombstone twice, so the sub-task would be back for good.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 2);
+        engine.Load();
+        engine.MoveItemToProject("a", "q");
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands), Changes = [Json.Deleted("items", "c")] };
+        await engine.SyncAsync();
+
+        api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.DoesNotContain("c", items.Keys);
+        Assert.Equal("p", items["b"].ProjectId);
         Assert.Equal(1, engine.FailedCount);
     }
 
@@ -587,7 +658,7 @@ public class SyncEngineStructureTests
 
     private static SyncEngine TwoSiblings()
     {
-        var store = new InMemorySnapshotStore();
+        var store = Projects();
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
         store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
         return NewEngine(store);
@@ -595,16 +666,29 @@ public class SyncEngineStructureTests
 
     private static SyncEngine ParentAndChild()
     {
-        var store = new InMemorySnapshotStore();
+        var store = Projects();
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","parent_id":"a","child_order":1}""");
         return NewEngine(store);
     }
 
+    /// <summary>A store holding the projects the helpers below file their tasks in and move them to.</summary>
+    private static InMemorySnapshotStore Projects()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
+        store.PutResource("projects", "q", """{"id":"q","name":"Home","child_order":2}""");
+        store.PutResource("projects", "other", """{"id":"other","name":"Other","child_order":3}""");
+        return store;
+    }
+
+    private static Dictionary<string, CommandResult> Refused(IReadOnlyList<Command> commands)
+        => commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected"));
+
     /// <summary>A task with a child and a grandchild, in a section, beside one that's none of theirs.</summary>
     private static InMemorySnapshotStore Family()
     {
-        var store = new InMemorySnapshotStore();
+        var store = Projects();
         store.PutResource("sections", "s1", """{"id":"s1","name":"Reports","project_id":"p"}""");
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
         store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""");

@@ -1246,7 +1246,15 @@ public sealed class SyncEngine
     }
 
     /// <summary>Moves a task to another project, keeping it top level there.</summary>
-    /// <returns>False when it's already top level in that project, or the task isn't held</returns>
+    /// <remarks>
+    /// The project has to be one the model holds, and it's asked here under the same lock as the
+    /// move. Asked beforehand by the caller, a sync could take the project away in between, and the
+    /// task would be filed under something no view shows and the server can only refuse.
+    ///
+    /// Outdenting doesn't come this way. It moves to whatever project the task was already in,
+    /// which is the task's own word for where it lives rather than a choice to be checked.
+    /// </remarks>
+    /// <returns>False when it's already top level in that project, or either isn't held</returns>
     public bool MoveItemToProject(string id, string projectId)
     {
         lock (_gate)
@@ -1254,7 +1262,8 @@ public sealed class SyncEngine
             id = Promoted(id);
             projectId = Promoted(projectId);
 
-            return MoveTo(id, projectId: projectId);
+            return Model.Get(ResourceType.Projects, projectId) is not null
+                   && MoveTo(id, projectId: projectId);
         }
 
     }
@@ -1329,7 +1338,11 @@ public sealed class SyncEngine
         }
         else if (projectId is not null)
         {
-            if (current.ParentId is null && current.SectionId is null && current.ProjectId == projectId)
+            // A task with no project is in the Inbox — one captured without naming a project has
+            // none until the server gives it the Inbox's — so that's where it already is.
+            var inProject = current.ProjectId ?? Model.Projects().FirstOrDefault(p => p.IsInboxProject)?.Id;
+
+            if (current.ParentId is null && current.SectionId is null && inProject == projectId)
                 return false;
 
             args["project_id"] = projectId;
@@ -2609,8 +2622,21 @@ public sealed class SyncEngine
             // Only a command that actually mutated a local copy has something to protect. A command
             // aimed at a resource we never held must not shadow the server's version of it, which
             // would be dropped for good once the sync token advances past that change.
-            if (c.PriorJson is not null && ParseArgs(c)["id"] is JsonValue v)
-                keys.Add(new ResourceKey(ResourceTypeFor(c), v.ToString()));
+            if (c.PriorJson is null || ParseArgs(c)["id"] is not JsonValue v)
+                continue;
+
+            keys.Add(new ResourceKey(ResourceTypeFor(c), v.ToString()));
+
+            // A move carries the sub-tasks with it, and they're in its priors because it changed
+            // them. Left unowned, the server's word on one arrives before it has moved them and
+            // pulls the sub-task back to where it was; and a tombstone taken meanwhile is undone
+            // when a refused move puts its priors back, for good, since no second one is sent.
+            if (c.Type == "item_move" && TryParseNode(c.PriorJson) is JsonArray priors)
+            {
+                foreach (var prior in priors)
+                    if (prior is JsonObject o && o["id"] is JsonValue carried)
+                        keys.Add(new ResourceKey(ResourceTypeFor(c), carried.ToString()));
+            }
         }
         return keys;
     }

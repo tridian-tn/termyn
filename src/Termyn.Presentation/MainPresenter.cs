@@ -1123,15 +1123,17 @@ public sealed class MainPresenter
     /// <param name="id">The task about to move</param>
     /// <returns>Every project and section the sidebar shows</returns>
     public IReadOnlyList<MoveDestination> DestinationsFor(string id)
-        => MoveDestinations.From(Sidebar, _engine.Snapshot().Items.FirstOrDefault(i => i.Id == id));
+    {
+        var snapshot = _engine.Snapshot();
+        return MoveDestinations.From(Sidebar, snapshot.Items.FirstOrDefault(i => i.Id == id), snapshot.InboxProjectId);
+    }
 
     /// <summary>
     /// Moves a task to the top level of a project or a section, taking its sub-tasks with it.
     /// </summary>
     /// <remarks>
-    /// The project is checked for here and the section isn't, because the engine already turns
-    /// away a section it doesn't hold. A project it doesn't hold it would send the task to anyway,
-    /// and one deleted by a sync while the picker was open is a move the server can only refuse.
+    /// A project or section deleted by a sync while the picker was open is turned away by the engine,
+    /// which asks under the same lock as the move rather than leaving a gap between the two.
     /// </remarks>
     /// <param name="id">The task to move</param>
     /// <param name="destination">Where to, from <see cref="DestinationsFor"/></param>
@@ -1141,7 +1143,7 @@ public sealed class MainPresenter
         var named = Named(id);
         var moved = destination.Kind switch
         {
-            SidebarKind.Project => _engine.HoldsProject(destination.Id) && _engine.MoveItemToProject(id, destination.Id),
+            SidebarKind.Project => _engine.MoveItemToProject(id, destination.Id),
             SidebarKind.Section => _engine.MoveItemToSection(id, destination.Id),
             _ => false,
         };

@@ -81,6 +81,21 @@ public class MoveDestinationsTests
     }
 
     [Fact]
+    public void A_task_with_no_project_yet_is_already_in_the_inbox()
+    {
+        // Captured without naming a project, it has none until the server gives it the Inbox's — and
+        // it's in the Inbox all the same, so that's the row to tick.
+        var store = Account();
+        store.PutResource("projects", "inbox", """{"id":"inbox","name":"Inbox","child_order":0,"is_inbox_project":true}""");
+        store.PutResource("items", "captured", """{"id":"captured","content":"Captured","child_order":1}""");
+        var presenter = NewPresenter(store);
+
+        var here = Assert.Single(presenter.DestinationsFor("captured"), d => d.Here);
+
+        Assert.Equal("inbox", here.Id);
+    }
+
+    [Fact]
     public void A_sub_task_is_already_nowhere()
     {
         // Every place is a move for one of those, including the section it's in: it comes out from
