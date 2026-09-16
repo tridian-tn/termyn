@@ -73,7 +73,36 @@ public class LinksTests
         // Built here and checked against the thing that guards them, so tightening one without the
         // other fails here rather than in the hands of whoever clicks the link.
         Assert.NotNull(Links.Openable(Links.TodoistFilter("276111043", "Assigned to me")));
+        Assert.NotNull(Links.Openable(Links.TodoistTask("6XR4GqQQCW6Gv9h4")));
         Assert.NotNull(Links.Openable(UpdateResult.ReleasesPage));
+    }
+
+    [Fact]
+    public void A_task_link_is_written_the_way_todoist_addresses_one()
+    {
+        // The id on its own, which is the form Todoist's API documentation gives for a task link.
+        // The id is the documentation's own example.
+        Assert.Equal(
+            "https://app.todoist.com/app/task/6XR4GqQQCW6Gv9h4",
+            Links.TodoistTask("6XR4GqQQCW6Gv9h4"));
+    }
+
+    [Theory]
+    [InlineData("../settings/account")]
+    [InlineData("../../oauth/authorize")]
+    [InlineData("x?next=https://evil.example")]
+    [InlineData("x#fragment")]
+    public void A_task_link_stays_on_the_task_page_whatever_the_id_held(string id)
+    {
+        // The id comes off the network. Unescaped, a slash in it walks up out of the task page —
+        // to somewhere else in the app, or somewhere the check refuses so nothing opens at all —
+        // and a question mark or a hash starts something that isn't the id.
+        var link = Links.Openable(Links.TodoistTask(id));
+
+        Assert.NotNull(link);
+        Assert.StartsWith("https://app.todoist.com/app/task/", link);
+        Assert.DoesNotContain("?", link);
+        Assert.DoesNotContain("#", link);
     }
 
     [Fact]

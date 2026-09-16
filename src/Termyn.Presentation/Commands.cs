@@ -28,6 +28,7 @@ public enum AppCommand
     MoveUp,
     MoveDown,
     MoveTo,
+    ShowInTodoist,
     Delete,
 
     // ---- On the selected sidebar row ----
@@ -73,12 +74,17 @@ public enum AppCommand
 /// Whether it can be sent to another project or section. False for a completed task fetched out of
 /// the archive, which the account no longer holds anywhere a move could reach
 /// </param>
+/// <param name="CanShowInTodoist">
+/// Whether Todoist has a page for it. False for a task made here that a sync hasn't taken to the
+/// server yet, which Todoist has never heard of
+/// </param>
 public sealed record TaskAbilities(
     bool CanIndent = false,
     bool CanOutdent = false,
     bool CanMoveUp = false,
     bool CanMoveDown = false,
-    bool CanMoveTo = false)
+    bool CanMoveTo = false,
+    bool CanShowInTodoist = false)
 {
     /// <summary>No task in hand, so nothing is on offer.</summary>
     public static readonly TaskAbilities None = new();
@@ -218,6 +224,10 @@ public static class Commands
             AppCommand.MoveUp => new CommandState("Move up", can.CanMoveUp),
             AppCommand.MoveDown => new CommandState("Move down", can.CanMoveDown),
             AppCommand.MoveTo => new CommandState("Move to…", can.CanMoveTo),
+
+            // No ellipsis: nothing opens here to ask anything, the browser just goes to the task.
+            AppCommand.ShowInTodoist => new CommandState("Show in Todoist", can.CanShowInTodoist),
+
             AppCommand.Delete => Task("Delete"),
 
             // Not on a task that is finished with — a sub-task of one would be work filed under

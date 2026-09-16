@@ -54,6 +54,7 @@ public class ShortcutTests
     [InlineData(Keys.Control | Keys.Up, AppCommand.MoveUp)]
     [InlineData(Keys.Control | Keys.Down, AppCommand.MoveDown)]
     [InlineData(Keys.Control | Keys.M, AppCommand.MoveTo)]
+    [InlineData(Keys.Control | Keys.O, AppCommand.ShowInTodoist)]
     [InlineData(Keys.Delete, AppCommand.Delete)]
     [InlineData(Keys.Control | Keys.Z, AppCommand.Undo)]
     public void The_outline_answers_to_its_own_keys(Keys keys, AppCommand expected)
@@ -168,6 +169,17 @@ public class ShortcutTests
         // looking at.
         Assert.Equal(AppCommand.MoveTo, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Outline));
         Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.M, MainForm.Scope.Sidebar));
+    }
+
+    [WinFormsFact]
+    public void Showing_a_task_in_todoist_answers_only_in_the_outline()
+    {
+        // The task under the cursor is the one that goes to the browser, so there has to be one.
+        // Window-wide it would also take Ctrl+O from the description editor and the comment box.
+        Assert.Equal(AppCommand.ShowInTodoist, MainForm.CommandFor(Keys.Control | Keys.O, MainForm.Scope.Outline));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.O, MainForm.Scope.Sidebar));
+        Assert.Equal(AppCommand.None, MainForm.CommandFor(Keys.Control | Keys.O, MainForm.Scope.Window));
+        Assert.Equal("Ctrl+O", MainForm.ShortcutFor(AppCommand.ShowInTodoist));
     }
 
     [WinFormsFact]

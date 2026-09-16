@@ -17,7 +17,7 @@ public class MenuTests
         TaskAbilities? can = null,
         bool completed = false,
         int depth = 0)
-        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true));
+        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true));
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -85,9 +85,31 @@ public class MenuTests
                 AppCommand.MoveUp,
                 AppCommand.MoveDown,
                 AppCommand.MoveTo,
+                AppCommand.ShowInTodoist,
                 AppCommand.Delete,
             ],
             Menus.Commands(Menus.TaskContext).ToArray());
+    }
+
+    [WinFormsFact]
+    public void Showing_a_task_in_todoist_is_in_both_task_menus_in_a_group_of_its_own()
+    {
+        // Asked for on the right-click as well as in the Task menu, which are one list. Ruled off
+        // from the moves above it, since it changes nothing, and from Delete below, which keeps to
+        // itself.
+        var bar = Menus.Bar.Single(e => e.Heading == "&Task");
+
+        Assert.Contains(AppCommand.ShowInTodoist, Menus.Commands(Menus.TaskContext));
+        Assert.Contains(AppCommand.ShowInTodoist, Menus.Commands(bar.Children ?? []));
+
+        using var built = BuildTaskMenu(OnTask());
+        var items = built.Menu.Items.Cast<ToolStripItem>().ToList();
+        var show = items.IndexOf(Find(built, "Show in Todoist"));
+
+        Assert.IsType<ToolStripSeparator>(items[show - 1]);
+        Assert.Equal("Move to…", items[show - 2].Text);
+        Assert.IsType<ToolStripSeparator>(items[show + 1]);
+        Assert.Equal("Delete", items[show + 2].Text);
     }
 
     [WinFormsFact]
@@ -304,6 +326,26 @@ public class MenuTests
 
         Assert.False(Find(archived, "Move to…").Enabled);
         Assert.True(Find(held, "Move to…").Enabled);
+    }
+
+    [WinFormsFact]
+    public void A_task_todoist_has_not_got_yet_is_not_offered_its_page()
+    {
+        using var unsynced = BuildTaskMenu(OnTask(can: new TaskAbilities(CanMoveTo: true)));
+        using var synced = BuildTaskMenu(OnTask(can: new TaskAbilities(CanShowInTodoist: true)));
+
+        Assert.False(Find(unsynced, "Show in Todoist").Enabled);
+        Assert.True(Find(synced, "Show in Todoist").Enabled);
+    }
+
+    [WinFormsFact]
+    public void Clicking_show_in_todoist_asks_for_it()
+    {
+        using var built = BuildTaskMenu(OnTask(can: new TaskAbilities(CanShowInTodoist: true)));
+
+        Find(built, "Show in Todoist").PerformClick();
+
+        Assert.Equal([AppCommand.ShowInTodoist], built.Ran);
     }
 
     [WinFormsFact]
@@ -556,9 +598,9 @@ public class MenuTests
     {
         using var built = BuildTaskMenu(OnTask());
 
-        // Three rules: what the task is, what it carries, where it sits, and then delete on its
-        // own. None at the top or the bottom, where a rule has nothing to divide.
-        Assert.Equal(3, built.Menu.Items.OfType<ToolStripSeparator>().Count());
+        // Four rules: what the task is, what it carries, where it sits, showing it in Todoist, and
+        // then delete on its own. None at the top or the bottom, where a rule has nothing to divide.
+        Assert.Equal(4, built.Menu.Items.OfType<ToolStripSeparator>().Count());
         Assert.IsNotType<ToolStripSeparator>(built.Menu.Items[0]);
         Assert.IsNotType<ToolStripSeparator>(built.Menu.Items[^1]);
     }
