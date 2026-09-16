@@ -1059,7 +1059,22 @@ public sealed class MainPresenter
                 _engine.CanOutdentItem(id),
                 _engine.CanMoveItem(id, -1),
                 _engine.CanMoveItem(id, 1),
-                _engine.Holds(id));
+                _engine.Holds(id),
+                TodoistLinkFor(id) is not null);
+
+    /// <summary>
+    /// Where a task's page is in the Todoist web app.
+    /// </summary>
+    /// <remarks>
+    /// Worked out again when it's followed rather than kept from when the menu opened, since a sync
+    /// can land in between and give a task added here the server's id.
+    /// </remarks>
+    /// <param name="id">The task, by whatever name the outline holds it under</param>
+    /// <returns>The link, or null when Todoist hasn't got the task yet</returns>
+    public string? TodoistLinkFor(string? id)
+        => id is not null && _engine.ServerIdOf(id) is { } serverId
+            ? Links.TodoistTask(serverId)
+            : null;
 
     /// <summary>Moves a task one place up or down among its siblings.</summary>
     /// <returns>False when it was already at that end, so the caller can skip a needless sync.</returns>

@@ -38,6 +38,19 @@ public static class Links
     }
 
     /// <summary>
+    /// The page for one task in the Todoist app.
+    /// </summary>
+    /// <remarks>
+    /// The id alone, which is the form Todoist documents for a task link. Escaped even so: it's the
+    /// only part of the address that came off the network, and a slash in it would otherwise walk
+    /// the path up out of the task page to wherever the rest of it pointed.
+    /// </remarks>
+    /// <param name="id">The id the server knows the task by</param>
+    /// <returns>The URL of that task's page</returns>
+    public static string TodoistTask(string id)
+        => $"https://app.todoist.com/app/task/{Uri.EscapeDataString(id)}";
+
+    /// <summary>
     /// A filter's name in the form a URL carries it.
     /// </summary>
     /// <remarks>

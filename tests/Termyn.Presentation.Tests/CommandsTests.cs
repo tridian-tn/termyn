@@ -239,6 +239,19 @@ public class CommandsTests
     }
 
     [Fact]
+    public void A_task_todoist_has_not_got_yet_is_not_offered_its_page()
+    {
+        // Added here and not synced, so there's no page in Todoist to go to. Still named, so the
+        // greyed entry says what it would have done.
+        var unsynced = new CommandContext(Row(), new TaskAbilities(CanMoveTo: true));
+        var synced = new CommandContext(Row(), new TaskAbilities(CanShowInTodoist: true));
+
+        Assert.False(State(AppCommand.ShowInTodoist, unsynced).Enabled);
+        Assert.True(State(AppCommand.ShowInTodoist, synced).Enabled);
+        Assert.Equal("Show in Todoist", State(AppCommand.ShowInTodoist, unsynced).Label);
+    }
+
+    [Fact]
     public void Abilities_without_a_task_count_for_nothing()
     {
         // Nothing selected, but the abilities of the row that was: a stale pairing must not leave
@@ -248,6 +261,7 @@ public class CommandsTests
         Assert.False(State(AppCommand.MoveUp, stale).Enabled);
         Assert.False(State(AppCommand.Indent, stale).Enabled);
         Assert.False(State(AppCommand.MoveTo, stale).Enabled);
+        Assert.False(State(AppCommand.ShowInTodoist, stale).Enabled);
     }
 
     [Theory]
@@ -304,8 +318,34 @@ public class CommandsTests
         var first = presenter.AbilitiesFor("a");
         var second = presenter.AbilitiesFor("b");
 
-        Assert.Equal(new TaskAbilities(CanIndent: false, CanOutdent: false, CanMoveUp: false, CanMoveDown: true, CanMoveTo: true), first);
-        Assert.Equal(new TaskAbilities(CanIndent: true, CanOutdent: false, CanMoveUp: true, CanMoveDown: false, CanMoveTo: true), second);
+        Assert.Equal(new TaskAbilities(CanIndent: false, CanOutdent: false, CanMoveUp: false, CanMoveDown: true, CanMoveTo: true, CanShowInTodoist: true), first);
+        Assert.Equal(new TaskAbilities(CanIndent: true, CanOutdent: false, CanMoveUp: true, CanMoveDown: false, CanMoveTo: true, CanShowInTodoist: true), second);
+    }
+
+    [Fact]
+    public void The_presenter_links_a_task_to_its_page_in_todoist()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "6XR4GqQQCW6Gv9h4", """{"id":"6XR4GqQQCW6Gv9h4","content":"A","project_id":"p","child_order":1}""");
+        var presenter = NewPresenter(store);
+
+        Assert.Equal("https://app.todoist.com/app/task/6XR4GqQQCW6Gv9h4", presenter.TodoistLinkFor("6XR4GqQQCW6Gv9h4"));
+        Assert.Null(presenter.TodoistLinkFor(null));
+    }
+
+    [Fact]
+    public void A_task_added_here_and_not_yet_synced_has_no_page_to_show()
+    {
+        // Held, so every edit is on offer, but Todoist has never heard of it.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
+        var presenter = NewPresenter(store, out var engine);
+
+        var temp = engine.AddItem(new System.Text.Json.Nodes.JsonObject { ["content"] = "New", ["project_id"] = "p" });
+
+        Assert.True(presenter.AbilitiesFor(temp).CanMoveTo);
+        Assert.False(presenter.AbilitiesFor(temp).CanShowInTodoist);
+        Assert.Null(presenter.TodoistLinkFor(temp));
     }
 
     [Fact]
@@ -317,9 +357,12 @@ public class CommandsTests
         => Assert.Equal(TaskAbilities.None, NewPresenter(new InMemorySnapshotStore()).AbilitiesFor("gone"));
 
     private static MainPresenter NewPresenter(InMemorySnapshotStore store)
+        => NewPresenter(store, out _);
+
+    private static MainPresenter NewPresenter(InMemorySnapshotStore store, out SyncEngine engine)
     {
         var today = new DateOnly(2026, 7, 31);
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(today));
+        engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(today));
         engine.Load();
         return new MainPresenter(engine, new QuickAddParser(new FixedClock(today)));
     }

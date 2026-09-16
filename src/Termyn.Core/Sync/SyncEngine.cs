@@ -1199,6 +1199,33 @@ public sealed class SyncEngine
 
     }
 
+    /// <summary>
+    /// The id Todoist itself knows a task by, for somewhere outside the app to find it.
+    /// </summary>
+    /// <remarks>
+    /// Null for a task made here that the server hasn't taken yet. It goes by the name we gave it
+    /// until a sync brings back the server's, and anywhere else that name leads nowhere. Asked of
+    /// the outbox rather than read off the shape of the id, so it's the pending create that decides
+    /// rather than a naming habit.
+    ///
+    /// A completed task fetched out of the archive has one like any other, unlike
+    /// <see cref="Holds"/>: it can't be edited from here, but Todoist still has it.
+    /// </remarks>
+    /// <param name="id">The task, by whatever name the caller is holding it under</param>
+    /// <returns>The server's id, or null when it hasn't one or nothing here holds the task</returns>
+    public string? ServerIdOf(string id)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+
+            if (Model.Get(ResourceType.Items, id) is null && !_completed.ContainsKey(id))
+                return null;
+
+            return _outbox.Exists(c => c.Type == "item_add" && c.TempId == id) ? null : id;
+        }
+    }
+
     /// <summary>A task with the siblings it is ordered among, or null when the model doesn't hold it.</summary>
     private (TaskItem Item, List<TaskItem> Siblings, int Index)? Placement(string id)
     {

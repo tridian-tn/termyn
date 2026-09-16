@@ -2354,6 +2354,10 @@ internal sealed class MainForm : Form
         // M for move. Only in the outline, where there's a task under the cursor to send somewhere:
         // window-wide it would fire over the description editor and the comment box as well.
         (Keys.Control | Keys.M, AppCommand.MoveTo, Scope.Outline),
+
+        // O for open, and the outline's alone for the same reason as the move: it's the task under
+        // the cursor that goes to the browser.
+        (Keys.Control | Keys.O, AppCommand.ShowInTodoist, Scope.Outline),
         (Keys.Delete, AppCommand.Delete, Scope.Outline),
 
         // Kept off the window, where it would take Ctrl+Z away from every text box in it — undoing
@@ -2995,6 +2999,18 @@ internal sealed class MainForm : Form
             case AppCommand.MoveTo:
                 Guarded(() => wrote = MoveElsewhere(id));
                 return wrote;
+
+            case AppCommand.ShowInTodoist:
+                Guarded(() =>
+                {
+                    // Still said, though the menus grey it: Ctrl+O reaches it without a menu having
+                    // opened to grey anything.
+                    if (_presenter.TodoistLinkFor(id) is not { } link)
+                        _status.Text = "Todoist hasn't got this task yet. It will once it has synced.";
+                    else if (!AppVersion.OpenLink(link))
+                        _status.Text = "Couldn't open the task in Todoist.";
+                });
+                return false;
 
             // Deliberately unconfirmed: Ctrl+Z brings the task back, and Windows asks for a
             // confirmation only where it can't offer that — the same reason deleting a file to the

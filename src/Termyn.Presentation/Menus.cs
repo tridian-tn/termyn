@@ -66,6 +66,9 @@ public static class Menus
         MenuEntry.Of(AppCommand.MoveDown),
         MenuEntry.Of(AppCommand.MoveTo),
 
+        // Out of the app rather than a change to the task, so it's ruled off from the edits above.
+        MenuEntry.AfterRule(AppCommand.ShowInTodoist),
+
         // Its own group at the bottom, away from anything the user meant to click.
         MenuEntry.AfterRule(AppCommand.Delete),
     ];
