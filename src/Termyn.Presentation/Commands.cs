@@ -63,6 +63,7 @@ public enum AppCommand
     Settings,
     CheckForUpdates,
     About,
+    SignOut,
     Exit,
 }
 
@@ -326,6 +327,10 @@ public static class Commands
             AppCommand.Settings => Always("Settings…"),
             AppCommand.CheckForUpdates => Always("Check for updates…"),
             AppCommand.About => Always("About Termyn"),
+
+            // The ellipsis is for the question it asks first, about what signing out takes with it.
+            AppCommand.SignOut => Always("Sign out…"),
+
             AppCommand.Exit => Always("Exit"),
 
             _ => new CommandState(string.Empty, false),

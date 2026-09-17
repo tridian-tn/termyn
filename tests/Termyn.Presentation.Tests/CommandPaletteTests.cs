@@ -143,6 +143,7 @@ public class CommandPaletteTests
                 AppCommand.Settings,
                 AppCommand.CheckForUpdates,
                 AppCommand.About,
+                AppCommand.SignOut,
             ],
             actions.Select(e => e.Command).ToArray());
     }

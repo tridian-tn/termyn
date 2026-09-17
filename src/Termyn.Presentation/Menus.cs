@@ -87,7 +87,10 @@ public static class Menus
             MenuEntry.AfterRule(AppCommand.QuickAdd),
             MenuEntry.AfterRule(AppCommand.SyncNow),
             MenuEntry.AfterRule(AppCommand.Settings),
-            MenuEntry.AfterRule(AppCommand.Exit)),
+
+            // The two ways out, together at the bottom.
+            MenuEntry.AfterRule(AppCommand.SignOut),
+            MenuEntry.Of(AppCommand.Exit)),
 
         MenuEntry.Group(
             "&Edit",

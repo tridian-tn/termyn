@@ -206,6 +206,23 @@ public sealed class AttachmentCacheTests : IDisposable
     }
 
     [Fact]
+    public void A_file_open_elsewhere_is_left_behind_and_still_counted()
+    {
+        // Signing out relies on this: emptying the cache steps over a file another program has
+        // open rather than failing, so the size afterwards is what says something was left.
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows refuses to delete an open file");
+
+        var cache = Cache();
+        var open = Put(cache, "https://files.example/a", "a.pdf", 10);
+        Put(cache, "https://files.example/b", "b.pdf", 10);
+
+        using (new FileStream(open, FileMode.Open, FileAccess.Read, FileShare.None))
+            Assert.Equal(1, cache.Clear());
+
+        Assert.Equal(10, cache.Size());
+    }
+
+    [Fact]
     public void A_cache_that_was_never_written_to_answers_rather_than_throwing()
     {
         // Nothing is downloaded until something is opened, so an account that never opens an
