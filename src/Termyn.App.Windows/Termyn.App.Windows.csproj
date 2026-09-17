@@ -38,6 +38,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Beside Termyn.exe wherever it goes. The installer and the portable zip are both made from
+         the publish directory, so this is the one place that puts the licences in both. -->
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Termyn.Core\Termyn.Core.csproj" />
     <ProjectReference Include="..\Termyn.Presentation\Termyn.Presentation.csproj" />
     <ProjectReference Include="..\Termyn.Platform.Windows\Termyn.Platform.Windows.csproj" />
