@@ -143,6 +143,11 @@ public sealed class MainPresenter
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
         History = new ActionHistory(history, _clock);
+
+        // The history quotes the account's tasks by name, so it goes whenever the account's cache
+        // does: on signing out, and when the server turns the token away.
+        engine.Purged += History.Clear;
+
         Publish(); // reflect whatever the engine already has loaded
     }
 
@@ -319,6 +324,39 @@ public sealed class MainPresenter
 
         // Only ask for another round while the network is answering, or the loop would spin.
         return new SyncOutcome(!IsOffline && pause is null && _engine.PendingCount > 0, pause);
+    }
+
+    /// <summary>
+    /// Forgets the account on this machine, and everything Termyn kept about it.
+    /// </summary>
+    /// <remarks>
+    /// Stop the sync loop first. A sync that starts afterwards finds no token, and one already on
+    /// its way back is dropped by the engine rather than applied.
+    /// </remarks>
+    public void SignOut()
+    {
+        _engine.SignOut();
+        Publish();
+    }
+
+    /// <summary>What to ask before signing out, including what it would lose.</summary>
+    /// <returns>The question, with a warning added when there are changes still to send</returns>
+    public string SignOutQuestion()
+    {
+        const string question =
+            "Sign out of Todoist?\n\n"
+            + "Termyn will forget your token, and remove the account's tasks, comments, downloaded "
+            + "files and the list of what you've done from this computer. Nothing is removed from "
+            + "Todoist itself.";
+
+        return _engine.PendingCount switch
+        {
+            0 => question,
+            1 => question + "\n\n1 change hasn't reached Todoist yet, and signing out now loses it. "
+                          + "Sync first if you want to keep it.",
+            var unsent => question + $"\n\n{unsent} changes haven't reached Todoist yet, and signing out now "
+                                   + "loses them. Sync first if you want to keep them.",
+        };
     }
 
     /// <summary>Where the backoff stops growing: a shade over four minutes, inside the spec's cadence.</summary>
@@ -2440,6 +2478,7 @@ public sealed class MainPresenter
         AppCommand.Settings,
         AppCommand.CheckForUpdates,
         AppCommand.About,
+        AppCommand.SignOut,
     ];
 
     private IEnumerable<PaletteEntry> PaletteEntries()

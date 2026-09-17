@@ -1106,6 +1106,76 @@ public class SyncEngineTests
         Assert.Empty(store.Load().Resources);
     }
 
+    // ---- Signing out ---------------------------------------------------------------------------
+
+    [Fact]
+    public void Signing_out_forgets_the_token_the_tasks_and_what_was_waiting_to_be_sent()
+    {
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var engine = new SyncEngine(new FakeApi(), store, secrets);
+        engine.Load();
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Still private" });
+
+        var purged = 0;
+        engine.Purged += () => purged++;
+
+        engine.SignOut();
+
+        Assert.Null(secrets.Stored);
+        Assert.Empty(engine.Snapshot().Items);
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Empty(store.Load().Resources);
+        Assert.Empty(store.Load().Outbox);
+
+        // Raised, so what the engine doesn't hold itself — the downloaded files, the history — goes
+        // the same way.
+        Assert.Equal(1, purged);
+    }
+
+    [Fact]
+    public async Task A_sync_that_lands_after_signing_out_does_not_bring_the_account_back()
+    {
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var api = new FakeApi
+        {
+            Next = _ =>
+            {
+                entered.TrySetResult();
+                release.Task.Wait();
+                return Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"Private"}""")]);
+            },
+        };
+        var store = new InMemorySnapshotStore();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+
+        var inFlight = Task.Run(() => engine.SyncAsync());
+        await entered.Task;
+
+        engine.SignOut();
+
+        release.SetResult();
+        await inFlight;
+
+        Assert.Empty(engine.Snapshot().Items);
+        Assert.Empty(store.Load().Resources);
+    }
+
+    [Fact]
+    public void A_sign_out_that_cannot_empty_the_cache_keeps_the_token()
+    {
+        // Signed out over a cache that's still there, the next account would be shown this one's
+        // tasks. Still signed in, the cache is at least the account's own.
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var engine = new SyncEngine(new FakeApi(), new UnpurgeableStore(), secrets);
+
+        Assert.Throws<IOException>(engine.SignOut);
+
+        Assert.Equal("tok", secrets.Stored);
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
 
     private static SyncEngine NewEngine(FakeApi api)

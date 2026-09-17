@@ -372,6 +372,27 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>
+    /// Forgets the account on this machine: its cached tasks, anything still waiting to be sent, and
+    /// its token.
+    /// </summary>
+    /// <remarks>
+    /// The same wipe a rejected token gets, asked for on purpose. What's still queued goes with it
+    /// rather than being held for later, since later could be somebody else's token.
+    ///
+    /// The token goes last. If the cache can't be emptied this throws with the token still stored,
+    /// so the account stays signed in over data it can still sync, rather than signed out over a
+    /// cache the next account would inherit.
+    /// </remarks>
+    public void SignOut()
+    {
+        lock (_gate)
+        {
+            PurgeLocal();
+            _secrets.ClearToken();
+        }
+    }
+
     // ---- Completed tasks (on demand, never persisted) --------------------------------------------
 
     /// <summary>Pages a completed-items fetch takes before giving up on an unbounded history.</summary>

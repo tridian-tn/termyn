@@ -47,12 +47,53 @@ internal static class Program
         ITodoistApi api = new TodoistApiClient(http);
         ISecretStore secrets = new DpapiSecretStore(paths);
 
+        // The same HttpClient as the API: one connection pool, one timeout, one place to configure.
+        // The Todoist token rides on each request rather than on the client, so nothing of the
+        // account's goes to GitHub with this.
+        var updates = new GitHubReleaseCheck(http);
+
+        var launch = new Launch(paths, settingsStore, api, secrets, instance, updates);
+
+        // Signing out comes back round to the token dialog in this same process. Starting a fresh
+        // one instead would race this one for the single-instance lock, and lose: it would hand
+        // itself to a window that was already on its way out.
+        while (RunSession(launch, settings, tray, quickAdd))
+        {
+            // Only the launch itself was asked to start in the tray or with quick-add open. The
+            // settings are read again because the window that just closed has written to them.
+            tray = quickAdd = false;
+            settings = settingsStore.Load();
+        }
+    }
+
+    /// <summary>What lasts for the whole process, however many times the user signs in.</summary>
+    private sealed record Launch(
+        IAppPaths Paths,
+        SettingsStore SettingsStore,
+        ITodoistApi Api,
+        ISecretStore Secrets,
+        WindowsSingleInstance Instance,
+        GitHubReleaseCheck Updates);
+
+    /// <summary>
+    /// Runs one signed-in stretch: asks for a token if there isn't one, then shows the window until
+    /// it closes.
+    /// </summary>
+    /// <param name="launch">What the process holds across sessions</param>
+    /// <param name="settings">The settings to start this session with</param>
+    /// <param name="tray">Start with no window on screen</param>
+    /// <param name="quickAdd">Open the quick-add box straight away</param>
+    /// <returns>True when the window closed because the user signed out, so there's another session to run</returns>
+    private static bool RunSession(Launch launch, AppSettings settings, bool tray, bool quickAdd)
+    {
+        var (paths, settingsStore, api, secrets, instance, updates) = launch;
+
         var auth = new AuthPresenter(api, secrets);
         if (!auth.HasStoredToken)
         {
             using var tokenForm = new TokenEntryForm(auth);
             if (tokenForm.ShowDialog() != DialogResult.OK)
-                return;
+                return false;
         }
 
         using var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
@@ -65,13 +106,14 @@ internal static class Program
         var attachments = new AttachmentCache(paths.AttachmentDirectory, settings.AttachmentCache);
         attachments.Sweep();
 
-        // A rejected token wipes the account's tasks; its downloaded files go the same way, so a
-        // machine that has switched accounts isn't still holding the previous one's documents.
+        // Signing out or a rejected token wipes the account's tasks; its downloaded files go the
+        // same way, so a machine that has switched accounts isn't still holding the previous one's
+        // documents.
         engine.Purged += () => attachments.Clear();
 
-        // Its own file beside the cache rather than a table in it: the cache is the account's data
-        // and is thrown away and rebuilt whenever the server says something surprising, and a
-        // record of what the user did has no business going with it.
+        // Its own file beside the cache rather than a table in it: the cache is thrown away and
+        // rebuilt whenever it can't be read, and a record of what the user did has no business
+        // going with it. It does go with the account, which the presenter sees to.
         using var history = new SqliteHistoryStore(Path.Combine(paths.CacheDirectory, "history.db"));
 
         var presenter = new MainPresenter(
@@ -95,22 +137,41 @@ internal static class Program
         // the path to the first paint.
         using var notifier = new TrayNotifier();
 
-        // The same HttpClient as the API: one connection pool, one timeout, one place to configure.
-        // The Todoist token rides on each request rather than on the client, so nothing of the
-        // account's goes to GitHub with this.
-        var updates = new GitHubReleaseCheck(http);
-
         var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, tray, quickAdd, store.Rebuilt);
 
+        bool signedOut;
         try
         {
             using var form = new MainForm(presenter, scheduler, shell);
             Application.Run(form);
+            signedOut = form.SignedOut;
         }
         finally
         {
             scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
+
+        if (!signedOut)
+            return false;
+
+        // Only now the loop has stopped, so nothing can start a sync on the token while it goes.
+        try
+        {
+            presenter.SignOut();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The engine lets go of the token only once the cache is empty, so a failure here
+            // leaves the account signed in over data it can still sync, and the next session opens
+            // straight onto it.
+            MessageBox.Show(
+                $"Termyn couldn't finish signing out, so you're still signed in.\r\n\r\n{ex.Message}",
+                "Termyn",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        return true;
     }
 
     private static bool Has(string[] args, string flag)

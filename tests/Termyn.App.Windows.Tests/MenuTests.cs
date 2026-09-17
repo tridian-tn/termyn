@@ -206,6 +206,22 @@ public class MenuTests
     }
 
     [WinFormsFact]
+    public void Signing_out_sits_with_exit_at_the_bottom_of_the_File_menu()
+    {
+        // The two ways out, together and ruled off from everything else, with Exit last where a
+        // File menu always keeps it.
+        var file = Menus.Bar.Single(e => e.Heading == "&File");
+        using var built = Build(file.Children ?? [], CommandContext.Empty);
+        var items = built.Menu.Items.Cast<ToolStripItem>().ToList();
+        var signOut = items.IndexOf(Find(built, "Sign out…"));
+
+        Assert.IsType<ToolStripSeparator>(items[signOut - 1]);
+        Assert.Equal("Exit", items[signOut + 1].Text);
+        Assert.Equal(items.Count - 1, signOut + 1);
+        Assert.True(items[signOut].Enabled);
+    }
+
+    [WinFormsFact]
     public void The_favourite_entry_says_which_way_it_would_go()
     {
         using var plain = Build(Organise, new CommandContext(Selection: Node(SidebarKind.Project)));

@@ -190,6 +190,34 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Signing_out_forgets_where_the_account_was_left_but_not_where_the_window_was()
+    {
+        var view = new ViewState
+        {
+            SelectedKey = "label:followup",
+            CollapsedKeys = ["header:Projects", "project:p1"],
+            CollapsedTasks = ["t1", "t2"],
+            SidebarWidth = 300,
+            ShowDescription = true,
+            DescriptionHeight = 240,
+            WindowX = 40,
+            WindowY = 60,
+            WindowWidth = 1600,
+            WindowHeight = 900,
+            Maximized = true,
+        };
+
+        var forgotten = view.WithoutAccount();
+
+        Assert.Equal(
+            view with { SelectedKey = null, CollapsedKeys = [], CollapsedTasks = [] },
+            forgotten);
+        Assert.Null(forgotten.SelectedKey);
+        Assert.Empty(forgotten.CollapsedKeys);
+        Assert.Empty(forgotten.CollapsedTasks);
+    }
+
+    [Fact]
     public void A_config_from_when_the_description_panel_was_split_still_loads()
     {
         // The panel used to be two panes down a splitter, and wrote a flag and a width for the

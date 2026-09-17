@@ -186,6 +186,15 @@ internal sealed class MainForm : Form
     private bool _syncingSidebar;
     private bool _exiting;
 
+    /// <summary>
+    /// True once the window has closed because the user signed out rather than exited.
+    /// </summary>
+    /// <remarks>
+    /// Nothing has been forgotten yet when this is set. The sync loop runs for as long as the
+    /// window does, so the wipe is left to whoever ran the window, once they've stopped the loop.
+    /// </remarks>
+    public bool SignedOut { get; private set; }
+
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
     private string _sidebarKey = ViewSelection.Default.Key;
 
@@ -705,6 +714,27 @@ internal sealed class MainForm : Form
         Application.Exit();
     }
 
+    /// <summary>
+    /// Asks, then closes the window so the account can be forgotten and the token asked for again.
+    /// </summary>
+    /// <remarks>
+    /// Doesn't end the application the way <see cref="Exit"/> does: the process carries on to the
+    /// first-run dialog, which is what signing out leads to.
+    /// </remarks>
+    private void SignOut()
+    {
+        // Before asking, so a description still being typed is counted among what would be lost
+        // rather than queued behind the question and wiped without a mention.
+        SaveDescription();
+
+        if (!Confirm(_presenter.SignOutQuestion()))
+            return;
+
+        SignedOut = true;
+        _exiting = true;
+        Close();
+    }
+
     /// <summary>Takes the global hotkey.</summary>
     /// <returns>What to tell the user, or null when there is nothing worth saying.</returns>
     private string? RegisterHotkey(bool announce)
@@ -952,7 +982,8 @@ internal sealed class MainForm : Form
     /// <returns>False when the file couldn't be written.</returns>
     private bool SaveViewState()
     {
-        _settings = _settings with { View = CurrentViewState() };
+        var view = CurrentViewState();
+        _settings = _settings with { View = SignedOut ? view.WithoutAccount() : view };
         return _shell.Store.Save(_settings);
     }
 
@@ -2842,6 +2873,10 @@ internal sealed class MainForm : Form
 
             case AppCommand.About:
                 ShowAbout();
+                return false;
+
+            case AppCommand.SignOut:
+                Guarded(SignOut);
                 return false;
 
             case AppCommand.Exit:

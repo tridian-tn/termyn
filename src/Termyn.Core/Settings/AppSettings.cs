@@ -130,6 +130,17 @@ public sealed record ViewState
     public bool Maximized { get; init; }
 
     /// <summary>
+    /// The same window with nothing left in it that belongs to the account.
+    /// </summary>
+    /// <remarks>
+    /// For signing out. The selection and the folds point at the account's projects, labels and
+    /// tasks, labels by name, and none of it means anything to whoever signs in next. Where the
+    /// window sat and how its panels were sized belong to the machine, so they stay.
+    /// </remarks>
+    /// <returns>This state with the selection and every fold cleared</returns>
+    public ViewState WithoutAccount() => this with { SelectedKey = null, CollapsedKeys = [], CollapsedTasks = [] };
+
+    /// <summary>
     /// Compares by what the state holds, not by which list instance holds it. A record compares a
     /// collection by reference, so two view states read back from the same file would otherwise be
     /// unequal — which is exactly the comparison anything checking for changes would want to make.
