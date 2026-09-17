@@ -818,7 +818,12 @@ internal sealed class MainForm : Form
             $"Termyn {AppVersion.Tag}\r\n\r\nA keyboard-driven Todoist client for Windows.\r\n\r\n"
             + $"Installed in:\r\n{AppVersion.Location}\r\n\r\n"
             + $"Settings and token:\r\n{_shell.Paths.ConfigDirectory}\r\n\r\n"
-            + $"Cache and logs:\r\n{_shell.Paths.CacheDirectory}",
+            + $"Cache and logs:\r\n{_shell.Paths.CacheDirectory}\r\n\r\n"
+
+            // Named rather than shown: the notices run to three hundred lines, most of them the
+            // Apache licence, which is no size for a message box.
+            + "The licences of the open-source components Termyn includes are in "
+            + "THIRD-PARTY-NOTICES.txt, in the folder it's installed in.",
             "About Termyn",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
