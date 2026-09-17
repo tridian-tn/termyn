@@ -723,6 +723,20 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void SignOut()
     {
+        // A download could land in the attachment cache after it had been emptied, and either
+        // transfer finishes by writing to this window after it has gone. Stopping one is a keypress
+        // away, so it's the user's call rather than something to do behind their back.
+        if (_transfer is not null)
+        {
+            MessageBox.Show(
+                this,
+                "A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then sign out.",
+                "Termyn",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
         // Before asking, so a description still being typed is counted among what would be lost
         // rather than queued behind the question and wiped without a mention.
         SaveDescription();

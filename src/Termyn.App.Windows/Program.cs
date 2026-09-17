@@ -60,9 +60,12 @@ internal static class Program
         while (RunSession(launch, settings, tray, quickAdd))
         {
             // Only the launch itself was asked to start in the tray or with quick-add open. The
-            // settings are read again because the window that just closed has written to them.
+            // settings are read again because the window that just closed has written to them —
+            // and forgotten again here, since that write can fail, and a file that still names the
+            // last account's labels and folds mustn't hand them to the next one.
             tray = quickAdd = false;
             settings = settingsStore.Load();
+            settings = settings with { View = settings.View.WithoutAccount() };
         }
     }
 
@@ -154,10 +157,24 @@ internal static class Program
         if (!signedOut)
             return false;
 
-        // Only now the loop has stopped, so nothing can start a sync on the token while it goes.
+        // Only now the loop has stopped, so nothing can start a sync on the token while it goes. One
+        // still on its way back after the loop's bounded wait is dropped by the engine when it
+        // lands, rejection included, so it can't reach the next account's token.
         try
         {
             presenter.SignOut();
+
+            // Emptying the cache skips a file another program has open, rather than failing over it.
+            // Signing out still goes ahead, but not quietly: the file is the last account's.
+            if (attachments.Size() > 0)
+            {
+                MessageBox.Show(
+                    "Some downloaded files couldn't be removed, probably because they're open in another "
+                    + $"program. Close them and delete what's left in:\r\n\r\n{paths.AttachmentDirectory}",
+                    "Termyn",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

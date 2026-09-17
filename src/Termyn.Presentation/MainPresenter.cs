@@ -146,7 +146,7 @@ public sealed class MainPresenter
 
         // The history quotes the account's tasks by name, so it goes whenever the account's cache
         // does: on signing out, and when the server turns the token away.
-        engine.Purged += History.Clear;
+        engine.Purged += ForgetHistory;
 
         Publish(); // reflect whatever the engine already has loaded
     }
@@ -331,12 +331,32 @@ public sealed class MainPresenter
     /// </summary>
     /// <remarks>
     /// Stop the sync loop first. A sync that starts afterwards finds no token, and one already on
-    /// its way back is dropped by the engine rather than applied.
+    /// its way back is dropped by the engine rather than applied — its rejection too, if that's what
+    /// it brings, so it can't clear the token of whoever signs in next.
     /// </remarks>
     public void SignOut()
     {
         _engine.SignOut();
         Publish();
+    }
+
+    /// <summary>Empties the history when the engine wipes the account.</summary>
+    /// <remarks>
+    /// Raised from inside the engine's purge, which on a rejected token is on its way to rethrowing
+    /// the rejection. A history file that can't be emptied mustn't replace that with a failure of its
+    /// own: the rejection is what tells the window to ask for a token. What's held in memory has gone
+    /// either way, and a history that can't be written to has never been a reason to stop working.
+    /// </remarks>
+    private void ForgetHistory()
+    {
+        try
+        {
+            History.Clear();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Left for the user to clear by hand, which reports its own failure.
+        }
     }
 
     /// <summary>What to ask before signing out, including what it would lose.</summary>

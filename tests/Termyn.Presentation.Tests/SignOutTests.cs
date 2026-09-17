@@ -91,6 +91,37 @@ public class SignOutTests
     }
 
     [Fact]
+    public async Task A_history_that_cannot_be_emptied_does_not_hide_a_rejected_token()
+    {
+        // The history is cleared from inside the engine's purge, on the way to rethrowing the
+        // rejection. If its file refused, that failure would arrive in the rejection's place, and
+        // the window would never be told to ask for a token.
+        var store = new InMemorySnapshotStore();
+        var api = new FakeApi { Throw = new TodoistAuthException("rejected") };
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today), history: new Locked());
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+
+        Assert.Equal(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
+    }
+
+    /// <summary>A history store whose file can't be emptied.</summary>
+    private sealed class Locked : IHistoryStore
+    {
+        public void Append(IReadOnlyList<StoredAction> entries) { }
+
+        public IReadOnlyList<StoredAction> Recent(int limit) => [];
+
+        public int Sweep(DateTimeOffset before) => 0;
+
+        public void Clear() => throw new IOException("locked");
+
+        public void Dispose() { }
+    }
+
+    [Fact]
     public void With_everything_sent_the_question_mentions_no_loss()
     {
         var (presenter, _, _, _) = Seeded();

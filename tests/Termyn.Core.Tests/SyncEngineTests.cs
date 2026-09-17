@@ -1164,6 +1164,96 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public async Task A_sync_rejected_after_signing_out_leaves_the_next_accounts_token_alone()
+    {
+        // Signing out waits only so long for a sync already on its way back. By the time one lands,
+        // somebody else may have signed in — and a rejection of the old token is not a reason to
+        // clear theirs.
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var api = new FakeApi
+        {
+            Next = _ =>
+            {
+                entered.TrySetResult();
+                release.Task.Wait();
+                throw new TodoistAuthException("rejected");
+            },
+        };
+        var secrets = new FakeSecrets { Stored = "old" };
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets);
+
+        var inFlight = Task.Run(() => engine.SyncAsync());
+        await entered.Task;
+
+        engine.SignOut();
+        secrets.SetToken("next");
+
+        release.SetResult();
+        await Assert.ThrowsAsync<TodoistAuthException>(() => inFlight);
+
+        Assert.Equal("next", secrets.Stored);
+    }
+
+    [Fact]
+    public async Task A_quick_add_rejected_after_signing_out_leaves_the_next_accounts_token_alone()
+    {
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var api = new FakeApi
+        {
+            QuickAdd = _ =>
+            {
+                entered.TrySetResult();
+                release.Task.Wait();
+                throw new TodoistAuthException("rejected");
+            },
+        };
+        var secrets = new FakeSecrets { Stored = "old" };
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets);
+
+        var inFlight = Task.Run(() => engine.QuickAddOnlineAsync("Buy milk"));
+        await entered.Task;
+
+        engine.SignOut();
+        secrets.SetToken("next");
+
+        release.SetResult();
+        await Assert.ThrowsAsync<TodoistAuthException>(() => inFlight);
+
+        Assert.Equal("next", secrets.Stored);
+    }
+
+    [Fact]
+    public async Task A_completed_fetch_rejected_after_signing_out_leaves_the_next_accounts_token_alone()
+    {
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var api = new FakeApi
+        {
+            Completed = _ =>
+            {
+                entered.TrySetResult();
+                release.Task.Wait();
+                throw new TodoistAuthException("rejected");
+            },
+        };
+        var secrets = new FakeSecrets { Stored = "old" };
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets);
+
+        var inFlight = Task.Run(() => engine.FetchCompletedAsync());
+        await entered.Task;
+
+        engine.SignOut();
+        secrets.SetToken("next");
+
+        release.SetResult();
+        await Assert.ThrowsAsync<TodoistAuthException>(() => inFlight);
+
+        Assert.Equal("next", secrets.Stored);
+    }
+
+    [Fact]
     public void A_sign_out_that_cannot_empty_the_cache_keeps_the_token()
     {
         // Signed out over a cache that's still there, the next account would be shown this one's
