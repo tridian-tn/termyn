@@ -1507,10 +1507,10 @@ internal sealed class MainForm : Form
 
         if (size > 0)
         {
-            using var brush = new SolidBrush(Theme.ToColor(colour));
-            e.Graphics.FillEllipse(
-                brush,
-                new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size));
+            Dots.Fill(
+                e.Graphics,
+                new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size),
+                Theme.ToColor(colour));
         }
 
         // The text keeps its full width rather than losing the dot's room: the row's background is

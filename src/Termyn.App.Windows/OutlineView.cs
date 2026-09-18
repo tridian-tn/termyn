@@ -798,8 +798,7 @@ internal sealed class OutlineView : ListView
         if (size <= 0)
             return;
 
-        using (var brush = new SolidBrush(colour))
-            g.FillEllipse(brush, new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size));
+        Dots.Fill(g, new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size), colour);
 
         var taken = size + (TextInset / 2);
         bounds.X += taken;
@@ -814,14 +813,15 @@ internal sealed class OutlineView : ListView
         var colour = Theme.ForPriority(priority);
 
         var size = Math.Min(9, bounds.Height - 8);
-        var dot = new Rectangle(
-            bounds.X + ((bounds.Width - size) / 2),
-            bounds.Y + ((bounds.Height - size) / 2),
-            size,
-            size);
 
-        using var brush = new SolidBrush(colour);
-        g.FillEllipse(brush, dot);
+        Dots.Fill(
+            g,
+            new Rectangle(
+                bounds.X + ((bounds.Width - size) / 2),
+                bounds.Y + ((bounds.Height - size) / 2),
+                size,
+                size),
+            colour);
     }
 
     private static TextFormatFlags Flags
