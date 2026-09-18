@@ -1,4 +1,5 @@
 using Termyn.Core.Capture;
+using Termyn.Core.Logging;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
@@ -44,7 +45,8 @@ internal static class TestWindow
             new AutoStart(),
             new Notifier(),
             new Instance(),
-            new GitHubReleaseCheck(Http));
+            new GitHubReleaseCheck(Http),
+            new RecordingLog());
 
         var window = new MainForm(presenter, scheduler, shell);
 

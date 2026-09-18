@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Termyn.Core;
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
+using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
@@ -33,6 +34,7 @@ internal sealed record Shell(
     INotifier Notifier,
     ISingleInstance Instance,
     GitHubReleaseCheck Updates,
+    ILog Log,
     bool StartInTray = false,
     bool StartWithQuickAdd = false,
 
@@ -818,7 +820,11 @@ internal sealed class MainForm : Form
             $"Termyn {AppVersion.Tag}\r\n\r\nA keyboard-driven Todoist client for Windows.\r\n\r\n"
             + $"Installed in:\r\n{AppVersion.Location}\r\n\r\n"
             + $"Settings and token:\r\n{_shell.Paths.ConfigDirectory}\r\n\r\n"
-            + $"Cache and logs:\r\n{_shell.Paths.CacheDirectory}\r\n\r\n"
+            + $"Cache:\r\n{_shell.Paths.CacheDirectory}\r\n\r\n"
+
+            // Named on its own now there's something in it: it's the first thing to ask for when
+            // somebody reports a problem.
+            + $"Log:\r\n{_shell.Paths.LogDirectory}\r\n\r\n"
 
             // Named rather than shown: the notices run to three hundred lines, most of them the
             // Apache licence, which is no size for a message box.
@@ -3430,6 +3436,11 @@ internal sealed class MainForm : Form
             _status.Text = ReconnectMessage;
             return;
         }
+
+        // The prefix is what the caller was doing — a background sync, or whatever the user asked
+        // for — and it's the difference between two identical-looking lines in the log.
+        if (ex is not OperationCanceledException)
+            _shell.Log.Error(prefix.TrimEnd().TrimEnd(':'), ex);
 
         _status.Text = ex switch
         {

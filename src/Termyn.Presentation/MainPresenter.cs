@@ -7,6 +7,7 @@ using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
 using Termyn.Core.History;
+using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
@@ -131,17 +132,20 @@ public sealed class MainPresenter
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
     /// file works without one, which is what lets the presenter be tested without a download folder.
     /// </param>
+    /// <param name="log">Where sync trouble is written down, or null to write none of it down.</param>
     public MainPresenter(
         SyncEngine engine,
         QuickAddParser parser,
         IClock? clock = null,
         AttachmentFetcher? fetcher = null,
-        IHistoryStore? history = null)
+        IHistoryStore? history = null,
+        ILog? log = null)
     {
         _engine = engine;
         _parser = parser;
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
+        _log = log;
         History = new ActionHistory(history, _clock);
 
         // The history quotes the account's tasks by name, so it goes whenever the account's cache
@@ -152,6 +156,8 @@ public sealed class MainPresenter
     }
 
     private readonly AttachmentFetcher? _fetcher;
+
+    private readonly ILog? _log;
 
     /// <summary>Raised whenever the sidebar, rows or status have been refreshed.</summary>
     public event Action? RowsChanged;
@@ -269,6 +275,8 @@ public sealed class MainPresenter
     /// </summary>
     public async Task LoadAsync(CancellationToken ct = default)
     {
+        // Set rather than noted (see NoteReachable): nothing has been tried yet, so this is where
+        // the session starts from and not something learnt about the network.
         IsOffline = false;
         Publish();
         await SyncAsync(ct);
@@ -292,7 +300,7 @@ public sealed class MainPresenter
         try
         {
             await _engine.SyncAsync(ct);
-            IsOffline = false;
+            NoteReachable(true);
             _lastSyncedAt = _clock.UtcNow;
             _pausedUntil = null;
             _rateLimitStreak = 0;
@@ -302,10 +310,11 @@ public sealed class MainPresenter
             // Being refused is not being offline: the cached view is current, and the only thing to
             // do is wait. Honour what the server asked for, and grow our own wait when it didn't say.
             pause = Pause(ex);
+            _log?.Warn($"Todoist is rate-limiting us; waiting {pause.Value.TotalSeconds:N0}s before trying again.");
         }
-        catch (TodoistNetworkException)
+        catch (TodoistNetworkException ex)
         {
-            IsOffline = true;
+            NoteReachable(false, ex);
         }
         catch (TodoistAuthException)
         {
@@ -324,6 +333,30 @@ public sealed class MainPresenter
 
         // Only ask for another round while the network is answering, or the loop would spin.
         return new SyncOutcome(!IsOffline && pause is null && _engine.PendingCount > 0, pause);
+    }
+
+    /// <summary>
+    /// Notes whether Todoist can be reached, and writes down the change.
+    /// </summary>
+    /// <remarks>
+    /// Every path that learns this goes through here — a sync, a capture, a completed fetch — so a
+    /// line saying Todoist is back can never appear without the one saying when it went. Only the
+    /// change is written down: a window left open offline overnight would otherwise say the same
+    /// thing nine hundred times, and the line that mattered would be lost among them.
+    /// </remarks>
+    /// <param name="reachable">Whether the request that just finished got through</param>
+    /// <param name="error">What stopped it, when something did</param>
+    private void NoteReachable(bool reachable, Exception? error = null)
+    {
+        if (IsOffline != reachable)
+            return; // already saying this
+
+        if (reachable)
+            _log?.Info("Todoist can be reached again.");
+        else
+            _log?.Warn("Todoist couldn't be reached. Working from the cache and queuing writes.", error);
+
+        IsOffline = !reachable;
     }
 
     /// <summary>
@@ -402,7 +435,7 @@ public sealed class MainPresenter
         var pause = asked > MaxPause ? MaxPause : asked;
 
         _pausedUntil = _clock.UtcNow + pause;
-        IsOffline = false;
+        NoteReachable(true);
         return pause;
     }
 
@@ -427,7 +460,7 @@ public sealed class MainPresenter
             return;
 
         var captured = await _engine.QuickAddOnlineAsync(text, ct);
-        IsOffline = !captured;
+        NoteReachable(captured);
 
         if (!captured)
         {
@@ -562,7 +595,7 @@ public sealed class MainPresenter
             var fetch = await _engine.FetchCompletedAsync(ct);
             CompletedTruncated = fetch.Truncated;
             ShowingCompleted = true;
-            IsOffline = false;
+            NoteReachable(true);
         }
         catch (TodoistRateLimitException ex)
         {
@@ -575,7 +608,7 @@ public sealed class MainPresenter
         {
             // Nothing to show and no way to get it. Left off rather than switched on and empty,
             // which would read as "you have completed nothing".
-            IsOffline = true;
+            NoteReachable(false);
             return false;
         }
         catch (TodoistAuthException)
