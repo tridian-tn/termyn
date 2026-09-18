@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
+using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 
@@ -92,14 +93,21 @@ public sealed class SyncEngine
 
     private sealed record UndoableWrite(string Type, string Id, string? PriorJson);
 
-    public SyncEngine(ITodoistApi api, ISnapshotStore store, ISecretStore secrets, IClock? clock = null, int attemptCeiling = 5)
+    /// <param name="log">
+    /// Where to write down what went wrong, or null to write nothing down. Ids and counts only —
+    /// nothing here ever logs what a task says (<see cref="ILog"/>)
+    /// </param>
+    public SyncEngine(ITodoistApi api, ISnapshotStore store, ISecretStore secrets, IClock? clock = null, int attemptCeiling = 5, ILog? log = null)
     {
         _api = api;
         _store = store;
         _secrets = secrets;
         _clock = clock ?? new SystemClock();
         _attemptCeiling = attemptCeiling;
+        _log = log;
     }
+
+    private readonly ILog? _log;
 
     /// <summary>The raw model. Only touch this while holding the gate — readers want <see cref="Snapshot"/>.</summary>
     private TodoistModel Model { get; } = new();
@@ -260,11 +268,19 @@ public sealed class SyncEngine
             _undoable.Clear();
             _completed.Clear();
 
+            var unreadable = 0;
             foreach (var r in snapshot.Resources)
             {
                 if (TryParse(r.Json) is { } o)
                     Model.Upsert(r.Type, r.Id, o);
+                else
+                    unreadable++;
             }
+
+            // Counted rather than quoted: the row that couldn't be read is somebody's task, and the
+            // log is no place for it. A sync will fetch it again.
+            if (unreadable > 0)
+                _log?.Warn($"{unreadable} of {snapshot.Resources.Count} cached rows couldn't be read and were skipped.");
 
             ResyncIfResourcesAreMissing();
 
@@ -2437,6 +2453,10 @@ public sealed class SyncEngine
             cmd.Attempts++;
             cmd.LastError = result.Error ?? result.ErrorCode;
 
+            // What kind of change it was and what the server said about it. Never its arguments:
+            // those carry what the user typed.
+            _log?.Warn($"Todoist refused {cmd.Type} (uuid {cmd.Uuid}, attempt {cmd.Attempts}): {cmd.LastError}");
+
             if (IsCreate(cmd))
             {
                 CascadeCancel(cmd);
@@ -2466,6 +2486,8 @@ public sealed class SyncEngine
     {
         cmd.State = OutboxState.Failed;
         cmd.LastError = error;
+
+        _log?.Warn($"Gave up on {cmd.Type} (uuid {cmd.Uuid}) after {cmd.Attempts} attempts: {error}");
 
         if (!IsCreate(cmd))
             RestorePriors(cmd);
@@ -2798,6 +2820,8 @@ public sealed class SyncEngine
     {
         if (generation != _generation)
             return;
+
+        _log?.Warn("Todoist rejected the token. It has been cleared, and the local copy of the account wiped.");
 
         _secrets.ClearToken();
         PurgeLocal();

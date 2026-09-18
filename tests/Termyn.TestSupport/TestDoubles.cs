@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
+using Termyn.Core.Logging;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
 
@@ -14,6 +15,21 @@ public sealed class FixedClock : IClock
 
     /// <summary>Midday, so converting into any timezone still lands on the same date.</summary>
     public DateTimeOffset UtcNow => new(Today.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero);
+}
+
+/// <summary>A log that keeps its lines, so a test can read what would have been written.</summary>
+public sealed class RecordingLog : ILog
+{
+    public List<string> Lines { get; } = [];
+
+    /// <summary>Everything written, as one string, for asserting that something isn't in it.</summary>
+    public string All => string.Join(Environment.NewLine, Lines);
+
+    public void Info(string message) => Lines.Add($"INFO {message}");
+
+    public void Warn(string message, Exception? error = null) => Lines.Add($"WARN {message} {error}".TrimEnd());
+
+    public void Error(string message, Exception? error = null) => Lines.Add($"ERROR {message} {error}".TrimEnd());
 }
 
 public sealed class FakeSecrets : ISecretStore

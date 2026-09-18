@@ -7,6 +7,7 @@ using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
 using Termyn.Core.History;
+using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
 using Termyn.Core.Sync;
@@ -131,17 +132,20 @@ public sealed class MainPresenter
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
     /// file works without one, which is what lets the presenter be tested without a download folder.
     /// </param>
+    /// <param name="log">Where sync trouble is written down, or null to write none of it down.</param>
     public MainPresenter(
         SyncEngine engine,
         QuickAddParser parser,
         IClock? clock = null,
         AttachmentFetcher? fetcher = null,
-        IHistoryStore? history = null)
+        IHistoryStore? history = null,
+        ILog? log = null)
     {
         _engine = engine;
         _parser = parser;
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
+        _log = log;
         History = new ActionHistory(history, _clock);
 
         // The history quotes the account's tasks by name, so it goes whenever the account's cache
@@ -152,6 +156,8 @@ public sealed class MainPresenter
     }
 
     private readonly AttachmentFetcher? _fetcher;
+
+    private readonly ILog? _log;
 
     /// <summary>Raised whenever the sidebar, rows or status have been refreshed.</summary>
     public event Action? RowsChanged;
@@ -292,6 +298,12 @@ public sealed class MainPresenter
         try
         {
             await _engine.SyncAsync(ct);
+
+            // Only the change is worth a line. A window left open offline overnight would otherwise
+            // write the same sentence nine hundred times.
+            if (IsOffline)
+                _log?.Info("Todoist can be reached again.");
+
             IsOffline = false;
             _lastSyncedAt = _clock.UtcNow;
             _pausedUntil = null;
@@ -302,9 +314,13 @@ public sealed class MainPresenter
             // Being refused is not being offline: the cached view is current, and the only thing to
             // do is wait. Honour what the server asked for, and grow our own wait when it didn't say.
             pause = Pause(ex);
+            _log?.Warn($"Todoist is rate-limiting us; waiting {pause.Value.TotalSeconds:N0}s before trying again.");
         }
-        catch (TodoistNetworkException)
+        catch (TodoistNetworkException ex)
         {
+            if (!IsOffline)
+                _log?.Warn("Todoist couldn't be reached. Working from the cache and queuing writes.", ex);
+
             IsOffline = true;
         }
         catch (TodoistAuthException)

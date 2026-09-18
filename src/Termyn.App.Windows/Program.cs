@@ -2,6 +2,7 @@ using Termyn.Core.Api;
 using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.History;
+using Termyn.Core.Logging;
 using Termyn.Core.Platform;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
@@ -32,6 +33,11 @@ internal static class Program
         var settingsStore = new SettingsStore(paths);
         var settings = settingsStore.Load();
 
+        // Early, so anything that goes wrong from here on has somewhere to go. Nothing of the
+        // account's is ever written to it — see ILog.
+        var log = new FileLog(paths);
+        log.Info($"Termyn {AppVersion.Tag} starting on {Environment.OSVersion.VersionString}, .NET {Environment.Version}.");
+
         // Before any window exists, which is the only time the framework will take it.
         Theme.ApplyToFramework(settings.Theme);
         ApplicationConfiguration.Initialize();
@@ -52,7 +58,7 @@ internal static class Program
         // account's goes to GitHub with this.
         var updates = new GitHubReleaseCheck(http);
 
-        var launch = new Launch(paths, settingsStore, api, secrets, instance, updates);
+        var launch = new Launch(paths, settingsStore, api, secrets, instance, updates, log);
 
         // Signing out comes back round to the token dialog in this same process. Starting a fresh
         // one instead would race this one for the single-instance lock, and lose: it would hand
@@ -76,7 +82,8 @@ internal static class Program
         ITodoistApi Api,
         ISecretStore Secrets,
         WindowsSingleInstance Instance,
-        GitHubReleaseCheck Updates);
+        GitHubReleaseCheck Updates,
+        ILog Log);
 
     /// <summary>
     /// Runs one signed-in stretch: asks for a token if there isn't one, then shows the window until
@@ -89,7 +96,7 @@ internal static class Program
     /// <returns>True when the window closed because the user signed out, so there's another session to run</returns>
     private static bool RunSession(Launch launch, AppSettings settings, bool tray, bool quickAdd)
     {
-        var (paths, settingsStore, api, secrets, instance, updates) = launch;
+        var (paths, settingsStore, api, secrets, instance, updates, log) = launch;
 
         var auth = new AuthPresenter(api, secrets);
         if (!auth.HasStoredToken)
@@ -101,7 +108,10 @@ internal static class Program
 
         using var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
 
-        var engine = new SyncEngine(api, store, secrets);
+        if (store.Rebuilt)
+            log.Warn("The cache couldn't be read and was started again from nothing. Anything queued went with it.");
+
+        var engine = new SyncEngine(api, store, secrets, log: log);
         engine.Load();
 
         // Swept on the way up rather than only after a download: an app left closed for a month
@@ -123,7 +133,8 @@ internal static class Program
             engine,
             new QuickAddParser(new SystemClock()),
             fetcher: new AttachmentFetcher(api, secrets, attachments),
-            history: history);
+            history: history,
+            log: log);
         var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
 
         // Said once, here, rather than at every place a write is made. The engine queues all of
@@ -140,7 +151,7 @@ internal static class Program
         // the path to the first paint.
         using var notifier = new TrayNotifier();
 
-        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, tray, quickAdd, store.Rebuilt);
+        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, log, tray, quickAdd, store.Rebuilt);
 
         bool signedOut;
         try
@@ -163,6 +174,7 @@ internal static class Program
         try
         {
             presenter.SignOut();
+            log.Info("Signed out. The token, the cache, the queue, the downloaded files and the history are gone.");
 
             // Emptying the cache skips a file another program has open, rather than failing over it.
             // Signing out still goes ahead, but not quietly: the file is the last account's.
@@ -178,6 +190,8 @@ internal static class Program
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            log.Error("Signing out couldn't finish, so the account is still signed in.", ex);
+
             // The engine lets go of the token only once the cache is empty, so a failure here
             // leaves the account signed in over data it can still sync, and the next session opens
             // straight onto it.

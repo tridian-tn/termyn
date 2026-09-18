@@ -4,6 +4,7 @@ using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 using Termyn.Core.Update;
 using Termyn.Core.Capture;
+using Termyn.Core.Logging;
 using Termyn.Presentation;
 using Termyn.TestSupport;
 
@@ -158,7 +159,8 @@ public class FoldsAcrossRestartTests : IDisposable
             new AutoStart(),
             new Notifier(),
             new Instance(),
-            new GitHubReleaseCheck(Http));
+            new GitHubReleaseCheck(Http),
+            new RecordingLog());
 
         var window = new MainForm(presenter, scheduler, shell);
 
