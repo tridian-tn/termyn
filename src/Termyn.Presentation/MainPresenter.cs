@@ -1990,16 +1990,16 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// The completed tasks belonging to the current view, most recently finished first, flat. They
-    /// go below the active ones rather than in among them: a task's place in the outline comes from
-    /// its sibling order, which stops meaning anything once it is done.
-    /// </summary>
-    /// <summary>
     /// Stands in for the completion time of a task ticked off here and not yet acked. Sorts above
     /// every real ISO timestamp, which is where a task finished a moment ago belongs.
     /// </summary>
     private const string JustNow = "￿";
 
+    /// <summary>
+    /// The completed tasks belonging to the current view, most recently finished first, flat. They
+    /// go below the active ones rather than in among them: a task's place in the outline comes from
+    /// its sibling order, which stops meaning anything once it is done.
+    /// </summary>
     private static List<TaskRow> CompletedRows(
         ModelSnapshot snapshot,
         Func<TaskItem, bool> selected,
