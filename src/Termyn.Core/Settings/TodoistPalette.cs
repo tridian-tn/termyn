@@ -54,7 +54,8 @@ public static class TodoistPalette
     private const int FirstId = 30;
 
     /// <summary>Every colour Todoist names, for anything that wants to show them all.</summary>
-    public static IReadOnlyCollection<string> Names => ByNumber;
+    /// <remarks>Wrapped, so a caller casting it back to an array can't rewrite the palette.</remarks>
+    public static IReadOnlyCollection<string> Names { get; } = Array.AsReadOnly(ByNumber);
 
     /// <summary>
     /// What a Todoist colour looks like.

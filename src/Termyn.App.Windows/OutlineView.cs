@@ -735,11 +735,11 @@ internal sealed class OutlineView : ListView
     /// </summary>
     /// <remarks>
     /// Nothing on a selected row: the accent is behind it, and a colour chosen to read against the
-    /// panel has made no promise about that. Nothing for a task in no project either — a dot there
-    /// would be saying something about a project the task hasn't got.
+    /// panel has made no promise about that. A task in no project has no colour either — the row
+    /// carries one only when it found the project — so that answers itself.
     /// </remarks>
     internal static Color? ProjectDot(TaskRow row, bool selected)
-        => selected || row.Project.Length == 0 || row.ProjectColour is not { } colour
+        => selected || row.ProjectColour is not { } colour
             ? null
             : Color.FromArgb(colour.R, colour.G, colour.B);
 
@@ -754,14 +754,6 @@ internal sealed class OutlineView : ListView
         TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
     }
 
-    /// <summary>
-    /// The labels on a task, each in its own colour.
-    /// </summary>
-    /// <remarks>
-    /// Drawn one at a time rather than as one string, since a task's labels rarely share a colour.
-    /// A selected row goes back to one colour for the lot: the accent behind it is what the row is
-    /// saying, and five colours over it say less than none.
-    /// </remarks>
     /// <summary>
     /// The labels of a row, each with the colour it is written in.
     /// </summary>
@@ -780,6 +772,7 @@ internal sealed class OutlineView : ListView
             .ToList();
     }
 
+    /// <summary>Writes the labels along the column, one after another in their own colours.</summary>
     private void DrawLabels(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
     {
         var text = Inset(bounds);

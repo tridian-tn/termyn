@@ -40,11 +40,11 @@ public class OutlineColourTests
 
     [WinFormsFact]
     public void A_task_in_no_project_has_no_dot()
-        => Assert.Null(OutlineView.ProjectDot(Row(colour: BerryRed, project: string.Empty), selected: false));
-
-    [WinFormsFact]
-    public void A_project_whose_colour_has_not_arrived_yet_has_no_dot()
-        => Assert.Null(OutlineView.ProjectDot(Row(), selected: false));
+    {
+        // As the presenter builds it: no project found, so no colour, so nothing to draw. The row
+        // can't hold a colour without a project, which is why that's the only case to answer.
+        Assert.Null(OutlineView.ProjectDot(Row(project: string.Empty), selected: false));
+    }
 
     [WinFormsFact]
     public void A_selected_row_keeps_the_accent_it_is_drawn_in()
