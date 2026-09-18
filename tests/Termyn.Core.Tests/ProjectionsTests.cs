@@ -103,6 +103,18 @@ public class ProjectionsTests
         => Assert.Equal(expected, Projections.ToProject(Obj(json)).IsShared);
 
     [Fact]
+    public void Reads_the_colour_a_project_is_given()
+        => Assert.Equal("berry_red", Projections.ToProject(Obj("""{"id":"p","name":"Work","color":"berry_red"}""")).Color);
+
+    [Fact]
+    public void Reads_the_colour_a_label_is_given()
+        => Assert.Equal("teal", Projections.ToLabel(Obj("""{"id":"l","name":"followup","color":"teal"}""")).Color);
+
+    [Fact]
+    public void A_project_with_no_colour_of_its_own_says_so()
+        => Assert.Null(Projections.ToProject(Obj("""{"id":"p","name":"Work"}""")).Color);
+
+    [Fact]
     public void Reads_the_account_id_off_the_user()
         => Assert.Equal("42", Projections.ToUserId(Obj("""{"id":"42","email":"a@b.c"}""")));
 

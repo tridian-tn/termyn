@@ -271,7 +271,12 @@ internal sealed class MainForm : Form
             FullRowSelect = true,
             Indent = 14,
             BorderStyle = BorderStyle.None,
+
+            // Only the text, so the tree goes on drawing the row's background, its selection and
+            // its expander — and a row with no colour of its own is left to it entirely.
+            DrawMode = TreeViewDrawMode.OwnerDrawText,
         };
+        _sidebar.DrawNode += OnSidebarDrawNode;
         _sidebar.MouseDown += (_, _) => Noticed();
         _sidebar.AfterSelect += OnSidebarSelect;
         _sidebar.KeyDown += OnSidebarKeyDown;
@@ -1144,6 +1149,12 @@ internal sealed class MainForm : Form
 
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
+        // Before the rows, so the first paint after a sync already knows what the labels look like.
+        _outline.LabelColours = _presenter.Labels.ToDictionary(
+            l => l.Name,
+            l => Theme.ToColor(TodoistPalette.Of(l.Color)),
+            StringComparer.Ordinal);
+
         _outline.Rows = _presenter.Rows;
 
         // After the rows, which is what decides whether the selected task is still there.
@@ -1461,6 +1472,76 @@ internal sealed class MainForm : Form
         MarkSidebarSelection();
     }
 
+    /// <summary>How much room the dot takes from the text, beside the dot's own width.</summary>
+    private const int DotGap = 4;
+
+    /// <summary>
+    /// How far in from the text's own left edge the dot starts.
+    /// </summary>
+    /// <remarks>
+    /// The expander is drawn immediately to the left of that edge, with next to nothing between the
+    /// two, so a dot starting there sits against it while the same expander has clear space on its
+    /// other side. Scaled with the display, since the expander is.
+    /// </remarks>
+    private const int DotLead = 4;
+
+    /// <summary>
+    /// Whether a row sits in the dot column, and so starts where a dot would leave it.
+    /// </summary>
+    /// <remarks>
+    /// Anything with a colour has a dot of its own. A section has none, but it lives under a
+    /// project that does, and leaving it at the tree's own left edge cancelled out the one level of
+    /// indent it gets: a section sat under its project's name rather than in from it.
+    ///
+    /// Headings and the smart views above them are outside that column and keep the edge they had.
+    /// </remarks>
+    internal static bool SitsInDotColumn(SidebarNode node)
+        => node.Colour is not null || node.Kind == SidebarKind.Section;
+
+    /// <summary>
+    /// Draws a row of the dot column: its name, and the dot in front of it where it has one.
+    /// </summary>
+    /// <remarks>
+    /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
+    /// display is scaled to — an image list would have had to be rebuilt at every DPI.
+    ///
+    /// Every other row is left to the tree, which keeps the headings' own font and both of the ways
+    /// a selected row is marked.
+    /// </remarks>
+    private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
+    {
+        if (e.Node?.Tag is not SidebarNode node || !SitsInDotColumn(node))
+        {
+            e.DrawDefault = true;
+            return;
+        }
+
+        var bounds = e.Bounds;
+        var size = Math.Min(8, bounds.Height - 6);
+        var lead = _sidebar.LogicalToDeviceUnits(DotLead);
+
+        if (size > 0 && node.Colour is { } colour)
+        {
+            Dots.Fill(
+                e.Graphics,
+                new Rectangle(bounds.X + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
+                Theme.ToColor(colour));
+        }
+
+        // The text keeps its full width rather than losing the dot's room: the row's background is
+        // already drawn, and a name shortened by a dot would be the wrong thing to trim.
+        var taken = lead + Math.Max(0, size) + DotGap;
+        var selected = (e.State & TreeNodeStates.Selected) != 0 && _sidebar.Focused;
+
+        TextRenderer.DrawText(
+            e.Graphics,
+            e.Node.Text,
+            e.Node.NodeFont ?? _sidebar.Font,
+            new Rectangle(bounds.X + taken, bounds.Y, bounds.Width, bounds.Height),
+            selected ? SystemColors.HighlightText : _sidebar.ForeColor,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+    }
+
     /// <summary>
     /// Marks the selected row for as long as the tree hasn't got the focus.
     /// </summary>
@@ -1761,8 +1842,7 @@ internal sealed class MainForm : Form
     /// into, and the way you found out was to try: Enter, F2 and a double-click all did nothing at
     /// all, silently.
     /// </remarks>
-    /// <param name="editable">Whether the account will take an edit to this task's description</param>
-    /// <param name="anySelected">Whether the outline is on a task at all, which changes what to say</param>
+    /// <param name="access">What the account will let the user do with this description</param>
     private void ShowDescriptionEditable(DescriptionAccess access)
     {
         _description.ReadOnly = access is not DescriptionAccess.Writable;

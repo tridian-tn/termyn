@@ -191,5 +191,5 @@ internal sealed record Theme(
             Apply(child);
     }
 
-    private static Color ToColor(Rgb rgb) => Color.FromArgb(rgb.R, rgb.G, rgb.B);
+    internal static Color ToColor(Rgb rgb) => Color.FromArgb(rgb.R, rgb.G, rgb.B);
 }

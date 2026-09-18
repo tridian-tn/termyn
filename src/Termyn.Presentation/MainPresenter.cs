@@ -10,6 +10,7 @@ using Termyn.Core.History;
 using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
+using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 
 namespace Termyn.Presentation;
@@ -40,7 +41,10 @@ public sealed record TaskRow(
     DateOnly? DueOn = null,
     int CommentCount = 0,
     bool HasChildren = false,
-    bool Collapsed = false);
+    bool Collapsed = false,
+
+    /// <summary>The colour Todoist gives the task's project, or null when it has none.</summary>
+    Rgb? ProjectColour = null);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -1773,15 +1777,15 @@ public sealed class MainPresenter
             // Keyed apart from their copies further down, so clicking one doesn't select the other.
             foreach (var favorite in favouriteProjects)
                 nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
-                    Key: SidebarKeys.Favourite(SidebarKind.Project, favorite.Id), IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
+                    Key: SidebarKeys.Favourite(SidebarKind.Project, favorite.Id), IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id), Colour: TodoistPalette.Of(favorite.Color)));
 
             foreach (var favorite in favouriteLabels)
                 nodes.Add(new SidebarNode(SidebarKind.Label, favorite.Name, favorite.Name, 1,
-                    Key: SidebarKeys.Favourite(SidebarKind.Label, favorite.Name), IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name)));
+                    Key: SidebarKeys.Favourite(SidebarKind.Label, favorite.Name), IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name), Colour: TodoistPalette.Of(favorite.Color)));
 
             foreach (var favorite in favouriteFilters)
                 nodes.Add(new SidebarNode(SidebarKind.Filter, favorite.Id, favorite.Name, 1,
-                    Key: SidebarKeys.Favourite(SidebarKind.Filter, favorite.Id), IsFavorite: true));
+                    Key: SidebarKeys.Favourite(SidebarKind.Filter, favorite.Id), IsFavorite: true, Colour: TodoistPalette.Of(favorite.Color)));
         }
 
         nodes.Add(Header("Projects"));
@@ -1805,7 +1809,7 @@ public sealed class MainPresenter
 
             foreach (var label in labels.DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase))
                 nodes.Add(new SidebarNode(SidebarKind.Label, label.Name, label.Name, 1,
-                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: starred.Contains(label.Name), Count: byLabel.GetValueOrDefault(label.Name)));
+                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: starred.Contains(label.Name), Count: byLabel.GetValueOrDefault(label.Name), Colour: TodoistPalette.Of(label.Color)));
         }
 
         if (filters.Count > 0)
@@ -1816,7 +1820,7 @@ public sealed class MainPresenter
             // every saved query over every task on each publish is not worth a number in brackets.
             foreach (var filter in filters)
                 nodes.Add(new SidebarNode(SidebarKind.Filter, filter.Id, filter.Name, 1,
-                    Key: SidebarKeys.For(SidebarKind.Filter, filter.Id), IsFavorite: filter.IsFavorite));
+                    Key: SidebarKeys.For(SidebarKind.Filter, filter.Id), IsFavorite: filter.IsFavorite, Colour: TodoistPalette.Of(filter.Color)));
         }
 
         return nodes;
@@ -1833,7 +1837,7 @@ public sealed class MainPresenter
                     continue;
 
                 nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
-                    Key: SidebarKeys.For(SidebarKind.Project, project.Id), IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id)));
+                    Key: SidebarKeys.For(SidebarKind.Project, project.Id), IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id), Colour: TodoistPalette.Of(project.Color)));
 
                 var owned = sections
                     .Where(s => s.ProjectId == project.Id)
@@ -1870,7 +1874,9 @@ public sealed class MainPresenter
     /// </summary>
     private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
     {
-        var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
+        var projects = snapshot.Projects
+            .DistinctBy(p => p.Id)
+            .ToDictionary(p => p.Id, p => (p.Name, Colour: TodoistPalette.Of(p.Color)));
 
         // Counted once for the whole outline rather than looked up per row.
         var reminderCounts = snapshot.Reminders
@@ -1918,19 +1924,27 @@ public sealed class MainPresenter
             }
         }
 
-        TaskRow Row(TaskItem item, int depth) => new(
-            item.Id,
-            item.Content,
-            item.Priority,
-            item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var name) ? name : string.Empty,
-            item.DueText ?? DueShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
-            item.Labels,
-            depth,
-            item.IsRecurring,
-            reminderCounts.GetValueOrDefault(item.Id),
-            item.Completed,
-            SmartViews.DueOn(item, snapshot.TimeZone),
-            snapshot.CommentCounts.GetValueOrDefault(item.Id));
+        TaskRow Row(TaskItem item, int depth)
+        {
+            var project = item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var found)
+                ? found
+                : default;
+
+            return new TaskRow(
+                item.Id,
+                item.Content,
+                item.Priority,
+                project.Name ?? string.Empty,
+                item.DueText ?? DueShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
+                item.Labels,
+                depth,
+                item.IsRecurring,
+                reminderCounts.GetValueOrDefault(item.Id),
+                item.Completed,
+                SmartViews.DueOn(item, snapshot.TimeZone),
+                snapshot.CommentCounts.GetValueOrDefault(item.Id),
+                ProjectColour: project.Name is null ? null : project.Colour);
+        }
     }
 
     /// <summary>
@@ -1976,16 +1990,16 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// The completed tasks belonging to the current view, most recently finished first, flat. They
-    /// go below the active ones rather than in among them: a task's place in the outline comes from
-    /// its sibling order, which stops meaning anything once it is done.
-    /// </summary>
-    /// <summary>
     /// Stands in for the completion time of a task ticked off here and not yet acked. Sorts above
     /// every real ISO timestamp, which is where a task finished a moment ago belongs.
     /// </summary>
     private const string JustNow = "￿";
 
+    /// <summary>
+    /// The completed tasks belonging to the current view, most recently finished first, flat. They
+    /// go below the active ones rather than in among them: a task's place in the outline comes from
+    /// its sibling order, which stops meaning anything once it is done.
+    /// </summary>
     private static List<TaskRow> CompletedRows(
         ModelSnapshot snapshot,
         Func<TaskItem, bool> selected,

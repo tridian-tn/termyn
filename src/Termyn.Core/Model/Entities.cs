@@ -149,6 +149,9 @@ public sealed class Project
     public bool IsFavorite { get; init; }
     public bool IsArchived { get; init; }
     public int ChildOrder { get; init; }
+
+    /// <summary>The colour Todoist gives it, by name (see <c>TodoistPalette</c>), or null for none.</summary>
+    public string? Color { get; init; }
 }
 
 /// <summary>Walks the project tree, which several callers need and none can assume is ordered.</summary>
@@ -199,6 +202,9 @@ public sealed class Label
     public required string Name { get; init; }
     public bool IsFavorite { get; init; }
     public int ItemOrder { get; init; }
+
+    /// <summary>The colour Todoist gives it, by name (see <c>TodoistPalette</c>), or null for none.</summary>
+    public string? Color { get; init; }
 }
 
 /// <summary>A saved filter: a stored query string, evaluated locally where the grammar allows.</summary>
@@ -209,6 +215,9 @@ public sealed class Filter
     public string Query { get; init; } = string.Empty;
     public bool IsFavorite { get; init; }
     public int ItemOrder { get; init; }
+
+    /// <summary>The colour Todoist gives it, by name (see <c>TodoistPalette</c>), or null for none.</summary>
+    public string? Color { get; init; }
 }
 
 /// <summary>
