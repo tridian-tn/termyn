@@ -1485,6 +1485,16 @@ internal sealed class MainForm : Form
     private const int DotGap = 4;
 
     /// <summary>
+    /// How far in from the text's own left edge the dot starts.
+    /// </summary>
+    /// <remarks>
+    /// The expander is drawn immediately to the left of that edge, with next to nothing between the
+    /// two, so a dot starting there sits against it while the same expander has clear space on its
+    /// other side. Scaled with the display, since the expander is.
+    /// </remarks>
+    private const int DotLead = 4;
+
+    /// <summary>
     /// Draws a row that has a colour of its own, with Todoist's dot in front of its name.
     /// </summary>
     /// <remarks>
@@ -1504,18 +1514,19 @@ internal sealed class MainForm : Form
 
         var bounds = e.Bounds;
         var size = Math.Min(8, bounds.Height - 6);
+        var lead = _sidebar.LogicalToDeviceUnits(DotLead);
 
         if (size > 0)
         {
             Dots.Fill(
                 e.Graphics,
-                new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size),
+                new Rectangle(bounds.X + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
                 Theme.ToColor(colour));
         }
 
         // The text keeps its full width rather than losing the dot's room: the row's background is
         // already drawn, and a name shortened by a dot would be the wrong thing to trim.
-        var taken = Math.Max(0, size) + DotGap;
+        var taken = lead + Math.Max(0, size) + DotGap;
         var selected = (e.State & TreeNodeStates.Selected) != 0 && _sidebar.Focused;
 
         TextRenderer.DrawText(
