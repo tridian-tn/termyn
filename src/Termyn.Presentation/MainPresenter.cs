@@ -1777,15 +1777,15 @@ public sealed class MainPresenter
             // Keyed apart from their copies further down, so clicking one doesn't select the other.
             foreach (var favorite in favouriteProjects)
                 nodes.Add(new SidebarNode(SidebarKind.Project, favorite.Id, favorite.Name, 1,
-                    Key: SidebarKeys.Favourite(SidebarKind.Project, favorite.Id), IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id)));
+                    Key: SidebarKeys.Favourite(SidebarKind.Project, favorite.Id), IsFavorite: true, Count: byProject.GetValueOrDefault(favorite.Id), Colour: TodoistPalette.Of(favorite.Color)));
 
             foreach (var favorite in favouriteLabels)
                 nodes.Add(new SidebarNode(SidebarKind.Label, favorite.Name, favorite.Name, 1,
-                    Key: SidebarKeys.Favourite(SidebarKind.Label, favorite.Name), IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name)));
+                    Key: SidebarKeys.Favourite(SidebarKind.Label, favorite.Name), IsFavorite: true, Count: byLabel.GetValueOrDefault(favorite.Name), Colour: TodoistPalette.Of(favorite.Color)));
 
             foreach (var favorite in favouriteFilters)
                 nodes.Add(new SidebarNode(SidebarKind.Filter, favorite.Id, favorite.Name, 1,
-                    Key: SidebarKeys.Favourite(SidebarKind.Filter, favorite.Id), IsFavorite: true));
+                    Key: SidebarKeys.Favourite(SidebarKind.Filter, favorite.Id), IsFavorite: true, Colour: TodoistPalette.Of(favorite.Color)));
         }
 
         nodes.Add(Header("Projects"));
@@ -1809,7 +1809,7 @@ public sealed class MainPresenter
 
             foreach (var label in labels.DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase))
                 nodes.Add(new SidebarNode(SidebarKind.Label, label.Name, label.Name, 1,
-                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: starred.Contains(label.Name), Count: byLabel.GetValueOrDefault(label.Name)));
+                    Key: SidebarKeys.For(SidebarKind.Label, label.Name), IsFavorite: starred.Contains(label.Name), Count: byLabel.GetValueOrDefault(label.Name), Colour: TodoistPalette.Of(label.Color)));
         }
 
         if (filters.Count > 0)
@@ -1820,7 +1820,7 @@ public sealed class MainPresenter
             // every saved query over every task on each publish is not worth a number in brackets.
             foreach (var filter in filters)
                 nodes.Add(new SidebarNode(SidebarKind.Filter, filter.Id, filter.Name, 1,
-                    Key: SidebarKeys.For(SidebarKind.Filter, filter.Id), IsFavorite: filter.IsFavorite));
+                    Key: SidebarKeys.For(SidebarKind.Filter, filter.Id), IsFavorite: filter.IsFavorite, Colour: TodoistPalette.Of(filter.Color)));
         }
 
         return nodes;
@@ -1837,7 +1837,7 @@ public sealed class MainPresenter
                     continue;
 
                 nodes.Add(new SidebarNode(SidebarKind.Project, project.Id, project.Name, depth,
-                    Key: SidebarKeys.For(SidebarKind.Project, project.Id), IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id)));
+                    Key: SidebarKeys.For(SidebarKind.Project, project.Id), IsFavorite: project.IsFavorite, Count: byProject.GetValueOrDefault(project.Id), Colour: TodoistPalette.Of(project.Color)));
 
                 var owned = sections
                     .Where(s => s.ProjectId == project.Id)

@@ -67,6 +67,50 @@ public class ColourTests
         Assert.Null(row.ProjectColour);
     }
 
+    // ---- The sidebar -----------------------------------------------------------------------------
+
+    [Fact]
+    public void A_project_a_label_and_a_filter_each_carry_their_colour_into_the_sidebar()
+    {
+        var store = Seeded("""{"id":"p1","name":"Work","color":"berry_red"}""");
+        store.PutResource("labels", "l1", """{"id":"l1","name":"followup","color":"teal"}""");
+        store.PutResource("filters", "f1", """{"id":"f1","name":"Overdue","query":"overdue","color":"grape"}""");
+
+        var sidebar = Presenter(store).Sidebar;
+
+        Assert.Equal(TodoistPalette.Of("berry_red"), sidebar.Single(n => n.Kind == SidebarKind.Project).Colour);
+        Assert.Equal(TodoistPalette.Of("teal"), sidebar.Single(n => n.Kind == SidebarKind.Label).Colour);
+        Assert.Equal(TodoistPalette.Of("grape"), sidebar.Single(n => n.Kind == SidebarKind.Filter).Colour);
+    }
+
+    [Fact]
+    public void A_favourites_copy_of_a_row_is_the_same_colour_as_the_row_itself()
+    {
+        // The two are separate rows, keyed apart so clicking one doesn't select the other, and a
+        // colour on one and not the other would read as two different projects.
+        var store = Seeded("""{"id":"p1","name":"Work","color":"berry_red","is_favorite":true}""");
+
+        var projects = Presenter(store).Sidebar.Where(n => n.Kind == SidebarKind.Project).ToList();
+
+        Assert.Equal(2, projects.Count);
+        Assert.All(projects, p => Assert.Equal(TodoistPalette.Of("berry_red"), p.Colour));
+    }
+
+    [Fact]
+    public void Termyns_own_rows_have_no_colour_to_draw()
+    {
+        // Smart views, sections and the headings between them are Termyn's furniture rather than
+        // the account's. A dot beside them would be inventing something Todoist never said.
+        var store = Seeded("""{"id":"p1","name":"Work","color":"berry_red"}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Reports","project_id":"p1"}""");
+
+        var sidebar = Presenter(store).Sidebar;
+
+        Assert.All(
+            sidebar.Where(n => n.Kind is SidebarKind.SmartView or SidebarKind.Section or SidebarKind.Header),
+            n => Assert.Null(n.Colour));
+    }
+
     [Fact]
     public void The_labels_a_window_draws_carry_their_own_colours()
     {

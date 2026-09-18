@@ -171,6 +171,7 @@ public static class Projections
         Query = JsonRead.String(o, "query") ?? string.Empty,
         IsFavorite = JsonRead.Bool(o, "is_favorite"),
         ItemOrder = JsonRead.Int(o, "item_order"),
+        Color = JsonRead.String(o, "color"),
     };
 
     public static Comment ToComment(JsonObject o) => new()

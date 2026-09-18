@@ -271,7 +271,12 @@ internal sealed class MainForm : Form
             FullRowSelect = true,
             Indent = 14,
             BorderStyle = BorderStyle.None,
+
+            // Only the text, so the tree goes on drawing the row's background, its selection and
+            // its expander — and a row with no colour of its own is left to it entirely.
+            DrawMode = TreeViewDrawMode.OwnerDrawText,
         };
+        _sidebar.DrawNode += OnSidebarDrawNode;
         _sidebar.MouseDown += (_, _) => Noticed();
         _sidebar.AfterSelect += OnSidebarSelect;
         _sidebar.KeyDown += OnSidebarKeyDown;
@@ -1476,6 +1481,52 @@ internal sealed class MainForm : Form
     /// to draw no selection of its own when it isn't focused, and the row is filled here instead —
     /// quieter than the focused selection, and a good deal louder than what was there before.
     /// </remarks>
+    /// <summary>How much room the dot takes from the text, beside the dot's own width.</summary>
+    private const int DotGap = 4;
+
+    /// <summary>
+    /// Draws a row that has a colour of its own, with Todoist's dot in front of its name.
+    /// </summary>
+    /// <remarks>
+    /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
+    /// display is scaled to — an image list would have had to be rebuilt at every DPI.
+    ///
+    /// Everything else is left to the tree: anything without a colour draws as it always did, which
+    /// keeps the headings' own font and both of the ways a selected row is marked.
+    /// </remarks>
+    private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
+    {
+        if (e.Node?.Tag is not SidebarNode node || node.Colour is not { } colour)
+        {
+            e.DrawDefault = true;
+            return;
+        }
+
+        var bounds = e.Bounds;
+        var size = Math.Min(8, bounds.Height - 6);
+
+        if (size > 0)
+        {
+            using var brush = new SolidBrush(Theme.ToColor(colour));
+            e.Graphics.FillEllipse(
+                brush,
+                new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size));
+        }
+
+        // The text keeps its full width rather than losing the dot's room: the row's background is
+        // already drawn, and a name shortened by a dot would be the wrong thing to trim.
+        var taken = Math.Max(0, size) + DotGap;
+        var selected = (e.State & TreeNodeStates.Selected) != 0 && _sidebar.Focused;
+
+        TextRenderer.DrawText(
+            e.Graphics,
+            e.Node.Text,
+            e.Node.NodeFont ?? _sidebar.Font,
+            new Rectangle(bounds.X + taken, bounds.Y, bounds.Width, bounds.Height),
+            selected ? SystemColors.HighlightText : _sidebar.ForeColor,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+    }
+
     private void MarkSidebarSelection() => MarkSidebarSelection(_sidebar.Focused);
 
     /// <param name="focused">Whether the tree has the focus, or is about to</param>

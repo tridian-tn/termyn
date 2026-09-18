@@ -1,4 +1,5 @@
 using Termyn.Core.Model;
+using Termyn.Core.Settings;
 
 namespace Termyn.Presentation;
 
@@ -27,7 +28,17 @@ public sealed record SidebarNode(
     string Key,
     bool IsFavorite = false,
     SmartView? View = null,
-    int Count = 0);
+    int Count = 0,
+
+    /// <summary>
+    /// The colour Todoist gives it, for the rows that have one — projects, labels and filters.
+    /// </summary>
+    /// <remarks>
+    /// Null on everything else: a smart view, a section and a heading are Termyn's own furniture
+    /// rather than the account's, and a dot beside them would be inventing something Todoist
+    /// doesn't say. Resolved here so nothing drawing a row has to know what Todoist's names mean.
+    /// </remarks>
+    Rgb? Colour = null);
 
 /// <summary>
 /// Builds the keys that identify sidebar rows. Todoist ids are only unique within a resource type,

@@ -215,6 +215,9 @@ public sealed class Filter
     public string Query { get; init; } = string.Empty;
     public bool IsFavorite { get; init; }
     public int ItemOrder { get; init; }
+
+    /// <summary>The colour Todoist gives it, by name (see <c>TodoistPalette</c>), or null for none.</summary>
+    public string? Color { get; init; }
 }
 
 /// <summary>
