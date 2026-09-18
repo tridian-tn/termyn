@@ -1472,15 +1472,6 @@ internal sealed class MainForm : Form
         MarkSidebarSelection();
     }
 
-    /// <summary>
-    /// Marks the selected row for as long as the tree hasn't got the focus.
-    /// </summary>
-    /// <remarks>
-    /// Windows draws an unfocused selection so faintly that which list you are on stops being
-    /// obvious, and the outline beside it holds the focus for most of a session. So the tree is told
-    /// to draw no selection of its own when it isn't focused, and the row is filled here instead —
-    /// quieter than the focused selection, and a good deal louder than what was there before.
-    /// </remarks>
     /// <summary>How much room the dot takes from the text, beside the dot's own width.</summary>
     private const int DotGap = 4;
 
@@ -1495,18 +1486,31 @@ internal sealed class MainForm : Form
     private const int DotLead = 4;
 
     /// <summary>
-    /// Draws a row that has a colour of its own, with Todoist's dot in front of its name.
+    /// Whether a row sits in the dot column, and so starts where a dot would leave it.
+    /// </summary>
+    /// <remarks>
+    /// Anything with a colour has a dot of its own. A section has none, but it lives under a
+    /// project that does, and leaving it at the tree's own left edge cancelled out the one level of
+    /// indent it gets: a section sat under its project's name rather than in from it.
+    ///
+    /// Headings and the smart views above them are outside that column and keep the edge they had.
+    /// </remarks>
+    internal static bool SitsInDotColumn(SidebarNode node)
+        => node.Colour is not null || node.Kind == SidebarKind.Section;
+
+    /// <summary>
+    /// Draws a row of the dot column: its name, and the dot in front of it where it has one.
     /// </summary>
     /// <remarks>
     /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
     /// display is scaled to — an image list would have had to be rebuilt at every DPI.
     ///
-    /// Everything else is left to the tree: anything without a colour draws as it always did, which
-    /// keeps the headings' own font and both of the ways a selected row is marked.
+    /// Every other row is left to the tree, which keeps the headings' own font and both of the ways
+    /// a selected row is marked.
     /// </remarks>
     private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
     {
-        if (e.Node?.Tag is not SidebarNode node || node.Colour is not { } colour)
+        if (e.Node?.Tag is not SidebarNode node || !SitsInDotColumn(node))
         {
             e.DrawDefault = true;
             return;
@@ -1516,7 +1520,7 @@ internal sealed class MainForm : Form
         var size = Math.Min(8, bounds.Height - 6);
         var lead = _sidebar.LogicalToDeviceUnits(DotLead);
 
-        if (size > 0)
+        if (size > 0 && node.Colour is { } colour)
         {
             Dots.Fill(
                 e.Graphics,
@@ -1538,6 +1542,15 @@ internal sealed class MainForm : Form
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
     }
 
+    /// <summary>
+    /// Marks the selected row for as long as the tree hasn't got the focus.
+    /// </summary>
+    /// <remarks>
+    /// Windows draws an unfocused selection so faintly that which list you are on stops being
+    /// obvious, and the outline beside it holds the focus for most of a session. So the tree is told
+    /// to draw no selection of its own when it isn't focused, and the row is filled here instead —
+    /// quieter than the focused selection, and a good deal louder than what was there before.
+    /// </remarks>
     private void MarkSidebarSelection() => MarkSidebarSelection(_sidebar.Focused);
 
     /// <param name="focused">Whether the tree has the focus, or is about to</param>
@@ -1829,8 +1842,7 @@ internal sealed class MainForm : Form
     /// into, and the way you found out was to try: Enter, F2 and a double-click all did nothing at
     /// all, silently.
     /// </remarks>
-    /// <param name="editable">Whether the account will take an edit to this task's description</param>
-    /// <param name="anySelected">Whether the outline is on a task at all, which changes what to say</param>
+    /// <param name="access">What the account will let the user do with this description</param>
     private void ShowDescriptionEditable(DescriptionAccess access)
     {
         _description.ReadOnly = access is not DescriptionAccess.Writable;
