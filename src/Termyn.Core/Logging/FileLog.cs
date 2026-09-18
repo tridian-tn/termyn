@@ -8,8 +8,8 @@ namespace Termyn.Core.Logging;
 /// <remarks>
 /// One line per entry, newest at the bottom of <c>termyn.log</c>. When that file reaches its cap it
 /// becomes <c>termyn.1.log</c>, what was <c>termyn.1.log</c> becomes <c>termyn.2.log</c>, and the
-/// oldest goes — so the whole log has a ceiling of <see cref="MaxBytes"/> × (<see cref="Kept"/> + 1)
-/// and never has to be tidied by hand.
+/// oldest goes — so the whole log has a ceiling of <see cref="MaxBytes"/> × (<see cref="Kept"/> + 1),
+/// plus at most one <see cref="MaxEntry"/> per file, and never has to be tidied by hand.
 ///
 /// Writes are serialised: the sync worker and the window both use this, and interleaved lines would
 /// be worse than no lines. Failures are swallowed — a log that can't be written is not a reason to
@@ -22,6 +22,16 @@ public sealed class FileLog : ILog
 
     /// <summary>How many rolled files are kept beside the current one.</summary>
     private const int Kept = 3;
+
+    /// <summary>
+    /// The most one entry may take.
+    /// </summary>
+    /// <remarks>
+    /// The file is rolled on what it already holds, so one entry can always carry it past the cap —
+    /// and an exception's text has no length anybody promised. Capping the entry bounds how far
+    /// past, which is what keeps the whole log's ceiling a number rather than a hope.
+    /// </remarks>
+    private const int MaxEntry = 8 * 1024;
 
     private const string FileName = "termyn.log";
 
@@ -55,11 +65,18 @@ public sealed class FileLog : ILog
 
     private void Write(string level, string message, Exception? error)
     {
-        // An exception's own text can run to several lines. They're indented so a reader — and
+        // One entry, one line. Some of what reaches here is the server's own words, which can carry
+        // line breaks of their own, and a message that broke into unindented lines would read as
+        // several entries — and would let anything the server says put whatever it liked in the log.
+        var line = $"{_clock.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z  {level,-5}  {message.ReplaceLineEndings(" ")}";
+
+        // An exception's own text does run to several lines. They're indented so a reader — and
         // anything counting entries — can tell a continuation from the next entry.
-        var line = $"{_clock.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z  {level,-5}  {message}";
         if (error is not null)
             line += Environment.NewLine + "    " + error.ToString().ReplaceLineEndings(Environment.NewLine + "    ");
+
+        if (line.Length > MaxEntry)
+            line = line[..MaxEntry] + " […]";
 
         lock (_gate)
         {

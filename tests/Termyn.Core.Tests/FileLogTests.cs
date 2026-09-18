@@ -53,6 +53,33 @@ public sealed class FileLogTests : IDisposable
     }
 
     [Fact]
+    public void A_message_with_line_breaks_in_it_is_still_one_entry()
+    {
+        // Some of what reaches the log is the server's own words. Left as they came, a message with
+        // newlines in it would read as several entries — and would let the server write whatever it
+        // liked into the log, in whatever shape it liked.
+        Log().Warn("Todoist refused this\r\n2026-01-01 00:00:00.000Z  INFO   nothing to see here");
+
+        var lines = Read().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Single(lines);
+        Assert.Contains("Todoist refused this 2026-01-01", lines[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_runaway_entry_is_cut_rather_than_let_run()
+    {
+        // The file is rolled on what it already holds, so one enormous entry would carry it past
+        // the cap — and an exception's text is not a length anybody promised.
+        Log().Error(new string('x', 200_000), new IOException(new string('y', 200_000)));
+
+        Assert.True(
+            new FileInfo(Path.Combine(_directory, "termyn.log")).Length < 16 * 1024,
+            "one entry took more than its share of the file");
+        Assert.EndsWith("[…]", Read().TrimEnd(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Everything_written_is_kept_in_order()
     {
         var log = Log();

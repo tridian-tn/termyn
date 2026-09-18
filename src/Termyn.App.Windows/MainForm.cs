@@ -3437,8 +3437,10 @@ internal sealed class MainForm : Form
             return;
         }
 
+        // The prefix is what the caller was doing — a background sync, or whatever the user asked
+        // for — and it's the difference between two identical-looking lines in the log.
         if (ex is not OperationCanceledException)
-            _shell.Log.Error("Something the user was doing went wrong.", ex);
+            _shell.Log.Error(prefix.TrimEnd().TrimEnd(':'), ex);
 
         _status.Text = ex switch
         {

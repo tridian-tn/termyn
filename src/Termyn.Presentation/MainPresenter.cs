@@ -275,6 +275,8 @@ public sealed class MainPresenter
     /// </summary>
     public async Task LoadAsync(CancellationToken ct = default)
     {
+        // Set rather than noted (see NoteReachable): nothing has been tried yet, so this is where
+        // the session starts from and not something learnt about the network.
         IsOffline = false;
         Publish();
         await SyncAsync(ct);
@@ -298,13 +300,7 @@ public sealed class MainPresenter
         try
         {
             await _engine.SyncAsync(ct);
-
-            // Only the change is worth a line. A window left open offline overnight would otherwise
-            // write the same sentence nine hundred times.
-            if (IsOffline)
-                _log?.Info("Todoist can be reached again.");
-
-            IsOffline = false;
+            NoteReachable(true);
             _lastSyncedAt = _clock.UtcNow;
             _pausedUntil = null;
             _rateLimitStreak = 0;
@@ -318,10 +314,7 @@ public sealed class MainPresenter
         }
         catch (TodoistNetworkException ex)
         {
-            if (!IsOffline)
-                _log?.Warn("Todoist couldn't be reached. Working from the cache and queuing writes.", ex);
-
-            IsOffline = true;
+            NoteReachable(false, ex);
         }
         catch (TodoistAuthException)
         {
@@ -340,6 +333,30 @@ public sealed class MainPresenter
 
         // Only ask for another round while the network is answering, or the loop would spin.
         return new SyncOutcome(!IsOffline && pause is null && _engine.PendingCount > 0, pause);
+    }
+
+    /// <summary>
+    /// Notes whether Todoist can be reached, and writes down the change.
+    /// </summary>
+    /// <remarks>
+    /// Every path that learns this goes through here — a sync, a capture, a completed fetch — so a
+    /// line saying Todoist is back can never appear without the one saying when it went. Only the
+    /// change is written down: a window left open offline overnight would otherwise say the same
+    /// thing nine hundred times, and the line that mattered would be lost among them.
+    /// </remarks>
+    /// <param name="reachable">Whether the request that just finished got through</param>
+    /// <param name="error">What stopped it, when something did</param>
+    private void NoteReachable(bool reachable, Exception? error = null)
+    {
+        if (IsOffline != reachable)
+            return; // already saying this
+
+        if (reachable)
+            _log?.Info("Todoist can be reached again.");
+        else
+            _log?.Warn("Todoist couldn't be reached. Working from the cache and queuing writes.", error);
+
+        IsOffline = !reachable;
     }
 
     /// <summary>
@@ -418,7 +435,7 @@ public sealed class MainPresenter
         var pause = asked > MaxPause ? MaxPause : asked;
 
         _pausedUntil = _clock.UtcNow + pause;
-        IsOffline = false;
+        NoteReachable(true);
         return pause;
     }
 
@@ -443,7 +460,7 @@ public sealed class MainPresenter
             return;
 
         var captured = await _engine.QuickAddOnlineAsync(text, ct);
-        IsOffline = !captured;
+        NoteReachable(captured);
 
         if (!captured)
         {
@@ -578,7 +595,7 @@ public sealed class MainPresenter
             var fetch = await _engine.FetchCompletedAsync(ct);
             CompletedTruncated = fetch.Truncated;
             ShowingCompleted = true;
-            IsOffline = false;
+            NoteReachable(true);
         }
         catch (TodoistRateLimitException ex)
         {
@@ -591,7 +608,7 @@ public sealed class MainPresenter
         {
             // Nothing to show and no way to get it. Left off rather than switched on and empty,
             // which would read as "you have completed nothing".
-            IsOffline = true;
+            NoteReachable(false);
             return false;
         }
         catch (TodoistAuthException)

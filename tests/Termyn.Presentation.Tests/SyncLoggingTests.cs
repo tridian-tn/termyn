@@ -57,6 +57,23 @@ public class SyncLoggingTests
     }
 
     [Fact]
+    public async Task Going_offline_during_a_capture_is_written_down_like_any_other()
+    {
+        // Quick-add learns this as much as a sync does. Recorded only in the sync, "Todoist can be
+        // reached again" could turn up with nothing before it saying when it went.
+        var (presenter, _, log) = Built();
+
+        await presenter.CaptureAsync("Buy milk");    // the fake answers nothing, so it went nowhere
+
+        Assert.Contains("Todoist couldn't be reached", log.All, StringComparison.Ordinal);
+
+        await presenter.SyncAsync();
+
+        Assert.Contains("Todoist can be reached again", log.All, StringComparison.Ordinal);
+        Assert.Equal(2, log.Lines.Count);
+    }
+
+    [Fact]
     public async Task Being_rate_limited_says_how_long_the_wait_is()
     {
         var (presenter, api, log) = Built();

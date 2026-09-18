@@ -40,6 +40,32 @@ public class SyncLoggingTests
     }
 
     [Fact]
+    public void A_queued_change_that_cannot_be_read_is_counted_too()
+    {
+        // It stays in the store and is never loaded, so it can never be sent and nothing else would
+        // ever mention it. This line is the only sign the user's change went nowhere.
+        var log = new RecordingLog();
+        var store = new InMemorySnapshotStore();
+        store.ApplyLocalWrite(
+            new OutboxCommand
+            {
+                Uuid = "u1",
+                Type = "item_update",
+                ArgsJson = "{ this is not json",
+                State = OutboxState.Pending,
+            },
+            [],
+            []);
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, log: log);
+
+        engine.Load();
+
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Contains("1 queued changes couldn't be read and will never be sent", log.All, StringComparison.Ordinal);
+        Assert.DoesNotContain("this is not json", log.All, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_refused_command_is_written_down_by_type_and_uuid()
     {
         var log = new RecordingLog();

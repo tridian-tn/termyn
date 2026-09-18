@@ -284,10 +284,18 @@ public sealed class SyncEngine
 
             ResyncIfResourcesAreMissing();
 
+            var unsendable = 0;
             foreach (var c in snapshot.Outbox)
             {
                 if (TryParse(c.ArgsJson) is null)
+                {
+                    // It stays in the store and will never be sent, so this is the only chance
+                    // anybody has of knowing a change was lost. Counted, not quoted: its arguments
+                    // are what the user typed.
+                    unsendable++;
                     continue;
+                }
+
                 _outbox.Add(c);
 
                 if (c.State != OutboxState.Pending)
@@ -320,6 +328,9 @@ public sealed class SyncEngine
                 if (c.Type is "item_close" or "item_delete" && ParseArgs(c)["id"] is JsonValue id)
                     RecordUndoable(c, id.ToString(), c.PriorJson);
             }
+
+            if (unsendable > 0)
+                _log?.Warn($"{unsendable} queued changes couldn't be read and will never be sent.");
         }
     }
 
