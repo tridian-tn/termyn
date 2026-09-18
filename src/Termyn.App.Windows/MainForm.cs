@@ -1144,6 +1144,12 @@ internal sealed class MainForm : Form
 
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
+        // Before the rows, so the first paint after a sync already knows what the labels look like.
+        _outline.LabelColours = _presenter.Labels.ToDictionary(
+            l => l.Name,
+            l => Theme.ToColor(TodoistPalette.Of(l.Color)),
+            StringComparer.Ordinal);
+
         _outline.Rows = _presenter.Rows;
 
         // After the rows, which is what decides whether the selected task is still there.

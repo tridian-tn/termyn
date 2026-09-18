@@ -10,6 +10,7 @@ using Termyn.Core.History;
 using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
+using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 
 namespace Termyn.Presentation;
@@ -40,7 +41,10 @@ public sealed record TaskRow(
     DateOnly? DueOn = null,
     int CommentCount = 0,
     bool HasChildren = false,
-    bool Collapsed = false);
+    bool Collapsed = false,
+
+    /// <summary>The colour Todoist gives the task's project, or null when it has none.</summary>
+    Rgb? ProjectColour = null);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -1870,7 +1874,9 @@ public sealed class MainPresenter
     /// </summary>
     private List<TaskRow> BuildOutline(ModelSnapshot snapshot, bool scoped)
     {
-        var projects = snapshot.Projects.DistinctBy(p => p.Id).ToDictionary(p => p.Id, p => p.Name);
+        var projects = snapshot.Projects
+            .DistinctBy(p => p.Id)
+            .ToDictionary(p => p.Id, p => (p.Name, Colour: TodoistPalette.Of(p.Color)));
 
         // Counted once for the whole outline rather than looked up per row.
         var reminderCounts = snapshot.Reminders
@@ -1918,19 +1924,27 @@ public sealed class MainPresenter
             }
         }
 
-        TaskRow Row(TaskItem item, int depth) => new(
-            item.Id,
-            item.Content,
-            item.Priority,
-            item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var name) ? name : string.Empty,
-            item.DueText ?? DueShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
-            item.Labels,
-            depth,
-            item.IsRecurring,
-            reminderCounts.GetValueOrDefault(item.Id),
-            item.Completed,
-            SmartViews.DueOn(item, snapshot.TimeZone),
-            snapshot.CommentCounts.GetValueOrDefault(item.Id));
+        TaskRow Row(TaskItem item, int depth)
+        {
+            var project = item.ProjectId is not null && projects.TryGetValue(item.ProjectId, out var found)
+                ? found
+                : default;
+
+            return new TaskRow(
+                item.Id,
+                item.Content,
+                item.Priority,
+                project.Name ?? string.Empty,
+                item.DueText ?? DueShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
+                item.Labels,
+                depth,
+                item.IsRecurring,
+                reminderCounts.GetValueOrDefault(item.Id),
+                item.Completed,
+                SmartViews.DueOn(item, snapshot.TimeZone),
+                snapshot.CommentCounts.GetValueOrDefault(item.Id),
+                ProjectColour: project.Name is null ? null : project.Colour);
+        }
     }
 
     /// <summary>

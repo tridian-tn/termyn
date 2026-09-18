@@ -625,7 +625,7 @@ internal sealed class OutlineView : ListView
                 break;
 
             case 2:
-                TextRenderer.DrawText(e.Graphics, row.Project, Font, Inset(e.Bounds), muted, Flags);
+                DrawProject(e.Graphics, e.Bounds, row, selected, muted);
                 break;
 
             case 3:
@@ -633,7 +633,7 @@ internal sealed class OutlineView : ListView
                 break;
 
             case 4:
-                TextRenderer.DrawText(e.Graphics, LabelsOf(row), Font, Inset(e.Bounds), muted, Flags);
+                DrawLabels(e.Graphics, e.Bounds, row, selected, muted);
                 break;
         }
     }
@@ -715,6 +715,102 @@ internal sealed class OutlineView : ListView
             var x = bounds.X + (level * IndentWidth) + (IndentWidth / 2);
             g.DrawLine(pen, x, bounds.Top, x, bounds.Bottom);
         }
+    }
+
+    /// <summary>
+    /// What each label is coloured with, by name.
+    /// </summary>
+    /// <remarks>
+    /// Given rather than looked up: labels join by name (§6.2), and the control has no model to ask.
+    /// A label missing from here is drawn in the muted colour, which is what every label looked like
+    /// before there were any.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal IReadOnlyDictionary<string, Color> LabelColours { get; set; } =
+        new Dictionary<string, Color>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The dot in front of a row's project, or null when there is none to draw.
+    /// </summary>
+    /// <remarks>
+    /// Nothing on a selected row: the accent is behind it, and a colour chosen to read against the
+    /// panel has made no promise about that. Nothing for a task in no project either — a dot there
+    /// would be saying something about a project the task hasn't got.
+    /// </remarks>
+    internal static Color? ProjectDot(TaskRow row, bool selected)
+        => selected || row.Project.Length == 0 || row.ProjectColour is not { } colour
+            ? null
+            : Color.FromArgb(colour.R, colour.G, colour.B);
+
+    /// <summary>The project a task is in, behind the dot Todoist gives that project.</summary>
+    private void DrawProject(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
+    {
+        var text = Inset(bounds);
+
+        if (ProjectDot(row, selected) is { } dot)
+            DrawDot(g, ref text, dot);
+
+        TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
+    }
+
+    /// <summary>
+    /// The labels on a task, each in its own colour.
+    /// </summary>
+    /// <remarks>
+    /// Drawn one at a time rather than as one string, since a task's labels rarely share a colour.
+    /// A selected row goes back to one colour for the lot: the accent behind it is what the row is
+    /// saying, and five colours over it say less than none.
+    /// </remarks>
+    /// <summary>
+    /// The labels of a row, each with the colour it is written in.
+    /// </summary>
+    /// <remarks>
+    /// A selected row comes back as one run in the one colour: the accent behind it is what the row
+    /// is saying, and five colours over it say less than none. A label the window hasn't been told
+    /// the colour of — one just made, before the sync describing it — reads as it always did.
+    /// </remarks>
+    internal IReadOnlyList<(string Text, Color Colour)> LabelRuns(TaskRow row, bool selected, Color muted)
+    {
+        if (selected || row.Labels.Count == 0)
+            return LabelsOf(row) is { Length: > 0 } all ? [(all, muted)] : [];
+
+        return row.Labels
+            .Select(l => ("@" + l, LabelColours.TryGetValue(l, out var found) ? found : muted))
+            .ToList();
+    }
+
+    private void DrawLabels(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
+    {
+        var text = Inset(bounds);
+
+        foreach (var (written, colour) in LabelRuns(row, selected, muted))
+        {
+            if (text.Width <= 0)
+                return;
+
+            TextRenderer.DrawText(g, written, Font, text, colour, Flags);
+
+            // Measured with the space that follows it, which is what puts the next one along.
+            var width = TextRenderer.MeasureText(g, written + " ", Font, text.Size, Flags).Width;
+            text.X += width;
+            text.Width -= width;
+        }
+    }
+
+    /// <summary>Draws a colour's dot at the left of <paramref name="bounds"/>, and takes its room.</summary>
+    private void DrawDot(Graphics g, ref Rectangle bounds, Color colour)
+    {
+        var size = Math.Min(8, bounds.Height - 8);
+        if (size <= 0)
+            return;
+
+        using (var brush = new SolidBrush(colour))
+            g.FillEllipse(brush, new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size));
+
+        var taken = size + (TextInset / 2);
+        bounds.X += taken;
+        bounds.Width = Math.Max(0, bounds.Width - taken);
     }
 
     private static void DrawPriority(Graphics g, Rectangle bounds, Priority priority)

@@ -51,6 +51,7 @@ public static class Projections
         IsArchived = JsonRead.Bool(o, "is_archived"),
         IsShared = JsonRead.Bool(o, "is_shared"),
         ChildOrder = JsonRead.Int(o, "child_order"),
+        Color = JsonRead.String(o, "color"),
     };
 
     /// <summary>
@@ -124,6 +125,7 @@ public static class Projections
         Name = JsonRead.String(o, "name") ?? string.Empty,
         IsFavorite = JsonRead.Bool(o, "is_favorite"),
         ItemOrder = JsonRead.Int(o, "item_order"),
+        Color = JsonRead.String(o, "color"),
     };
 
     public static Reminder ToReminder(JsonObject o)
