@@ -1219,9 +1219,11 @@ public sealed class MainPresenter
     /// </summary>
     /// <remarks>
     /// The account's and not the machine's: someone working away from home would otherwise be
-    /// offered a day the rest of the app doesn't agree is today.
+    /// offered a day the rest of the app doesn't agree is today. Read off the engine directly,
+    /// since taking a whole snapshot to find out what day it is would parse every task in the
+    /// account for one date.
     /// </remarks>
-    public DateOnly Today => _engine.Snapshot().Today;
+    public DateOnly Today => _engine.Today;
 
     /// <summary>Sets or, with a null date, clears the day a task has to be finished by.</summary>
     public void SetDeadline(string id, DateOnly? date)

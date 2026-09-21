@@ -59,15 +59,56 @@ public class DeadlineFormTests
     }
 
     [WinFormsFact]
-    public void Picking_a_day_after_clearing_undoes_the_clear()
+    public void A_deadline_the_calendar_cant_show_opens_on_the_earliest_it_can()
     {
-        // Both buttons answer the same question, and the last one pressed is the answer.
-        using var dialog = DeadlineForm.For("Ship it", new DateOnly(2026, 8, 4), Today);
+        // A deadline is whatever the account's JSON said, and the control throws outright on a date
+        // before 1753 — which would leave that task's deadline unreachable from here for good.
+        using var dialog = DeadlineForm.For("Ship it", new DateOnly(1600, 5, 1), Today);
 
-        dialog.PressClear();
-        dialog.PickFromCalendar(new DateOnly(2026, 8, 11));
+        Assert.Equal(new DateOnly(1753, 1, 1), dialog.Chosen);
+    }
 
-        Assert.Equal(new DateOnly(2026, 8, 11), dialog.Chosen);
+    [WinFormsFact]
+    public void Enter_and_escape_close_the_calendar_without_reaching_the_dialog()
+    {
+        // The dialog answers Escape with Cancel and Enter with OK. A key let through from the
+        // calendar would shut both in one press, throwing away the day just settled on.
+        using var dialog = DeadlineForm.For("Ship it", null, Today);
+
+        foreach (var key in new[] { Keys.Enter, Keys.Escape })
+        {
+            var pressed = dialog.PressInCalendar(key);
+
+            Assert.True(pressed.Handled);
+            Assert.True(pressed.SuppressKeyPress);
+        }
+
+        // And anything else is left alone, or the calendar couldn't be typed into at all.
+        Assert.False(dialog.PressInCalendar(Keys.Down).Handled);
+    }
+
+    [WinFormsFact]
+    public void The_button_that_opens_the_calendar_says_what_it_is()
+    {
+        // It carries a drawn calendar and no words, and the day beside it is a label rather than
+        // anything that looks pressable — so hovering has to answer what it does.
+        using var dialog = DeadlineForm.For("Ship it", null, Today);
+
+        Assert.Equal("Pick a day", dialog.PickTip);
+        Assert.Equal(new Size(dialog.LogicalToDeviceUnits(16), dialog.LogicalToDeviceUnits(16)), dialog.GlyphDrawn);
+    }
+
+    [WinFormsFact]
+    public void What_the_dialog_built_is_let_go_of_when_it_is()
+    {
+        // Neither the calendar's drop nor the button's image is a child control, so the base
+        // disposal doesn't reach them — and a dialog built and dropped without being shown raises
+        // no close to hang them off, which is every test in this file.
+        var dialog = DeadlineForm.For("Ship it", null, Today);
+
+        dialog.Dispose();
+
+        Assert.True(dialog.Released);
     }
 
     [WinFormsFact]
@@ -100,6 +141,24 @@ public class DeadlineFormTests
         dialog.PressClear();
 
         Assert.Equal(DialogResult.OK, dialog.DialogResult);
+    }
+
+    [WinFormsFact]
+    public void The_calendar_takes_the_keys_when_it_opens()
+    {
+        // The whole keyboard route depends on this: a control inside a drop-down isn't on the
+        // form's own focus chain, so asking the calendar itself to take the focus does nothing and
+        // the calendar sits open and deaf. Shown off-screen, since a window nobody has displayed
+        // has no handle to focus and no place to hang a drop-down off.
+        using var dialog = DeadlineForm.For("Ship it", null, Today);
+        dialog.StartPosition = FormStartPosition.Manual;
+        dialog.Location = new Point(-2000, -2000);
+        dialog.Show();
+
+        dialog.PressPick();
+
+        Assert.True(dialog.CalendarOpen);
+        Assert.True(dialog.CalendarFocused);
     }
 
     [WinFormsFact]

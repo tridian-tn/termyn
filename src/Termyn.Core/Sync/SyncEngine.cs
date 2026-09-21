@@ -174,6 +174,29 @@ public sealed class SyncEngine
                 .ToList();
     }
 
+    /// <summary>
+    /// Today in the account's own timezone.
+    /// </summary>
+    /// <remarks>
+    /// Its own reader rather than a field off <see cref="Snapshot"/>, which parses every task's
+    /// JSON and counts the queue to build what it returns. That's the right price for a publish and
+    /// far too much for a window asking which day to open a calendar on.
+    /// </remarks>
+    public DateOnly Today
+    {
+        get
+        {
+            lock (_gate)
+                return DayIn(Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User)));
+        }
+    }
+
+    /// <summary>The day it is in a given zone, by this engine's clock.</summary>
+    /// <param name="zone">The timezone to read the day in</param>
+    /// <returns>Today, as that zone has it</returns>
+    private DateOnly DayIn(TimeZoneInfo zone)
+        => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime);
+
     /// <summary>Takes a consistent view of the model and queue depths.</summary>
     public ModelSnapshot Snapshot()
     {
@@ -195,7 +218,7 @@ public sealed class SyncEngine
                 Model.Filters().ToList(),
                 Model.Reminders().ToList(),
                 Model.PlanLimits(),
-                DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.UtcNow, zone).DateTime),
+                DayIn(zone),
                 zone,
                 Projections.ToUserId(user),
                 Projections.ToNextWeek(user),

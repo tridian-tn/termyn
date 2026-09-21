@@ -654,8 +654,10 @@ internal sealed class OutlineView : ListView
                 TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(bounds), text, Flags);
                 break;
 
+            // The same face the task's own column uses, so a finished task's dates are struck
+            // through with its name rather than left reading as though they still stood.
             default:
-                TextRenderer.DrawText(e.Graphics, CellOf(row, column), Font, Inset(e.Bounds), muted, Flags);
+                TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(e.Bounds), muted, Flags);
                 break;
         }
     }

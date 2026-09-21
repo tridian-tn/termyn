@@ -12,12 +12,15 @@ namespace Termyn.App.Windows;
 /// </remarks>
 internal static class CalendarGlyph
 {
-    /// <summary>How thick the pen is, which is also how tall the header band comes out.</summary>
+    /// <summary>How thick the page is outlined.</summary>
     private const int Stroke = 1;
+
+    /// <summary>How wide the rings above the page are drawn, and how tall they stand.</summary>
+    private const int Ring = 2;
 
     /// <summary>
     /// Draws a calendar inside <paramref name="bounds"/>: a page, a band across the top with two
-    /// rings above it, and three marks where the days would be.
+    /// rings above it, and two marks where the days would be.
     /// </summary>
     /// <param name="g">What to draw on</param>
     /// <param name="bounds">The square the calendar fills</param>
@@ -53,18 +56,17 @@ internal static class CalendarGlyph
             g.FillRectangle(brush, page.X + 1, page.Y + 1, page.Width - 1, band);
 
             // The two rings it hangs by, standing above the page.
-            var ring = Math.Max(2, page.Width / 6);
-            g.FillRectangle(brush, page.X + ring, page.Y - 2, Stroke + 1, 3);
-            g.FillRectangle(brush, page.Right - ring - 1, page.Y - 2, Stroke + 1, 3);
+            var inset = Math.Max(Ring, page.Width / 6);
+            g.FillRectangle(brush, page.X + inset, page.Y - Ring, Ring, Ring + 1);
+            g.FillRectangle(brush, page.Right - inset - 1, page.Y - Ring, Ring, Ring + 1);
 
             // Two days on the page below it. One row rather than two: at sixteen pixels the rows
             // come out a pixel apart and read as a single smudged block.
-            var mark = Math.Max(3, page.Width / 4);
-            var day = new Size(mark, Math.Max(3, page.Height / 4));
+            var day = new Size(Math.Max(3, page.Width / 4), Math.Max(3, page.Height / 4));
             var top = page.Y + band + ((page.Bottom - page.Y - band - day.Height) / 2);
 
             g.FillRectangle(brush, page.X + 2, top, day.Width, day.Height);
-            g.FillRectangle(brush, page.X + 3 + mark, top, day.Width, day.Height);
+            g.FillRectangle(brush, page.X + 3 + day.Width, top, day.Width, day.Height);
         }
         finally
         {

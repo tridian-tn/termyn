@@ -23,22 +23,29 @@ internal sealed class DeadlineForm : Form
     /// <summary>How the chosen day is written out: long enough to name the weekday.</summary>
     private const string Written = "dddd, d MMMM yyyy";
 
-    /// <summary>How big the calendar on the button is drawn.</summary>
+    /// <summary>How big the calendar on the button is drawn, before the screen's scaling.</summary>
     private const int GlyphSize = 16;
 
     private readonly Label _shown;
     private readonly Button _pick;
     private readonly Button _clear;
     private readonly MonthCalendar _calendar;
+    private readonly ToolStripControlHost _host;
     private readonly ToolStripDropDown _drop;
-    private readonly Bitmap _glyph;
+    private readonly ToolTip _tips = new();
 
+    private Bitmap? _glyph;
     private DateOnly _day;
     private bool _cleared;
 
     private DeadlineForm(string task, DateOnly? current, DateOnly today)
     {
-        _day = current ?? today;
+        _calendar = new MonthCalendar { MaxSelectionCount = 1 };
+
+        // Held to what the calendar can show. A deadline is whatever the account's JSON said, and
+        // one before 1753 — an import, or another client's bug — makes the control throw on being
+        // given it, which would leave that task's deadline unreachable from here for good.
+        _day = Clamp(current ?? today);
 
         Text = "Deadline";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -68,21 +75,20 @@ internal sealed class DeadlineForm : Form
             ForeColor = SystemColors.GrayText,
         };
 
-        // Drawn into an image rather than painted on the button: a button in the system's own style
-        // is drawn by Windows and never raises Paint, which left the glyph off it entirely.
-        _glyph = new Bitmap(GlyphSize, GlyphSize);
-        using (var into = Graphics.FromImage(_glyph))
-            CalendarGlyph.Draw(into, new Rectangle(0, 0, GlyphSize, GlyphSize), SystemColors.ControlText);
-
         _pick = new Button
         {
             Location = new Point(14, 62),
             Size = new Size(32, 28),
-            Image = _glyph,
             AccessibleName = "Pick a day",
         };
 
         _pick.Click += (_, _) => ShowCalendar();
+
+        // The button says nothing in words, and the day beside it is a label rather than something
+        // that looks pressable, so there has to be somewhere to find out what it does.
+        _tips.SetToolTip(_pick, "Pick a day");
+
+        DrawGlyph();
 
         _shown = new Label
         {
@@ -110,33 +116,24 @@ internal sealed class DeadlineForm : Form
             DialogResult = DialogResult.OK;
         };
 
-        _calendar = new MonthCalendar { MaxSelectionCount = 1, SelectionStart = _day.ToDateTime(TimeOnly.MinValue) };
+        _calendar.SetDate(_day.ToDateTime(TimeOnly.MinValue));
 
         // The drop is built before anything is wired to it, so the handlers below aren't closing
         // over a field that isn't there yet.
+        _host = new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty };
         _drop = new ToolStripDropDown { Padding = Padding.Empty, AutoClose = true };
-        _drop.Items.Add(new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty });
+        _drop.Items.Add(_host);
 
         _calendar.DateSelected += (_, e) => Picked(DateOnly.FromDateTime(e.Start));
 
         // Arrow keys move the selection without picking anything, so the day on show follows them
         // too: the calendar is closed with Enter or Escape, and what it was left on is the answer.
         _calendar.DateChanged += (_, e) => Picked(DateOnly.FromDateTime(e.Start), keepOpen: true);
-        _calendar.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode is Keys.Enter or Keys.Escape)
-                _drop.Close();
-        };
+        _calendar.KeyDown += (_, e) => CalendarKey(e);
 
         AcceptButton = ok;
         CancelButton = cancel;
         Controls.AddRange([heading, prompt, _pick, _shown, _clear, ok, cancel]);
-
-        FormClosed += (_, _) =>
-        {
-            _drop.Dispose();
-            _glyph.Dispose();
-        };
     }
 
     /// <summary>The day picked, or null when the deadline is to be cleared.</summary>
@@ -163,10 +160,53 @@ internal sealed class DeadlineForm : Form
 
     /// <summary>Takes a day off the calendar, as choosing one in it does.</summary>
     /// <param name="day">The day chosen</param>
-    internal void PickFromCalendar(DateOnly day)
+    internal void PickFromCalendar(DateOnly day) => Picked(day);
+
+    /// <summary>Opens the calendar, as pressing the button does.</summary>
+    internal void PressPick() => InvokeOnClick(_pick, EventArgs.Empty);
+
+    /// <summary>Whether the calendar is up.</summary>
+    internal bool CalendarOpen => _drop.Visible;
+
+    /// <summary>Whether the calendar has the keys, which is what makes it usable without a mouse.</summary>
+    internal bool CalendarFocused => _calendar.Focused;
+
+    /// <summary>Whether what the dialog built has been let go of.</summary>
+    internal bool Released => _drop.IsDisposed;
+
+    /// <summary>What hovering the calendar button says.</summary>
+    internal string PickTip => _tips.GetToolTip(_pick) ?? string.Empty;
+
+    /// <summary>How big the calendar on the button came out, which follows the screen's scaling.</summary>
+    internal Size GlyphDrawn => _pick.Image?.Size ?? Size.Empty;
+
+    /// <summary>Presses a key in the calendar, for a test with no calendar to type into.</summary>
+    /// <param name="key">The key pressed</param>
+    /// <returns>The key as the handler left it, which says whether it was taken</returns>
+    internal KeyEventArgs PressInCalendar(Keys key)
     {
-        _calendar.SetDate(day.ToDateTime(TimeOnly.MinValue));
-        Picked(day);
+        var pressed = new KeyEventArgs(key);
+        CalendarKey(pressed);
+        return pressed;
+    }
+
+    /// <summary>
+    /// Closes the calendar on Enter or Escape, leaving it on whatever day it was showing.
+    /// </summary>
+    /// <remarks>
+    /// The key is swallowed rather than let go: the dialog answers Escape with Cancel and Enter
+    /// with OK, so a key that carried on past here would dismiss the calendar and the dialog behind
+    /// it in one press — throwing away the day the user had just settled on.
+    /// </remarks>
+    /// <param name="pressed">The key pressed in the calendar</param>
+    private void CalendarKey(KeyEventArgs pressed)
+    {
+        if (pressed.KeyCode is not (Keys.Enter or Keys.Escape))
+            return;
+
+        _drop.Close();
+        pressed.Handled = true;
+        pressed.SuppressKeyPress = true;
     }
 
     /// <summary>
@@ -177,21 +217,81 @@ internal sealed class DeadlineForm : Form
     private void Picked(DateOnly day, bool keepOpen = false)
     {
         _day = day;
-
-        // Picking a day answers the same question Clear does, so it undoes a Clear pressed before it.
-        _cleared = false;
         _shown.Text = day.ToString(Written, CultureInfo.CurrentCulture);
 
         if (!keepOpen)
             _drop.Close();
     }
 
-    /// <summary>Drops the calendar under the button that asks for it.</summary>
+    /// <summary>
+    /// Drops the calendar under the button that asks for it.
+    /// </summary>
+    /// <remarks>
+    /// The focus is put on the host rather than the calendar: a control inside a drop-down isn't
+    /// on the form's own focus chain, and asking the control itself does nothing — which would
+    /// leave the calendar open and deaf to every key.
+    /// </remarks>
     private void ShowCalendar()
     {
         _calendar.SetDate(_day.ToDateTime(TimeOnly.MinValue));
         _drop.Show(_pick, new Point(0, _pick.Height));
-        _calendar.Focus();
+        _host.Focus();
+    }
+
+    /// <summary>
+    /// Draws the button's calendar at the size this screen wants it.
+    /// </summary>
+    /// <remarks>
+    /// Redrawn rather than scaled: the glyph is a handful of rectangles, and stretching a sixteen
+    /// pixel bitmap to a two-hundred-per-cent screen gives a blurred one. Called again when the
+    /// window lands on a monitor with different scaling.
+    /// </remarks>
+    private void DrawGlyph()
+    {
+        var size = LogicalToDeviceUnits(GlyphSize);
+        var drawn = new Bitmap(size, size);
+
+        using (var into = Graphics.FromImage(drawn))
+            CalendarGlyph.Draw(into, new Rectangle(0, 0, size, size), SystemColors.ControlText);
+
+        _pick.Image = drawn;
+
+        // Assigned before the old one goes, so nothing is ever asked to draw an image that's been
+        // let go of.
+        _glyph?.Dispose();
+        _glyph = drawn;
+    }
+
+    /// <summary>The day, held to what the calendar is able to show.</summary>
+    /// <param name="day">The day asked for</param>
+    /// <returns>That day, or the nearest one the calendar can show</returns>
+    private DateOnly Clamp(DateOnly day)
+    {
+        var least = DateOnly.FromDateTime(_calendar.MinDate);
+        var most = DateOnly.FromDateTime(_calendar.MaxDate);
+
+        return day < least ? least : day > most ? most : day;
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        DrawGlyph();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        // Here rather than on FormClosed: neither of these is a child control, so the base disposal
+        // doesn't reach them, and a dialog built and dropped without ever being shown — which is
+        // every test of this window — would never raise a close to hang them off.
+        if (disposing)
+        {
+            _drop.Dispose();
+            _tips.Dispose();
+            _glyph?.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     /// <summary>
