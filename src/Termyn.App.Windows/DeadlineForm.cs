@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Label = System.Windows.Forms.Label;
 
 namespace Termyn.App.Windows;
@@ -11,16 +13,33 @@ namespace Termyn.App.Windows;
 /// themselves for the server to settle. A deadline has no such field: the API takes a date and
 /// nothing else, so there's no server to fall back on, and a picker asks for exactly what can be
 /// sent rather than inviting a phrase that would have to be refused.
+///
+/// The two ways of naming a date are to be unified, so the day sits here as plain text beside a
+/// button that drops a calendar — not in a date control of its own, which is a shape the unified
+/// one won't keep.
 /// </remarks>
 internal sealed class DeadlineForm : Form
 {
-    private readonly DateTimePicker _picker;
-    private readonly Button _clear;
+    /// <summary>How the chosen day is written out: long enough to name the weekday.</summary>
+    private const string Written = "dddd, d MMMM yyyy";
 
+    /// <summary>How big the calendar on the button is drawn.</summary>
+    private const int GlyphSize = 16;
+
+    private readonly Label _shown;
+    private readonly Button _pick;
+    private readonly Button _clear;
+    private readonly MonthCalendar _calendar;
+    private readonly ToolStripDropDown _drop;
+    private readonly Bitmap _glyph;
+
+    private DateOnly _day;
     private bool _cleared;
 
     private DeadlineForm(string task, DateOnly? current, DateOnly today)
     {
+        _day = current ?? today;
+
         Text = "Deadline";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
@@ -28,14 +47,12 @@ internal sealed class DeadlineForm : Form
         MinimizeBox = false;
         ClientSize = new Size(420, 156);
 
-        var prompt = new Label { Text = "Finish it by:", Location = new Point(14, 14), Size = new Size(392, 20) };
-
+        // The task first: what's being changed, before what's being asked about it.
         var heading = new Label
         {
             Text = task,
-            Location = new Point(14, 36),
+            Location = new Point(14, 14),
             Size = new Size(392, 20),
-            ForeColor = SystemColors.GrayText,
             AutoEllipsis = true,
 
             // What a task is called is the account's text, so an ampersand in it is a character
@@ -43,14 +60,35 @@ internal sealed class DeadlineForm : Form
             UseMnemonic = false,
         };
 
-        // Opens on the deadline it has, or on today for a task with none — which is the day
-        // somebody reaching for this is most often counting from.
-        _picker = new DateTimePicker
+        var prompt = new Label
+        {
+            Text = "Finish it by:",
+            Location = new Point(14, 38),
+            Size = new Size(392, 20),
+            ForeColor = SystemColors.GrayText,
+        };
+
+        // Drawn into an image rather than painted on the button: a button in the system's own style
+        // is drawn by Windows and never raises Paint, which left the glyph off it entirely.
+        _glyph = new Bitmap(GlyphSize, GlyphSize);
+        using (var into = Graphics.FromImage(_glyph))
+            CalendarGlyph.Draw(into, new Rectangle(0, 0, GlyphSize, GlyphSize), SystemColors.ControlText);
+
+        _pick = new Button
         {
             Location = new Point(14, 62),
-            Size = new Size(392, 27),
-            Format = DateTimePickerFormat.Long,
-            Value = (current ?? today).ToDateTime(TimeOnly.MinValue),
+            Size = new Size(32, 28),
+            Image = _glyph,
+            AccessibleName = "Pick a day",
+        };
+
+        _pick.Click += (_, _) => ShowCalendar();
+
+        _shown = new Label
+        {
+            Location = new Point(52, 66),
+            Size = new Size(354, 20),
+            Text = _day.ToString(Written, CultureInfo.CurrentCulture),
         };
 
         // Shown disabled rather than hidden on a task without one: the button says what can be done
@@ -72,13 +110,37 @@ internal sealed class DeadlineForm : Form
             DialogResult = DialogResult.OK;
         };
 
+        _calendar = new MonthCalendar { MaxSelectionCount = 1, SelectionStart = _day.ToDateTime(TimeOnly.MinValue) };
+        _calendar.DateSelected += (_, e) => Picked(DateOnly.FromDateTime(e.Start));
+
+        // Arrow keys move the selection without picking anything, so the day on show follows them
+        // too: the calendar is closed with Enter or Escape, and what it was left on is the answer.
+        _calendar.DateChanged += (_, e) => Picked(DateOnly.FromDateTime(e.Start), keepOpen: true);
+        _calendar.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode is Keys.Enter or Keys.Escape)
+                _drop.Close();
+        };
+
+        _drop = new ToolStripDropDown { Padding = Padding.Empty, AutoClose = true };
+        _drop.Items.Add(new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty });
+
         AcceptButton = ok;
         CancelButton = cancel;
-        Controls.AddRange([prompt, heading, _picker, _clear, ok, cancel]);
+        Controls.AddRange([heading, prompt, _pick, _shown, _clear, ok, cancel]);
+
+        FormClosed += (_, _) =>
+        {
+            _drop.Dispose();
+            _glyph.Dispose();
+        };
     }
 
     /// <summary>The day picked, or null when the deadline is to be cleared.</summary>
-    internal DateOnly? Chosen => _cleared ? null : DateOnly.FromDateTime(_picker.Value);
+    internal DateOnly? Chosen => _cleared ? null : _day;
+
+    /// <summary>The day as the dialog writes it out.</summary>
+    internal string DayShown => _shown.Text;
 
     /// <summary>Whether clearing is offered, which it isn't on a task with no deadline to clear.</summary>
     internal bool CanClear => _clear.Enabled;
@@ -96,11 +158,44 @@ internal sealed class DeadlineForm : Form
     /// </remarks>
     internal void PressClear() => InvokeOnClick(_clear, EventArgs.Empty);
 
+    /// <summary>Takes a day off the calendar, as choosing one in it does.</summary>
+    /// <param name="day">The day chosen</param>
+    internal void PickFromCalendar(DateOnly day)
+    {
+        _calendar.SetDate(day.ToDateTime(TimeOnly.MinValue));
+        Picked(day);
+    }
+
+    /// <summary>
+    /// Takes the day chosen and says so on the face of the dialog.
+    /// </summary>
+    /// <param name="day">The day now chosen</param>
+    /// <param name="keepOpen">Whether the calendar stays up, which it does while keys move it</param>
+    private void Picked(DateOnly day, bool keepOpen = false)
+    {
+        _day = day;
+
+        // Picking a day answers the same question Clear does, so it undoes a Clear pressed before it.
+        _cleared = false;
+        _shown.Text = day.ToString(Written, CultureInfo.CurrentCulture);
+
+        if (!keepOpen)
+            _drop.Close();
+    }
+
+    /// <summary>Drops the calendar under the button that asks for it.</summary>
+    private void ShowCalendar()
+    {
+        _calendar.SetDate(_day.ToDateTime(TimeOnly.MinValue));
+        _drop.Show(_pick, new Point(0, _pick.Height));
+        _calendar.Focus();
+    }
+
     /// <summary>
     /// Asks for the day a task has to be finished by.
     /// </summary>
     /// <param name="owner">The window to centre on</param>
-    /// <param name="task">What the task is called, shown above the calendar</param>
+    /// <param name="task">What the task is called, shown above the question</param>
     /// <param name="current">The deadline the task has now, or null when it hasn't got one</param>
     /// <param name="today">Today in the account's timezone, which a task with no deadline opens on</param>
     /// <param name="chosen">The day picked, or null to clear the deadline</param>
