@@ -72,6 +72,7 @@ internal sealed class OutlineView : ListView
         Columns.Add("!", 46, HorizontalAlignment.Center).Tag = TaskColumn.Priority;
         Columns.Add("Project", 140).Tag = TaskColumn.Project;
         Columns.Add("Due", 120).Tag = TaskColumn.Due;
+        Columns.Add("Deadline", 100).Tag = TaskColumn.Deadline;
         Columns.Add("Labels", 140).Tag = TaskColumn.Labels;
     }
 
@@ -408,11 +409,25 @@ internal sealed class OutlineView : ListView
         if (_cache[e.ItemIndex] is not { } cached)
         {
             var row = _rows[e.ItemIndex];
-            cached = new ListViewItem([ContentOf(row), string.Empty, row.Project, DueOf(row), LabelsOf(row)]) { Tag = row.Id };
+            cached = new ListViewItem(Cells(row)) { Tag = row.Id };
             _cache[e.ItemIndex] = cached;
         }
 
         e.Item = cached;
+    }
+
+    /// <summary>
+    /// A row's cells in the order the columns stand, which is what the control is handed.
+    /// </summary>
+    /// <param name="row">The task to read across</param>
+    /// <returns>One string per column, empty for the ones drawn rather than written</returns>
+    internal string[] Cells(TaskRow row)
+    {
+        var cells = new string[Columns.Count];
+        for (var i = 0; i < cells.Length; i++)
+            cells[i] = Columns[i].Tag is TaskColumn column ? CellOf(row, column) : string.Empty;
+
+        return cells;
     }
 
     /// <summary>Room for the sort arrow at the end of a header.</summary>
@@ -585,7 +600,7 @@ internal sealed class OutlineView : ListView
         if (!Buffered(e.Bounds))
             return;
 
-        if (e.ItemIndex >= _rows.Count)
+        if (e.ItemIndex >= _rows.Count || e.ColumnIndex < 0 || e.ColumnIndex >= Columns.Count)
             return;
 
         var row = _rows[e.ItemIndex];
@@ -603,9 +618,11 @@ internal sealed class OutlineView : ListView
         using (var background = new SolidBrush(selected ? Theme.Accent : Theme.Panel))
             e.Graphics.FillRectangle(background, e.Bounds);
 
-        switch (e.ColumnIndex)
+        // Which column this is comes from the header's own tag rather than its position, so adding
+        // one can't leave a cell drawn under the wrong heading.
+        switch (Columns[e.ColumnIndex].Tag)
         {
-            case 0:
+            case TaskColumn.Content:
                 var bounds = e.Bounds;
                 bounds.X += row.Depth * IndentWidth;
                 bounds.Width -= row.Depth * IndentWidth;
@@ -617,26 +634,47 @@ internal sealed class OutlineView : ListView
 
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
-                TextRenderer.DrawText(e.Graphics, ContentOf(row), font, Inset(bounds), text, Flags);
+                TextRenderer.DrawText(e.Graphics, CellOf(row, TaskColumn.Content), font, Inset(bounds), text, Flags);
                 break;
 
-            case 1:
+            case TaskColumn.Priority:
                 DrawPriority(e.Graphics, e.Bounds, row.Priority);
                 break;
 
-            case 2:
+            case TaskColumn.Project:
                 DrawProject(e.Graphics, e.Bounds, row, selected, muted);
                 break;
 
-            case 3:
-                TextRenderer.DrawText(e.Graphics, DueOf(row), Font, Inset(e.Bounds), muted, Flags);
+            case TaskColumn.Labels:
+                DrawLabels(e.Graphics, e.Bounds, row, selected, muted);
                 break;
 
-            case 4:
-                DrawLabels(e.Graphics, e.Bounds, row, selected, muted);
+            case TaskColumn column:
+                TextRenderer.DrawText(e.Graphics, CellOf(row, column), Font, Inset(e.Bounds), muted, Flags);
                 break;
         }
     }
+
+    /// <summary>
+    /// What a cell says, for the columns that are words rather than marks.
+    /// </summary>
+    /// <remarks>
+    /// One table for the text the control is handed and the text that's drawn, so a column can't
+    /// end up saying one thing to the screen and another to a screen reader. The priority column
+    /// is a flag with no words to it, and answers empty.
+    /// </remarks>
+    /// <param name="row">The task the cell belongs to</param>
+    /// <param name="column">Which of its columns is being asked for</param>
+    /// <returns>The words for that cell, or empty when the column is drawn rather than written</returns>
+    internal static string CellOf(TaskRow row, TaskColumn column) => column switch
+    {
+        TaskColumn.Content => ContentOf(row),
+        TaskColumn.Project => row.Project,
+        TaskColumn.Due => DueOf(row),
+        TaskColumn.Deadline => row.Deadline,
+        TaskColumn.Labels => LabelsOf(row),
+        _ => string.Empty,
+    };
 
     /// <summary>Labels as they are written in quick-add, so the row reads the way it was typed.</summary>
     private static string LabelsOf(TaskRow row)
