@@ -1,46 +1,52 @@
-using Termyn.Core.Sync;
-
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
 /// The room a sidebar heading is given to be written in.
 /// </summary>
 /// <remarks>
-/// A heading is set in bold and the tree measures every row with its own font, so the row it hands
+/// A heading is set in bold and a tree measures every row with its own font, so the row it hands
 /// over is a regular-weight row's width — and the last letter of a bold word is cut off the end of
-/// it. Measured here rather than looked at: at a hundred per cent it's six pixels and an 's', and
-/// on a scaled display it's a good deal more.
+/// it. Measured rather than looked at: at a hundred per cent it's six pixels and an 's', and on a
+/// scaled display a good deal more.
+///
+/// The tree here is built rather than taken off a window. What's in doubt is the control's own
+/// measuring, which is the same wherever the tree is, and standing a whole main window up to read
+/// it back costs the suite more than the tie to the sidebar is worth.
 /// </remarks>
 public class SidebarHeadingTests
 {
-    private static TreeView Sidebar(MainForm window)
-        => Every(window).OfType<TreeView>().First();
-
-    private static IEnumerable<Control> Every(Control parent)
+    /// <summary>A tree set up the way the sidebar is, with one heading in bold.</summary>
+    private static TreeView Sidebar(out TreeNode heading, out Font bold)
     {
-        foreach (Control child in parent.Controls)
+        var tree = new TreeView
         {
-            yield return child;
+            Width = 220,
+            HideSelection = true,
+            ShowLines = false,
+            ShowRootLines = false,
+            FullRowSelect = true,
+            Indent = 14,
+            BorderStyle = BorderStyle.None,
+            DrawMode = TreeViewDrawMode.OwnerDrawText,
+        };
 
-            foreach (var nested in Every(child))
-                yield return nested;
-        }
+        bold = new Font(tree.Font, FontStyle.Bold);
+        heading = new TreeNode("Favourites") { NodeFont = bold };
+
+        tree.Nodes.Add(heading);
+        tree.CreateControl();
+
+        return tree;
     }
 
     [WinFormsFact]
     public void The_row_the_tree_offers_a_heading_is_too_narrow_for_it()
     {
-        // The reason the drawing is taken over at all. If this ever stops being true — a heading
-        // set in the ordinary face, say — the widening below has nothing left to do.
-        using var window = TestWindow.Build("sidebar-heading-room.json", new InMemorySnapshotStore());
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2200, -2200);
-        window.Show();
+        // The reason the drawing is taken over at all. If a tree ever starts measuring a row by
+        // the font the row is set in, the widening below has nothing left to do.
+        using var tree = Sidebar(out var heading, out var bold);
+        using var face = bold;
 
-        var tree = Sidebar(window);
-        var heading = tree.Nodes.Cast<TreeNode>().First(n => n.NodeFont is not null);
-
-        using var bold = new Font(heading.NodeFont!, heading.NodeFont!.Style);
         var wanted = TextRenderer.MeasureText(heading.Text, bold).Width;
 
         Assert.True(
@@ -51,18 +57,14 @@ public class SidebarHeadingTests
     [WinFormsFact]
     public void Widening_a_row_gives_it_the_rest_of_the_sidebar()
     {
-        using var window = TestWindow.Build("sidebar-heading-widened.json", new InMemorySnapshotStore());
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2200, -2200);
-        window.Show();
-
-        var tree = Sidebar(window);
-        var heading = tree.Nodes.Cast<TreeNode>().First(n => n.NodeFont is not null);
+        using var tree = Sidebar(out var heading, out var bold);
+        using var face = bold;
 
         var room = MainForm.Widened(heading.Bounds, tree.ClientSize.Width);
-        var wanted = TextRenderer.MeasureText(heading.Text, heading.NodeFont!).Width;
 
-        Assert.True(room.Width >= wanted, $"widened to {room.Width}px for text wanting {wanted}px");
+        Assert.True(
+            room.Width >= TextRenderer.MeasureText(heading.Text, bold).Width,
+            $"widened to {room.Width}px for text wanting {TextRenderer.MeasureText(heading.Text, bold).Width}px");
 
         // And nothing else about the row moves: it starts where it started and is as tall as it was.
         Assert.Equal(heading.Bounds.Location, room.Location);
