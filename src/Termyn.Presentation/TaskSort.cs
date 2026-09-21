@@ -10,6 +10,7 @@ public enum TaskColumn
     Priority,
     Project,
     Due,
+    Deadline,
     Labels,
 }
 

@@ -44,7 +44,20 @@ public sealed record TaskRow(
     bool Collapsed = false,
 
     /// <summary>The colour Todoist gives the task's project, or null when it has none.</summary>
-    Rgb? ProjectColour = null);
+    Rgb? ProjectColour = null,
+
+    /// <summary>
+    /// The date the task has to be finished by, as its column shows it, or empty when it has none.
+    /// </summary>
+    /// <remarks>
+    /// A column of its own rather than a mark beside the due date: the two answer different
+    /// questions — when to pick the work up, and when it stops being any use — and a task can
+    /// easily have one without the other.
+    /// </remarks>
+    string Deadline = "",
+
+    /// <summary>The day that deadline falls on, for ordering by it.</summary>
+    DateOnly? DeadlineOn = null);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -2033,7 +2046,7 @@ public sealed class MainPresenter
                 item.Content,
                 item.Priority,
                 project.Name ?? string.Empty,
-                item.DueText ?? DueShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
+                item.DueText ?? DateShown(item.DueDate, snapshot.TimeZone, snapshot.Today),
                 item.Labels,
                 depth,
                 item.IsRecurring,
@@ -2041,44 +2054,47 @@ public sealed class MainPresenter
                 item.Completed,
                 SmartViews.DueOn(item, snapshot.TimeZone),
                 snapshot.CommentCounts.GetValueOrDefault(item.Id),
-                ProjectColour: project.Name is null ? null : project.Colour);
+                ProjectColour: project.Name is null ? null : project.Colour,
+                Deadline: DateShown(item.Deadline, snapshot.TimeZone, snapshot.Today),
+                DeadlineOn: SmartViews.DeadlineOn(item, snapshot.TimeZone));
         }
     }
 
     /// <summary>
-    /// The due date as the column shows it, for a task the server hasn't yet described in words.
+    /// A date as a column shows it — a due date the server hasn't described in words, or a deadline.
     /// </summary>
     /// <remarks>
-    /// Todoist supplies the wording — "1 Aug", "every Monday" — and a date set here has none until
-    /// it has been round-tripped, so the stored ISO date shows through and the row reads as a
-    /// different kind of thing from the ones either side of it. Writing it out the same way closes
-    /// that gap. The year is only worth the width when it isn't this one.
+    /// Todoist supplies the wording for a due date — "1 Aug", "every Monday" — and one set here has
+    /// none until it has been round-tripped, so the stored ISO date shows through and the row reads
+    /// as a different kind of thing from the ones either side of it. Writing it out the same way
+    /// closes that gap. A deadline is never worded at all, so it comes through here every time. The
+    /// year is only worth the width when it isn't this one.
     ///
     /// Written in the invariant culture rather than the machine's, since what's being reproduced
     /// here is the server's wording and not a date of Termyn's own.
     /// </remarks>
-    /// <param name="due">The ISO date, floating datetime, or UTC instant Todoist stores, or null</param>
+    /// <param name="stored">The ISO date, floating datetime, or UTC instant Todoist stores, or null</param>
     /// <param name="zone">The account's timezone, which a UTC instant is shown in</param>
     /// <param name="today">Today in the account's timezone, for deciding whether to show the year</param>
     /// <returns>A short date, with the time when the task is due at one, or empty when no date is set</returns>
-    private static string DueShown(string? due, TimeZoneInfo zone, DateOnly today)
+    private static string DateShown(string? stored, TimeZoneInfo zone, DateOnly today)
     {
-        if (due is null)
+        if (stored is null)
             return string.Empty;
 
         // A task with a fixed timezone arrives as a UTC instant; the other two forms are already in
         // the account's own terms. An all-day date is ten characters and no more, so anything
         // longer carries a time worth showing.
-        if (due.EndsWith('Z'))
+        if (stored.EndsWith('Z'))
         {
-            return DateTimeOffset.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
+            return DateTimeOffset.TryParse(stored, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
                 ? Written(TimeZoneInfo.ConvertTime(instant, zone).DateTime, withTime: true)
-                : due;
+                : stored;
         }
 
-        return DateTime.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
-            ? Written(when, withTime: due.Length > 10)
-            : due;
+        return DateTime.TryParse(stored, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
+            ? Written(when, withTime: stored.Length > 10)
+            : stored;
 
         string Written(DateTime moment, bool withTime)
         {
@@ -2495,6 +2511,7 @@ public sealed class MainPresenter
             TaskColumn.Priority => a.Priority.CompareTo(b.Priority),
             TaskColumn.Project => string.Compare(a.Project, b.Project, StringComparison.CurrentCultureIgnoreCase),
             TaskColumn.Due => Nullable.Compare(a.DueOn, b.DueOn),
+            TaskColumn.Deadline => Nullable.Compare(a.DeadlineOn, b.DeadlineOn),
             TaskColumn.Labels => string.Compare(LabelKey(a), LabelKey(b), StringComparison.CurrentCultureIgnoreCase),
             _ => 0,
         };
@@ -2503,8 +2520,10 @@ public sealed class MainPresenter
         {
             TaskColumn.Project => row.Project.Length == 0,
 
-            // Undated is not "furthest away" — it isn't on the calendar at all.
+            // Undated is not "furthest away" — it isn't on the calendar at all. The same goes for a
+            // task nobody has given a deadline: it isn't the most distant one, it hasn't got one.
             TaskColumn.Due => row.DueOn is null,
+            TaskColumn.Deadline => row.DeadlineOn is null,
 
             TaskColumn.Labels => row.Labels.Count == 0,
             _ => false,
