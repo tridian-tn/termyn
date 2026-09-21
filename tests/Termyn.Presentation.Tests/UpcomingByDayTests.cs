@@ -137,6 +137,39 @@ public class UpcomingByDayTests
     }
 
     [Fact]
+    public void A_task_folded_away_elsewhere_still_stands_under_its_own_day()
+    {
+        // A fold hides sub-tasks under the task they belong to. There is no such task here — the
+        // view is flat — so a fold made in a project would otherwise take a day's work off the
+        // list entirely, with the sidebar still counting it.
+        var presenter = Upcoming(
+            Task("a", "Parent", "2026-08-01"),
+            Task("b", "Child", "2026-08-03", parent: "a"));
+
+        presenter.SetCollapsed("a", collapsed: true);
+
+        Assert.Equal(["1 Aug · Tomorrow", "Parent", "3 Aug · Monday", "Child"], Contents(presenter));
+    }
+
+    [Fact]
+    public void Folding_the_lot_isnt_offered_where_there_is_nothing_to_fold()
+    {
+        // The view is flat under its days, so nothing on screen has anything under it. An entry
+        // that did nothing visible would be worse than one that's plainly unavailable.
+        var presenter = Upcoming(
+            Task("a", "Parent", "2026-08-01"),
+            Task("b", "Child", "2026-08-03", parent: "a"));
+
+        Assert.False(presenter.CanCollapseAll);
+        Assert.False(presenter.CanExpandAll);
+
+        // And it comes back the moment the view has a tree again.
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.True(presenter.CanCollapseAll);
+    }
+
+    [Fact]
     public async Task A_finished_task_keeps_to_the_bottom_under_no_heading()
     {
         // It isn't work waiting on a day, so it stays where a finished task goes everywhere else.

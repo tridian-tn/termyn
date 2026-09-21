@@ -117,7 +117,21 @@ internal sealed class OutlineView : ListView
     /// </summary>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public Theme Theme { get; set; } = Theme.Resolve(ThemePreference.System);
+    public Theme Theme
+    {
+        get => _theme;
+        set
+        {
+            _theme = value;
+
+            // The pen is the one colour kept rather than taken per draw, so it goes with the
+            // theme that chose it.
+            _rule?.Dispose();
+            _rule = null;
+        }
+    }
+
+    private Theme _theme = Theme.Resolve(ThemePreference.System);
 
     protected override void OnFontChanged(EventArgs e)
     {
@@ -134,6 +148,7 @@ internal sealed class OutlineView : ListView
         {
             _struck?.Dispose();
             _heading?.Dispose();
+            _rule?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -163,6 +178,11 @@ internal sealed class OutlineView : ListView
             _rows = value;
             _cache = new ListViewItem?[value.Count];
             VirtualListSize = value.Count;
+
+            // Forgotten with the rows it counted. A sync refreshes these every 45 seconds, and an
+            // index left over from the last lot names a different task — which would send the next
+            // step off a heading the wrong way.
+            _lastOnTask = -1;
 
             // Bookkeeping, not a choice the user made. Clearing and re-adding an index raises the
             // selection event twice, and the moment in between has nothing selected — which anything
@@ -710,7 +730,7 @@ internal sealed class OutlineView : ListView
 
         if (row.IsHeading)
         {
-            DrawDay(e.Graphics, e.Bounds, row, column);
+            DrawDay(e.Graphics, e.Bounds, row, column, selected ? Theme.OnAccent : Theme.Text);
             return;
         }
 
@@ -770,16 +790,27 @@ internal sealed class OutlineView : ListView
     /// <param name="bounds">The cell being drawn</param>
     /// <param name="row">The heading row</param>
     /// <param name="column">Which column this cell belongs to</param>
-    private void DrawDay(Graphics g, Rectangle bounds, TaskRow row, TaskColumn column)
+    /// <param name="colour">What to write the day in, which the selection changes</param>
+    private void DrawDay(Graphics g, Rectangle bounds, TaskRow row, TaskColumn column, Color colour)
     {
-        using (var rule = new Pen(Theme.Border))
-            g.DrawLine(rule, bounds.Left, bounds.Top, bounds.Right, bounds.Top);
+        g.DrawLine(Rule, bounds.Left, bounds.Top, bounds.Right, bounds.Top);
 
         if (column != TaskColumn.Content)
             return;
 
-        TextRenderer.DrawText(g, row.Content, Heading, Inset(bounds), Theme.Text, Flags);
+        TextRenderer.DrawText(g, row.Content, Heading, Inset(bounds), colour, Flags);
     }
+
+    /// <summary>
+    /// The line drawn above a day's heading, held like the fonts rather than made per cell.
+    /// </summary>
+    /// <remarks>
+    /// A heading is handed out a cell at a time and redrawn whenever the pointer crosses the row,
+    /// so a pen built per call is six of them per pass over one row.
+    /// </remarks>
+    private Pen Rule => _rule ??= new Pen(Theme.Border);
+
+    private Pen? _rule;
 
     /// <summary>How the outline fills a cell: with words, or with one of the marks it paints.</summary>
     internal enum CellPaint

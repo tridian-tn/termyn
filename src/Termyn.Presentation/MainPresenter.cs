@@ -2272,7 +2272,11 @@ public sealed class MainPresenter
                 .ToList();
         }
 
-        Rows = ByDay(Folded(Ordered(rows)));
+        var ordered = Ordered(rows);
+
+        // One or the other, never both. Grouping lays the view out flat under its days, and a fold
+        // hides what sits under a task — which, under a day, is nothing at all.
+        Rows = Grouping ? ByDay(ordered) : Folded(ordered);
         Status = ComposeStatus(pending, failed);
     }
 
@@ -2290,32 +2294,29 @@ public sealed class MainPresenter
     /// A finished task keeps to the bottom under no heading at all, the way it does everywhere
     /// else: it isn't work waiting on a day.
     /// </remarks>
-    /// <param name="rows">The outline as the rest of the pipeline left it</param>
+    /// <param name="rows">The outline as ordering left it</param>
     /// <returns>The rows to show, headings and all</returns>
     private IReadOnlyList<TaskRow> ByDay(IReadOnlyList<TaskRow> rows)
     {
-        if (Selection.View != SmartView.Upcoming || Searching || rows.Count == 0 || _projectedFrom is not { } snapshot)
+        if (rows.Count == 0 || _projectedFrom is not { } snapshot)
             return rows;
-
-        var byId = snapshot.Items.ToDictionary(i => i.Id, i => i, StringComparer.Ordinal);
 
         // Sorted, because the rows arrive in the account's own order — or in whatever order a
         // column was clicked for — and neither has anything to say about which day comes first.
         var days = new SortedDictionary<DateOnly, List<TaskRow>>();
-        var done = new List<TaskRow>();
+        var loose = new List<TaskRow>();
 
         foreach (var row in rows)
         {
-            if (row.Completed)
+            // The day comes off DueOn rather than the Due column beside it: the column shows the
+            // words Todoist gave the task, which for a repeat is "every Monday" and names no day.
+            // A finished task keeps to the bottom, and so does anything with no day to file it
+            // under — shown under no heading rather than quietly dropped.
+            if (row.Completed || row.DueOn is not { } due)
             {
-                done.Add(row);
+                loose.Add(row);
                 continue;
             }
-
-            // Read from the task rather than the row: the row shows the words Todoist gave it,
-            // which for a repeat is "every Monday" and names no day at all.
-            if (!byId.TryGetValue(row.Id, out var item) || SmartViews.DueOn(item, snapshot.TimeZone) is not { } due)
-                continue;
 
             if (!days.TryGetValue(due, out var under))
                 days[due] = under = [];
@@ -2331,9 +2332,16 @@ public sealed class MainPresenter
             grouped.AddRange(under);
         }
 
-        grouped.AddRange(done);
+        grouped.AddRange(loose);
         return grouped;
     }
+
+    /// <summary>Whether the outline is being laid out under a heading for each day.</summary>
+    /// <remarks>
+    /// Upcoming alone, and not while searching: a search crosses the whole account and answers
+    /// with matches rather than with days, and the matches aren't all due in the week ahead.
+    /// </remarks>
+    private bool Grouping => Selection.View == SmartView.Upcoming && !Searching;
 
     /// <summary>
     /// The row that heads a day's tasks.
@@ -2431,10 +2439,18 @@ public sealed class MainPresenter
         return true;
     }
 
-    /// <summary>Whether anything on screen could still be folded, or unfolded.</summary>
-    public bool CanCollapseAll => _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+    /// <summary>
+    /// Whether anything on screen could still be folded, or unfolded.
+    /// </summary>
+    /// <remarks>
+    /// Neither is offered where the view is grouped by day: it's laid out flat, so nothing on
+    /// screen has anything under it, and an entry that did nothing visible would be worse than
+    /// one that's plainly unavailable.
+    /// </remarks>
+    public bool CanCollapseAll => !Grouping && _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
 
-    public bool CanExpandAll => _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+    /// <inheritdoc cref="CanCollapseAll" />
+    public bool CanExpandAll => !Grouping && _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
 
     /// <summary>
     /// Folds, or unfolds, every task in the view that has anything under it.
@@ -2710,10 +2726,10 @@ public sealed class MainPresenter
     private IReadOnlyList<TaskRow> Searchable()
         => _searchableRows ??= _projectedFrom is { } snapshot ? BuildOutline(snapshot, scoped: false) : [];
 
-    /// <summary>The whole status line: what is on screen, then where the sync loop stands.</summary>
     /// <summary>How many of the rows on show are tasks, which is what the status bar counts.</summary>
     private int Counted => Rows.Count(r => !r.IsHeading);
 
+    /// <summary>The whole status line: what is on screen, then where the sync loop stands.</summary>
     private string ComposeStatus(int pending, int failed)
     {
         SyncStatus = BuildSyncStatus(pending, failed);

@@ -118,6 +118,21 @@ public class HeadingRowTests
     }
 
     [WinFormsFact]
+    public void Which_way_the_selection_was_going_is_forgotten_with_the_rows()
+    {
+        // A sync replaces these every 45 seconds. An index left over from the last lot names a
+        // different task, and the step off a heading would be sent the wrong way by it.
+        using var outline = Outline();
+
+        Select(outline, 4);   // travelling up, as far as the old rows were concerned
+        outline.Rows = outline.Rows.ToList();
+
+        Select(outline, 3);
+
+        Assert.Equal("Third", outline.SelectedRow?.Content);
+    }
+
+    [WinFormsFact]
     public void A_heading_hands_over_its_day_and_nothing_else()
     {
         // What the control is given as the row's cells, which is what a screen reader reads out.
