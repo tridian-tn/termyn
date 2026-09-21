@@ -111,6 +111,12 @@ internal sealed class DeadlineForm : Form
         };
 
         _calendar = new MonthCalendar { MaxSelectionCount = 1, SelectionStart = _day.ToDateTime(TimeOnly.MinValue) };
+
+        // The drop is built before anything is wired to it, so the handlers below aren't closing
+        // over a field that isn't there yet.
+        _drop = new ToolStripDropDown { Padding = Padding.Empty, AutoClose = true };
+        _drop.Items.Add(new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty });
+
         _calendar.DateSelected += (_, e) => Picked(DateOnly.FromDateTime(e.Start));
 
         // Arrow keys move the selection without picking anything, so the day on show follows them
@@ -121,9 +127,6 @@ internal sealed class DeadlineForm : Form
             if (e.KeyCode is Keys.Enter or Keys.Escape)
                 _drop.Close();
         };
-
-        _drop = new ToolStripDropDown { Padding = Padding.Empty, AutoClose = true };
-        _drop.Items.Add(new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty });
 
         AcceptButton = ok;
         CancelButton = cancel;
