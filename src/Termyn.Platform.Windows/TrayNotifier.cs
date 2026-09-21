@@ -52,6 +52,9 @@ public sealed class TrayNotifier : INotifier
     /// <summary>The menu as it stands, for the same reason.</summary>
     internal IReadOnlyList<string> MenuLabels => _menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text ?? string.Empty).ToList();
 
+    /// <summary>Everything on the menu, rules included, so a test can see the shape as well as the words.</summary>
+    internal IReadOnlyList<ToolStripItem> MenuItems => _menu.Items.Cast<ToolStripItem>().ToList();
+
     public bool Visible
     {
         get => _icon.Visible;
@@ -97,9 +100,19 @@ public sealed class TrayNotifier : INotifier
         if (_disposed)
             return;
 
+        // Disposed rather than dropped: the menu is rebuilt whenever the views it offers change, so
+        // what Clear lets go of here would otherwise pile up for the life of the session.
+        foreach (var item in _menu.Items.Cast<ToolStripItem>().ToList())
+            item.Dispose();
+
         _menu.Items.Clear();
+
         foreach (var command in commands)
-            _menu.Items.Add(new ToolStripMenuItem(command.Label, null, (_, _) => command.Invoke()));
+        {
+            _menu.Items.Add(command.IsRule
+                ? new ToolStripSeparator()
+                : new ToolStripMenuItem(command.Label, null, (_, _) => command.Invoke()));
+        }
     }
 
     public void Dispose()

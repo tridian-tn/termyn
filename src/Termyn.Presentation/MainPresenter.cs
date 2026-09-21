@@ -663,7 +663,66 @@ public sealed class MainPresenter
         Selection = selection;
         SelectedKey = key;
         SearchQuery = string.Empty;
+        Remember(key);
         Publish();
+    }
+
+    /// <summary>How many views the tray offers a way back to.</summary>
+    private const int MostRecentViews = 5;
+
+    /// <summary>
+    /// How many are kept, which is more than are shown.
+    /// </summary>
+    /// <remarks>
+    /// The ones shown are whittled down from these — the view being looked at now comes out, and so
+    /// does anything the account no longer has — so keeping only five would leave a short list
+    /// shorter still.
+    /// </remarks>
+    private const int RecentKept = 12;
+
+    /// <summary>The keys of views opened this session, newest first.</summary>
+    private readonly List<string> _recent = [];
+
+    /// <summary>
+    /// The views most recently opened, newest first, as a way back to them.
+    /// </summary>
+    /// <remarks>
+    /// Read against the sidebar each time rather than stored as labels, so a project renamed or
+    /// deleted elsewhere doesn't linger here under a name the account no longer uses.
+    ///
+    /// The view being looked at now is left out. From the tray, where this is offered, that view is
+    /// what opening the window gives you anyway, and an entry that lands you where you already are
+    /// is one of five places wasted.
+    ///
+    /// Told apart by what they open rather than by the row they were opened from: a favourited
+    /// project is two rows with two keys, and offering it once from Favourites and again from the
+    /// tree would be the same project twice under the same name.
+    /// </remarks>
+    public IReadOnlyList<SidebarNode> RecentViews
+    {
+        get
+        {
+            var here = Sidebar.FirstOrDefault(n => n.Key == SelectedKey);
+
+            return _recent
+                .Select(k => Sidebar.FirstOrDefault(n => n.Key == k))
+                .OfType<SidebarNode>()
+                .Where(n => here is null || n.Kind != here.Kind || n.Id != here.Id)
+                .DistinctBy(n => (n.Kind, n.Id))
+                .Take(MostRecentViews)
+                .ToList();
+        }
+    }
+
+    /// <summary>Notes a view as the most recently opened, keeping each one once.</summary>
+    /// <param name="key">The sidebar key of the view just opened</param>
+    private void Remember(string key)
+    {
+        _recent.Remove(key);
+        _recent.Insert(0, key);
+
+        if (_recent.Count > RecentKept)
+            _recent.RemoveRange(RecentKept, _recent.Count - RecentKept);
     }
 
     /// <summary>

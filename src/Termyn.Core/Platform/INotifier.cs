@@ -1,7 +1,16 @@
 namespace Termyn.Core.Platform;
 
-/// <summary>One entry on the tray icon's menu.</summary>
-public sealed record NotifierCommand(string Label, Action Invoke);
+/// <summary>One entry on the tray icon's menu, or the rule between two groups of them.</summary>
+/// <param name="Label">What the entry says, or empty for a rule</param>
+/// <param name="Invoke">What picking it does</param>
+public sealed record NotifierCommand(string Label, Action Invoke)
+{
+    /// <summary>A rule between groups of entries, which does nothing if a desktop lets it be picked.</summary>
+    public static NotifierCommand Rule { get; } = new(string.Empty, () => { });
+
+    /// <summary>Whether this is a rule rather than something to run.</summary>
+    public bool IsRule => Label.Length == 0;
+}
 
 /// <summary>
 /// The desktop's status area: an icon that says how much is due, and a menu. Kept behind an

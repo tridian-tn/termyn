@@ -174,6 +174,35 @@ public class TrayNotifierTests
     }
 
     [Fact]
+    public void A_rule_between_groups_is_drawn_as_a_separator()
+    {
+        using var tray = new TrayNotifier();
+
+        tray.SetCommands([new NotifierCommand("Open Termyn", () => { }), NotifierCommand.Rule, new NotifierCommand("Exit", () => { })]);
+
+        Assert.Collection(
+            tray.MenuItems,
+            first => Assert.Equal("Open Termyn", first.Text),
+            rule => Assert.IsType<ToolStripSeparator>(rule),
+            last => Assert.Equal("Exit", last.Text));
+    }
+
+    [Fact]
+    public void Replacing_the_menu_lets_go_of_what_it_held()
+    {
+        // The menu is rebuilt whenever the views it offers change, so anything it drops here would
+        // otherwise pile up for the life of the session.
+        using var tray = new TrayNotifier();
+        tray.SetCommands([new NotifierCommand("Work", () => { }), NotifierCommand.Rule]);
+        var was = tray.MenuItems;
+
+        tray.SetCommands([new NotifierCommand("Home", () => { })]);
+
+        Assert.All(was, item => Assert.True(item.IsDisposed, $"{item.GetType().Name} was left behind"));
+        Assert.Equal(["Home"], tray.MenuLabels);
+    }
+
+    [Fact]
     public void A_tooltip_that_fits_is_left_alone()
     {
         using var tray = new TrayNotifier();
