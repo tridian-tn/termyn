@@ -123,13 +123,19 @@ internal sealed class OutlineView : ListView
     {
         _struck?.Dispose();
         _struck = null;
+        _heading?.Dispose();
+        _heading = null;
         base.OnFontChanged(e);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             _struck?.Dispose();
+            _heading?.Dispose();
+        }
+
         base.Dispose(disposing);
     }
 
@@ -214,11 +220,20 @@ internal sealed class OutlineView : ListView
         }
     }
 
-    public string? SelectedId
-        => SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count ? _rows[SelectedIndices[0]].Id : null;
+    public string? SelectedId => SelectedRow?.Id;
 
+    /// <summary>
+    /// The task the list is on, or null when it is on none.
+    /// </summary>
+    /// <remarks>
+    /// A day's heading answers null. The selection is moved off one as soon as it lands there, so
+    /// this is the second line rather than the first — but everything that acts on a task reads
+    /// the selection through here, and none of it should ever be handed a row that isn't one.
+    /// </remarks>
     public TaskRow? SelectedRow
-        => SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count ? _rows[SelectedIndices[0]] : null;
+        => SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count && !_rows[SelectedIndices[0]].IsHeading
+            ? _rows[SelectedIndices[0]]
+            : null;
 
     /// <summary>Selects a task and scrolls it into view. For explicit navigation, not for refreshes.</summary>
     public void SelectId(string id)
@@ -247,7 +262,25 @@ internal sealed class OutlineView : ListView
 
     protected override void OnSelectedIndexChanged(EventArgs e)
     {
-        _selectedIndex = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;
+        // Held while the selection is being moved off a heading; that path publishes once when it
+        // has landed on a task.
+        if (_stepping)
+            return;
+
+        var index = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;
+
+        // A day's heading is not a task, so the selection carries on past it the way it arrived —
+        // down onto the day's first task, or up onto the last of the day before.
+        if (index >= 0 && index < _rows.Count && _rows[index].IsHeading && PastHeading(index) is { } landed)
+            index = Step(landed);
+
+        _selectedIndex = index;
+
+        // Which way the next arrival is travelling is measured from here rather than from the row
+        // last selected: moving a selection clears it first, and that empty moment would otherwise
+        // read as having come from the top of the list every time.
+        if (index >= 0 && index < _rows.Count && !_rows[index].IsHeading)
+            _lastOnTask = index;
 
         // Held while the rows are being reassigned; that path publishes once when it is done.
         if (_reseating)
@@ -255,6 +288,58 @@ internal sealed class OutlineView : ListView
 
         _publishedIndex = _selectedIndex;
         base.OnSelectedIndexChanged(e);
+    }
+
+    /// <summary>True while the selection is being walked off a heading, so the move is published once.</summary>
+    private bool _stepping;
+
+    /// <summary>The last row the selection settled on that was a task, which says which way it moves.</summary>
+    private int _lastOnTask = -1;
+
+    /// <summary>
+    /// The row to carry a selection on to, having landed on a heading.
+    /// </summary>
+    /// <remarks>
+    /// The way it was already going, so an arrow key keeps its direction and a click on a heading
+    /// takes the day it heads. Turned round at either end, where carrying on would mean leaving
+    /// the list — the top of Upcoming is a heading, and arriving there from below has to land on
+    /// something.
+    /// </remarks>
+    /// <param name="index">The heading the selection landed on</param>
+    /// <returns>The row to take instead, or null when there is no task either way</returns>
+    private int? PastHeading(int index)
+    {
+        var forwards = index > _lastOnTask;
+
+        return Task(index, forwards ? 1 : -1) ?? Task(index, forwards ? -1 : 1);
+
+        int? Task(int from, int step)
+        {
+            for (var at = from + step; at >= 0 && at < _rows.Count; at += step)
+                if (!_rows[at].IsHeading)
+                    return at;
+
+            return null;
+        }
+    }
+
+    /// <summary>Moves the selection, without publishing the half of it that lands nowhere.</summary>
+    /// <param name="index">The row to select</param>
+    /// <returns>The row now selected</returns>
+    private int Step(int index)
+    {
+        _stepping = true;
+        try
+        {
+            SelectedIndices.Clear();
+            SelectedIndices.Add(index);
+        }
+        finally
+        {
+            _stepping = false;
+        }
+
+        return index;
     }
 
     /// <summary>
@@ -623,6 +708,12 @@ internal sealed class OutlineView : ListView
         if (Columns[e.ColumnIndex].Tag is not TaskColumn column)
             return;
 
+        if (row.IsHeading)
+        {
+            DrawDay(e.Graphics, e.Bounds, row, column);
+            return;
+        }
+
         switch (PaintOf(column))
         {
             case CellPaint.Priority:
@@ -660,6 +751,34 @@ internal sealed class OutlineView : ListView
                 TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(e.Bounds), muted, Flags);
                 break;
         }
+    }
+
+    /// <summary>The face a day's heading is set in, made on first use like the struck one.</summary>
+    private Font Heading => _heading ??= new Font(Font, FontStyle.Bold);
+
+    private Font? _heading;
+
+    /// <summary>
+    /// Draws the row that heads a day's tasks: a rule across the list, and the day above it.
+    /// </summary>
+    /// <remarks>
+    /// The rule is drawn a cell at a time, since that is how the list hands the row out — each
+    /// cell's share of it lines up with the next to make one line across the width. The day itself
+    /// is written in the task column, which is the widest and the one the eye starts at.
+    /// </remarks>
+    /// <param name="g">What to draw on</param>
+    /// <param name="bounds">The cell being drawn</param>
+    /// <param name="row">The heading row</param>
+    /// <param name="column">Which column this cell belongs to</param>
+    private void DrawDay(Graphics g, Rectangle bounds, TaskRow row, TaskColumn column)
+    {
+        using (var rule = new Pen(Theme.Border))
+            g.DrawLine(rule, bounds.Left, bounds.Top, bounds.Right, bounds.Top);
+
+        if (column != TaskColumn.Content)
+            return;
+
+        TextRenderer.DrawText(g, row.Content, Heading, Inset(bounds), Theme.Text, Flags);
     }
 
     /// <summary>How the outline fills a cell: with words, or with one of the marks it paints.</summary>
