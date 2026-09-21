@@ -628,6 +628,9 @@ internal sealed class OutlineView : ListView
         const int WmEraseBackground = 0x0014;
         const int WmContextMenu = 0x007B;
         const int WmPaint = 0x000F;
+        const int WmLeftDown = 0x0201;
+        const int WmLeftDouble = 0x0203;
+        const int WmRightDown = 0x0204;
 
         if (m.Msg == WmPaint)
         {
@@ -656,6 +659,12 @@ internal sealed class OutlineView : ListView
         // aimed at whichever row was selected somewhere else. The two are told apart by lParam,
         // which the keyboard sends as -1.
         if (m.Msg == WmContextMenu && m.LParam != -1 && !PointsAtRow(m.LParam))
+            return;
+
+        // A day's heading is not a task, so a click on one is dropped where it lands. Letting the
+        // list select it and moving the selection off afterwards works, but the row it settles on
+        // lights up and goes out again — a flash on a row nobody clicked.
+        if (m.Msg is WmLeftDown or WmLeftDouble or WmRightDown && OverHeading(m.LParam))
             return;
 
         base.WndProc(ref m);
@@ -691,6 +700,22 @@ internal sealed class OutlineView : ListView
         Invalidate(bounds);
         return false;
     }
+
+    /// <summary>
+    /// Whether a click position packed into an lParam is over a day's heading.
+    /// </summary>
+    /// <remarks>
+    /// Client coordinates, unlike the context menu's, which the shell sends in screen ones.
+    /// </remarks>
+    /// <param name="lParam">Where the button went down, as the message carries it</param>
+    /// <returns>True when that is a heading rather than a task</returns>
+    private bool OverHeading(nint lParam) => IsHeadingAt(new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF)));
+
+    /// <summary>Whether a point in the list is over a day's heading.</summary>
+    /// <param name="client">Where to look, in the list's own coordinates</param>
+    /// <returns>True when a heading is drawn there</returns>
+    internal bool IsHeadingAt(Point client)
+        => HitTest(client).Item?.Index is { } index && index >= 0 && index < _rows.Count && _rows[index].IsHeading;
 
     /// <summary>Whether a screen position packed into an lParam is over a row.</summary>
     private bool PointsAtRow(nint lParam)

@@ -133,6 +133,22 @@ public class HeadingRowTests
     }
 
     [WinFormsFact]
+    public void The_list_knows_a_heading_by_where_it_is_on_screen()
+    {
+        // What a click is turned away by. Dropping the click where it lands is the whole of the
+        // fix for the flash: letting the list select a heading and moving the selection off again
+        // lights up the row next to it and puts it out, on a row nobody clicked.
+        using var outline = Outline();
+        outline.Size = new Size(400, 300);
+
+        var heading = outline.GetItemRect(3);
+        var task = outline.GetItemRect(4);
+
+        Assert.True(outline.IsHeadingAt(new Point(heading.Left + 20, heading.Top + (heading.Height / 2))));
+        Assert.False(outline.IsHeadingAt(new Point(task.Left + 20, task.Top + (task.Height / 2))));
+    }
+
+    [WinFormsFact]
     public void A_heading_hands_over_its_day_and_nothing_else()
     {
         // What the control is given as the row's cells, which is what a screen reader reads out.
