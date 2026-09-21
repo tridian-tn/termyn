@@ -57,7 +57,17 @@ public sealed record TaskRow(
     string Deadline = "",
 
     /// <summary>The day that deadline falls on, for ordering by it.</summary>
-    DateOnly? DeadlineOn = null);
+    DateOnly? DeadlineOn = null,
+
+    /// <summary>
+    /// Whether this row is a day's heading rather than a task.
+    /// </summary>
+    /// <remarks>
+    /// Upcoming is grouped by day, and a virtualised list can't use the control's own grouping —
+    /// so a heading is a row like any other, and everything that acts on a task has to know the
+    /// difference. It carries the day's name in <c>Content</c> and nothing else.
+    /// </remarks>
+    bool IsHeading = false);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -2262,8 +2272,94 @@ public sealed class MainPresenter
                 .ToList();
         }
 
-        Rows = Folded(Ordered(rows));
+        Rows = ByDay(Folded(Ordered(rows)));
         Status = ComposeStatus(pending, failed);
+    }
+
+    /// <summary>
+    /// Upcoming, under a heading for each day. Every other view is handed back untouched.
+    /// </summary>
+    /// <remarks>
+    /// Last of all, so the headings are laid over whatever order and folding settled on: sort by
+    /// priority in Upcoming and each day comes out by priority, with the days still in order.
+    ///
+    /// The tasks go flat to be grouped. A sub-task due on a different day from its parent can't sit
+    /// under both its parent and its own day, and the day is what this view is for — so nesting is
+    /// what gives, and every task stands under the day it's due.
+    ///
+    /// A finished task keeps to the bottom under no heading at all, the way it does everywhere
+    /// else: it isn't work waiting on a day.
+    /// </remarks>
+    /// <param name="rows">The outline as the rest of the pipeline left it</param>
+    /// <returns>The rows to show, headings and all</returns>
+    private IReadOnlyList<TaskRow> ByDay(IReadOnlyList<TaskRow> rows)
+    {
+        if (Selection.View != SmartView.Upcoming || Searching || rows.Count == 0 || _projectedFrom is not { } snapshot)
+            return rows;
+
+        var byId = snapshot.Items.ToDictionary(i => i.Id, i => i, StringComparer.Ordinal);
+
+        // Sorted, because the rows arrive in the account's own order — or in whatever order a
+        // column was clicked for — and neither has anything to say about which day comes first.
+        var days = new SortedDictionary<DateOnly, List<TaskRow>>();
+        var done = new List<TaskRow>();
+
+        foreach (var row in rows)
+        {
+            if (row.Completed)
+            {
+                done.Add(row);
+                continue;
+            }
+
+            // Read from the task rather than the row: the row shows the words Todoist gave it,
+            // which for a repeat is "every Monday" and names no day at all.
+            if (!byId.TryGetValue(row.Id, out var item) || SmartViews.DueOn(item, snapshot.TimeZone) is not { } due)
+                continue;
+
+            if (!days.TryGetValue(due, out var under))
+                days[due] = under = [];
+
+            under.Add(row with { Depth = 0, HasChildren = false, Collapsed = false });
+        }
+
+        var grouped = new List<TaskRow>(rows.Count + days.Count);
+
+        foreach (var (day, under) in days)
+        {
+            grouped.Add(DayRow(day, snapshot.Today));
+            grouped.AddRange(under);
+        }
+
+        grouped.AddRange(done);
+        return grouped;
+    }
+
+    /// <summary>
+    /// The row that heads a day's tasks.
+    /// </summary>
+    /// <remarks>
+    /// Written in the machine's own culture rather than the invariant one the due column uses:
+    /// that column reproduces the server's wording, and this is Termyn's own words about a day.
+    /// Tomorrow is named rather than dated, since that is how anybody would say it.
+    /// </remarks>
+    /// <param name="day">The day being headed</param>
+    /// <param name="today">Today in the account's timezone, for naming tomorrow</param>
+    /// <returns>A row carrying the heading, which is no task</returns>
+    private static TaskRow DayRow(DateOnly day, DateOnly today)
+    {
+        var named = day == today.AddDays(1)
+            ? "Tomorrow"
+            : day.ToString("dddd", CultureInfo.CurrentCulture);
+
+        return new TaskRow(
+            $"day:{day:yyyy-MM-dd}",
+            $"{day.ToString("d MMM", CultureInfo.CurrentCulture)} · {named}",
+            Priority.P4,
+            string.Empty,
+            string.Empty,
+            [],
+            IsHeading: true);
     }
 
     /// <summary>
@@ -2615,6 +2711,9 @@ public sealed class MainPresenter
         => _searchableRows ??= _projectedFrom is { } snapshot ? BuildOutline(snapshot, scoped: false) : [];
 
     /// <summary>The whole status line: what is on screen, then where the sync loop stands.</summary>
+    /// <summary>How many of the rows on show are tasks, which is what the status bar counts.</summary>
+    private int Counted => Rows.Count(r => !r.IsHeading);
+
     private string ComposeStatus(int pending, int failed)
     {
         SyncStatus = BuildSyncStatus(pending, failed);
@@ -2622,7 +2721,8 @@ public sealed class MainPresenter
         return string.Join(" · ",
             new[]
             {
-                Rows.Count == 1 ? "1 task" : $"{Rows.Count} tasks",
+                // The days' headings are furniture rather than work, so they aren't counted.
+                Counted == 1 ? "1 task" : $"{Counted} tasks",
                 CompletedTruncated ? "most recent completed only" : null,
                 SyncStatus.Describe(),
             }.Where(s => s is not null));
