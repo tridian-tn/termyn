@@ -37,6 +37,10 @@ public class OutlineColumnTests
                 TaskColumn.Labels,
             ],
             outline.Columns.Cast<ColumnHeader>().Select(c => c.Tag).ToArray());
+
+        // And headed with what it holds, since the column is the only thing saying which date a
+        // row's two dates is which.
+        Assert.Equal(["Task", "!", "Project", "Due", "Deadline", "Labels"], outline.Columns.Cast<ColumnHeader>().Select(c => c.Text).ToArray());
     }
 
     [WinFormsFact]
