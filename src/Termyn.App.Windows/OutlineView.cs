@@ -563,8 +563,8 @@ internal sealed class OutlineView : ListView
     /// <remarks>
     /// The list redraws a row the first time the pointer enters it, and that redraw does not come
     /// through a paint — it is drawn straight onto the window. Double buffering only covers a
-    /// paint, which is why this control has had it all along and flickered anyway: the row's six
-    /// draws, the item and then each of its cells, land one at a time and the row is watched being
+    /// paint, which is why this control has had it all along and flickered anyway: the row's draws,
+    /// the item and then each of its cells, land one at a time and the row is watched being
     /// assembled. What it draws is identical to what is already there, which is why it reads as a
     /// flicker rather than as a change.
     ///
@@ -620,9 +620,26 @@ internal sealed class OutlineView : ListView
 
         // Which column this is comes from the header's own tag rather than its position, so adding
         // one can't leave a cell drawn under the wrong heading.
-        switch (Columns[e.ColumnIndex].Tag)
+        if (Columns[e.ColumnIndex].Tag is not TaskColumn column)
+            return;
+
+        switch (PaintOf(column))
         {
-            case TaskColumn.Content:
+            case CellPaint.Priority:
+                DrawPriority(e.Graphics, e.Bounds, row.Priority);
+                break;
+
+            case CellPaint.Project:
+                DrawProject(e.Graphics, e.Bounds, row, selected, muted);
+                break;
+
+            case CellPaint.Labels:
+                DrawLabels(e.Graphics, e.Bounds, row, selected, muted);
+                break;
+
+            // The task's own column is words like the others, but they start after the indent and
+            // the expander rather than at the edge of the cell.
+            case CellPaint.Written when column == TaskColumn.Content:
                 var bounds = e.Bounds;
                 bounds.X += row.Depth * IndentWidth;
                 bounds.Width -= row.Depth * IndentWidth;
@@ -634,26 +651,44 @@ internal sealed class OutlineView : ListView
 
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
-                TextRenderer.DrawText(e.Graphics, CellOf(row, TaskColumn.Content), font, Inset(bounds), text, Flags);
+                TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(bounds), text, Flags);
                 break;
 
-            case TaskColumn.Priority:
-                DrawPriority(e.Graphics, e.Bounds, row.Priority);
-                break;
-
-            case TaskColumn.Project:
-                DrawProject(e.Graphics, e.Bounds, row, selected, muted);
-                break;
-
-            case TaskColumn.Labels:
-                DrawLabels(e.Graphics, e.Bounds, row, selected, muted);
-                break;
-
-            case TaskColumn column:
+            default:
                 TextRenderer.DrawText(e.Graphics, CellOf(row, column), Font, Inset(e.Bounds), muted, Flags);
                 break;
         }
     }
+
+    /// <summary>How the outline fills a cell: with words, or with one of the marks it paints.</summary>
+    internal enum CellPaint
+    {
+        /// <summary>Written out, which is what a column is unless it's one of the three below.</summary>
+        Written,
+
+        Priority,
+        Project,
+        Labels,
+    }
+
+    /// <summary>
+    /// Which of those a column gets.
+    /// </summary>
+    /// <remarks>
+    /// Kept out of the drawing so a test can hold it to this. The paint itself can't be asserted —
+    /// a virtual owner-drawn list won't render its rows into a bitmap — so a column that quietly
+    /// stopped being painted would go on writing the same words with the colour gone, and nothing
+    /// would fail. Here, dropping one is a test away.
+    /// </remarks>
+    /// <param name="column">The column being drawn</param>
+    /// <returns>What fills its cells</returns>
+    internal static CellPaint PaintOf(TaskColumn column) => column switch
+    {
+        TaskColumn.Priority => CellPaint.Priority,
+        TaskColumn.Project => CellPaint.Project,
+        TaskColumn.Labels => CellPaint.Labels,
+        _ => CellPaint.Written,
+    };
 
     /// <summary>
     /// What a cell says, for the columns that are words rather than marks.

@@ -382,8 +382,8 @@ internal sealed class MainForm : Form
         _comments.AttachRequested += OnFileAttached;
         _comments.CancelRequested += () => _transfer?.Cancel();
 
-        // The description goes under the outline rather than beside it: the outline is five columns wide
-        // before it is useful, and a panel down the side of it takes that from the task names.
+        // The description goes under the outline rather than beside it: the outline is six columns
+        // wide before it is useful, and a panel down the side of it takes that from the task names.
         _detail = new SplitContainer
         {
             Dock = DockStyle.Fill,
@@ -2562,6 +2562,9 @@ internal sealed class MainForm : Form
         (Keys.F2, AppCommand.Rename, Scope.Outline),
         (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewSubtask, Scope.Outline),
         (Keys.Control | Keys.D, AppCommand.Due, Scope.Outline),
+
+        // Shift on the same letter, because it's the same question about a different date.
+        (Keys.Control | Keys.Shift | Keys.D, AppCommand.Deadline, Scope.Outline),
         (Keys.Control | Keys.D1, AppCommand.Priority1, Scope.Outline),
         (Keys.Control | Keys.D2, AppCommand.Priority2, Scope.Outline),
         (Keys.Control | Keys.D3, AppCommand.Priority3, Scope.Outline),
@@ -3179,6 +3182,10 @@ internal sealed class MainForm : Form
                 Guarded(() => wrote = PromptForDue(id));
                 return wrote;
 
+            case AppCommand.Deadline:
+                Guarded(() => wrote = PromptForDeadline(id));
+                return wrote;
+
             case AppCommand.Labels:
                 Guarded(() => wrote = PickLabels(id));
                 return wrote;
@@ -3470,6 +3477,35 @@ internal sealed class MainForm : Form
 
         _presenter.SetDueFromText(id, answer);
         return true;
+    }
+
+    /// <summary>Asks for a deadline and applies it. Returns false when nothing was changed.</summary>
+    /// <remarks>
+    /// Unlike a due date, words nobody here can read have nowhere to go: Todoist takes a deadline
+    /// as a day and has no field for the phrase it came from, so an unreadable answer is said to be
+    /// unreadable rather than quietly sent for the server to guess at.
+    /// </remarks>
+    private bool PromptForDeadline(string id)
+    {
+        var answer = InputDialog.Ask(
+            this,
+            "Deadline",
+            "Finish it by when?  (friday, 2026-12-25, in 3 days — blank clears)");
+
+        if (answer is null)
+            return false;
+
+        if (_presenter.SetDeadlineFromText(id, answer))
+            return true;
+
+        MessageBox.Show(
+            this,
+            $"“{answer.Trim()}” isn't a day I can read. A deadline is one date — try “friday”, “2026-12-25” or “in 3 days”.",
+            "Termyn",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+
+        return false;
     }
 
     /// <summary>Shows the reminders on a task.</summary>
