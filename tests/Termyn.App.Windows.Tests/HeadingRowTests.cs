@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Termyn.Core.Model;
 using Termyn.Presentation;
 
@@ -27,6 +28,7 @@ public class HeadingRowTests
             Task("b", "Second"),
             Heading("2 Aug · Sunday"),
             Task("c", "Third"),
+            Task("d", "Fourth"),
         ];
 
         return outline;
@@ -130,6 +132,65 @@ public class HeadingRowTests
         Select(outline, 3);
 
         Assert.Equal("Third", outline.SelectedRow?.Content);
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+
+    /// <summary>Presses a key on the list itself, so its own navigation does the moving.</summary>
+    /// <param name="outline">The list to press it on</param>
+    /// <param name="key">Which key, as Windows numbers them</param>
+    private static void Press(OutlineView outline, int key)
+    {
+        const int WmKeyDown = 0x0100;
+
+        SendMessage(outline.Handle, WmKeyDown, key, 0);
+        Application.DoEvents();
+    }
+
+    [WinFormsTheory]
+    [InlineData(0x28, "b", "Third", "Fourth")]   // down from a day's last task, across, and on again
+    [InlineData(0x26, "c", "Second", "First")]   // and the same going up
+    public void Crossing_a_heading_doesnt_swallow_the_next_keypress(int key, string from, string across, string andOn)
+    {
+        // Two presses, because the first one is fine either way: a list moves its selection from
+        // wherever its focus is, so moving only the selection off a heading leaves the focus
+        // sitting on it — and the press after that steps the focus onto the row already selected.
+        // Nothing moves, and to anyone pressing the key it reads as a keystroke thrown away.
+        using var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
+        using var outline = Outline();
+        outline.Dock = DockStyle.Fill;
+        form.Controls.Add(outline);
+        form.Show();
+
+        outline.SelectId(from);
+        outline.Focus();
+
+        Press(outline, key);
+        Assert.Equal(across, outline.SelectedRow?.Content);
+
+        Press(outline, key);
+        Assert.Equal(andOn, outline.SelectedRow?.Content);
+    }
+
+    [WinFormsFact]
+    public void A_task_picked_out_from_elsewhere_can_be_stepped_off_straight_away()
+    {
+        // The same quirk as crossing a heading, met from the other side: a row selected by a
+        // search, the palette or the tray takes the focus with it, or the first arrow key
+        // afterwards only brings the focus back and nothing appears to happen.
+        using var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
+        using var outline = Outline();
+        outline.Dock = DockStyle.Fill;
+        form.Controls.Add(outline);
+        form.Show();
+
+        outline.SelectId("a");
+        outline.Focus();
+
+        Press(outline, 0x28);
+
+        Assert.Equal("Second", outline.SelectedRow?.Content);
     }
 
     [WinFormsFact]

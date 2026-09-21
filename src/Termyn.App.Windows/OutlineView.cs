@@ -255,13 +255,22 @@ internal sealed class OutlineView : ListView
             ? _rows[SelectedIndices[0]]
             : null;
 
-    /// <summary>Selects a task and scrolls it into view. For explicit navigation, not for refreshes.</summary>
+    /// <summary>
+    /// Selects a task and scrolls it into view. For explicit navigation, not for refreshes.
+    /// </summary>
+    /// <remarks>
+    /// The focus goes with the selection. A list moves from wherever its focus is, so a row picked
+    /// out from somewhere else — a search, the palette, the tray — would otherwise spend the first
+    /// arrow key afterwards bringing the focus back to it, and that press would look thrown away.
+    /// </remarks>
+    /// <param name="id">The task to select</param>
     public void SelectId(string id)
     {
         if (IndexOf(id) is var index and >= 0)
         {
             SelectedIndices.Clear();
             SelectedIndices.Add(index);
+            FocusedItem = Items[index];
             EnsureVisible(index);
         }
     }
@@ -343,7 +352,14 @@ internal sealed class OutlineView : ListView
         }
     }
 
-    /// <summary>Moves the selection, without publishing the half of it that lands nowhere.</summary>
+    /// <summary>
+    /// Moves the selection, without publishing the half of it that lands nowhere.
+    /// </summary>
+    /// <remarks>
+    /// The focus goes with it. A list moves its selection from wherever the focus is, so leaving
+    /// the focus on the heading costs the next keypress: it steps the focus onto the row that is
+    /// already selected, the selection doesn't move, and the key reads as having been swallowed.
+    /// </remarks>
     /// <param name="index">The row to select</param>
     /// <returns>The row now selected</returns>
     private int Step(int index)
@@ -353,6 +369,7 @@ internal sealed class OutlineView : ListView
         {
             SelectedIndices.Clear();
             SelectedIndices.Add(index);
+            FocusedItem = Items[index];
         }
         finally
         {
