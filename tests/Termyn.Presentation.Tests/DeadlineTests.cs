@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
@@ -8,12 +9,9 @@ using Termyn.TestSupport;
 namespace Termyn.Presentation.Tests;
 
 /// <summary>
-/// The date a task has to be finished by, as the outline shows it and orders by it.
+/// The date a task has to be finished by: setting it, clearing it, and how the outline shows it
+/// and orders by it.
 /// </summary>
-/// <remarks>
-/// Read-only throughout: Todoist sets a deadline, Termyn shows it. Nothing here writes one, which
-/// is the whole of what v1 owes.
-/// </remarks>
 public class DeadlineTests
 {
     private static readonly DateOnly Today = new(2026, 7, 31);
@@ -101,6 +99,107 @@ public class DeadlineTests
         Assert.Equal(["Later", "Earlier", "None"], Contents(presenter));
     }
 
+    // ---- Setting one ---------------------------------------------------------------------------
+
+    [Fact]
+    public void A_day_picked_is_set_as_the_deadline()
+    {
+        var presenter = Presenter(Task("i1", "Ship it"));
+
+        presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
+
+        Assert.Equal("4 Aug", presenter.Rows.Single().Deadline);
+    }
+
+    [Fact]
+    public void What_reaches_the_account_is_the_day_alone_on_the_one_field()
+    {
+        // The row moving only proves the local copy changed. This is the half that goes to Todoist,
+        // and a command carrying more than the one field would take a stale copy of the rest with it.
+        var (engine, presenter) = Engine(Task("i1", "Ship it"));
+
+        presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
+
+        var queued = Assert.Single(engine.Outbox);
+        Assert.Equal("item_update", queued.Type);
+
+        var args = JsonNode.Parse(queued.ArgsJson)!.AsObject();
+        Assert.Equal(["deadline", "id"], args.Select(a => a.Key).Order().ToArray());
+        Assert.Equal("2026-08-04", args["deadline"]!["date"]!.ToString());
+    }
+
+    [Fact]
+    public void Clearing_it_empties_the_column_and_says_so_to_the_account()
+    {
+        var (engine, presenter) = Engine(Task("i1", "Ship it", deadline: "2026-08-04"));
+
+        presenter.SetDeadline("i1", null);
+
+        Assert.Equal(string.Empty, presenter.Rows.Single().Deadline);
+
+        // A null rather than an absent field: leaving it out is the one thing that means "don't
+        // touch it", which would leave the deadline exactly where it was.
+        var args = JsonNode.Parse(Assert.Single(engine.Outbox).ArgsJson)!.AsObject();
+        Assert.True(args.ContainsKey("deadline"));
+        Assert.Null(args["deadline"]);
+    }
+
+    [Fact]
+    public void Setting_and_clearing_are_written_down_in_what_youve_done()
+    {
+        var presenter = Presenter(Task("i1", "Ship it"), Task("i2", "Something else"));
+
+        presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
+        presenter.SetDeadline("i2", null);
+
+        Assert.Equal(
+            ["Cleared the deadline on “Something else”", "Set “Ship it” to finish by 4 Aug"],
+            presenter.History.Recent().Select(e => e.Said).ToArray());
+    }
+
+    [Fact]
+    public void Changing_your_mind_about_one_deadline_is_a_single_line()
+    {
+        // The same work on the same task, the way a run of description edits is: the list keeps
+        // the wording it ended up with rather than every step on the way there.
+        var presenter = Presenter(Task("i1", "Ship it"));
+
+        presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
+        presenter.SetDeadline("i1", new DateOnly(2026, 8, 11));
+
+        Assert.Equal(["Set “Ship it” to finish by 11 Aug"], presenter.History.Recent().Select(e => e.Said).ToArray());
+    }
+
+    [Fact]
+    public void Setting_a_deadline_leaves_the_due_date_alone()
+    {
+        var presenter = Presenter(Task("i1", "Ship it", due: "2026-08-01"));
+
+        presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
+
+        var row = presenter.Rows.Single();
+        Assert.Equal("1 Aug", row.Due);
+        Assert.Equal("4 Aug", row.Deadline);
+    }
+
+    [Fact]
+    public void A_deadline_is_set_on_the_task_it_was_asked_for_and_no_other()
+    {
+        var presenter = Presenter(Task("i1", "Ship it"), Task("i2", "Something else"));
+
+        presenter.SetDeadline("i2", new DateOnly(2026, 8, 4));
+
+        Assert.Equal([string.Empty, "4 Aug"], presenter.Rows.Select(r => r.Deadline).ToArray());
+    }
+
+    [Fact]
+    public void The_day_offered_is_the_accounts_today_rather_than_the_machines()
+    {
+        // What the picker opens on for a task with no deadline. Read from the account's own clock
+        // so it agrees with the rest of the app about which day it is.
+        Assert.Equal(Today, Presenter(Task("i1", "Ship it")).Today);
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
 
     private static string[] Contents(MainPresenter presenter)
@@ -127,7 +226,10 @@ public class DeadlineTests
 
     private static TaskRow Single((string Id, string Json) task) => Presenter(task).Rows.Single();
 
-    private static MainPresenter Presenter(params (string Id, string Json)[] tasks)
+    private static MainPresenter Presenter(params (string Id, string Json)[] tasks) => Engine(tasks).Presenter;
+
+    /// <summary>The same presenter, with the engine behind it, for the tests that read the outbox.</summary>
+    private static (SyncEngine Engine, MainPresenter Presenter) Engine(params (string Id, string Json)[] tasks)
     {
         var store = new InMemorySnapshotStore();
         foreach (var task in tasks)
@@ -138,6 +240,6 @@ public class DeadlineTests
 
         var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
         presenter.Select(ViewSelection.Of(SmartView.All));
-        return presenter;
+        return (engine, presenter);
     }
 }

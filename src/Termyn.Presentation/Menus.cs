@@ -51,6 +51,10 @@ public static class Menus
         MenuEntry.Of(AppCommand.NewSubtask),
 
         MenuEntry.AfterRule(AppCommand.Due),
+
+        // Directly under the due date, since the two are asked the same way and are told apart by
+        // sitting together rather than by their names.
+        MenuEntry.Of(AppCommand.Deadline),
         MenuEntry.Group(
             "&Priority",
             MenuEntry.Of(AppCommand.Priority1),

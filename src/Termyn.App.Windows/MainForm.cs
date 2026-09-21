@@ -3480,32 +3480,16 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Asks for a deadline and applies it. Returns false when nothing was changed.</summary>
-    /// <remarks>
-    /// Unlike a due date, words nobody here can read have nowhere to go: Todoist takes a deadline
-    /// as a day and has no field for the phrase it came from, so an unreadable answer is said to be
-    /// unreadable rather than quietly sent for the server to guess at.
-    /// </remarks>
     private bool PromptForDeadline(string id)
     {
-        var answer = InputDialog.Ask(
-            this,
-            "Deadline",
-            "Finish it by when?  (friday, 2026-12-25, in 3 days — blank clears)");
-
-        if (answer is null)
+        if (_outline.SelectedRow is not { } row)
             return false;
 
-        if (_presenter.SetDeadlineFromText(id, answer))
-            return true;
+        if (!DeadlineForm.Ask(this, row.Content, row.DeadlineOn, _presenter.Today, out var chosen))
+            return false;
 
-        MessageBox.Show(
-            this,
-            $"“{answer.Trim()}” isn't a day I can read. A deadline is one date — try “friday”, “2026-12-25” or “in 3 days”.",
-            "Termyn",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
-
-        return false;
+        _presenter.SetDeadline(id, chosen);
+        return true;
     }
 
     /// <summary>Shows the reminders on a task.</summary>
