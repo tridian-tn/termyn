@@ -309,6 +309,7 @@ internal sealed class MainForm : Form
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
+        AskForDeadline = AskWithDialog;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.SelectedIndexChanged += (_, _) => FollowSelection();
 
@@ -382,8 +383,8 @@ internal sealed class MainForm : Form
         _comments.AttachRequested += OnFileAttached;
         _comments.CancelRequested += () => _transfer?.Cancel();
 
-        // The description goes under the outline rather than beside it: the outline is five columns wide
-        // before it is useful, and a panel down the side of it takes that from the task names.
+        // The description goes under the outline rather than beside it: the outline is six columns
+        // wide before it is useful, and a panel down the side of it takes that from the task names.
         _detail = new SplitContainer
         {
             Dock = DockStyle.Fill,
@@ -2562,6 +2563,9 @@ internal sealed class MainForm : Form
         (Keys.F2, AppCommand.Rename, Scope.Outline),
         (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewSubtask, Scope.Outline),
         (Keys.Control | Keys.D, AppCommand.Due, Scope.Outline),
+
+        // Shift on the same letter, because it's the same question about a different date.
+        (Keys.Control | Keys.Shift | Keys.D, AppCommand.Deadline, Scope.Outline),
         (Keys.Control | Keys.D1, AppCommand.Priority1, Scope.Outline),
         (Keys.Control | Keys.D2, AppCommand.Priority2, Scope.Outline),
         (Keys.Control | Keys.D3, AppCommand.Priority3, Scope.Outline),
@@ -3179,6 +3183,10 @@ internal sealed class MainForm : Form
                 Guarded(() => wrote = PromptForDue(id));
                 return wrote;
 
+            case AppCommand.Deadline:
+                Guarded(() => wrote = PromptForDeadline(id));
+                return wrote;
+
             case AppCommand.Labels:
                 Guarded(() => wrote = PickLabels(id));
                 return wrote;
@@ -3471,6 +3479,50 @@ internal sealed class MainForm : Form
         _presenter.SetDueFromText(id, answer);
         return true;
     }
+
+    /// <summary>
+    /// Asks for the day a task has to be finished by. A property so a test can answer without a
+    /// dialog to click; the window sets it to the real one as it's built.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<TaskRow, (bool Answered, DateOnly? Day)> AskForDeadline { get; set; }
+
+    /// <summary>Asks for a deadline and applies it. Returns false when nothing was changed.</summary>
+    /// <remarks>
+    /// The row is found by the id the command names rather than read off the selection: the two are
+    /// the same row today, and a dialog headed with one task while writing to another is not a thing
+    /// to leave resting on that.
+    /// </remarks>
+    private bool PromptForDeadline(string id)
+    {
+        if (_presenter.Rows.FirstOrDefault(r => r.Id == id) is not { } row)
+            return false;
+
+        var (answered, day) = AskForDeadline(row);
+
+        // A dialog closed on the day it opened with is not a change. Writing anyway would queue a
+        // command to Todoist, note it in what you've done, and set a sync going, all for nothing.
+        if (!answered || day == row.DeadlineOn)
+            return false;
+
+        _presenter.SetDeadline(id, day);
+        return true;
+    }
+
+    /// <summary>Puts the deadline dialog up, which is what <see cref="AskForDeadline"/> is by default.</summary>
+    /// <param name="row">The task being asked about</param>
+    /// <returns>Whether a day was settled on, and which — null being a deadline cleared</returns>
+    private (bool Answered, DateOnly? Day) AskWithDialog(TaskRow row)
+        => DeadlineForm.Ask(this, row.Content, row.DeadlineOn, _presenter.Today, out var day)
+            ? (true, day)
+            : (false, null);
+
+    /// <summary>Runs a command on a task, for a test with no keyboard or menu to reach it by.</summary>
+    /// <param name="command">The command to run</param>
+    /// <param name="id">The task to run it on</param>
+    /// <returns>True when it changed something the server has yet to hear about</returns>
+    internal bool RunOnTask(AppCommand command, string id) => RunTaskCommand(command, id);
 
     /// <summary>Shows the reminders on a task.</summary>
     /// <returns>True when one was added or removed.</returns>

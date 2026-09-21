@@ -74,6 +74,7 @@ public class MenuTests
                 AppCommand.Rename,
                 AppCommand.NewSubtask,
                 AppCommand.Due,
+                AppCommand.Deadline,
                 AppCommand.Priority1,
                 AppCommand.Priority2,
                 AppCommand.Priority3,
@@ -563,6 +564,7 @@ public class MenuTests
         Assert.Equal("Space", shown["Complete"]);
         Assert.Equal("F2", shown["Rename"]);
         Assert.Equal("Ctrl+D", shown["Due date…"]);
+        Assert.Equal("Ctrl+Shift+D", shown["Deadline…"]);
         Assert.Equal("Ctrl+L", shown["Labels…"]);
         Assert.Equal("Ctrl+R", shown["Reminders…"]);
         Assert.Equal("Ctrl+→", shown["Indent"]);

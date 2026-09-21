@@ -57,6 +57,22 @@ public class ItemFieldsTests
         => Assert.Null(ItemFields.Due(null, new TimeOnly(9, 0)));
 
     [Fact]
+    public void A_deadline_is_sent_as_the_day_alone()
+    {
+        var deadline = ItemFields.Deadline(new DateOnly(2026, 8, 4))!;
+
+        Assert.Equal("2026-08-04", deadline["date"]!.ToString());
+
+        // Todoist tags what it read back with the language it read it in. Sending one would be
+        // claiming words were read where a date was picked.
+        Assert.Equal(["date"], deadline.Select(kv => kv.Key).ToArray());
+    }
+
+    [Fact]
+    public void No_day_clears_the_deadline()
+        => Assert.Null(ItemFields.Deadline(null));
+
+    [Fact]
     public void Recreating_a_task_keeps_only_the_fields_a_client_may_send()
     {
         var prior = Json.Object("""

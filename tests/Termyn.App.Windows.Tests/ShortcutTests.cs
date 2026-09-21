@@ -45,6 +45,7 @@ public class ShortcutTests
     [InlineData(Keys.Control | Keys.Enter, AppCommand.ToggleComplete)]
     [InlineData(Keys.F2, AppCommand.Rename)]
     [InlineData(Keys.Control | Keys.D, AppCommand.Due)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.D, AppCommand.Deadline)]
     [InlineData(Keys.Control | Keys.D1, AppCommand.Priority1)]
     [InlineData(Keys.Control | Keys.D4, AppCommand.Priority4)]
     [InlineData(Keys.Control | Keys.L, AppCommand.Labels)]

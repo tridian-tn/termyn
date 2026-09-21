@@ -69,6 +69,21 @@ public static class ItemFields
     }
 
     /// <summary>
+    /// Builds a <c>deadline</c> object, or <c>null</c> to clear the one a task has.
+    /// </summary>
+    /// <remarks>
+    /// A plain calendar day and nothing else: a deadline carries no time, no timezone and no
+    /// recurrence, and means the same day wherever it's read. The language the server tags it with
+    /// on the way back isn't sent — it's Todoist's note of how it read the words, and these were
+    /// never words.
+    /// </remarks>
+    /// <param name="date">The day the task has to be finished by, or null to clear it</param>
+    /// <returns>The object to send as the task's <c>deadline</c>, or null to clear it</returns>
+    public static JsonObject? Deadline(DateOnly? date) => date is { } day
+        ? new JsonObject { ["date"] = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) }
+        : null;
+
+    /// <summary>
     /// A due date written out rather than picked — "every Monday", "in 3 days". The server reads it
     /// and sends back the schedule it settled on, which is the only way a recurrence can be set:
     /// there is no field that says "repeat weekly", just the words.

@@ -71,8 +71,30 @@ public class OutlineColumnTests
     [WinFormsFact]
     public void A_task_with_no_deadline_hands_over_an_empty_cell()
     {
+        // The whole row rather than the one cell: read by position, this would go on passing if a
+        // column were inserted in front of it and the empty cell being read were some other one's.
         using var outline = new OutlineView();
 
-        Assert.Equal(string.Empty, outline.Cells(Row() with { Deadline = string.Empty })[4]);
+        Assert.Equal(
+            ["Plan the week", string.Empty, "Work", "1 Aug", string.Empty, "@followup"],
+            outline.Cells(Row() with { Deadline = string.Empty }));
+    }
+
+    [WinFormsFact]
+    public void Each_column_is_filled_the_way_it_says()
+    {
+        // The drawing itself can't be asserted, so this holds the decision that routes it. A column
+        // that stopped being painted would write the same words with the colour gone — the
+        // project's dot and the labels' own colours are what would go missing without a sound.
+        //
+        // Named rather than typed: the enum is internal to a control that is itself internal, and a
+        // public test method can't take one as an argument.
+        using var outline = new OutlineView();
+
+        Assert.Equal(
+            ["Written", "Priority", "Project", "Written", "Written", "Labels"],
+            outline.Columns.Cast<ColumnHeader>()
+                .Select(c => OutlineView.PaintOf((TaskColumn)c.Tag!).ToString())
+                .ToArray());
     }
 }

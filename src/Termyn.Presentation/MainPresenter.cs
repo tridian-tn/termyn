@@ -1214,6 +1214,32 @@ public sealed class MainPresenter
         return first is not null && RepeatStarters.Contains(first, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Today in the account's own timezone, for a window with a date to offer.
+    /// </summary>
+    /// <remarks>
+    /// The account's and not the machine's: someone working away from home would otherwise be
+    /// offered a day the rest of the app doesn't agree is today. Read off the engine directly,
+    /// since taking a whole snapshot to find out what day it is would parse every task in the
+    /// account for one date.
+    /// </remarks>
+    public DateOnly Today => _engine.Today;
+
+    /// <summary>Sets or, with a null date, clears the day a task has to be finished by.</summary>
+    public void SetDeadline(string id, DateOnly? date)
+    {
+        var named = Named(id);
+        _engine.UpdateItem(id, new JsonObject { ["deadline"] = ItemFields.Deadline(date) });
+
+        History.Note(
+            date is { } day
+                ? $"Set {named} to finish by {day.ToString("d MMM", CultureInfo.InvariantCulture)}"
+                : $"Cleared the deadline on {named}",
+            $"deadline:{id}");
+
+        Publish();
+    }
+
     public void Complete(string id)
     {
         var named = Named(id);

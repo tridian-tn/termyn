@@ -17,6 +17,7 @@ public enum AppCommand
     Rename,
     NewSubtask,
     Due,
+    Deadline,
     Priority1,
     Priority2,
     Priority3,
@@ -211,6 +212,7 @@ public static class Commands
             AppCommand.Rename => Task("Rename"),
 
             AppCommand.Due => Task("Due date…"),
+            AppCommand.Deadline => Task("Deadline…"),
             AppCommand.Labels => Task("Labels…"),
 
             // Left offered on a plan without reminders: the dialog is where the user can see what
