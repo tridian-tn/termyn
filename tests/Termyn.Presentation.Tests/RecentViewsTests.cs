@@ -135,7 +135,7 @@ public class RecentViewsTests
         presenter.Select(ViewSelection.OfLabel("followup"));
         presenter.Select(ViewSelection.OfProject("p1"));
 
-        Assert.Equal(["followup", "Upcoming"], Offered(presenter));
+        Assert.Equal(["@followup", "Upcoming"], Offered(presenter));
     }
 
     [Fact]
@@ -173,6 +173,84 @@ public class RecentViewsTests
 
         // The other row opens the view already on screen, which is the thing this leaves out.
         Assert.Empty(presenter.RecentViews);
+    }
+
+    [Fact]
+    public void Flitting_between_two_views_does_not_push_the_others_out()
+    {
+        // What keeping each key once is really for. Remembered afresh each time, two views flipped
+        // between would fill every slot kept and evict everything else — and the list would be two
+        // entries long however much had been opened before.
+        var (presenter, _, _) = Seeded(upTo: 8);
+        foreach (var i in Enumerable.Range(4, 5))
+            presenter.Select(ViewSelection.OfProject($"p{i}"));
+
+        for (var i = 0; i < 7; i++)
+        {
+            presenter.Select(ViewSelection.OfProject("p1"));
+            presenter.Select(ViewSelection.OfProject("p2"));
+        }
+
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+
+        Assert.Contains("Project 8", Offered(presenter));
+    }
+
+    [Fact]
+    public void Two_labels_differing_only_in_case_are_one_view()
+    {
+        // A task's labels join by name, and Todoist lets two labels differ by case alone — which
+        // the rest of the sidebar already treats as one. Offered twice they'd be the same view
+        // under two spellings.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"Followup","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"followup","item_order":2,"is_favorite":true}""");
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today));
+
+        foreach (var node in presenter.Sidebar.Where(n => n.Kind == SidebarKind.Label))
+            presenter.SelectByKey(node.Key);
+
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        Assert.Single(presenter.RecentViews);
+    }
+
+    [Fact]
+    public void A_label_is_offered_as_it_is_written()
+    {
+        // The tray is a flat list with no tree to say what a row is, so a label wears its @.
+        var (presenter, _, _) = Seeded();
+
+        presenter.Select(ViewSelection.OfLabel("followup"));
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        Assert.Equal(["@followup"], Offered(presenter));
+    }
+
+    [Fact]
+    public void A_section_is_offered_under_the_project_it_is_in()
+    {
+        // "Backlog" in two projects is two entries reading the same otherwise, and the menu has no
+        // nesting to tell them apart.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Home","child_order":2}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Backlog","project_id":"p1","section_order":1}""");
+        store.PutResource("sections", "s2", """{"id":"s2","name":"Backlog","project_id":"p2","section_order":1}""");
+
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today));
+
+        presenter.Select(ViewSelection.OfSection("s1"));
+        presenter.Select(ViewSelection.OfSection("s2"));
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        Assert.Equal(["Home › Backlog", "Work › Backlog"], Offered(presenter));
     }
 
     [Fact]

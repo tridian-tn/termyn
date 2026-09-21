@@ -698,7 +698,7 @@ public sealed class MainPresenter
     /// project is two rows with two keys, and offering it once from Favourites and again from the
     /// tree would be the same project twice under the same name.
     /// </remarks>
-    public IReadOnlyList<SidebarNode> RecentViews
+    public IReadOnlyList<RecentView> RecentViews
     {
         get
         {
@@ -707,11 +707,50 @@ public sealed class MainPresenter
             return _recent
                 .Select(k => Sidebar.FirstOrDefault(n => n.Key == k))
                 .OfType<SidebarNode>()
-                .Where(n => here is null || n.Kind != here.Kind || n.Id != here.Id)
-                .DistinctBy(n => (n.Kind, n.Id))
+                .Where(n => here is null || !Identity(n).Equals(Identity(here)))
+                .DistinctBy(Identity)
                 .Take(MostRecentViews)
+                .Select(n => new RecentView(n.Key, Describe(n)))
                 .ToList();
         }
+    }
+
+    /// <summary>
+    /// What makes two sidebar rows the same view.
+    /// </summary>
+    /// <remarks>
+    /// A label is known by its name, and Todoist lets two differ by case alone while a task's
+    /// labels join to either — so they're one view here, as they are everywhere else in this file.
+    /// </remarks>
+    /// <param name="node">The row to identify</param>
+    /// <returns>What it opens, whatever row it was opened from</returns>
+    private static (SidebarKind Kind, string Id) Identity(SidebarNode node)
+        => (node.Kind, node.Kind == SidebarKind.Label ? node.Id.ToLowerInvariant() : node.Id);
+
+    /// <summary>
+    /// What to call a view in a flat list.
+    /// </summary>
+    /// <remarks>
+    /// The sidebar says what a row is by where it sits; a menu has only the words. A label carries
+    /// the <c>@</c> it's written with, and a section names its project — "Backlog" under two
+    /// projects is two entries reading the same otherwise.
+    /// </remarks>
+    /// <param name="node">The row being offered</param>
+    /// <returns>Its name, said so it can't be mistaken for another row's</returns>
+    private string Describe(SidebarNode node)
+    {
+        if (node.Kind == SidebarKind.Label)
+            return "@" + node.Label;
+
+        if (node.Kind != SidebarKind.Section)
+            return node.Label;
+
+        var snapshot = _engine.Snapshot();
+        var owner = snapshot.Sections.FirstOrDefault(s => s.Id == node.Id)?.ProjectId is { } project
+            ? snapshot.Projects.FirstOrDefault(p => p.Id == project)?.Name
+            : null;
+
+        return owner is { Length: > 0 } ? $"{owner} › {node.Label}" : node.Label;
     }
 
     /// <summary>Notes a view as the most recently opened, keeping each one once.</summary>

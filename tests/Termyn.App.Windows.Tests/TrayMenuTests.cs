@@ -1,3 +1,4 @@
+using Termyn.Core.Sync;
 using Termyn.Core.Platform;
 using Termyn.Presentation;
 
@@ -12,12 +13,11 @@ namespace Termyn.App.Windows.Tests;
 /// </remarks>
 public class TrayMenuTests
 {
-    private static SidebarNode View(string label, string key)
-        => new(SidebarKind.Project, label, label, 1, key);
+    private static RecentView View(string label, string key) => new(key, label);
 
     private readonly List<string> _ran = [];
 
-    private IReadOnlyList<NotifierCommand> Menu(params SidebarNode[] recent)
+    private IReadOnlyList<NotifierCommand> Menu(params RecentView[] recent)
         => MainForm.TrayCommands(
             recent,
             () => _ran.Add("open"),
@@ -79,5 +79,93 @@ public class TrayMenuTests
             rule.Invoke();
 
         Assert.Empty(_ran);
+    }
+
+    [WinFormsFact]
+    public void A_view_with_no_name_is_still_an_entry_rather_than_a_rule()
+    {
+        // The labels are the account's now, and nothing promises a project has a name. Read off an
+        // empty label, "this is a rule" would draw that project as a line and lose it.
+        var menu = Menu(View(string.Empty, "project:p1"));
+
+        // Two rules, because the group of views is there — and the nameless view is one of them.
+        Assert.Equal(2, menu.Count(c => c.IsRule));
+        Assert.Contains(menu, c => !c.IsRule && c.Label.Length == 0);
+    }
+
+    // ---- The window and the tray together --------------------------------------------------------
+
+    private static InMemorySnapshotStore Account()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Home","child_order":2}""");
+        return store;
+    }
+
+    [WinFormsFact]
+    public void The_menu_is_filled_as_it_opens_rather_than_kept_up_to_date()
+    {
+        // Worked out at the moment it's shown, so it can't go stale and can't be rewritten under
+        // the pointer of somebody reading it.
+        using var window = TestWindow.Build("tray-open.json", Account(), out var tray, out var presenter);
+
+        // Shown, off-screen: a form that was never displayed has no handle, and the window drops
+        // work aimed at a window that isn't there.
+        window.StartPosition = FormStartPosition.Manual;
+        window.Location = new Point(-2000, -2000);
+        window.Show();
+
+        presenter.Select(ViewSelection.OfProject("p1"));
+        presenter.Select(ViewSelection.OfProject("p2"));
+
+        Assert.DoesNotContain(tray.Commands, c => c.Label == "Work");
+
+        tray.Opening();
+
+        Assert.Contains(tray.Commands, c => c.Label == "Work");
+    }
+
+    [WinFormsFact]
+    public void Picking_a_view_opens_the_window_on_it()
+    {
+        using var window = TestWindow.Build("tray-pick.json", Account(), out var tray, out var presenter);
+
+        // Shown, off-screen: a form that was never displayed has no handle, and the window drops
+        // work aimed at a window that isn't there.
+        window.StartPosition = FormStartPosition.Manual;
+        window.Location = new Point(-2000, -2000);
+        window.Show();
+
+        presenter.Select(ViewSelection.OfProject("p1"));
+        presenter.Select(ViewSelection.OfProject("p2"));
+        tray.Opening();
+        tray.Pick("Work");
+
+        Assert.Equal(SidebarKeys.For(SidebarKind.Project, "p1"), presenter.SelectedKey);
+        Assert.Equal(ViewSelection.OfProject("p1"), presenter.Selection);
+    }
+
+    [WinFormsFact]
+    public void Picking_a_view_the_account_no_longer_has_still_opens_the_window()
+    {
+        // The menu is built as it opens, so this needs the row to go between opening the menu and
+        // picking from it — but a stale entry mustn't leave the window unopened either way.
+        using var window = TestWindow.Build("tray-gone.json", Account(), out var tray, out var presenter);
+
+        // Shown, off-screen: a form that was never displayed has no handle, and the window drops
+        // work aimed at a window that isn't there.
+        window.StartPosition = FormStartPosition.Manual;
+        window.Location = new Point(-2000, -2000);
+        window.Show();
+
+        presenter.Select(ViewSelection.OfProject("p1"));
+        presenter.Select(ViewSelection.OfProject("p2"));
+        tray.Opening();
+
+        var wasOn = presenter.SelectedKey;
+        tray.Commands.First(c => c.Label == "Work").Invoke();
+
+        Assert.NotEqual(wasOn, presenter.SelectedKey);
     }
 }

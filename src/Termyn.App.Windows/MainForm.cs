@@ -517,8 +517,12 @@ internal sealed class MainForm : Form
         _scheduler.SyncFailed += OnSyncFailed;
         _shell.Hotkey.Pressed += OnHotkey;
         _shell.Notifier.Activated += OnTrayActivated;
+        _shell.Notifier.MenuOpening += OnTrayMenuOpening;
 
+        // Filled once here as well as on every opening: a menu with nothing in it is one the
+        // desktop declines to show at all, which would make the first right-click do nothing.
         BuildTrayMenu();
+
         _hotkeyNotice = RegisterHotkey(announce: false);
 
         if (shell.CacheRebuilt)
@@ -564,6 +568,7 @@ internal sealed class MainForm : Form
         _scheduler.SyncFailed -= OnSyncFailed;
         _shell.Hotkey.Pressed -= OnHotkey;
         _shell.Notifier.Activated -= OnTrayActivated;
+        _shell.Notifier.MenuOpening -= OnTrayMenuOpening;
         if (_signalsWired)
             _shell.Instance.SignalReceived -= OnInstanceSignal;
 
@@ -687,6 +692,9 @@ internal sealed class MainForm : Form
 
     private void OnTrayActivated() => OnUi(RestoreWindow);
 
+    /// <summary>Fills the tray's menu as it opens, so what it offers is what has just been done.</summary>
+    private void OnTrayMenuOpening() => OnUi(() => Guarded(BuildTrayMenu));
+
     private void OnInstanceSignal(string message) => OnUi(() => Guarded(() =>
     {
         if (message == InstanceSignals.QuickAdd)
@@ -726,7 +734,7 @@ internal sealed class MainForm : Form
     /// <param name="goTo">Open the window on the view with this sidebar key</param>
     /// <returns>The menu, in the order it is shown</returns>
     internal static IReadOnlyList<NotifierCommand> TrayCommands(
-        IReadOnlyList<SidebarNode> recent,
+        IReadOnlyList<RecentView> recent,
         Action open,
         Action quickAdd,
         Action sync,
@@ -761,22 +769,18 @@ internal sealed class MainForm : Form
         return commands;
     }
 
-    /// <summary>The views the tray menu was last built from, so it's only rebuilt when they change.</summary>
-    private string _trayViews = string.Empty;
-
-    /// <summary>What the tray's view entries would say, as one string to compare against.</summary>
-    /// <param name="views">The views currently on offer</param>
-    /// <returns>A line per view, its key and its name</returns>
-    private static string Signature(IReadOnlyList<SidebarNode> views)
-        => string.Join('\n', views.Select(v => v.Key + '\t' + v.Label));
-
+    /// <summary>
+    /// Fills the tray's menu, as it is about to be shown.
+    /// </summary>
+    /// <remarks>
+    /// Built at that moment rather than kept up to date: the views it offers follow what the user
+    /// has been doing, and rewriting the menu on a timer would either show something stale or move
+    /// the entries under the pointer of somebody reading them.
+    /// </remarks>
     private void BuildTrayMenu()
     {
-        var recent = _presenter.RecentViews;
-        _trayViews = Signature(recent);
-
         _shell.Notifier.SetCommands(TrayCommands(
-            recent,
+            _presenter.RecentViews,
             () => OnUi(RestoreWindow),
             () => OnUi(() => Guarded(QuickAdd.Summon)),
             () => _scheduler.RequestNow(),
@@ -1268,11 +1272,6 @@ internal sealed class MainForm : Form
         };
 
         _shell.Notifier.SetStatus(tooltip, today);
-
-        // Only when the views have actually moved. This runs on every render, and rebuilding the
-        // menu each time would throw away one the user had open.
-        if (_trayViews != Signature(_presenter.RecentViews))
-            BuildTrayMenu();
     }
 
     private void RenderUnsupported()
