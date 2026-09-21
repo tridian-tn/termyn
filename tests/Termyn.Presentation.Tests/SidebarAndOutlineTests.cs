@@ -154,7 +154,11 @@ public class SidebarAndOutlineTests
 
         presenter.Select(ViewSelection.Of(SmartView.Upcoming));
 
-        Assert.Equal(new[] { "Due Monday" }, presenter.Rows.Select(r => r.Content).ToArray());
+        // Which tasks it shows, not how they're laid out: the view heads each day, and the
+        // headings are covered where that decision lives.
+        Assert.Equal(
+            new[] { "Due Monday" },
+            presenter.Rows.Where(r => !r.IsHeading).Select(r => r.Content).ToArray());
     }
 
     [Fact]

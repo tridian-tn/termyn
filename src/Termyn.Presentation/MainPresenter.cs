@@ -57,7 +57,17 @@ public sealed record TaskRow(
     string Deadline = "",
 
     /// <summary>The day that deadline falls on, for ordering by it.</summary>
-    DateOnly? DeadlineOn = null);
+    DateOnly? DeadlineOn = null,
+
+    /// <summary>
+    /// Whether this row is a day's heading rather than a task.
+    /// </summary>
+    /// <remarks>
+    /// Upcoming is grouped by day, and a virtualised list can't use the control's own grouping —
+    /// so a heading is a row like any other, and everything that acts on a task has to know the
+    /// difference. It carries the day's name in <c>Content</c> and nothing else.
+    /// </remarks>
+    bool IsHeading = false);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -2262,8 +2272,102 @@ public sealed class MainPresenter
                 .ToList();
         }
 
-        Rows = Folded(Ordered(rows));
+        var ordered = Ordered(rows);
+
+        // One or the other, never both. Grouping lays the view out flat under its days, and a fold
+        // hides what sits under a task — which, under a day, is nothing at all.
+        Rows = Grouping ? ByDay(ordered) : Folded(ordered);
         Status = ComposeStatus(pending, failed);
+    }
+
+    /// <summary>
+    /// Upcoming, under a heading for each day. Every other view is handed back untouched.
+    /// </summary>
+    /// <remarks>
+    /// Last of all, so the headings are laid over whatever order and folding settled on: sort by
+    /// priority in Upcoming and each day comes out by priority, with the days still in order.
+    ///
+    /// The tasks go flat to be grouped. A sub-task due on a different day from its parent can't sit
+    /// under both its parent and its own day, and the day is what this view is for — so nesting is
+    /// what gives, and every task stands under the day it's due.
+    ///
+    /// A finished task keeps to the bottom under no heading at all, the way it does everywhere
+    /// else: it isn't work waiting on a day.
+    /// </remarks>
+    /// <param name="rows">The outline as ordering left it</param>
+    /// <returns>The rows to show, headings and all</returns>
+    private IReadOnlyList<TaskRow> ByDay(IReadOnlyList<TaskRow> rows)
+    {
+        if (rows.Count == 0 || _projectedFrom is not { } snapshot)
+            return rows;
+
+        // Sorted, because the rows arrive in the account's own order — or in whatever order a
+        // column was clicked for — and neither has anything to say about which day comes first.
+        var days = new SortedDictionary<DateOnly, List<TaskRow>>();
+        var loose = new List<TaskRow>();
+
+        foreach (var row in rows)
+        {
+            // The day comes off DueOn rather than the Due column beside it: the column shows the
+            // words Todoist gave the task, which for a repeat is "every Monday" and names no day.
+            // A finished task keeps to the bottom, and so does anything with no day to file it
+            // under — shown under no heading rather than quietly dropped.
+            if (row.Completed || row.DueOn is not { } due)
+            {
+                loose.Add(row);
+                continue;
+            }
+
+            if (!days.TryGetValue(due, out var under))
+                days[due] = under = [];
+
+            under.Add(row with { Depth = 0, HasChildren = false, Collapsed = false });
+        }
+
+        var grouped = new List<TaskRow>(rows.Count + days.Count);
+
+        foreach (var (day, under) in days)
+        {
+            grouped.Add(DayRow(day, snapshot.Today));
+            grouped.AddRange(under);
+        }
+
+        grouped.AddRange(loose);
+        return grouped;
+    }
+
+    /// <summary>Whether the outline is being laid out under a heading for each day.</summary>
+    /// <remarks>
+    /// Upcoming alone, and not while searching: a search crosses the whole account and answers
+    /// with matches rather than with days, and the matches aren't all due in the week ahead.
+    /// </remarks>
+    private bool Grouping => Selection.View == SmartView.Upcoming && !Searching;
+
+    /// <summary>
+    /// The row that heads a day's tasks.
+    /// </summary>
+    /// <remarks>
+    /// Written in the machine's own culture rather than the invariant one the due column uses:
+    /// that column reproduces the server's wording, and this is Termyn's own words about a day.
+    /// Tomorrow is named rather than dated, since that is how anybody would say it.
+    /// </remarks>
+    /// <param name="day">The day being headed</param>
+    /// <param name="today">Today in the account's timezone, for naming tomorrow</param>
+    /// <returns>A row carrying the heading, which is no task</returns>
+    private static TaskRow DayRow(DateOnly day, DateOnly today)
+    {
+        var named = day == today.AddDays(1)
+            ? "Tomorrow"
+            : day.ToString("dddd", CultureInfo.CurrentCulture);
+
+        return new TaskRow(
+            $"day:{day:yyyy-MM-dd}",
+            $"{day.ToString("d MMM", CultureInfo.CurrentCulture)} · {named}",
+            Priority.P4,
+            string.Empty,
+            string.Empty,
+            [],
+            IsHeading: true);
     }
 
     /// <summary>
@@ -2335,10 +2439,18 @@ public sealed class MainPresenter
         return true;
     }
 
-    /// <summary>Whether anything on screen could still be folded, or unfolded.</summary>
-    public bool CanCollapseAll => _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+    /// <summary>
+    /// Whether anything on screen could still be folded, or unfolded.
+    /// </summary>
+    /// <remarks>
+    /// Neither is offered where the view is grouped by day: it's laid out flat, so nothing on
+    /// screen has anything under it, and an entry that did nothing visible would be worse than
+    /// one that's plainly unavailable.
+    /// </remarks>
+    public bool CanCollapseAll => !Grouping && _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
 
-    public bool CanExpandAll => _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+    /// <inheritdoc cref="CanCollapseAll" />
+    public bool CanExpandAll => !Grouping && _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
 
     /// <summary>
     /// Folds, or unfolds, every task in the view that has anything under it.
@@ -2614,6 +2726,9 @@ public sealed class MainPresenter
     private IReadOnlyList<TaskRow> Searchable()
         => _searchableRows ??= _projectedFrom is { } snapshot ? BuildOutline(snapshot, scoped: false) : [];
 
+    /// <summary>How many of the rows on show are tasks, which is what the status bar counts.</summary>
+    private int Counted => Rows.Count(r => !r.IsHeading);
+
     /// <summary>The whole status line: what is on screen, then where the sync loop stands.</summary>
     private string ComposeStatus(int pending, int failed)
     {
@@ -2622,7 +2737,8 @@ public sealed class MainPresenter
         return string.Join(" · ",
             new[]
             {
-                Rows.Count == 1 ? "1 task" : $"{Rows.Count} tasks",
+                // The days' headings are furniture rather than work, so they aren't counted.
+                Counted == 1 ? "1 task" : $"{Counted} tasks",
                 CompletedTruncated ? "most recent completed only" : null,
                 SyncStatus.Describe(),
             }.Where(s => s is not null));

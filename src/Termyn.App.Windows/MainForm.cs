@@ -1600,37 +1600,78 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
     {
-        if (e.Node?.Tag is not SidebarNode node || !SitsInDotColumn(node))
+        if (e.Node is not { } drawn || drawn.Tag is not SidebarNode node)
         {
             e.DrawDefault = true;
             return;
         }
 
-        var bounds = e.Bounds;
-        var size = Math.Min(8, bounds.Height - 6);
-        var lead = _sidebar.LogicalToDeviceUnits(DotLead);
+        var bounds = Widened(e.Bounds, _sidebar.ClientSize.Width);
+        var taken = 0;
 
-        if (size > 0 && node.Colour is { } colour)
+        if (SitsInDotColumn(node))
         {
-            Dots.Fill(
-                e.Graphics,
-                new Rectangle(bounds.X + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
-                Theme.ToColor(colour));
-        }
+            var size = Math.Min(8, bounds.Height - 6);
+            var lead = _sidebar.LogicalToDeviceUnits(DotLead);
 
-        // The text keeps its full width rather than losing the dot's room: the row's background is
-        // already drawn, and a name shortened by a dot would be the wrong thing to trim.
-        var taken = lead + Math.Max(0, size) + DotGap;
-        var selected = (e.State & TreeNodeStates.Selected) != 0 && _sidebar.Focused;
+            if (size > 0 && node.Colour is { } colour)
+            {
+                Dots.Fill(
+                    e.Graphics,
+                    new Rectangle(bounds.X + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
+                    Theme.ToColor(colour));
+            }
+
+            // The text keeps its full width rather than losing the dot's room: the row's background
+            // is already drawn, and a name shortened by a dot would be the wrong thing to trim.
+            taken = lead + Math.Max(0, size) + DotGap;
+        }
 
         TextRenderer.DrawText(
             e.Graphics,
-            e.Node.Text,
-            e.Node.NodeFont ?? _sidebar.Font,
-            new Rectangle(bounds.X + taken, bounds.Y, bounds.Width, bounds.Height),
-            selected ? SystemColors.HighlightText : _sidebar.ForeColor,
+            drawn.Text,
+            drawn.NodeFont ?? _sidebar.Font,
+            bounds with { X = bounds.X + taken },
+            Writing(drawn, e.State),
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
     }
+
+    /// <summary>
+    /// What to write a sidebar row in.
+    /// </summary>
+    /// <remarks>
+    /// The selection is taken from the tree as well as from the row handed over, because the two
+    /// disagree for as long as a mouse button is held: the row is selected the moment the button
+    /// goes down, and the tree holds the item's own selected state back until it goes up in case
+    /// the press turns into a drag. Read from the state alone, a row would be written in ordinary
+    /// ink over the highlight already behind it.
+    /// </remarks>
+    /// <param name="drawn">The row being drawn</param>
+    /// <param name="state">What the tree says about it</param>
+    /// <returns>The colour to write its name in</returns>
+    private Color Writing(TreeNode drawn, TreeNodeStates state)
+    {
+        var selected = (state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn;
+
+        if (selected && _sidebar.Focused)
+            return SystemColors.HighlightText;
+
+        return drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor;
+    }
+
+    /// <summary>
+    /// A row's text given the rest of the sidebar's width to be written in.
+    /// </summary>
+    /// <remarks>
+    /// The tree measures a row from its own font, so a row set in anything wider — a heading, in
+    /// bold — is handed a rectangle its own words don't fit. Nothing is drawn over: the room taken
+    /// here is the room to the right of the row, which on a tree one column wide is empty.
+    /// </remarks>
+    /// <param name="bounds">The room the tree offered</param>
+    /// <param name="width">How wide the sidebar is</param>
+    /// <returns>The same row, running to the edge of the tree</returns>
+    internal static Rectangle Widened(Rectangle bounds, int width)
+        => bounds with { Width = Math.Max(bounds.Width, width - bounds.X) };
 
     /// <summary>
     /// Marks the selected row for as long as the tree hasn't got the focus.
