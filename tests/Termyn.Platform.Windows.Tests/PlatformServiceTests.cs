@@ -174,6 +174,62 @@ public class TrayNotifierTests
     }
 
     [Fact]
+    public void A_rule_between_groups_is_drawn_as_a_separator()
+    {
+        using var tray = new TrayNotifier();
+
+        tray.SetCommands([new NotifierCommand("Open Termyn", () => { }), NotifierCommand.Rule, new NotifierCommand("Exit", () => { })]);
+
+        Assert.Collection(
+            tray.MenuItems,
+            first => Assert.Equal("Open Termyn", first.Text),
+            rule => Assert.IsType<ToolStripSeparator>(rule),
+            last => Assert.Equal("Exit", last.Text));
+    }
+
+    [Fact]
+    public void An_ampersand_in_a_name_is_shown_rather_than_swallowed()
+    {
+        // Entries are named from the account now. A menu reads a single ampersand as the marker for
+        // an access key, so "R&D" would be drawn as "RD" with D as its key; the doubled form is
+        // what shows the character itself.
+        using var tray = new TrayNotifier();
+
+        tray.SetCommands([new NotifierCommand("R&D", () => { })]);
+
+        Assert.Equal(["R&&D"], tray.MenuLabels);
+    }
+
+    [Fact]
+    public void The_menu_says_when_it_is_about_to_be_shown()
+    {
+        // What the entries are follows what the user has been doing, so the host fills them in at
+        // this moment rather than keeping them up to date.
+        using var tray = new TrayNotifier();
+        var asked = 0;
+        tray.MenuOpening += () => asked++;
+
+        tray.RaiseMenuOpening();
+
+        Assert.Equal(1, asked);
+    }
+
+    [Fact]
+    public void Replacing_the_menu_lets_go_of_what_it_held()
+    {
+        // The menu is rebuilt whenever the views it offers change, so anything it drops here would
+        // otherwise pile up for the life of the session.
+        using var tray = new TrayNotifier();
+        tray.SetCommands([new NotifierCommand("Work", () => { }), NotifierCommand.Rule]);
+        var was = tray.MenuItems;
+
+        tray.SetCommands([new NotifierCommand("Home", () => { })]);
+
+        Assert.All(was, item => Assert.True(item.IsDisposed, $"{item.GetType().Name} was left behind"));
+        Assert.Equal(["Home"], tray.MenuLabels);
+    }
+
+    [Fact]
     public void A_tooltip_that_fits_is_left_alone()
     {
         using var tray = new TrayNotifier();

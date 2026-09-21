@@ -203,6 +203,7 @@ public class FoldsAcrossRestartTests : IDisposable
     private sealed class Notifier : INotifier
     {
         public event Action? Activated { add { } remove { } }
+        public event Action? MenuOpening { add { } remove { } }
 
         public bool Visible { get; set; }
         public void SetStatus(string tooltip, int dueToday) { }

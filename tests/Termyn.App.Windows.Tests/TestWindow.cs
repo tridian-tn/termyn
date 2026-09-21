@@ -29,13 +29,29 @@ internal static class TestWindow
     /// <param name="store">What the account holds, or null for an empty one</param>
     /// <returns>The window, which the caller disposes</returns>
     internal static MainForm Build(string settingsName, InMemorySnapshotStore? store = null)
+        => Build(settingsName, store, out _, out _);
+
+    /// <summary>
+    /// The same window, with the tray it talks to and the presenter behind it.
+    /// </summary>
+    /// <param name="settingsName">A file name of its own, so two suites can't share one</param>
+    /// <param name="store">What the account holds, or null for an empty one</param>
+    /// <param name="notifier">The tray, which keeps whatever menu it was given</param>
+    /// <param name="presenter">The presenter, for a test that needs to drive it</param>
+    /// <returns>The window, which the caller disposes</returns>
+    internal static MainForm Build(
+        string settingsName,
+        InMemorySnapshotStore? store,
+        out Notifier notifier,
+        out MainPresenter presenter)
     {
         var engine = new SyncEngine(new FakeApi(), store ?? new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
         engine.Load();
 
         var clock = new SystemClock();
-        var presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
         var scheduler = new SyncScheduler(presenter.SyncAsync, SyncCadence.Default);
+        notifier = new Notifier();
 
         var shell = new Shell(
             new Paths(),
@@ -43,7 +59,7 @@ internal static class TestWindow
             new AppSettings(),
             new Hotkey(),
             new AutoStart(),
-            new Notifier(),
+            notifier,
             new Instance(),
             new GitHubReleaseCheck(Http),
             new RecordingLog());
@@ -82,13 +98,24 @@ internal static class TestWindow
         public bool SetEnabled(bool enabled) => true;
     }
 
-    private sealed class Notifier : INotifier
+    /// <summary>A tray that keeps the menu it is given, so a test can read it and pick from it.</summary>
+    internal sealed class Notifier : INotifier
     {
         public event Action? Activated { add { } remove { } }
+        public event Action? MenuOpening;
+
+        /// <summary>The menu as the window last set it.</summary>
+        internal IReadOnlyList<NotifierCommand> Commands { get; private set; } = [];
+
+        /// <summary>Raises what the desktop raises as the menu is about to be shown.</summary>
+        internal void Opening() => MenuOpening?.Invoke();
+
+        /// <summary>Picks the entry with this label, as a click would.</summary>
+        internal void Pick(string label) => Commands.First(c => !c.IsRule && c.Label == label).Invoke();
 
         public bool Visible { get; set; }
         public void SetStatus(string tooltip, int dueToday) { }
-        public void SetCommands(IReadOnlyList<NotifierCommand> commands) { }
+        public void SetCommands(IReadOnlyList<NotifierCommand> commands) => Commands = commands;
         public void Dispose() { }
     }
 

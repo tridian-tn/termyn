@@ -517,8 +517,12 @@ internal sealed class MainForm : Form
         _scheduler.SyncFailed += OnSyncFailed;
         _shell.Hotkey.Pressed += OnHotkey;
         _shell.Notifier.Activated += OnTrayActivated;
+        _shell.Notifier.MenuOpening += OnTrayMenuOpening;
 
+        // Filled once here as well as on every opening: a menu with nothing in it is one the
+        // desktop declines to show at all, which would make the first right-click do nothing.
         BuildTrayMenu();
+
         _hotkeyNotice = RegisterHotkey(announce: false);
 
         if (shell.CacheRebuilt)
@@ -564,6 +568,7 @@ internal sealed class MainForm : Form
         _scheduler.SyncFailed -= OnSyncFailed;
         _shell.Hotkey.Pressed -= OnHotkey;
         _shell.Notifier.Activated -= OnTrayActivated;
+        _shell.Notifier.MenuOpening -= OnTrayMenuOpening;
         if (_signalsWired)
             _shell.Instance.SignalReceived -= OnInstanceSignal;
 
@@ -687,6 +692,9 @@ internal sealed class MainForm : Form
 
     private void OnTrayActivated() => OnUi(RestoreWindow);
 
+    /// <summary>Fills the tray's menu as it opens, so what it offers is what has just been done.</summary>
+    private void OnTrayMenuOpening() => OnUi(() => Guarded(BuildTrayMenu));
+
     private void OnInstanceSignal(string message) => OnUi(() => Guarded(() =>
     {
         if (message == InstanceSignals.QuickAdd)
@@ -704,15 +712,96 @@ internal sealed class MainForm : Form
         BringToFront();
     }
 
-    private void BuildTrayMenu() => _shell.Notifier.SetCommands(
-    [
-        new NotifierCommand("Open Termyn", () => OnUi(RestoreWindow)),
-        new NotifierCommand("Quick add…", () => OnUi(() => Guarded(QuickAdd.Summon))),
-        new NotifierCommand("Sync now", () => _scheduler.RequestNow()),
-        new NotifierCommand("Settings…", () => OnUi(() => Guarded(OpenSettings))),
-        new NotifierCommand("Check for updates…", () => OnUi(() => _ = CheckForUpdatesAsync())),
-        new NotifierCommand("Exit", () => OnUi(Exit)),
-    ]);
+    /// <summary>
+    /// The tray icon's menu: what the app can be asked for without its window, and the views most
+    /// recently open.
+    /// </summary>
+    /// <remarks>
+    /// Built here rather than in the window so a test can read the whole menu — its order, its
+    /// rules, and which view each entry opens — without a tray to hang it on.
+    ///
+    /// The views sit in a group of their own between opening the window and the rest. They're the
+    /// only part that changes while the app runs, and a menu whose bottom half moved under the
+    /// pointer would be a menu nobody could learn.
+    /// </remarks>
+    /// <param name="recent">The views to offer, newest first</param>
+    /// <param name="open">Show the window as it was</param>
+    /// <param name="quickAdd">Open the quick-add box</param>
+    /// <param name="sync">Sync now</param>
+    /// <param name="settings">Open settings</param>
+    /// <param name="updates">Check for updates</param>
+    /// <param name="exit">Close for real</param>
+    /// <param name="goTo">Open the window on the view with this sidebar key</param>
+    /// <returns>The menu, in the order it is shown</returns>
+    internal static IReadOnlyList<NotifierCommand> TrayCommands(
+        IReadOnlyList<RecentView> recent,
+        Action open,
+        Action quickAdd,
+        Action sync,
+        Action settings,
+        Action updates,
+        Action exit,
+        Action<string> goTo)
+    {
+        var commands = new List<NotifierCommand>
+        {
+            new("Open Termyn", open),
+            new("Quick add…", quickAdd),
+        };
+
+        if (recent.Count > 0)
+        {
+            commands.Add(NotifierCommand.Rule);
+
+            foreach (var view in recent)
+            {
+                var key = view.Key;
+                commands.Add(new NotifierCommand(view.Label, () => goTo(key)));
+            }
+        }
+
+        commands.Add(NotifierCommand.Rule);
+        commands.Add(new NotifierCommand("Sync now", sync));
+        commands.Add(new NotifierCommand("Settings…", settings));
+        commands.Add(new NotifierCommand("Check for updates…", updates));
+        commands.Add(new NotifierCommand("Exit", exit));
+
+        return commands;
+    }
+
+    /// <summary>
+    /// Fills the tray's menu, as it is about to be shown.
+    /// </summary>
+    /// <remarks>
+    /// Built at that moment rather than kept up to date: the views it offers follow what the user
+    /// has been doing, and rewriting the menu on a timer would either show something stale or move
+    /// the entries under the pointer of somebody reading them.
+    /// </remarks>
+    private void BuildTrayMenu()
+    {
+        _shell.Notifier.SetCommands(TrayCommands(
+            _presenter.RecentViews,
+            () => OnUi(RestoreWindow),
+            () => OnUi(() => Guarded(QuickAdd.Summon)),
+            () => _scheduler.RequestNow(),
+            () => OnUi(() => Guarded(OpenSettings)),
+            () => OnUi(() => _ = CheckForUpdatesAsync()),
+            () => OnUi(Exit),
+            key => OnUi(() => Guarded(() => OpenFromTray(key)))));
+    }
+
+    /// <summary>Opens the window on a view the tray offered.</summary>
+    /// <param name="key">The sidebar key of the view to open</param>
+    private void OpenFromTray(string key)
+    {
+        if (_presenter.SelectByKey(key))
+        {
+            _sidebarKey = key;
+            Highlight();
+        }
+
+        RestoreWindow();
+    }
 
     private void Exit()
     {

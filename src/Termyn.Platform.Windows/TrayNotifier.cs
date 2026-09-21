@@ -32,12 +32,15 @@ public sealed class TrayNotifier : INotifier
             if (e.Button == MouseButtons.Left)
                 Activated?.Invoke();
         };
+        _menu.Opening += (_, _) => MenuOpening?.Invoke();
         // Nothing is drawn here. The first icon costs the best part of a tenth of a second — GDI+
         // coming up, mostly — and doing that before the window exists is a tenth of a second added
         // to every start. The host asks for a status once it has something to show.
     }
 
     public event Action? Activated;
+
+    public event Action? MenuOpening;
 
     /// <summary>The hover text as the shell has it. Internal so a test can check the truncation.</summary>
     internal string Tooltip => _icon.Text;
@@ -51,6 +54,12 @@ public sealed class TrayNotifier : INotifier
 
     /// <summary>The menu as it stands, for the same reason.</summary>
     internal IReadOnlyList<string> MenuLabels => _menu.Items.OfType<ToolStripMenuItem>().Select(i => i.Text ?? string.Empty).ToList();
+
+    /// <summary>Everything on the menu, rules included, so a test can see the shape as well as the words.</summary>
+    internal IReadOnlyList<ToolStripItem> MenuItems => _menu.Items.Cast<ToolStripItem>().ToList();
+
+    /// <summary>Says the menu is about to be shown, for a test with no tray to right-click.</summary>
+    internal void RaiseMenuOpening() => MenuOpening?.Invoke();
 
     public bool Visible
     {
@@ -97,9 +106,22 @@ public sealed class TrayNotifier : INotifier
         if (_disposed)
             return;
 
+        // Disposed rather than dropped: the menu is rebuilt whenever the views it offers change, so
+        // what Clear lets go of here would otherwise pile up for the life of the session.
+        foreach (var item in _menu.Items.Cast<ToolStripItem>().ToList())
+            item.Dispose();
+
         _menu.Items.Clear();
+
         foreach (var command in commands)
-            _menu.Items.Add(new ToolStripMenuItem(command.Label, null, (_, _) => command.Invoke()));
+        {
+            // The ampersand is doubled because a menu reads a single one as the mnemonic marker:
+            // a project called "R&D" would otherwise be drawn as "RD", with D as its access key.
+            // Done here because it's this desktop's quirk, not something the caller should know.
+            _menu.Items.Add(command.IsRule
+                ? new ToolStripSeparator()
+                : new ToolStripMenuItem(command.Label.Replace("&", "&&"), null, (_, _) => command.Invoke()));
+        }
     }
 
     public void Dispose()

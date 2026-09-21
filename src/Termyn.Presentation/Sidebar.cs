@@ -15,6 +15,16 @@ public enum SidebarKind
     Header,
 }
 
+/// <summary>
+/// A view offered somewhere with no tree to show its shape — the tray menu.
+/// </summary>
+/// <param name="Key">The sidebar row to open</param>
+/// <param name="Label">
+/// What to call it where nothing else says what it is: a label wears its <c>@</c>, and a section
+/// names the project it's in, since the same section name in two projects is common
+/// </param>
+public sealed record RecentView(string Key, string Label);
+
 /// <summary>One row of the sidebar tree, already flattened with its indent depth.</summary>
 /// <param name="Key">
 /// Identifies this row uniquely. A favourited project appears twice — once under Favourites and

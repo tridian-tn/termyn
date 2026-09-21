@@ -663,7 +663,105 @@ public sealed class MainPresenter
         Selection = selection;
         SelectedKey = key;
         SearchQuery = string.Empty;
+        Remember(key);
         Publish();
+    }
+
+    /// <summary>How many views the tray offers a way back to.</summary>
+    private const int MostRecentViews = 5;
+
+    /// <summary>
+    /// How many are kept, which is more than are shown.
+    /// </summary>
+    /// <remarks>
+    /// The ones shown are whittled down from these — the view being looked at now comes out, and so
+    /// does anything the account no longer has — so keeping only five would leave a short list
+    /// shorter still.
+    /// </remarks>
+    private const int RecentKept = 12;
+
+    /// <summary>The keys of views opened this session, newest first.</summary>
+    private readonly List<string> _recent = [];
+
+    /// <summary>
+    /// The views most recently opened, newest first, as a way back to them.
+    /// </summary>
+    /// <remarks>
+    /// Read against the sidebar each time rather than stored as labels, so a project renamed or
+    /// deleted elsewhere doesn't linger here under a name the account no longer uses.
+    ///
+    /// The view being looked at now is left out. From the tray, where this is offered, that view is
+    /// what opening the window gives you anyway, and an entry that lands you where you already are
+    /// is one of five places wasted.
+    ///
+    /// Told apart by what they open rather than by the row they were opened from: a favourited
+    /// project is two rows with two keys, and offering it once from Favourites and again from the
+    /// tree would be the same project twice under the same name.
+    /// </remarks>
+    public IReadOnlyList<RecentView> RecentViews
+    {
+        get
+        {
+            var here = Sidebar.FirstOrDefault(n => n.Key == SelectedKey);
+
+            return _recent
+                .Select(k => Sidebar.FirstOrDefault(n => n.Key == k))
+                .OfType<SidebarNode>()
+                .Where(n => here is null || !Identity(n).Equals(Identity(here)))
+                .DistinctBy(Identity)
+                .Take(MostRecentViews)
+                .Select(n => new RecentView(n.Key, Describe(n)))
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// What makes two sidebar rows the same view.
+    /// </summary>
+    /// <remarks>
+    /// A label is known by its name, and Todoist lets two differ by case alone while a task's
+    /// labels join to either — so they're one view here, as they are everywhere else in this file.
+    /// </remarks>
+    /// <param name="node">The row to identify</param>
+    /// <returns>What it opens, whatever row it was opened from</returns>
+    private static (SidebarKind Kind, string Id) Identity(SidebarNode node)
+        => (node.Kind, node.Kind == SidebarKind.Label ? node.Id.ToLowerInvariant() : node.Id);
+
+    /// <summary>
+    /// What to call a view in a flat list.
+    /// </summary>
+    /// <remarks>
+    /// The sidebar says what a row is by where it sits; a menu has only the words. A label carries
+    /// the <c>@</c> it's written with, and a section names its project — "Backlog" under two
+    /// projects is two entries reading the same otherwise.
+    /// </remarks>
+    /// <param name="node">The row being offered</param>
+    /// <returns>Its name, said so it can't be mistaken for another row's</returns>
+    private string Describe(SidebarNode node)
+    {
+        if (node.Kind == SidebarKind.Label)
+            return "@" + node.Label;
+
+        if (node.Kind != SidebarKind.Section)
+            return node.Label;
+
+        var snapshot = _engine.Snapshot();
+        var owner = snapshot.Sections.FirstOrDefault(s => s.Id == node.Id)?.ProjectId is { } project
+            ? snapshot.Projects.FirstOrDefault(p => p.Id == project)?.Name
+            : null;
+
+        return owner is { Length: > 0 } ? $"{owner} › {node.Label}" : node.Label;
+    }
+
+    /// <summary>Notes a view as the most recently opened, keeping each one once.</summary>
+    /// <param name="key">The sidebar key of the view just opened</param>
+    private void Remember(string key)
+    {
+        _recent.Remove(key);
+        _recent.Insert(0, key);
+
+        if (_recent.Count > RecentKept)
+            _recent.RemoveRange(RecentKept, _recent.Count - RecentKept);
     }
 
     /// <summary>
