@@ -265,15 +265,20 @@ public class MainPresenterTests
     // ---- Intents -------------------------------------------------------------------------------
 
     [Fact]
-    public void Completing_a_task_removes_it_from_the_list_and_can_be_undone()
+    public void Completing_a_task_marks_it_finished_and_can_be_undone()
     {
         var presenter = NewPresenter(new FakeApi(), SeededStore());
 
         presenter.Complete("i1");
-        Assert.Empty(presenter.Rows);
+
+        // Still on the list, drawn finished: it stays for a few seconds so a slip of the mouse
+        // doesn't take a task off the screen with nothing said about where it went. What happens
+        // after that has its own tests.
+        Assert.True(presenter.Rows.Single().Completed);
         Assert.True(presenter.CanUndo);
 
         Assert.True(presenter.Undo());
+        Assert.False(presenter.Rows.Single().Completed);
         Assert.Equal("Cached task", presenter.Rows.Single().Content);
     }
 

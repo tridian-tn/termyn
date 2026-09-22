@@ -28,6 +28,18 @@ internal sealed class OutlineView : ListView
     /// <summary>How big the arrow itself is drawn inside that room.</summary>
     private const int ExpanderGlyph = 8;
 
+    /// <summary>
+    /// How much room the box that ticks a task off takes, between the expander and the words.
+    /// </summary>
+    /// <remarks>
+    /// Wider than the box drawn in it, and the whole of it answers to a click: a fourteen-pixel
+    /// square is a target people miss, and the room around it costs nothing to hand over.
+    /// </remarks>
+    private const int CheckWidth = 20;
+
+    /// <summary>How big the box itself is drawn inside that room.</summary>
+    private const int CheckSize = 13;
+
     private IReadOnlyList<TaskRow> _rows = [];
 
     /// <summary>Struck through, for a completed row. Built once rather than per cell painted.</summary>
@@ -388,9 +400,16 @@ internal sealed class OutlineView : ListView
     /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        // The expander is not the row. Clicking it asks for the sub-tasks and nothing else — the
-        // selection stays where the user put it, which is what every tree does and what stops a
-        // glance at what is underneath from moving them off what they were reading.
+        // Neither the box nor the expander is the row. Clicking one asks for that one thing and
+        // nothing else — the selection stays where the user put it, which is what every list does
+        // and what stops ticking a task off from moving them away from what they were reading.
+        if (e.Button == MouseButtons.Left && CheckboxAt(e.Location) is { } ticked)
+        {
+            Focus();
+            ToggleRequested?.Invoke(ticked);
+            return;
+        }
+
         if (e.Button == MouseButtons.Left && ExpanderAt(e.Location) is { } id)
         {
             Focus();
@@ -429,6 +448,52 @@ internal sealed class OutlineView : ListView
     /// <summary>Asks for a task's sub-tasks to be hidden, or shown again.</summary>
     /// <remarks>The task's id, and whether it should end up collapsed.</remarks>
     public event Action<string, bool>? CollapseRequested;
+
+    /// <summary>Asks for a task to be ticked off, or put back — the box on its row was clicked.</summary>
+    public event Action<string>? ToggleRequested;
+
+    /// <summary>Clicks a task's box, for a test with no row to click.</summary>
+    /// <param name="id">The task whose box was clicked</param>
+    internal void ClickCheckbox(string id) => ToggleRequested?.Invoke(id);
+
+    /// <summary>
+    /// Presses a mouse button somewhere in the list, for a test with no hand to do it.
+    /// </summary>
+    /// <remarks>
+    /// Straight to the handler rather than through a posted button-down: a list takes the mouse on
+    /// a press and waits inside its own loop for the release, and a release nobody sends never
+    /// arrives — which hangs the test rather than failing it.
+    /// </remarks>
+    /// <param name="button">Which button went down</param>
+    /// <param name="at">Where, in the list's own coordinates</param>
+    internal void PressAt(MouseButtons button, Point at) => OnMouseDown(new MouseEventArgs(button, 1, at.X, at.Y, 0));
+
+    /// <summary>
+    /// The task whose box is under a point, or null where there isn't one.
+    /// </summary>
+    /// <remarks>
+    /// The whole gutter answers rather than the square drawn in it, for the reason the expander's
+    /// does: a thirteen-pixel target is one people miss. A day's heading has no box — there's no
+    /// task on that row to tick off.
+    /// </remarks>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The task's id, or null when that point is not a box</returns>
+    internal string? CheckboxAt(Point point)
+    {
+        if (HitTest(point).Item?.Index is not { } index || index < 0 || index >= _rows.Count)
+            return null;
+
+        var row = _rows[index];
+        if (row.IsHeading)
+            return null;
+
+        // The first column's own left edge, since a list can be scrolled sideways and the columns
+        // can be dragged narrower than the indent they are holding.
+        var bounds = GetItemRect(index, ItemBoundsPortion.Entire);
+        bounds.X += (row.Depth * IndentWidth) + ExpanderWidth;
+
+        return new Rectangle(bounds.X, bounds.Y, CheckWidth, bounds.Height).Contains(point) ? row.Id : null;
+    }
 
     /// <summary>
     /// The task whose expander is under a point, or null where there isn't one.
@@ -804,6 +869,11 @@ internal sealed class OutlineView : ListView
 
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
+
+                DrawCheck(e.Graphics, Checkbox(bounds), row.Completed, selected ? Theme.OnAccent : Theme.Muted);
+
+                bounds.X += CheckWidth;
+                bounds.Width -= CheckWidth;
                 TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(bounds), text, Flags);
                 break;
 
@@ -936,6 +1006,66 @@ internal sealed class OutlineView : ListView
     /// <summary>Where the expander sits, given the row's first column already moved in by its depth.</summary>
     private static Rectangle Expander(Rectangle indented)
         => new(indented.X, indented.Y, ExpanderWidth, indented.Height);
+
+    /// <summary>
+    /// Where the box that ticks a task off sits, given the row already moved past its expander.
+    /// </summary>
+    /// <param name="indented">The first column, indented and past the expander's room</param>
+    /// <returns>The square the box is drawn in, centred in the room it's given</returns>
+    internal static Rectangle Checkbox(Rectangle indented)
+    {
+        var size = Math.Min(CheckSize, Math.Max(0, indented.Height - 4));
+
+        return new Rectangle(
+            indented.X + ((CheckWidth - size) / 2),
+            indented.Y + ((indented.Height - size) / 2),
+            size,
+            size);
+    }
+
+    /// <summary>
+    /// Draws the box that ticks a task off: a square, and a tick in it once it's done.
+    /// </summary>
+    /// <remarks>
+    /// Drawn rather than asked of Windows. A themed checkbox comes out in the system's colours,
+    /// which on the dark theme is a pale box on a dark row — and the tick is three points, which
+    /// is less code than fetching the renderer and correcting what it gives back.
+    /// </remarks>
+    /// <param name="g">What to draw on</param>
+    /// <param name="bounds">The square the box fills</param>
+    /// <param name="ticked">Whether the task is done</param>
+    /// <param name="colour">What to draw it in</param>
+    internal static void DrawCheck(Graphics g, Rectangle bounds, bool ticked, Color colour)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return;
+
+        using var pen = new Pen(colour);
+
+        // The square is four straight lines, which smoothing only softens; the tick is diagonal,
+        // and unsmoothed at this size it reads as a staircase.
+        g.DrawRectangle(pen, bounds);
+
+        if (!ticked)
+            return;
+
+        var was = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+        try
+        {
+            var inset = Math.Max(2, bounds.Width / 5);
+            var foot = new Point(bounds.Left + inset, bounds.Top + (bounds.Height / 2));
+            var turn = new Point(bounds.Left + (bounds.Width / 2) - 1, bounds.Bottom - inset - 1);
+            var head = new Point(bounds.Right - inset, bounds.Top + inset);
+
+            g.DrawLines(pen, [foot, turn, head]);
+        }
+        finally
+        {
+            g.SmoothingMode = was;
+        }
+    }
 
     /// <summary>
     /// The arrow that hides and shows a task's sub-tasks — right when they are hidden, down when
