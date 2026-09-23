@@ -52,8 +52,8 @@ jobs:
       # nobody reads, is worse than a failure.
       #
       # -Version is taken from the tag when there is one and left off otherwise, so a tag push
-      # names the artefacts and stamps the assembly with the tag rather than with the props. On a
-      # branch or a PR the props are the source, as before.
+      # names the artefacts and stamps the assembly with the tag. On a branch or a PR they come out
+      # as the 0.0.0 placeholder from the props, which is all a packaging check needs.
       #
       # The runner image ships Inno Setup 6 under Program Files (x86), which is one of the three
       # places the script looks, so nothing is installed for it. That is the part of this worth

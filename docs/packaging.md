@@ -22,9 +22,11 @@ so rather than failing. `-RequireInstaller` turns that fallback into a failure, 
 want anywhere a release comes from: shipping half of what was asked for, announced in a warning
 nobody reads, is worse than stopping.
 
-**The version lives in one place** — `<Version>` in `Directory.Build.props`. It stamps the
-executable, names both artefacts, and is what the update check compares against, so the installer,
-the binary and the release tag cannot disagree. Release tags are that number with a leading `v`.
+**The version lives in one place: the release tag.** CI passes it to the script as `-Version`
+(without the leading `v`), and from there it stamps the executable, names both artefacts, and is
+what the update check compares against, so the installer, the binary and the tag can't disagree.
+`<Version>` in `Directory.Build.props` is a `0.0.0` placeholder that's never bumped. Anything built
+without `-Version` calls itself v0.0.0, which the update check treats as older than every release.
 
 ## Releasing
 
@@ -37,9 +39,8 @@ creating it as a **draft** if it isn't there already. Draft rather than publishe
 signed yet: somebody should look before these are downloadable. Press publish to make the release
 real, or delete the draft to abandon it.
 
-The tag has to be the version that was built — `v1.2.0` against a `Directory.Build.props` still
-saying `1.1.0` fails the job rather than attaching the previous version's installer to this
-version's release. Bump `<Version>`, merge it, then tag.
+There's nothing to bump beforehand. Tag the commit you want to release (`v1.2.0`) and push the tag,
+and that commit is built as 1.2.0.
 
 What this doesn't do is tell you the installer *works*. A runner has the .NET Desktop Runtime
 installed, so the missing-runtime path can't be exercised there; that one still wants a clean VM.
