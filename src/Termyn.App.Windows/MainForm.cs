@@ -3564,6 +3564,12 @@ internal sealed class MainForm : Form
             _presenter.Complete(id);
     }
 
+    /// <summary>
+    /// Whether the timer that takes ticked-off tasks away is running, so a test can ask without
+    /// waiting out the seconds it takes.
+    /// </summary>
+    internal bool DroppingTicked => _tickedIdle.Enabled;
+
     /// <summary>Asks for a deadline and applies it. Returns false when nothing was changed.</summary>
     /// <remarks>
     /// The row is found by the id the command names rather than read off the selection: the two are
