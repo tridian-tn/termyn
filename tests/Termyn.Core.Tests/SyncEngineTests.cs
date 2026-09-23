@@ -873,6 +873,80 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public async Task A_cancelled_reorder_leaves_an_edit_made_since()
+    {
+        // The reorder goes with the refused add, and its other tasks get their places back. Only
+        // their places: B was renamed after the reorder, and the rename is still on its way.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, TwoInProject(), new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New", ["project_id"] = "p", ["child_order"] = 3 });
+        engine.MoveItem(temp, -1); // between a and b, so b moves down one
+        engine.UpdateItem("b", new JsonObject { ["content"] = "B renamed" });
+
+        api.Next = cmds => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = cmds.ToDictionary(c => c.Uuid, c => c.Type == "item_add" ? new CommandResult(false, null, "err") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        var b = engine.Snapshot().Items.Single(i => i.Id == "b");
+        Assert.Equal("B renamed", b.Content);
+        Assert.Equal(2, b.ChildOrder);
+    }
+
+    [Fact]
+    public async Task A_refused_reorder_leaves_one_copy_of_a_task_the_server_has_named_since()
+    {
+        // Added offline and then moved up one. The server takes the add and names the task, and
+        // refuses the reorder. Put back under the name it had here, there'd be two of it.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, TwoInProject(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New", ["project_id"] = "p", ["child_order"] = 3 });
+        engine.MoveItem(temp, -1);
+
+        api.Next = cmds => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = cmds.ToDictionary(c => c.Uuid, c => c.Type == "item_reorder" ? new CommandResult(false, null, "err") : new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real1" },
+        };
+        await engine.SyncAsync();
+
+        var added = Assert.Single(engine.Snapshot().Items, i => i.Content == "New");
+        Assert.Equal("real1", added.Id);
+        Assert.Equal(3, added.ChildOrder);
+        Assert.Equal(2, engine.Snapshot().Items.Single(i => i.Id == "b").ChildOrder);
+    }
+
+    [Fact]
+    public async Task A_refused_reorder_leaves_an_edit_made_since()
+    {
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, TwoInProject(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        engine.MoveItem("b", -1);
+        engine.UpdateItem("a", new JsonObject { ["content"] = "A renamed" });
+
+        api.Next = cmds => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = cmds.ToDictionary(c => c.Uuid, c => c.Type == "item_reorder" ? new CommandResult(false, null, "err") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.Equal("A renamed", items["a"].Content);
+        Assert.Equal(1, items["a"].ChildOrder);
+        Assert.Equal(2, items["b"].ChildOrder);
+    }
+
+    [Fact]
     public async Task A_withheld_tombstone_survives_a_restart()
     {
         var store = new InMemorySnapshotStore();
@@ -1308,6 +1382,15 @@ public class SyncEngineTests
         var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
         engine.Load();
         return engine;
+    }
+
+    /// <summary>A store holding "a" then "b" in project "p".</summary>
+    private static InMemorySnapshotStore TwoInProject()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
+        return store;
     }
 
     private static JsonObject Args(OutboxCommand cmd) => (JsonObject)JsonNode.Parse(cmd.ArgsJson)!;

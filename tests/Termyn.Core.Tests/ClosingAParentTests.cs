@@ -124,6 +124,32 @@ public class ClosingAParentTests
     }
 
     [Fact]
+    public async Task A_sub_task_the_server_names_while_its_close_is_pending_isnt_reopened()
+    {
+        // Added offline and ticked off with the task. The add lands first, and the server's copy of
+        // the sub-task comes back under its new name, still open.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 5);
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["parent_id"] = "a" });
+        Assert.Contains(temp, engine.CompleteItem("a")!);
+
+        // No verdict on the close, so it's still pending once this lands.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.Where(c => c.Type == "item_add").ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+            Changes = [Json.Change("items", "real", """{"id":"real","content":"Added offline","project_id":"p","parent_id":"a","child_order":3}""")],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal(1, engine.PendingCount);
+        Assert.True(Items(engine)["real"].Completed);
+    }
+
+    [Fact]
     public async Task A_refused_close_leaves_an_edit_made_since()
     {
         // It takes the tick off where the task stands. Put back whole, the rename the server took

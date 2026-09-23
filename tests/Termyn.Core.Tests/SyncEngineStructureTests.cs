@@ -450,6 +450,161 @@ public class SyncEngineStructureTests
     }
 
     [Fact]
+    public async Task A_refused_move_leaves_one_copy_of_a_sub_task_the_server_has_named_since()
+    {
+        // Added offline under the task, then carried by its move. The server takes the add and
+        // names the sub-task, and refuses the move. Put back under the name it had here, there'd
+        // be two of it, for good.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        var temp = engine.AddItem(AddedUnder("a"));
+        engine.MoveItemToProject("a", "q");
+        Assert.Equal("q", engine.Snapshot().Items.Single(i => i.Id == temp).ProjectId);
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = RefusingMoves(commands),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+        };
+        await engine.SyncAsync();
+
+        var added = Assert.Single(engine.Snapshot().Items, i => i.Content == "Added offline");
+        Assert.Equal("real", added.Id);
+        Assert.Equal("p", added.ProjectId);
+        Assert.Equal("s1", added.SectionId);
+    }
+
+    [Fact]
+    public async Task A_refused_move_doesnt_bring_back_a_sub_task_whose_add_was_refused()
+    {
+        // The refused add takes the sub-task away. The server never had it, so nothing it sends will
+        // ever take it away again if the move's refusal puts it back.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        engine.AddItem(AddedUnder("a"));
+        engine.MoveItemToProject("a", "q");
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        Assert.DoesNotContain(engine.Snapshot().Items, i => i.Content == "Added offline");
+        Assert.Equal("p", engine.Snapshot().Items.Single(i => i.Id == "a").ProjectId);
+    }
+
+    [Fact]
+    public async Task A_refused_move_leaves_an_edit_made_since()
+    {
+        // Renamed after the move, and the renames land where the move doesn't. Put back whole, the
+        // move's priors would undo them here and nowhere else.
+        var store = Family();
+        store.PutResource("items", "q1", """{"id":"q1","content":"Q1","project_id":"q","child_order":5}""");
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        engine.MoveItemToProject("a", "q");
+        Assert.Equal(6, engine.Snapshot().Items.Single(i => i.Id == "a").ChildOrder);
+
+        engine.UpdateItem("a", new JsonObject { ["content"] = "A renamed" });
+        engine.UpdateItem("b", new JsonObject { ["content"] = "B renamed" });
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = RefusingMoves(commands) };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.Equal("A renamed", items["a"].Content);
+        Assert.Equal("B renamed", items["b"].Content);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Equal("s1", items[id].SectionId));
+        Assert.Equal(1, items["a"].ChildOrder);
+    }
+
+    [Fact]
+    public async Task A_refused_move_leaves_a_sub_task_under_the_parent_it_was_given_since()
+    {
+        // The move only took its sub-tasks into another project. C was outdented under A after
+        // that, and the outdent lands where the move doesn't, so C stays under A.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        engine.MoveItemToProject("a", "q");
+        Assert.True(engine.OutdentItem("c"));
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Args["id"]!.ToString() == "a" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        var c = engine.Snapshot().Items.Single(i => i.Id == "c");
+        Assert.Equal("a", c.ParentId);
+        Assert.Equal(2, c.ChildOrder);
+        Assert.Equal("p", c.ProjectId);
+        Assert.Equal("s1", c.SectionId);
+    }
+
+    [Fact]
+    public async Task A_refused_outdent_puts_the_task_back_under_the_name_the_server_gave_its_parent()
+    {
+        // Both added offline, one under the other, and the sub-task then outdented. The server takes
+        // both adds and refuses the outdent, so the parent it goes back under has been renamed.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Projects(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        var parent = engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p" });
+        var child = engine.AddItem(new JsonObject { ["content"] = "Child", ["project_id"] = "p", ["parent_id"] = parent });
+        Assert.True(engine.OutdentItem(child));
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = RefusingMoves(commands),
+            TempIdMapping = new Dictionary<string, string> { [parent] = "parent", [child] = "child" },
+        };
+        await engine.SyncAsync();
+
+        var restored = Assert.Single(engine.Snapshot().Items, i => i.Content == "Child");
+        Assert.Equal("child", restored.Id);
+        Assert.Equal("parent", restored.ParentId);
+    }
+
+    [Fact]
+    public async Task A_sub_task_the_server_names_while_its_move_is_pending_isnt_pulled_back()
+    {
+        // Added offline and carried by the move. The add lands first, and the server's copy of the
+        // sub-task comes back under its new name, still in the old project.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 5);
+        engine.Load();
+
+        var temp = engine.AddItem(AddedUnder("a"));
+        engine.MoveItemToProject("a", "q");
+
+        // No verdict on the move, so it's still pending once this lands.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.Where(c => c.Type == "item_add").ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+            Changes = [Json.Change("items", "real", """{"id":"real","content":"Added offline","project_id":"p","section_id":"s1","parent_id":"a","child_order":2}""")],
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal(1, engine.PendingCount);
+        Assert.Equal("q", engine.Snapshot().Items.Single(i => i.Id == "real").ProjectId);
+    }
+
+    [Fact]
     public void An_indent_can_be_reverted_back_to_where_it_was()
     {
         var engine = TwoSiblings();
@@ -684,6 +839,16 @@ public class SyncEngineStructureTests
 
     private static Dictionary<string, CommandResult> Refused(IReadOnlyList<Command> commands)
         => commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected"));
+
+    /// <summary>Refuses the moves in a batch and takes everything else.</summary>
+    private static Dictionary<string, CommandResult> RefusingMoves(IReadOnlyList<Command> commands)
+        => commands.ToDictionary(
+            c => c.Uuid,
+            c => c.Type == "item_move" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null));
+
+    /// <summary>A sub-task added offline under a task in <see cref="Family"/>.</summary>
+    private static JsonObject AddedUnder(string parentId)
+        => new() { ["content"] = "Added offline", ["project_id"] = "p", ["section_id"] = "s1", ["parent_id"] = parentId };
 
     /// <summary>A task with a child and a grandchild, in a section, beside one that's none of theirs.</summary>
     private static InMemorySnapshotStore Family()
