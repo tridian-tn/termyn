@@ -80,6 +80,20 @@ public class TickedOffTests
     }
 
     [Fact]
+    public void Once_it_is_back_the_status_line_stops_offering_to_put_it_back()
+    {
+        // Nothing is waiting to go any more, so a line naming Ctrl+Z would be about nothing — and
+        // pressing it would take back the reopen rather than the tick.
+        var (presenter, _) = Seeded();
+        presenter.Complete("a");
+
+        presenter.Reopen("a");
+
+        Assert.False(presenter.Lingering);
+        Assert.DoesNotContain("Ctrl+Z", presenter.Status);
+    }
+
+    [Fact]
     public void Taking_the_change_back_leaves_nothing_waiting_to_go()
     {
         var (presenter, clock) = Seeded();
