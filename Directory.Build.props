@@ -16,13 +16,13 @@
     <NeutralLanguage>en-GB</NeutralLanguage>
   </PropertyGroup>
 
-  <!-- The version a dev build stamps itself with, read back at runtime by the update check and
-       shown in the about box. A release build gets its version from the tag instead — the packaging
-       job passes it to publish, so an assembly cut from a tag carries the tag's number regardless
-       of what is here. Left as something a running app can still report so `dotnet run` shows
-       something meaningful. -->
+  <!-- A placeholder, not a release number: the release tag is the only real version. The packaging
+       job passes the tag to publish, so a release build is stamped with it. Anything else — `dotnet
+       run`, a Debug build, a local package without -Version — calls itself v0.0.0, which is plainly
+       not a release and makes the update check offer whatever the latest one is. Left empty, the
+       SDK would stamp 1.0.0 instead, which reads as newer than every release so far. -->
   <PropertyGroup>
-    <Version>0.2.0</Version>
+    <Version>0.0.0</Version>
     <Company>Tridian</Company>
     <Product>Termyn</Product>
     <Copyright>Copyright © Trystan Negus</Copyright>

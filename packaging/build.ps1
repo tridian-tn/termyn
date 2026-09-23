@@ -7,15 +7,14 @@
     .NET 10 Desktop Runtime on the target machine; neither bundles it, which is what keeps the
     download small and lets the runtime be serviced independently.
 
-    The version comes from -Version when it is given, and from Directory.Build.props otherwise.
-    Given, it is passed to dotnet publish as well, so the stamped assembly, the two filenames and
-    the release tag cannot disagree. Not given, the props are the one place to change it and the
-    rest still cannot disagree — the release job in CI passes the tag through when there is one.
+    The version comes from -Version, which CI passes from the release tag. It's passed to dotnet
+    publish as well, so the stamped assembly, the two filenames and the release tag can't disagree.
+    Left off, the build takes the 0.0.0 placeholder in Directory.Build.props — fine for checking
+    the packaging works, and named so nobody mistakes it for a release.
 
 .PARAMETER Version
-    The version to build. Plain numbers, up to four parts (e.g. 1.2.3). Overrides the value in
-    Directory.Build.props and stamps the assembly with the same number the filenames carry, so a
-    release cut from a tag comes out named after the tag whatever the props still say.
+    The version to build. Plain numbers, up to four parts (e.g. 1.2.3). Stamps the assembly with
+    the same number the filenames carry. Required for anything meant to be released.
 
 .PARAMETER SkipTests
     Package without running the test suite first. For iterating on the packaging itself.
@@ -136,6 +135,12 @@ function Invoke-Sign {
 $version = Get-ProductVersion -Override $Version
 Write-Host "Termyn $version" -ForegroundColor Cyan
 
+# Not a failure: CI packages every pull request this way to check the packaging still works. It's
+# only a release that must never carry the placeholder, and releases always come with -Version.
+if ($version -eq '0.0.0') {
+    Write-Warning 'No -Version given, so these are 0.0.0 dev builds. Pass -Version for anything meant to be released.'
+}
+
 if (-not $SkipTests) {
     Write-Host 'Running tests...' -ForegroundColor Cyan
     dotnet test --solution (Join-Path $root 'Termyn.slnx')
@@ -152,9 +157,9 @@ New-Item -ItemType Directory -Path $publish -Force | Out-Null
 
 Write-Host 'Publishing...' -ForegroundColor Cyan
 
-# The version passed to publish as well, or the assembly is stamped from the props and the two
-# filenames wrap something whose about box reads as the old number. Not given, publish reads the
-# same props Get-ProductVersion just did, and the two agree by construction.
+# The version passed to publish as well, or the assembly is stamped with the 0.0.0 placeholder and
+# the two filenames wrap something whose about box and update check read as a dev build. Not given,
+# publish reads the same props Get-ProductVersion just did, and the two agree by construction.
 $publishArgs = @('publish', $app, '-c', 'Release', '-o', $publish, '--nologo', '--verbosity', 'quiet', '-p:DebugType=none')
 if ($Version) { $publishArgs += "-p:Version=$version" }
 
