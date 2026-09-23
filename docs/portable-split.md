@@ -85,7 +85,7 @@ one above.
 `Write` — about 250 lines deciding what every run of a description says, how far it indents and
 which style it takes. It is the largest piece of portable reasoning in the project and the most
 expensive to extract, because there is no intermediate run list: each run is written into the
-`RichTextBox` selection as the walk reaches it.
+rich text document as the walk reaches it.
 
 Extracting it means producing `(text, style, indent, source span)` runs in `Presentation` and
 leaving the RTF emission here. That is a restructure rather than a move. It would sit beside
@@ -100,9 +100,9 @@ a bug.
 
 The cost that is real now is in the tests. Every test in `Termyn.App.Windows.Tests` must carry
 `[WinFormsFact]` — single-threaded apartment, message pump — and `ApartmentTests` fails the build
-if one doesn't. That is 5,739 lines of test running on a path that xUnit does not give a test by
-default, and [#115](https://github.com/tridian-tn/termyn/issues/115) is the standing bill: the
-markdown tests fail in clusters on CI, never locally, and a re-run of the same commit passes.
+if one doesn't. They also run one at a time, since rich edit controls on several threads at once is
+what [#115](https://github.com/tridian-tn/termyn/issues/115) turned out to be. That is 5,739 lines
+of test running on a path that xUnit does not give a test by default.
 
 Several of the clean moves are already tested through a control that only exists to be constructed.
 `OutlineColumnTests` stands an `OutlineView` up to call a static method; so do `OutlineColourTests`
@@ -145,10 +145,10 @@ costs nothing.
 that hasn't happened. The moment a Linux client exists, the tier that needs a portable type first
 stops being a preference and becomes the difference between one key map and two.
 
-**#115 forcing the markdown tests off the apartment path anyway.** If the flakiness is eventually
-fixed by taking those tests away from the control, the Markdig walk gets extracted as a side effect
-and the cost of doing it deliberately drops to nearly nothing. If it is fixed some other way, the
-walk stays where it is and the case for moving it is only the second-client one.
+**Not #115 any more.** It could have forced the markdown tests off the control, and the walk out
+with them as a side effect. It was fixed another way — the tests run one at a time, so no two
+threads use a rich edit control at once — so the walk stays where it is and the case for moving it
+is only the second-client one.
 
 **Descriptions, or the outline, growing a second renderer.** The rendered view and the editor
 already agree about the source because `MarkdownHighlight` is shared. Anything that has to agree

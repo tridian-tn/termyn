@@ -92,23 +92,18 @@ public class MarkdownEditorTests
     /// Selects a stretch, and makes sure the selection went there.
     /// </summary>
     /// <remarks>
-    /// This is how the trouble hid behind these tests for so long. Setting a selection on one of
-    /// these controls sometimes doesn't take and leaves it at nought, and everything asked after
-    /// that then answers about character nought — so a monospace face came back as the body face,
-    /// which the test read as the styling being wrong rather than as its own question having gone
-    /// astray. Asked again, and said plainly when it still won't take.
+    /// A selection that didn't take is left at nought, and everything asked after it then answers
+    /// about character nought — so a monospace face comes back as the body face, and the test reads
+    /// that as the styling being wrong rather than as its own question having gone astray. It's been
+    /// seen when these tests ran alongside others on another thread, which this assembly no longer
+    /// does, and said plainly if it's ever seen again.
     /// </remarks>
     private static void Pick(MarkdownEditor editor, int at, int length)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            editor.Select(at, length);
+        editor.Select(at, length);
 
-            if (editor.SelectionStart == at && editor.SelectionLength == length)
-                return;
-        }
-
-        Assert.Fail(
+        Assert.True(
+            editor.SelectionStart == at && editor.SelectionLength == length,
             $"asked for {length} characters at {at} and got {editor.SelectionLength} at "
             + $"{editor.SelectionStart}. Nothing read from this selection would be about the right "
             + $"place. In the box: '{Shown(editor.Text)}'");

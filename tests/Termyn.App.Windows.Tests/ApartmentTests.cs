@@ -1,20 +1,25 @@
 using System.Reflection;
 using System.Threading;
+using Xunit.Sdk;
+using Xunit.v3;
 
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// That these tests run where Windows Forms can be run.
+/// That these tests run where Windows Forms can be run, and the way the app runs it.
 /// </summary>
 /// <remarks>
 /// Windows Forms wants a single-threaded apartment and a message pump. xUnit gives a test neither:
 /// its bodies run on thread-pool threads, which are MTA, with nothing pumping. Most of what these
-/// tests do works there anyway — setting a selection is a synchronous SendMessage — and the parts
-/// that don't are the ones that have been failing on the build agent and never here.
+/// tests do works there anyway — setting a selection is a synchronous SendMessage — which is how
+/// it went unnoticed.
 ///
-/// So every test in this assembly is a WinForms one, and that is worth holding rather than trusting
-/// to everyone remembering: a plain [Fact] added later would run in the wrong place and nothing
-/// would say so until a build went red for reasons nobody could reproduce.
+/// So every test in this assembly is a WinForms one, and they run one at a time rather than side by
+/// side on threads of their own. Both are worth holding rather than trusting to everyone
+/// remembering: a plain [Fact] added later, or the attribute that runs them one at a time taken out
+/// for the speed, would run in a way the app never does, and nothing would say so until a build
+/// went red for reasons nobody could reproduce. What's held is the attribute — a runner told to run
+/// them in parallel would still be obeyed, and nothing here runs them that way.
 /// </remarks>
 public class ApartmentTests
 {
@@ -42,5 +47,17 @@ public class ApartmentTests
             stragglers.Count == 0,
             "these run in the default apartment and want [WinFormsFact] or [WinFormsTheory]: "
             + string.Join(", ", stragglers));
+    }
+
+    [WinFormsFact]
+    public void The_tests_here_run_one_at_a_time()
+    {
+        // Rich edit controls on two threads at once can break a font for the whole process, and a
+        // selection in text set in it then comes back at nought — see the note on the attribute.
+        var parallel = typeof(ApartmentTests).Assembly.GetCustomAttribute<ParallelizationAttribute>();
+
+        Assert.True(
+            parallel?.GetMode() == ParallelMode.None,
+            "the tests here run side by side, which puts rich edit controls on several threads at once");
     }
 }

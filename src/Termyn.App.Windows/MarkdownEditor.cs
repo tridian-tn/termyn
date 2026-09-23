@@ -150,12 +150,12 @@ internal sealed class MarkdownEditor : RichTextBox
             // It also settles what used to need a separate pass: the document is built from
             // nothing each time, so a word that was bold until its asterisks were deleted comes
             // back plain without anything having to notice that it changed.
-            Rtf = BuildRtf(text);
+            RichText.Load(this, BuildRtf(text));
             _styled = text;
         }
         finally
         {
-            Restore(selection, length);
+            Select(selection, length);
             ScrollTo(scroll);
 
             SendMessage(Handle, WmSetRedraw, 1, 0);
@@ -171,26 +171,14 @@ internal sealed class MarkdownEditor : RichTextBox
     /// <remarks>
     /// Written out rather than applied run by run because a rich edit control takes a document in
     /// one message and a selection's formatting in three per run — and a full-length description
-    /// is three thousand runs. The colours and the two faces are declared once at the top and each
-    /// run then names them, which is what keeps this proportional to the text rather than to the
-    /// number of things in it.
+    /// is three thousand runs.
     /// </remarks>
-    private string BuildRtf(string text)
+    private StringBuilder BuildRtf(string text)
     {
         var body = (int)Math.Round(Font.SizeInPoints * 2);   // RTF counts in half-points
 
         var rtf = new StringBuilder(text.Length * 2 + 256);
-        rtf.Append(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil ")
-           .Append(Font.FontFamily.Name)
-           .Append(@";}{\f1\fmodern ")
-           .Append(Faces.FixedWidth.Name)
-           .Append(@";}}");
-
-        rtf.Append(@"{\colortbl ;")
-           .Append(Colour(_theme.Text))
-           .Append(Colour(_theme.Muted))
-           .Append(Colour(_theme.Accent))
-           .Append('}');
+        RichText.Open(rtf, Font.FontFamily.GetName(0), _theme);
 
         foreach (var run in MarkdownHighlight.Runs(text))
         {
@@ -198,7 +186,7 @@ internal sealed class MarkdownEditor : RichTextBox
             var level = heading ? run.Style - MarkdownStyle.Heading1 : 0;
             var size = heading ? (int)Math.Round(body * (1f + HeadingScale[level])) : body;
 
-            rtf.Append(run.Style == MarkdownStyle.Code ? @"\f1" : @"\f0")
+            rtf.Append(@"\f").Append(run.Style == MarkdownStyle.Code ? RichText.FixedFace : RichText.BodyFace)
                .Append(@"\fs").Append(size)
                .Append(heading || run.Style == MarkdownStyle.Strong ? @"\b" : @"\b0")
                .Append(run.Style is MarkdownStyle.Emphasis or MarkdownStyle.Quote ? @"\i" : @"\i0")
@@ -206,7 +194,7 @@ internal sealed class MarkdownEditor : RichTextBox
                .Append(@"\cf").Append(ColourIndex(run.Style))
                .Append(' ');
 
-            Escape(rtf, text.AsSpan(run.Start, run.Length));
+            RichText.Escape(rtf, text.AsSpan(run.Start, run.Length));
         }
 
         // The last \par of a document ends the paragraph it is on rather than opening an empty one
@@ -216,93 +204,17 @@ internal sealed class MarkdownEditor : RichTextBox
         if (text.EndsWith('\n'))
             rtf.Append(@"\par ");
 
-        return rtf.Append('}').ToString();
-    }
-
-    /// <summary>How many times a selection that didn't take is set again before giving up.</summary>
-    private const int SelectionAttempts = 3;
-
-    /// <summary>
-    /// Puts the user's place back, and makes sure it went back.
-    /// </summary>
-    /// <remarks>
-    /// Asking is not enough. On a build agent this control has been left with its caret at nought
-    /// after being told to put it at twenty — which here means the user is typing in the middle of
-    /// a description, the styling catches up on a pause, and the caret jumps to the top. That is
-    /// the fault <see cref="Refill"/> exists to prevent, arriving by another road.
-    ///
-    /// Nothing is done about a selection that never takes after this. There is no better place to
-    /// put the caret than where the control has left it, and being wrong about where it is would
-    /// be worse than the jump.
-    /// </remarks>
-    /// <param name="start">Where the selection began</param>
-    /// <param name="length">How much of it there was</param>
-    private void Restore(int start, int length)
-    {
-        for (var attempt = 0; attempt < SelectionAttempts; attempt++)
-        {
-            Select(start, length);
-
-            if (SelectionStart == start && SelectionLength == length)
-                return;
-        }
+        return rtf.Append('}');
     }
 
     /// <summary>Which entry of the colour table a style is drawn in.</summary>
     private static int ColourIndex(MarkdownStyle style) => style switch
     {
-        MarkdownStyle.LinkText => 3,
+        MarkdownStyle.LinkText => RichText.AccentColour,
         MarkdownStyle.Marker or MarkdownStyle.Url or MarkdownStyle.Code
-            or MarkdownStyle.Rule or MarkdownStyle.Quote => 2,
-        _ => 1,
+            or MarkdownStyle.Rule or MarkdownStyle.Quote => RichText.MutedColour,
+        _ => RichText.TextColour,
     };
-
-    private static string Colour(Color colour)
-        => $@"\red{colour.R}\green{colour.G}\blue{colour.B};";
-
-    /// <summary>
-    /// Writes text into a rich text document without any of it being read as instructions.
-    /// </summary>
-    /// <remarks>
-    /// A description is account data and can hold anything. A brace or a backslash left alone would
-    /// be read as the document's own syntax — at best drawing the rest of the description wrongly,
-    /// at worst swallowing it. Anything outside ASCII goes as its code point, since the header says
-    /// this document is ANSI and a pasted em dash or emoji would otherwise arrive as mojibake.
-    /// </remarks>
-    private static void Escape(StringBuilder rtf, ReadOnlySpan<char> text)
-    {
-        foreach (var c in text)
-        {
-            switch (c)
-            {
-                case '\\' or '{' or '}':
-                    rtf.Append('\\').Append(c);
-                    break;
-
-                case '\n':
-                    rtf.Append(@"\par ");
-                    break;
-
-                // The control holds a line ending as one newline, so this is only reachable from
-                // text that arrived with one on its own. Dropped rather than drawn as a blank.
-                case '\r':
-                    break;
-
-                case '\t':
-                    rtf.Append(@"\tab ");
-                    break;
-
-                case < (char)128:
-                    rtf.Append(c);
-                    break;
-
-                default:
-                    // Signed, as the format asks: anything above 32767 is written as a negative.
-                    rtf.Append(@"\u").Append((short)c).Append('?');
-                    break;
-            }
-        }
-    }
 
     /// <summary>
     /// Swallows the change this control made to itself.
