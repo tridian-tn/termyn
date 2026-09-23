@@ -141,6 +141,10 @@ internal sealed class MarkdownEditor : RichTextBox
         var length = SelectionLength;
         var scroll = ScrollPosition();
 
+        // Handing the control a document puts it back to its own size, and the user may have it
+        // scaled. Taken with the rest of their place, so it can go back with it.
+        var zoom = ZoomLevel.Of(this);
+
         try
         {
             // The whole document at once, rather than a selection and two property sets per run.
@@ -155,6 +159,10 @@ internal sealed class MarkdownEditor : RichTextBox
         }
         finally
         {
+            // Ahead of the scroll, which was measured at this scale and means somewhere else in the
+            // description at any other.
+            zoom.ApplyTo(this);
+
             Select(selection, length);
             ScrollTo(scroll);
 

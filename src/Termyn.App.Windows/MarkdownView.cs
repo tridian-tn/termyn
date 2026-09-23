@@ -232,6 +232,10 @@ internal sealed class MarkdownView : RichTextBox
         if (!IsHandleCreated)
             return;
 
+        // Loading a document puts the box back to its own size, and the user may have it scaled.
+        // Switching task or a sync coming in is no reason for it to stop being.
+        var zoom = ZoomLevel.Of(this);
+
         // Drawing is switched off for the duration, so the box isn't painted empty and then full in
         // the place the user is reading.
         SendMessage(Handle, WmSetRedraw, 0, 0);
@@ -250,6 +254,9 @@ internal sealed class MarkdownView : RichTextBox
         }
         finally
         {
+            // After the scroll, which doesn't mind: the top is the top at any scale.
+            zoom.ApplyTo(this);
+
             SendMessage(Handle, WmSetRedraw, 1, 0);
             Invalidate();
         }
