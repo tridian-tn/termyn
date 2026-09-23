@@ -1265,12 +1265,17 @@ public sealed class MainPresenter
     /// </remarks>
     private static readonly TimeSpan Lingers = TimeSpan.FromSeconds(5);
 
-    /// <summary>What's been ticked off lately, and when, so it can be kept on the list a while.</summary>
-    private readonly Dictionary<string, DateTimeOffset> _ticked = [];
+    /// <summary>A task ticked off lately: when, and the sub-tasks that went with it.</summary>
+    /// <param name="At">When it was ticked off</param>
+    /// <param name="Under">The sub-tasks ticked off along with it, which stay and go with it</param>
+    private sealed record Ticked(DateTimeOffset At, IReadOnlyList<string> Under);
+
+    /// <summary>What's been ticked off lately, so it can be kept on the list a while.</summary>
+    private readonly Dictionary<string, Ticked> _ticked = [];
 
     /// <summary>When the first of them is due to go, or null when the list holds none.</summary>
     public DateTimeOffset? LingerEnds
-        => _ticked.Count == 0 ? null : _ticked.Values.Min() + Lingers;
+        => _ticked.Count == 0 ? null : _ticked.Values.Min(t => t.At) + Lingers;
 
     /// <summary>Whether anything ticked off is being kept on the list for the moment.</summary>
     public bool Lingering => _ticked.Count > 0;
@@ -1282,7 +1287,7 @@ public sealed class MainPresenter
     public bool DropTicked()
     {
         var now = _clock.UtcNow;
-        var gone = _ticked.Where(t => now - t.Value >= Lingers).Select(t => t.Key).ToList();
+        var gone = _ticked.Where(t => now - t.Value.At >= Lingers).Select(t => t.Key).ToList();
 
         if (gone.Count == 0)
             return false;
@@ -1296,19 +1301,28 @@ public sealed class MainPresenter
         return true;
     }
 
-    /// <summary>Whether a finished task is still being shown because it was only just ticked off.</summary>
-    /// <param name="id">The task to ask about</param>
-    /// <returns>True while it stays on the list</returns>
-    private bool Kept(string id) => !ShowingCompleted && _ticked.ContainsKey(id);
+    /// <summary>
+    /// The finished tasks still being shown because they were only just ticked off.
+    /// </summary>
+    /// <remarks>
+    /// The sub-tasks that went with one are kept as long as it is. They're finished too, and
+    /// going on their own would move the rows under the pointer; staying without it, they'd be
+    /// sub-tasks with no parent in view, and turn up as top-level tasks.
+    /// </remarks>
+    /// <returns>Their ids, or none with finished work on show, where they're listed anyway</returns>
+    private HashSet<string> Kept()
+        => ShowingCompleted
+            ? []
+            : _ticked.SelectMany(t => t.Value.Under.Prepend(t.Key)).ToHashSet(StringComparer.Ordinal);
 
     public void Complete(string id)
     {
         var named = Named(id);
-        _engine.CompleteItem(id);
+        var under = _engine.CompleteItem(id);
 
         // Kept on the list for a moment, so a slip of the mouse doesn't take a task off the screen
         // with nothing said about where it went.
-        _ticked[id] = _clock.UtcNow;
+        _ticked[id] = new Ticked(_clock.UtcNow, under);
 
         History.Note($"Completed {named}", $"complete:{id}");
         Publish();
@@ -2069,8 +2083,9 @@ public sealed class MainPresenter
     private List<TaskItem> VisibleItems(ModelSnapshot snapshot)
     {
         var archived = snapshot.Projects.Where(p => p.IsArchived).Select(p => p.Id).ToHashSet();
+        var kept = Kept();
         return snapshot.Items
-            .Where(i => (!i.Completed || Kept(i.Id)) && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
+            .Where(i => (!i.Completed || kept.Contains(i.Id)) && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
             .ToList();
     }
 

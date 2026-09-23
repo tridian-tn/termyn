@@ -629,11 +629,16 @@ public sealed class SyncEngine
 
     /// <summary>Completes a task via <c>item_close</c>, which advances a recurring task instead.</summary>
     /// <remarks>
-    /// An ordinary task is ticked off locally straight away. A recurring one is left exactly as it
-    /// is: the server moves it to its next occurrence rather than finishing it, and working out
-    /// where that lands is the recurrence guessing that belongs on the server.
+    /// An ordinary task is ticked off locally straight away, and so are its open sub-tasks. The
+    /// server finishes those along with it and says nothing until the next sync, so without
+    /// following suit here they'd sit on the list as tasks with no parent in view.
+    ///
+    /// A recurring one is left exactly as it is: the server moves it to its next occurrence rather
+    /// than finishing it, and working out where that lands is the recurrence guessing that belongs
+    /// on the server.
     /// </remarks>
-    public void CompleteItem(string id)
+    /// <returns>The sub-tasks ticked off along with it, nearest first</returns>
+    public IReadOnlyList<string> CompleteItem(string id)
     {
         lock (_gate)
         {
@@ -648,11 +653,12 @@ public sealed class SyncEngine
             // list when it's closed, so there is nothing there to press twice, and guarding it too
             // would swallow a genuine re-close after an undo.
             if (recurring && HasPendingClose(id))
-                return;
+                return [];
 
             JsonObject? completed = null;
             string? prior = null;
-            StoredResource[] upserts = [];
+            var upserts = new List<StoredResource>();
+            var carried = new List<(string Id, JsonObject Json)>();
 
             if (existing is not null)
             {
@@ -662,7 +668,27 @@ public sealed class SyncEngine
                 {
                     completed = existing.DeepClone().AsObject();
                     completed["checked"] = true;
-                    upserts = [new StoredResource(ResourceType.Items, id, completed.ToJsonString())];
+                    upserts.Add(new StoredResource(ResourceType.Items, id, completed.ToJsonString()));
+
+                    // In the priors the way a move keeps the sub-tasks it carries, so the close owns
+                    // them until it lands and a refused one puts them back.
+                    var priors = new JsonArray { existing.DeepClone() };
+
+                    foreach (var child in DescendantsOf(id))
+                    {
+                        if (Model.Get(ResourceType.Items, child) is not { } json || Projections.ToTaskItem(json).Completed)
+                            continue;
+
+                        var ticked = json.DeepClone().AsObject();
+                        ticked["checked"] = true;
+
+                        priors.Add(json.DeepClone());
+                        upserts.Add(new StoredResource(ResourceType.Items, child, ticked.ToJsonString()));
+                        carried.Add((child, ticked));
+                    }
+
+                    if (carried.Count > 0)
+                        prior = priors.ToJsonString();
                 }
             }
 
@@ -674,8 +700,11 @@ public sealed class SyncEngine
             if (completed is not null)
                 Model.Upsert(ResourceType.Items, id, completed);
 
+            foreach (var (child, json) in carried)
+                Model.Upsert(ResourceType.Items, child, json);
+
             if (existing is null)
-                return;
+                return [];
 
             // Reversible only while it's queued. Once the server has advanced the schedule there is
             // no putting the occurrence back, and item_uncomplete would reopen a task that was
@@ -684,8 +713,30 @@ public sealed class SyncEngine
                 RecordUndoBarrier(cmd);
             else
                 RecordUndoable(cmd, id, prior);
+
+            return carried.Select(c => c.Id).ToList();
         }
     }
+
+    /// <summary>
+    /// The sub-tasks a close ticked off along with the task it named.
+    /// </summary>
+    /// <remarks>
+    /// Read off its priors, which hold them after the task itself. They're in the outbox's copy of
+    /// the command as well as the undo stack's, so this still works for a close queued before a
+    /// restart.
+    /// </remarks>
+    /// <param name="id">The task the close was for</param>
+    /// <param name="priorJson">What the close recorded before it changed anything</param>
+    /// <returns>Their ids, or none for a close that took nothing with it</returns>
+    private static List<string> CarriedBy(string id, string? priorJson)
+        => priorJson is not null && TryParseNode(priorJson) is JsonArray priors
+            ? priors.OfType<JsonObject>()
+                .Select(p => p["id"]?.ToString())
+                .OfType<string>()
+                .Where(p => p != id)
+                .ToList()
+            : [];
 
     /// <summary>Whether a close for this task is already queued and unsent.</summary>
     private bool HasPendingClose(string id)
@@ -737,35 +788,78 @@ public sealed class SyncEngine
     /// The task may only exist in the on-demand completed fetch, which is where a long-completed one
     /// comes from. Reopening it makes it an ordinary active task, so it moves into the model — and
     /// into the snapshot with it, since from here on incremental sync will keep it current.
+    ///
+    /// The sub-tasks its last close took with it come back too, each with an uncomplete of its own.
+    /// The server reopens a task's parents along with it but not what's under it, so putting back
+    /// a parent ticked off by mistake would otherwise leave everything under it finished.
     /// </remarks>
     public void ReopenItem(string id)
     {
         lock (_gate)
         {
             id = Promoted(id);
-
-            var existing = Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id);
-            JsonObject? reopened = null;
-
-            // Only what the model already held counts as prior state. A fetched task had none, and
-            // recording one would have undo write a completed task into the snapshot.
-            var prior = Model.Get(ResourceType.Items, id)?.ToJsonString();
-            StoredResource[] upserts = [];
-
-            if (existing is not null)
-            {
-                reopened = existing.DeepClone().AsObject();
-                reopened["checked"] = false;
-                upserts = [new StoredResource(ResourceType.Items, id, reopened.ToJsonString())];
-            }
-
-            Persist("item_uncomplete", new JsonObject { ["id"] = id }, null, prior, upserts, []);
-            if (reopened is not null)
-                Model.Upsert(ResourceType.Items, id, reopened);
-
-            // It is active now, so the completed list has no further claim on it.
-            _completed.Remove(id);
+            Reopen(id, CarriedBy(id, LastClose(id)?.PriorJson));
         }
+    }
+
+    /// <summary>
+    /// Reopens a task, the sub-tasks named with it, and the parents the server reopens by itself.
+    /// </summary>
+    /// <param name="id">The task being put back</param>
+    /// <param name="carried">The sub-tasks its close ticked off along with it</param>
+    private void Reopen(string id, IReadOnlyList<string> carried)
+    {
+        Uncomplete(id);
+
+        foreach (var child in carried.Select(Promoted))
+            if (Model.Get(ResourceType.Items, child) is { } json && Projections.ToTaskItem(json).Completed)
+                Uncomplete(child);
+
+        // Queuing nothing for these: the server does it without being asked, and an uncomplete
+        // of its own would be a second reopen of a task that's already open by then. Mirrored here
+        // so a sub-task put back doesn't sit on the list with no parent in view until it syncs.
+        var seen = new HashSet<string>(StringComparer.Ordinal) { id };
+
+        for (var parent = ParentOf(id); parent is not null && seen.Add(parent); parent = ParentOf(parent))
+            if (Model.Get(ResourceType.Items, parent) is { } json && Projections.ToTaskItem(json).Completed)
+                Uncheck(parent);
+    }
+
+    /// <summary>The task a task sits under, or null for a top-level one or one not held.</summary>
+    private string? ParentOf(string id)
+        => Model.Get(ResourceType.Items, id) is { } json ? Projections.ToTaskItem(json).ParentId : null;
+
+    /// <summary>The most recent close of this task that undo still remembers, if there is one.</summary>
+    private UndoableWrite? LastClose(string id)
+        => Enumerable.Reverse(_undoStack)
+            .Select(uuid => _undoable.GetValueOrDefault(uuid))
+            .FirstOrDefault(w => w is { Type: "item_close" } && w.Id == id);
+
+    /// <summary>Takes the tick off one task and queues the <c>item_uncomplete</c> that says so.</summary>
+    /// <param name="id">The task to reopen, already promoted</param>
+    private void Uncomplete(string id)
+    {
+        var existing = Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id);
+        JsonObject? reopened = null;
+
+        // Only what the model already held counts as prior state. A fetched task had none, and
+        // recording one would have undo write a completed task into the snapshot.
+        var prior = Model.Get(ResourceType.Items, id)?.ToJsonString();
+        StoredResource[] upserts = [];
+
+        if (existing is not null)
+        {
+            reopened = existing.DeepClone().AsObject();
+            reopened["checked"] = false;
+            upserts = [new StoredResource(ResourceType.Items, id, reopened.ToJsonString())];
+        }
+
+        Persist("item_uncomplete", new JsonObject { ["id"] = id }, null, prior, upserts, []);
+        if (reopened is not null)
+            Model.Upsert(ResourceType.Items, id, reopened);
+
+        // It is active now, so the completed list has no further claim on it.
+        _completed.Remove(id);
     }
 
     /// <summary>Deletes a task optimistically and queues an <c>item_delete</c>.</summary>
@@ -2151,6 +2245,10 @@ public sealed class SyncEngine
                     // command is all that is left to forget.
                     RemoveCommand(queued);
                     Uncheck(record.Id);
+
+                    foreach (var child in CarriedBy(record.Id, record.PriorJson))
+                        Uncheck(Promoted(child));
+
                     return true;
                 }
 
@@ -2173,7 +2271,7 @@ public sealed class SyncEngine
                     // Already applied server-side; only meaningful if the task is still there.
                     if (Model.Get(ResourceType.Items, record.Id) is null)
                         continue;
-                    ReopenItem(record.Id);
+                    Reopen(Promoted(record.Id), CarriedBy(record.Id, record.PriorJson));
                     return true;
                 }
 
@@ -2725,8 +2823,9 @@ public sealed class SyncEngine
             // A move carries the sub-tasks with it, and they're in its priors because it changed
             // them. Left unowned, the server's word on one arrives before it has moved them and
             // pulls the sub-task back to where it was; and a tombstone taken meanwhile is undone
-            // when a refused move puts its priors back, for good, since no second one is sent.
-            if (c.Type == "item_move" && TryParseNode(c.PriorJson) is JsonArray priors)
+            // when a refused move puts its priors back, for good, since no second one is sent. A
+            // close ticks off the sub-tasks under it, and holds them for the same reasons.
+            if (c.Type is "item_move" or "item_close" && TryParseNode(c.PriorJson) is JsonArray priors)
             {
                 foreach (var prior in priors)
                     if (prior is JsonObject o && o["id"] is JsonValue carried)

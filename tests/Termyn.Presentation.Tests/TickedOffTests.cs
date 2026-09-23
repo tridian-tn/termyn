@@ -141,12 +141,63 @@ public class TickedOffTests
         Assert.Null(presenter.LingerEnds);
     }
 
-    private static (MainPresenter Presenter, FixedClock Clock) Seeded()
+    // ---- A task with sub-tasks -----------------------------------------------------------------
+
+    [Fact]
+    public void Its_sub_tasks_stay_under_it_drawn_finished()
+    {
+        // They're finished too — the server takes them with it — and going on their own would move
+        // the rows under the pointer while the parent was still there to click.
+        var (presenter, _) = Seeded(withSubTasks: true);
+
+        presenter.Complete("a");
+
+        var rows = presenter.Rows.ToDictionary(r => r.Id);
+        Assert.Equal((0, true), (rows["a"].Depth, rows["a"].Completed));
+        Assert.Equal((1, true), (rows["a1"].Depth, rows["a1"].Completed));
+        Assert.Equal((2, true), (rows["a2"].Depth, rows["a2"].Completed));
+    }
+
+    [Fact]
+    public void And_go_when_it_does_rather_than_turning_up_on_their_own()
+    {
+        // Left behind, a sub-task with no parent in view is listed at the top level — which looks
+        // like the tick promoted it.
+        var (presenter, clock) = Seeded(withSubTasks: true);
+        presenter.Complete("a");
+
+        clock.Advance(LongEnough);
+        presenter.DropTicked();
+
+        Assert.DoesNotContain(presenter.Rows, r => r.Id is "a" or "a1" or "a2");
+        Assert.Contains(presenter.Rows, r => r.Id == "b");
+    }
+
+    [Fact]
+    public void Putting_it_back_brings_its_sub_tasks_back_with_it()
+    {
+        var (presenter, _) = Seeded(withSubTasks: true);
+        presenter.Complete("a");
+
+        presenter.Reopen("a");
+
+        var rows = presenter.Rows.ToDictionary(r => r.Id);
+        Assert.Equal((1, false), (rows["a1"].Depth, rows["a1"].Completed));
+        Assert.Equal((2, false), (rows["a2"].Depth, rows["a2"].Completed));
+    }
+
+    private static (MainPresenter Presenter, FixedClock Clock) Seeded(bool withSubTasks = false)
     {
         var store = new InMemorySnapshotStore();
         store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");
         store.PutResource("items", "a", """{"id":"a","content":"Ship it","project_id":"p","child_order":1}""");
         store.PutResource("items", "b", """{"id":"b","content":"Something else","project_id":"p","child_order":2}""");
+
+        if (withSubTasks)
+        {
+            store.PutResource("items", "a1", """{"id":"a1","content":"Pack it","project_id":"p","parent_id":"a","child_order":1}""");
+            store.PutResource("items", "a2", """{"id":"a2","content":"Label it","project_id":"p","parent_id":"a1","child_order":1}""");
+        }
 
         var clock = new FixedClock(Today);
         var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, clock);
