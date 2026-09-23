@@ -123,6 +123,69 @@ public class SyncEngineFailureRollbackTests
         Assert.Equal("Renamed elsewhere", engine.Snapshot().Projects.Single(p => p.Id == "p1").Name);
     }
 
+    // ---- Rolling back a write to something the server has named since ---------------------------
+
+    [Fact]
+    public async Task A_refused_edit_leaves_one_copy_of_a_task_the_server_has_named_since()
+    {
+        // Added offline and edited before it went. The server takes the add and names the task, and
+        // refuses the edit. Put back under the name the edit recorded, there'd be two of it, for good.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        engine.UpdateItem(temp, new JsonObject { ["content"] = "Edited offline" });
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_update" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+        };
+        await engine.SyncAsync();
+
+        var added = Assert.Single(engine.Snapshot().Items, i => i.Id != "i1");
+        Assert.Equal("real", added.Id);
+        Assert.Equal("Written offline", added.Content);
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
+    [Fact]
+    public async Task A_refused_delete_puts_a_task_back_under_the_names_the_server_has_given_since()
+    {
+        // Deleted while its add was on the wire, so the delete goes in the next round under the
+        // server's name for it. What it recorded still has the names from here, for the task and
+        // for the parent it was added under — put back as recorded, it'd be a task the server has
+        // never heard of, under a parent that isn't held.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        var parent = engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p1" });
+        var child = engine.AddItem(new JsonObject { ["content"] = "Child", ["project_id"] = "p1", ["parent_id"] = parent });
+
+        api.Next = commands =>
+        {
+            engine.DeleteItem(child);
+            return new SyncResponse
+            {
+                SyncToken = "s2",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+                TempIdMapping = new Dictionary<string, string> { [parent] = "parent", [child] = "child" },
+            };
+        };
+        await engine.SyncAsync();
+
+        Fails(api, engine);
+        await engine.SyncAsync();
+
+        var restored = Assert.Single(engine.Snapshot().Items, i => i.Content == "Child");
+        Assert.Equal("child", restored.Id);
+        Assert.Equal("parent", restored.ParentId);
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == child);
+    }
+
     // ---- Undo across a restart -------------------------------------------------------------------
 
     [Fact]
@@ -213,10 +276,10 @@ public class SyncEngineFailureRollbackTests
         return store;
     }
 
-    private static (SyncEngine Engine, FakeApi Api) Engine(InMemorySnapshotStore store)
+    private static (SyncEngine Engine, FakeApi Api) Engine(InMemorySnapshotStore store, int attemptCeiling = 2)
     {
         var api = new FakeApi();
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)), attemptCeiling: 2);
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)), attemptCeiling: attemptCeiling);
         engine.Load();
         return (engine, api);
     }
