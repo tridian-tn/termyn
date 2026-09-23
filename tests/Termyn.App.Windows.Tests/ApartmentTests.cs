@@ -16,9 +16,10 @@ namespace Termyn.App.Windows.Tests;
 ///
 /// So every test in this assembly is a WinForms one, and they run one at a time rather than side by
 /// side on threads of their own. Both are worth holding rather than trusting to everyone
-/// remembering: a plain [Fact] added later, or parallel running switched back on for the speed,
-/// would run in a way the app never does, and nothing would say so until a build went red for
-/// reasons nobody could reproduce.
+/// remembering: a plain [Fact] added later, or the attribute that runs them one at a time taken out
+/// for the speed, would run in a way the app never does, and nothing would say so until a build
+/// went red for reasons nobody could reproduce. What's held is the attribute — a runner told to run
+/// them in parallel would still be obeyed, and nothing here runs them that way.
 /// </remarks>
 public class ApartmentTests
 {
