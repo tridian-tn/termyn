@@ -186,6 +186,97 @@ public class SyncEngineFailureRollbackTests
         Assert.DoesNotContain(store.Load().Resources, r => r.Id == child);
     }
 
+    [Fact]
+    public async Task A_refused_edit_leaves_one_copy_when_the_app_restarts_before_it_gives_up()
+    {
+        // Named in one round and refused for good in a later one, with a restart between. What the
+        // server named what isn't kept across the restart, so the edit's priors have to have been
+        // renamed and saved when the name arrived.
+        var store = Seeded();
+        var (engine, api) = Engine(store);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        engine.UpdateItem(temp, new JsonObject { ["content"] = "Edited offline" });
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_update" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+        };
+        await engine.SyncAsync();
+
+        var (restarted, restartedApi) = Engine(store);
+        Fails(restartedApi, restarted);
+        await restarted.SyncAsync();
+
+        Assert.Equal(1, restarted.FailedCount);
+        var added = Assert.Single(restarted.Snapshot().Items, i => i.Id != "i1");
+        Assert.Equal("real", added.Id);
+        Assert.Equal("Written offline", added.Content);
+    }
+
+    [Fact]
+    public async Task Undoing_a_delete_after_a_restart_puts_the_task_back_under_the_servers_names()
+    {
+        // Deleted while its add was on the wire, the add lands and names it and its parent, and the
+        // app restarts before the delete goes. Undo puts back what the delete recorded.
+        var store = Seeded();
+        var (engine, api) = Engine(store);
+
+        var parent = engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p1" });
+        var child = engine.AddItem(new JsonObject { ["content"] = "Child", ["project_id"] = "p1", ["parent_id"] = parent });
+
+        api.Next = commands =>
+        {
+            engine.DeleteItem(child);
+            return new SyncResponse
+            {
+                SyncToken = "s2",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+                TempIdMapping = new Dictionary<string, string> { [parent] = "parent", [child] = "child" },
+            };
+        };
+        await engine.SyncAsync();
+
+        var restarted = Reload(store);
+        Assert.True(restarted.Undo());
+
+        var restored = Assert.Single(restarted.Snapshot().Items, i => i.Content == "Child");
+        Assert.Equal("child", restored.Id);
+        Assert.Equal("parent", restored.ParentId);
+    }
+
+    [Fact]
+    public async Task Undoing_a_project_delete_after_a_restart_puts_back_a_task_the_server_has_named_since()
+    {
+        // The same across a cascade, whose priors hold each resource one level down.
+        var store = Seeded();
+        var (engine, api) = Engine(store);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+
+        api.Next = commands =>
+        {
+            engine.DeleteProject("p1");
+            return new SyncResponse
+            {
+                SyncToken = "s2",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+                TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+            };
+        };
+        await engine.SyncAsync();
+
+        var restarted = Reload(store);
+        Assert.True(restarted.Undo());
+
+        var added = Assert.Single(restarted.Snapshot().Items, i => i.Content == "Written offline");
+        Assert.Equal("real", added.Id);
+    }
+
     // ---- Undo across a restart -------------------------------------------------------------------
 
     [Fact]
