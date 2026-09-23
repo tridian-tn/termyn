@@ -187,18 +187,25 @@ public class OutlineFoldingTests
         return new Point(bounds.X + (depth * 18) + 7, bounds.Y + (bounds.Height / 2));
     }
 
-    /// <remarks>
-    /// That pressing the expander asks for the fold isn't asserted here. Delivering a click to a
-    /// native list means standing in for Windows, and what would be held is the three lines that
-    /// dispatch it rather than the thing that can be wrong — which is where the expander is. So
-    /// these ask the control what is under a point, which is the question the press asks it.
-    /// </remarks>
     [WinFormsFact]
     public void The_expander_is_what_is_under_the_head_of_the_row()
     {
         using var view = Outline(Row("a", children: true), Row("b", depth: 1));
 
         Assert.Equal("a", view.ExpanderAt(ExpanderOf(view, 0, depth: 0)));
+    }
+
+    [WinFormsFact]
+    public void Clicking_the_expander_folds_the_row_and_leaves_the_selection_alone()
+    {
+        // A real press rather than a call to the handler. The list selects the row under a press
+        // after the handlers have run, so returning from one kept nothing where it was — the
+        // expander took the selection to its row for as long as it had been there.
+        using var view = Outline(Row("a", children: true), Row("b", depth: 1), Row("c"));
+        Pick(view, "c");
+
+        Assert.Equal([("a", true)], Asked(view, () => RealMouse.Click(view, ExpanderOf(view, 0, depth: 0))));
+        Assert.Equal("c", view.SelectedId);
     }
 
     [WinFormsFact]
@@ -230,6 +237,17 @@ public class OutlineFoldingTests
         var bounds = view.GetItemRect(0, ItemBoundsPortion.Entire);
 
         Assert.Null(view.ExpanderAt(new Point(bounds.X + 80, bounds.Y + (bounds.Height / 2))));
+    }
+
+    [WinFormsFact]
+    public void Past_the_edge_of_the_task_column_there_is_no_expander()
+    {
+        // Narrower than a sub-task's indent, the column draws no expander for it, and the room it
+        // would have had is the next column's.
+        using var view = Outline(Row("a", children: true), Row("b", depth: 1, children: true), Row("c", depth: 2));
+        view.Columns[0].Width = 12;
+
+        Assert.Null(view.ExpanderAt(ExpanderOf(view, 1, depth: 1)));
     }
 
     [WinFormsFact]

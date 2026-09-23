@@ -9,12 +9,24 @@ namespace Termyn.TestSupport;
 /// <summary>A clock stuck on one date, so date-sensitive tests are deterministic.</summary>
 public sealed class FixedClock : IClock
 {
+    private TimeSpan _since;
+
     public FixedClock(DateOnly today) => Today = today;
 
     public DateOnly Today { get; }
 
     /// <summary>Midday, so converting into any timezone still lands on the same date.</summary>
-    public DateTimeOffset UtcNow => new(Today.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero);
+    public DateTimeOffset UtcNow => new DateTimeOffset(Today.ToDateTime(new TimeOnly(12, 0)), TimeSpan.Zero) + _since;
+
+    /// <summary>
+    /// Moves the clock on, for a test about something that waits.
+    /// </summary>
+    /// <remarks>
+    /// The day doesn't move with it. What this is for is the seconds and minutes something sits
+    /// before it happens, and a test that wanted tomorrow would say so by building tomorrow.
+    /// </remarks>
+    /// <param name="by">How far to move it on</param>
+    public void Advance(TimeSpan by) => _since += by;
 }
 
 /// <summary>A log that keeps its lines, so a test can read what would have been written.</summary>

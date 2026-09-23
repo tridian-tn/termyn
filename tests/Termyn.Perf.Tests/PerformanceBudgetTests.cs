@@ -124,6 +124,44 @@ public class PerformanceBudgetTests : IDisposable
     }
 
     [Fact]
+    public void Ticking_a_task_off_reaches_the_rows_within_a_frame()
+    {
+        // The write people make most, and one that looks through the whole account for sub-tasks
+        // to take with it. Held to the same frame as any other write.
+        using var store = new SqliteSnapshotStore(Seeded());
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, Parser(), new FixedClock(ReferenceAccount.Today));
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        // Tasks with a sub-task under them, so each close has something to take with it — and none
+        // that repeat, which move on to their next date rather than being ticked off.
+        var parents = Enumerable.Range(0, ReferenceAccount.Tasks)
+            .Where(i => i % 4 == 0 && i % 10 != 0)
+            .Select(i => $"i{i}")
+            .Take(WarmUp + Rounds)
+            .ToList();
+
+        foreach (var id in parents.Take(WarmUp))
+            presenter.Complete(id);
+
+        var best = TimeSpan.MaxValue;
+        foreach (var id in parents.Skip(WarmUp))
+        {
+            var watch = Stopwatch.StartNew();
+            presenter.Complete(id);
+            watch.Stop();
+
+            Assert.True(presenter.Rows.Single(r => r.Id == id).Completed);
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < TimeSpan.FromMilliseconds(32), $"ticking a task off took {best.TotalMilliseconds:N1} ms to reach the rows");
+    }
+
+    [Fact]
     public void Switching_view_reprojects_within_a_frame()
     {
         using var store = new SqliteSnapshotStore(Seeded());

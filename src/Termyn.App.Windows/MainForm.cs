@@ -156,6 +156,9 @@ internal sealed class MainForm : Form
     /// </summary>
     private readonly System.Windows.Forms.Timer _saveIdle;
 
+    /// <summary>Takes a ticked-off task off the list once it has been there long enough.</summary>
+    private readonly System.Windows.Forms.Timer _tickedIdle;
+
     /// <summary>The panel size as the user last left it, which is what gets saved.</summary>
     private int _descriptionHeight;
 
@@ -311,6 +314,7 @@ internal sealed class MainForm : Form
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
         AskForDeadline = AskWithDialog;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
+        _outline.ToggleRequested += id => Guarded(() => TickOff(id));
         _outline.SelectedIndexChanged += (_, _) => FollowSelection();
 
         // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
@@ -459,6 +463,12 @@ internal sealed class MainForm : Form
         _saveIdle = new System.Windows.Forms.Timer { Interval = 5000 };
         _saveIdle.Tick += (_, _) => SaveDescription();
 
+        // A task ticked off stays on the list for a few seconds. This is what takes it away when
+        // its time is up — a second's granularity on a five-second stay, which nobody can see, and
+        // it only runs while there's something waiting to go.
+        _tickedIdle = new System.Windows.Forms.Timer { Interval = 1000 };
+        _tickedIdle.Tick += (_, _) => Guarded(() => _presenter.DropTicked());
+
         _split = new SplitContainer
         {
             Dock = DockStyle.Fill,
@@ -575,6 +585,7 @@ internal sealed class MainForm : Form
 
         _renderIdle.Dispose();
         _saveIdle.Dispose();
+        _tickedIdle.Dispose();
         _quickAdd?.AllowClose();
         _quickAdd?.Dispose();
         _headerFont?.Dispose();
@@ -1252,6 +1263,9 @@ internal sealed class MainForm : Form
         RenderStatus();
         RenderUnsupported();
         RenderTray();
+
+        // Only while something ticked off is still on the list, so an idle window ticks nothing.
+        _tickedIdle.Enabled = _presenter.Lingering;
     }
 
     /// <summary>
@@ -3528,6 +3542,33 @@ internal sealed class MainForm : Form
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal Func<TaskRow, (bool Answered, DateOnly? Day)> AskForDeadline { get; set; }
+
+    /// <summary>
+    /// Ticks a task off, or puts it back, from the box on its row.
+    /// </summary>
+    /// <remarks>
+    /// The row is found by the id the box belongs to rather than read off the selection: clicking
+    /// a box deliberately leaves the selection where it was, so the two are usually different rows.
+    /// </remarks>
+    /// <param name="id">The task whose box was clicked</param>
+    private void TickOff(string id)
+    {
+        Noticed();
+
+        if (_presenter.Rows.FirstOrDefault(r => r.Id == id) is not { } row)
+            return;
+
+        if (row.Completed)
+            _presenter.Reopen(id);
+        else
+            _presenter.Complete(id);
+    }
+
+    /// <summary>
+    /// Whether the timer that takes ticked-off tasks away is running, so a test can ask without
+    /// waiting out the seconds it takes.
+    /// </summary>
+    internal bool DroppingTicked => _tickedIdle.Enabled;
 
     /// <summary>Asks for a deadline and applies it. Returns false when nothing was changed.</summary>
     /// <remarks>
