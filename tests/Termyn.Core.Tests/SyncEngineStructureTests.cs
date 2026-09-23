@@ -497,6 +497,289 @@ public class SyncEngineStructureTests
     }
 
     [Fact]
+    public async Task A_task_indented_under_one_whose_add_is_refused_goes_back_where_it_was()
+    {
+        // The refused add takes the indent with it. The server never moved X, so nothing it sends
+        // will put X back, and left alone it sits under a task that isn't there.
+        var store = OneTask();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var added = engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["child_order"] = 1 });
+        Assert.True(engine.IndentItem("x"));
+        Assert.Equal(added, engine.Snapshot().Items.Single(i => i.Id == "x").ParentId);
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var x = engine.Snapshot().Items.Single(i => i.Id == "x");
+        Assert.Null(x.ParentId);
+        Assert.Equal("p", x.ProjectId);
+        Assert.Null(x.SectionId);
+        Assert.Equal(2, x.ChildOrder);
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Equal(0, engine.FailedCount);
+
+        var reloaded = NewEngine(store).Snapshot().Items.Single(i => i.Id == "x");
+        Assert.Null(reloaded.ParentId);
+        Assert.Equal(2, reloaded.ChildOrder);
+    }
+
+    [Fact]
+    public async Task A_task_moved_on_after_an_indent_whose_add_is_refused_ends_where_the_server_has_it()
+    {
+        // Indented under a task added offline, then moved to another project. The move names nothing
+        // that was refused, so it goes to the server and lands. Rolling back the indent puts X back
+        // in the first project, and the server's copy that comes back with the move says where it
+        // really is.
+        var store = OneTask();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["child_order"] = 1 });
+        Assert.True(engine.IndentItem("x"));
+        Assert.True(engine.MoveItemToProject("x", "q"));
+
+        // Takes the move to q and refuses the rest.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_move" && c.Args["project_id"] is not null ? new CommandResult(true, null, null) : new CommandResult(false, "ERR", "rejected")),
+            Changes = [Json.Change("items", "x", """{"id":"x","content":"X","project_id":"q","parent_id":null,"section_id":null,"child_order":1}""")],
+        };
+        await engine.SyncAsync();
+
+        var x = engine.Snapshot().Items.Single(i => i.Id == "x");
+        Assert.Equal("q", x.ProjectId);
+        Assert.Null(x.ParentId);
+        Assert.Null(x.SectionId);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task A_later_move_refused_after_an_indent_whose_add_is_refused_puts_the_task_back_where_it_started()
+    {
+        // The move to another project was queued with X under the task added offline, and that's
+        // what its priors said. Refused in its turn, it'd put X back under a task that isn't there.
+        // Across a restart, so what it's been told since has to have reached the store.
+        var store = OneTask();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["child_order"] = 1 });
+        Assert.True(engine.IndentItem("x"));
+
+        // Moved while the add and the indent are on the wire, so the move isn't in this round and
+        // nothing but the rollback writes its command back to the store.
+        api.Next = commands =>
+        {
+            Assert.True(engine.MoveItemToProject("x", "q"));
+            return new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        };
+        await engine.SyncAsync();
+        Assert.Equal(1, engine.PendingCount);
+
+        var restarted = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        restarted.Load();
+        api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
+        await restarted.SyncAsync();
+
+        var x = restarted.Snapshot().Items.Single(i => i.Id == "x");
+        Assert.Null(x.ParentId);
+        Assert.Equal("p", x.ProjectId);
+        Assert.Equal(2, x.ChildOrder);
+        Assert.Equal(1, restarted.FailedCount);
+    }
+
+    [Fact]
+    public async Task A_sub_task_ticked_off_with_a_task_whose_add_is_refused_is_put_back_open()
+    {
+        // Ticking off the task added offline ticks off X under it. The close goes with the refused
+        // add, and the server never had X ticked off, so nothing it sends will take the tick off.
+        var store = OneTask();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var added = engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["child_order"] = 1 });
+        Assert.True(engine.IndentItem("x"));
+        engine.CompleteItem(added);
+        Assert.True(engine.Snapshot().Items.Single(i => i.Id == "x").Completed);
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var x = engine.Snapshot().Items.Single(i => i.Id == "x");
+        Assert.False(x.Completed);
+        Assert.Null(x.ParentId);
+        Assert.Equal(0, engine.PendingCount);
+        Assert.False(NewEngine(store).Snapshot().Items.Single(i => i.Id == "x").Completed);
+    }
+
+    [Fact]
+    public async Task A_task_moved_into_a_project_whose_add_is_refused_goes_back_with_its_sub_tasks()
+    {
+        // The move names the project added offline, and carried A's sub-tasks into it. All three
+        // go back to the project and section they were in, still under the same parents.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var added = engine.AddProject("New");
+        Assert.True(engine.MoveItemToProject("a", added));
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Equal("s1", items[id].SectionId));
+        Assert.Null(items["a"].ParentId);
+        Assert.Equal("a", items["b"].ParentId);
+        Assert.Equal("b", items["c"].ParentId);
+        Assert.Equal(1, items["a"].ChildOrder);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task A_task_moved_into_a_section_of_a_project_whose_add_is_refused_goes_back_with_its_sub_tasks()
+    {
+        // The move names the section rather than the project, but the section was added in the
+        // project added offline, so it goes with the project's add all the same.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var project = engine.AddProject("New");
+        var section = engine.AddSection("Later", project);
+        Assert.True(engine.MoveItemToSection("a", section));
+
+        // Only the project's add is refused.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.Where(c => c.Type == "project_add").ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+        };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Equal("s1", items[id].SectionId));
+        Assert.Null(items["a"].ParentId);
+        Assert.Equal("a", items["b"].ParentId);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task A_task_indented_then_reordered_under_one_whose_add_is_refused_goes_back_to_its_old_place()
+    {
+        // Indented, then moved below a sub-task added beside it. The reorder came after the indent,
+        // and its priors have X first under the refused task. Put back after the indent rather
+        // than before, that position would be left on X at the top level.
+        var store = OneTask();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var parent = engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p", ["child_order"] = 1 });
+        Assert.True(engine.IndentItem("x"));
+        engine.AddItem(new JsonObject { ["content"] = "Child", ["project_id"] = "p", ["parent_id"] = parent, ["child_order"] = 2 });
+        Assert.True(engine.MoveItem("x", 1));
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var x = Assert.Single(engine.Snapshot().Items);
+        Assert.Null(x.ParentId);
+        Assert.Equal(2, x.ChildOrder);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task A_task_the_server_names_goes_back_when_its_indent_goes_with_a_refused_add()
+    {
+        // Both added offline, the second indented under the first. The server takes the second's add
+        // and names it, and refuses the first's. The indent recorded the task under the id it had
+        // here, and has to find it under the new one.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Projects(), new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p", ["child_order"] = 1 });
+        var moved = engine.AddItem(new JsonObject { ["content"] = "Moved", ["project_id"] = "p", ["child_order"] = 2 });
+        Assert.True(engine.IndentItem(moved));
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.TempId == moved ? new CommandResult(true, null, null) : new CommandResult(false, "ERR", "rejected")),
+            TempIdMapping = new Dictionary<string, string> { [moved] = "real" },
+        };
+        await engine.SyncAsync();
+
+        var task = Assert.Single(engine.Snapshot().Items);
+        Assert.Equal("real", task.Id);
+        Assert.Null(task.ParentId);
+        Assert.Equal(2, task.ChildOrder);
+    }
+
+    [Fact]
+    public async Task A_task_indented_twice_under_tasks_whose_adds_are_refused_goes_back_where_it_started()
+    {
+        // Indented under one task added offline, then under a sub-task added under that. Both moves
+        // go with the refused add, and the second one's priors have X under the first task — so
+        // rolled back in the order they were made, X ends up under a task that isn't there.
+        var store = OneTask();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var parent = engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p", ["child_order"] = 1 });
+        var child = engine.AddItem(new JsonObject { ["content"] = "Child", ["project_id"] = "p", ["parent_id"] = parent, ["child_order"] = 1 });
+        Assert.True(engine.IndentItem("x"));
+        Assert.True(engine.IndentItem("x"));
+        Assert.Equal(child, engine.Snapshot().Items.Single(i => i.Id == "x").ParentId);
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var x = Assert.Single(engine.Snapshot().Items);
+        Assert.Equal("x", x.Id);
+        Assert.Null(x.ParentId);
+        Assert.Equal(2, x.ChildOrder);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task A_task_whose_add_is_refused_stays_gone_after_being_indented()
+    {
+        // The indent names the task the add was refused for, so it's cancelled along with the add.
+        // Putting back where that task was filed mustn't bring it back, here or in the store.
+        var store = Projects();
+        store.PutResource("items", "r", """{"id":"r","content":"R","project_id":"p","child_order":1}""");
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var added = engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["child_order"] = 2 });
+        Assert.True(engine.IndentItem(added));
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        Assert.Equal("r", Assert.Single(engine.Snapshot().Items).Id);
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Equal("r", Assert.Single(NewEngine(store).Snapshot().Items).Id);
+    }
+
+    [Fact]
     public async Task A_refused_move_leaves_an_edit_made_since()
     {
         // Renamed after the move, and the renames land where the move doesn't. Put back whole, the
@@ -934,6 +1217,14 @@ public class SyncEngineStructureTests
         => commands.ToDictionary(
             c => c.Uuid,
             c => c.Type == "item_move" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null));
+
+    /// <summary>A store holding one top-level task, X, second in its project.</summary>
+    private static InMemorySnapshotStore OneTask()
+    {
+        var store = Projects();
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","child_order":2}""");
+        return store;
+    }
 
     /// <summary>A sub-task added offline under a task in <see cref="Family"/>.</summary>
     private static JsonObject AddedUnder(string parentId)
