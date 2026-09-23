@@ -104,6 +104,54 @@ public class SyncEngineFailureRollbackTests
     }
 
     [Fact]
+    public async Task A_refused_label_delete_keeps_a_label_the_server_has_put_on_the_task_since()
+    {
+        // Put on elsewhere while the delete was queued. The server never took the label off, so its
+        // word on the task still has it, and that's the list to keep.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 2);
+
+        engine.DeleteLabel("l1");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+            Changes = [new ResourceChange("items", "i1", false, Json.Object("""{"id":"i1","content":"Task","project_id":"p1","labels":["home","errand"]}"""))],
+        };
+        await engine.SyncAsync();
+
+        Fails(api, engine);
+        await engine.SyncAsync();
+
+        Assert.Equal(["home", "errand"], engine.Snapshot().Items.Single().Labels);
+    }
+
+    [Fact]
+    public async Task A_refused_label_delete_leaves_labels_set_on_the_task_since()
+    {
+        // An edit writes the whole list, so once it lands the server has the task without the
+        // label, delete or no delete. Putting it back would show a label the task doesn't have.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        engine.DeleteLabel("l1");
+        engine.UpdateItem("i1", new JsonObject { ["labels"] = new JsonArray("work") });
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "label_delete" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        Assert.Equal(["work"], engine.Snapshot().Items.Single().Labels);
+        Assert.Equal("home", engine.Snapshot().Labels.Single().Name);
+    }
+
+    [Fact]
     public async Task An_edit_that_fails_for_good_goes_back_to_the_servers_version()
     {
         var store = Seeded();
