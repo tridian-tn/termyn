@@ -3055,6 +3055,44 @@ public sealed class SyncEngine
             ForgetUndoable(d.Uuid);
         }
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());
+
+        // A command can have recorded one of them without naming it. A project or section delete
+        // records everything it took, and a label delete every task wearing the label, so neither
+        // is cancelled here. Left in, rolling one back would put back something the server never
+        // had, and nothing would ever say to take it away. Saved, so a restart doesn't bring the
+        // entry back with it.
+        foreach (var c in _outbox)
+        {
+            if (c.PriorJson is { } priors && PriorsWithout(priors, doomedIds) is { } kept)
+            {
+                c.PriorJson = kept;
+                _store.UpdateCommand(c);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A command's priors without the entries for resources whose creates were refused.
+    /// </summary>
+    /// <remarks>
+    /// Only an array of them loses anything. A command whose one prior is such a resource names
+    /// it, so it was cancelled along with it.
+    /// </remarks>
+    /// <param name="priorJson">What the command recorded before it changed anything</param>
+    /// <param name="dropped">The temporary ids of the refused creates</param>
+    /// <returns>The priors without them, or null when none of them were there</returns>
+    private static string? PriorsWithout(string priorJson, HashSet<string> dropped)
+    {
+        // Looked for as text first, the same as when renaming them.
+        if (!dropped.Any(id => priorJson.Contains(id, StringComparison.Ordinal)) || TryParseNode(priorJson) is not JsonArray entries)
+            return null;
+
+        // A cascading delete holds each resource one level down.
+        var removed = entries.RemoveAll(e => e is JsonObject entry
+            && (entry["resource"] as JsonObject ?? entry)["id"] is JsonValue id
+            && dropped.Contains(id.ToString()));
+
+        return removed > 0 ? entries.ToJsonString() : null;
     }
 
     /// <summary>
