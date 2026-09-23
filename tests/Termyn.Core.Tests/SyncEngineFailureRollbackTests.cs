@@ -277,6 +277,159 @@ public class SyncEngineFailureRollbackTests
         Assert.Equal("real", added.Id);
     }
 
+    // ---- Rolling back a delete over something added offline -------------------------------------
+
+    [Fact]
+    public async Task A_refused_project_delete_leaves_out_a_task_whose_add_was_refused()
+    {
+        // Added offline, then its project deleted. The server refuses the add, so the task goes,
+        // and refuses the delete, which puts back everything it took. The task was one of those,
+        // but the server never had it: put back, it'd stay for good, since nothing would ever say
+        // to take it away.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        engine.DeleteProject("p1");
+        Fails(api, engine);
+
+        await engine.SyncAsync();
+
+        var snapshot = engine.Snapshot();
+        Assert.Equal("Work", snapshot.Projects.Single(p => p.Id == "p1").Name);
+        Assert.Equal("Admin", snapshot.Sections.Single().Name);
+        Assert.Equal(["Task"], snapshot.Items.Select(i => i.Content));
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
+    [Fact]
+    public async Task A_refused_label_delete_leaves_out_a_task_whose_add_was_refused()
+    {
+        // A label delete records every task wearing the label, and names only the label, so it
+        // isn't cancelled with the add either.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1", ["labels"] = new JsonArray("home") });
+        engine.DeleteLabel("l1");
+        Fails(api, engine);
+
+        await engine.SyncAsync();
+
+        Assert.Equal(["Task"], engine.Snapshot().Items.Select(i => i.Content));
+        Assert.Equal(["home"], engine.Snapshot().Items.Single().Labels);
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
+    [Fact]
+    public async Task Undoing_a_project_delete_leaves_out_a_task_whose_add_was_refused()
+    {
+        // The delete is refused short of the ceiling, so it's still queued and still undoable, and
+        // undoing it puts back what it took the same way.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 2);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        engine.DeleteProject("p1");
+        Fails(api, engine);
+
+        await engine.SyncAsync();
+
+        Assert.True(engine.Undo());
+        Assert.Equal("Work", engine.Snapshot().Projects.Single(p => p.Id == "p1").Name);
+        Assert.Equal(["Task"], engine.Snapshot().Items.Select(i => i.Content));
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
+    [Fact]
+    public async Task A_refused_project_delete_keeps_a_task_whose_add_the_server_never_ruled_on()
+    {
+        // That add may well have landed, so it stays in the outbox, failed, keeping what was typed.
+        // Putting back what the delete took has to keep it as well.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        engine.DeleteProject("p1");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands
+                .Where(c => c.Type == "project_delete")
+                .ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+        };
+        await engine.SyncAsync();
+
+        var kept = Assert.Single(engine.Snapshot().Items, i => i.Content == "Written offline");
+        Assert.Equal(temp, kept.Id);
+        Assert.Equal(2, engine.FailedCount);
+    }
+
+    [Fact]
+    public async Task A_project_delete_refused_after_a_restart_leaves_out_a_task_whose_add_was_refused()
+    {
+        // Deleted while the add was on the wire, so the delete isn't sent until the next round, and
+        // the app restarts before then. Taking the task out of what the delete recorded has to have
+        // been saved, as nothing else about the delete changed in the round that refused the add.
+        var store = Seeded();
+        var (engine, api) = Engine(store);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+
+        api.Next = commands =>
+        {
+            engine.DeleteProject("p1");
+            return new SyncResponse
+            {
+                SyncToken = "s2",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+            };
+        };
+        await engine.SyncAsync();
+
+        var (restarted, restartedApi) = Engine(store, attemptCeiling: 1);
+        Fails(restartedApi, restarted);
+        await restarted.SyncAsync();
+
+        Assert.Equal(1, restarted.FailedCount);
+        Assert.Equal("Work", restarted.Snapshot().Projects.Single(p => p.Id == "p1").Name);
+        Assert.Equal(["Task"], restarted.Snapshot().Items.Select(i => i.Content));
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
+    [Fact]
+    public async Task A_delete_refused_after_a_restart_puts_back_a_task_whose_add_landed()
+    {
+        // The other side of it: an add that landed mustn't be taken for one that was refused once a
+        // restart has forgotten what the server named it. Deleted while the add was on the wire,
+        // named by the server, then the delete refused for good after a restart.
+        var store = Seeded();
+        var (engine, api) = Engine(store);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+
+        api.Next = commands =>
+        {
+            engine.DeleteItem(temp);
+            return new SyncResponse
+            {
+                SyncToken = "s2",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+                TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+            };
+        };
+        await engine.SyncAsync();
+
+        var (restarted, restartedApi) = Engine(store, attemptCeiling: 1);
+        Fails(restartedApi, restarted);
+        await restarted.SyncAsync();
+
+        var restored = Assert.Single(restarted.Snapshot().Items, i => i.Content == "Written offline");
+        Assert.Equal("real", restored.Id);
+        Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
     // ---- Undo across a restart -------------------------------------------------------------------
 
     [Fact]
