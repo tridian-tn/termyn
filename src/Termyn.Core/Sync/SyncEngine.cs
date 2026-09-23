@@ -2442,6 +2442,21 @@ public sealed class SyncEngine
 
             var id = idValue.ToString();
 
+            // A label delete records each task wearing the label whole, but all it changes on one
+            // is its labels. Put back whole, an edit made since would go with it. The label itself
+            // was removed, so it still goes back whole below.
+            if (cmd.Type == "label_delete" && type == ResourceType.Items)
+            {
+                if (Model.Get(type, id) is { } wearer)
+                {
+                    var rewound = Rewound(wearer, resource, ["labels"]);
+                    _store.PutResource(type, id, rewound.ToJsonString());
+                    Model.Upsert(type, id, rewound);
+                }
+
+                continue;
+            }
+
             // An update puts back only what it wrote. Its prior is the whole resource as it stood
             // when the command was queued, and restoring all of it takes away every change made
             // since — including ones nothing here has any quarrel with. A close queued before an
