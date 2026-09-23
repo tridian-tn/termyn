@@ -7,12 +7,16 @@ using Termyn.Presentation;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// The description panel keeping the scale it was given when it draws again.
+/// The description panel's scale: kept when the panel draws again, and put back when it's asked to be.
 /// </summary>
 /// <remarks>
 /// A rich edit control goes back to its own size whenever it's handed a new document, and both
 /// halves of the panel are handed one on every task switch, sync and pause in the typing — so a
 /// panel the user had scaled went back to its own size within moments of their scaling it.
+///
+/// Putting it back had the opposite trouble. The control's zoom property remembers the last scale
+/// it set and skips a set that matches, and the wheel scales the control without going through it —
+/// so after the wheel, Ctrl+0 asked for the size the property thought it was still at.
 /// </remarks>
 public class PanelZoomTests
 {
@@ -20,9 +24,13 @@ public class PanelZoomTests
     private const int MkControl = 0x0008;
     private const int WheelDelta = 120;
     private const int EmGetFirstVisibleLine = 0x00CE;
+    private const int EmGetZoom = 0x0400 + 224;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint SendMessage(nint window, int message, ref int wParam, ref int lParam);
 
     // ---- The rendering ------------------------------------------------------------------------
 
@@ -153,6 +161,43 @@ public class PanelZoomTests
         Assert.True(window.NewContext(null).Zoomed);
     }
 
+    // ---- Putting it back ----------------------------------------------------------------------
+
+    [WinFormsFact]
+    public void Ctrl_0_puts_a_panel_the_wheel_scaled_back_to_its_own_size()
+    {
+        // Nothing here reads ZoomFactor between the wheel and the reset. Reading it is what brings
+        // the property's memory up to date, and that's the very thing Ctrl+0 used to go without.
+        using var window = PanelOnFirstTask("termyn-panel-zoom-reset.json");
+        var view = Find<MarkdownView>(window);
+
+        CtrlWheel(view, notches: 2);
+        Assert.NotEqual((0, 0), Zoom(view));
+
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.D0, MainForm.Scope.Window));
+
+        Assert.Equal(1f, view.ZoomFactor);
+        Assert.False(window.NewContext(null).Zoomed);
+    }
+
+    [WinFormsFact]
+    public void Ctrl_0_puts_back_the_half_that_isnt_on_show_as_well()
+    {
+        // Scaled while it was being written in, then left for the rendering. Reset from there, it
+        // came back still scaled — and the way to reset it stayed lit, since that asks both halves.
+        using var window = PanelOnFirstTask("termyn-panel-zoom-reset-hidden.json");
+        var editor = Find<MarkdownEditor>(window);
+        Assert.False(editor.Visible);
+
+        CtrlWheel(editor, notches: 2);
+        Assert.NotEqual((0, 0), Zoom(editor));
+
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.D0, MainForm.Scope.Window));
+
+        Assert.Equal(1f, editor.ZoomFactor);
+        Assert.False(window.NewContext(null).Zoomed);
+    }
+
     // ---- Helpers ------------------------------------------------------------------------------
 
     private static MarkdownView Rendering(string markdown)
@@ -218,6 +263,18 @@ public class PanelZoomTests
 
     private static int FirstVisibleLine(RichTextBox box)
         => (int)SendMessage(box.Handle, EmGetFirstVisibleLine, 0, 0);
+
+    /// <summary>
+    /// The scale as the control holds it, asked without going through its property — reading that
+    /// would bring the property's memory up to date and hide what it had wrong.
+    /// </summary>
+    private static (int Numerator, int Denominator) Zoom(RichTextBox box)
+    {
+        var numerator = 0;
+        var denominator = 0;
+        SendMessage(box.Handle, EmGetZoom, ref numerator, ref denominator);
+        return (numerator, denominator);
+    }
 
     private static T Find<T>(Control parent) where T : Control => Descendants(parent).OfType<T>().Single();
 

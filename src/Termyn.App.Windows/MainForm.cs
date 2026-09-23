@@ -2949,8 +2949,15 @@ internal sealed class MainForm : Form
         if (!CanZoom)
             return;
 
-        _rendered.ZoomFactor = to;
-        _description.ZoomFactor = to;
+        foreach (var half in (RichTextBox[])[_rendered, _description])
+        {
+            // Read before it's set. The property keeps the last scale it set and skips a set that
+            // matches, and the wheel scales the control without going through it — so Ctrl+0 on a
+            // panel the wheel had scaled asked for the size the property thought it was still at,
+            // and got nothing. Reading asks the control, which puts that right.
+            _ = half.ZoomFactor;
+            half.ZoomFactor = to;
+        }
     }
 
     /// <summary>Whether the panel is showing something that can be scaled at all.</summary>
@@ -2985,7 +2992,12 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Runs a command from wherever it was asked for.</summary>
-    private void Run(AppCommand command)
+    /// <remarks>
+    /// Internal so a test can run one the way a keystroke does. A menu isn't the same road: opening
+    /// one reads the window's state on the way, and a keystroke goes straight here.
+    /// </remarks>
+    /// <param name="command">The command to run</param>
+    internal void Run(AppCommand command)
     {
         Noticed();
         Dispatch(command);
