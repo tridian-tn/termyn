@@ -2426,6 +2426,12 @@ public sealed class SyncEngine
             return;
         }
 
+        // The name a label delete took off the tasks that wore it.
+        var takenLabel = cmd.Type == "label_delete"
+                         && PriorEntries(node).FirstOrDefault(e => e["type"]?.ToString() == ResourceType.Labels)?["resource"] is JsonObject label
+            ? Projections.ToLabel(label).Name
+            : null;
+
         foreach (var restored in node is JsonArray array ? array.OfType<JsonNode>() : [node])
         {
             if (restored is not JsonObject entry)
@@ -2442,18 +2448,12 @@ public sealed class SyncEngine
 
             var id = idValue.ToString();
 
-            // A label delete records each task wearing the label whole, but all it changes on one
-            // is its labels. Put back whole, an edit made since would go with it. The label itself
-            // was removed, so it still goes back whole below.
-            if (cmd.Type == "label_delete" && type == ResourceType.Items)
+            // A label delete records each task wearing the label whole, but all it does to one is
+            // take the label off, so that's all that goes back. The label itself was removed, so it
+            // still goes back whole below.
+            if (takenLabel is not null && type == ResourceType.Items)
             {
-                if (Model.Get(type, id) is { } wearer)
-                {
-                    var rewound = Rewound(wearer, resource, ["labels"]);
-                    _store.PutResource(type, id, rewound.ToJsonString());
-                    Model.Upsert(type, id, rewound);
-                }
-
+                PutLabelBack(id, resource, takenLabel);
                 continue;
             }
 
@@ -2513,6 +2513,36 @@ public sealed class SyncEngine
             _store.PutResource(key.Type, key.Id, restored.ToJsonString());
             Model.Upsert(key.Type, key.Id, restored);
         }
+    }
+
+    /// <summary>
+    /// Puts a deleted label back on a task that wore it, where the task stands now.
+    /// </summary>
+    /// <remarks>
+    /// Only where the task's labels are still as the delete left them, and then the prior's labels
+    /// are exactly those with this one back in its place. Anything else changed since stays. The
+    /// server sending the task since means it still has the label on, and it's already back. A
+    /// list set here since is what the server holds, as an edit writes the whole list, so it's
+    /// left as it is. A task that isn't held any more stays gone.
+    /// </remarks>
+    /// <param name="recordedId">The id the prior recorded, which may since have been promoted</param>
+    /// <param name="prior">The task as it stood when the delete was queued</param>
+    /// <param name="name">The label's name</param>
+    private void PutLabelBack(string recordedId, JsonObject prior, string name)
+    {
+        var id = Promoted(recordedId);
+
+        if (Model.Get(ResourceType.Items, id) is not { } current)
+            return;
+
+        var left = Projections.ToTaskItem(prior).Labels.Where(l => !string.Equals(l, name, StringComparison.OrdinalIgnoreCase));
+        if (!Projections.ToTaskItem(current).Labels.SequenceEqual(left, StringComparer.OrdinalIgnoreCase))
+            return;
+
+        var restored = Rewound(current, prior, ["labels"]);
+
+        _store.PutResource(ResourceType.Items, id, restored.ToJsonString());
+        Model.Upsert(ResourceType.Items, id, restored);
     }
 
     /// <summary>
