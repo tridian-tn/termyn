@@ -282,6 +282,24 @@ public class MarkdownViewTests
         Assert.DoesNotContain("```", view.Text);
     }
 
+    [WinFormsTheory]
+    [InlineData("```")]
+    [InlineData("```js")]
+    [InlineData("~~~")]
+    [InlineData("```\n```")]
+    [InlineData("Some notes\n\n```")]
+    public void A_fence_with_nothing_in_it_is_not_the_end_of_the_description(string markdown)
+    {
+        // Typed as the start of a code block and left there for a moment, which is all it takes for
+        // the rendering to be drawn from it. A fence with no lines under it has no lines at all to
+        // read, and it used to throw rather than draw nothing — taking down the window, with the
+        // description it was typed into still showing the one before it.
+        using var view = Render(markdown);
+
+        Assert.Equal(view.TextLength, view.Counted);
+        Assert.DoesNotContain("```", view.Text);
+    }
+
     [WinFormsFact]
     public void A_bare_url_is_shown_as_it_was_typed()
     {

@@ -397,14 +397,12 @@ internal sealed class MarkdownView : RichTextBox
     /// <summary>Writes a block that carries its text as raw lines rather than as inlines.</summary>
     private void WriteLines(LeafBlock block, Style style)
     {
+        // By count rather than by walking the array behind it, which is longer than the lines it
+        // holds and isn't there at all for a fence with nothing in it — the first thing on screen
+        // after typing three backticks.
         var text = new StringBuilder();
-        foreach (var line in block.Lines.Lines)
-        {
-            if (line.Slice.Text is null)
-                continue;
-
-            text.AppendLine(line.Slice.ToString());
-        }
+        for (var i = 0; i < block.Lines.Count; i++)
+            text.AppendLine(block.Lines.Lines[i].Slice.ToString());
 
         Write(text.ToString().TrimEnd(), style, from: block.Span);
     }
