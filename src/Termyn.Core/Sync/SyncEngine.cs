@@ -61,6 +61,17 @@ public sealed class SyncEngine
     /// </summary>
     private static readonly string[] IdKeys = ["id", .. TodoistModel.ReferenceKeys];
 
+    /// <summary>
+    /// What a move changes on the task it names: where it's filed and its place there.
+    /// </summary>
+    private static readonly string[] MovedFields = ["project_id", "section_id", "parent_id", "child_order"];
+
+    /// <summary>
+    /// What a move changes on the sub-tasks it carries. They follow it into its project and
+    /// section, and stay under the same parent in the same place.
+    /// </summary>
+    private static readonly string[] CarriedFields = ["project_id", "section_id"];
+
     private readonly object _gate = new();
     private readonly ITodoistApi _api;
     private readonly ISnapshotStore _store;
@@ -2399,10 +2410,32 @@ public sealed class SyncEngine
         // of it to say otherwise. And an edit made since the close would go with it.
         if (cmd.Type == "item_close")
         {
-            foreach (var entry in node is JsonArray array ? array.OfType<JsonObject>() : node is JsonObject single ? [single] : [])
+            foreach (var entry in PriorEntries(node))
                 if (entry["id"] is JsonValue closed && !JsonRead.Bool(entry, "checked"))
                     Uncheck(Promoted(closed.ToString()));
 
+            return;
+        }
+
+        // A move changes where the tasks it touches are filed and nothing else, so rolling one back
+        // puts that back on each task as it stands now, for the same reasons. The task it named can
+        // have a new parent, section, project and place; the sub-tasks it carried only followed it
+        // into a project and section.
+        if (cmd.Type == "item_move")
+        {
+            var named = ParseArgs(cmd)["id"] is JsonValue target ? Promoted(target.ToString()) : null;
+
+            foreach (var entry in PriorEntries(node))
+                if (entry["id"] is JsonValue moved)
+                    PutBack(ResourceType.Items, moved.ToString(), entry, Promoted(moved.ToString()) == named ? MovedFields : CarriedFields);
+
+            return;
+        }
+
+        // A reorder's priors are whole resources as well, and all it changes is a position.
+        if (Reorder.For(cmd.Type) is { } kind)
+        {
+            RestorePositions(kind, prior, []);
             return;
         }
 
@@ -2432,12 +2465,48 @@ public sealed class SyncEngine
             // Only where the resource is still here. Gone, there is nothing to rewind and the whole
             // prior goes back as it always did, which is what puts a resource back after a delete.
             var copy = WritesNamedFields(cmd) && Model.Get(type, id) is { } current
-                ? Rewound(current, resource, ParseArgs(cmd))
+                ? Rewound(current, resource, ParseArgs(cmd).Select(a => a.Key))
                 : resource.DeepClone().AsObject();
 
             _store.PutResource(type, id, copy.ToJsonString());
             Model.Upsert(type, id, copy);
         }
+    }
+
+    /// <summary>
+    /// The entries a command's priors hold, whether it recorded an array or a single resource.
+    /// </summary>
+    private static IEnumerable<JsonObject> PriorEntries(JsonNode node)
+        => node is JsonArray array ? array.OfType<JsonObject>() : node is JsonObject single ? [single] : [];
+
+    /// <summary>
+    /// Puts back the fields a command changed on a resource, where the resource stands now.
+    /// </summary>
+    /// <remarks>
+    /// For a command whose priors are whole resources but which changes only a field or two on
+    /// each. Written back whole, a prior undoes every edit made since. Written back under the id it
+    /// was recorded with, a resource added offline and named by the server since gets a second
+    /// copy. And one dropped since — its add refused, or deleted — comes back for good, as the
+    /// server has nothing to say about something it doesn't have.
+    /// </remarks>
+    /// <param name="type">The resource type</param>
+    /// <param name="recordedId">The id the prior recorded, which may since have been promoted</param>
+    /// <param name="prior">The resource as it stood when the command was queued</param>
+    /// <param name="fields">The fields the command changed</param>
+    private void PutBack(string type, string recordedId, JsonObject prior, IEnumerable<string> fields)
+    {
+        var id = Promoted(recordedId);
+
+        if (Model.Get(type, id) is not { } current)
+            return;
+
+        // A parent, section or project in the prior can have been named since, the same as the
+        // resource itself.
+        var restored = Rewound(current, prior, fields);
+        PromoteReferences(restored);
+
+        _store.PutResource(type, id, restored.ToJsonString());
+        Model.Upsert(type, id, restored);
     }
 
     /// <summary>
@@ -2457,12 +2526,12 @@ public sealed class SyncEngine
     /// </summary>
     /// <param name="current">The resource as it is</param>
     /// <param name="prior">The resource as it stood when the command was queued</param>
-    /// <param name="args">What the command was sent with, whose keys are the fields it wrote</param>
-    private static JsonObject Rewound(JsonObject current, JsonObject prior, JsonObject args)
+    /// <param name="fields">The fields the command wrote</param>
+    private static JsonObject Rewound(JsonObject current, JsonObject prior, IEnumerable<string> fields)
     {
         var rewound = current.DeepClone().AsObject();
 
-        foreach (var (field, _) in args)
+        foreach (var field in fields)
         {
             // Names the resource rather than changing it.
             if (field == "id")
@@ -2821,34 +2890,25 @@ public sealed class SyncEngine
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());
     }
 
+    /// <summary>
+    /// Puts back the positions a reorder gave, on each resource as it stands now.
+    /// </summary>
+    /// <remarks>
+    /// Only the position: its priors are whole resources, but that's all a reorder changes. Each
+    /// is found under the name the server has given it since, and one that isn't held any more
+    /// stays gone.
+    /// </remarks>
+    /// <param name="kind">Which of the three reorders it was</param>
+    /// <param name="priorJson">What the reorder recorded before it changed anything</param>
+    /// <param name="skip">Ids that are about to be removed anyway</param>
     private void RestorePositions(Reorder kind, string priorJson, HashSet<string> skip)
     {
-        JsonNode? node;
-        try
-        {
-            node = JsonNode.Parse(priorJson);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
-
-        if (node is not JsonArray priors)
+        if (TryParseNode(priorJson) is not JsonArray priors)
             return;
 
-        foreach (var entry in priors)
-        {
-            if (entry is not JsonObject obj || obj["id"] is not JsonValue idValue)
-                continue;
-
-            var id = idValue.ToString();
-            if (skip.Contains(id) || Model.Get(kind.Resource, id) is null)
-                continue;
-
-            var copy = obj.DeepClone().AsObject();
-            _store.PutResource(kind.Resource, id, copy.ToJsonString());
-            Model.Upsert(kind.Resource, id, copy);
-        }
+        foreach (var entry in priors.OfType<JsonObject>())
+            if (entry["id"] is JsonValue id && !skip.Contains(id.ToString()))
+                PutBack(kind.Resource, id.ToString(), entry, [kind.Order]);
     }
 
     /// <summary>
@@ -2878,14 +2938,16 @@ public sealed class SyncEngine
 
             // A move carries the sub-tasks with it, and they're in its priors because it changed
             // them. Left unowned, the server's word on one arrives before it has moved them and
-            // pulls the sub-task back to where it was; and a tombstone taken meanwhile is undone
-            // when a refused move puts its priors back, for good, since no second one is sent. A
-            // close ticks off the sub-tasks under it, and holds them for the same reasons.
+            // pulls the sub-task back to where it was. A close ticks off the sub-tasks under it,
+            // and holds them for the same reason.
+            //
+            // Held under the name the server has given each one since. A sub-task added offline is
+            // renamed once its add lands, and the server's word on it comes under the new name.
             if (c.Type is "item_move" or "item_close" && TryParseNode(c.PriorJson) is JsonArray priors)
             {
                 foreach (var prior in priors)
                     if (prior is JsonObject o && o["id"] is JsonValue carried)
-                        keys.Add(new ResourceKey(ResourceTypeFor(c), carried.ToString()));
+                        keys.Add(new ResourceKey(ResourceTypeFor(c), Promoted(carried.ToString())));
             }
         }
         return keys;
