@@ -79,8 +79,14 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     private int _at;
 
-    /// <summary>The rendering being built, handed to the box whole when it's done.</summary>
-    private StringBuilder _rtf = new();
+    /// <summary>
+    /// The rendering being built, handed to the box whole when it's done. Kept between renders and
+    /// emptied at the start of each, since a description is redrawn on every sync.
+    /// </summary>
+    private readonly StringBuilder _rtf = new();
+
+    /// <summary>The body text's size in points, read once a render rather than once a run.</summary>
+    private float _body;
 
     /// <summary>
     /// The paragraph settings last written into the document, so a run that shares them doesn't
@@ -234,7 +240,7 @@ internal sealed class MarkdownView : RichTextBox
             // The whole rendering in one message, rather than a selection set, styled and written
             // for every run — which for a full-length description was thousands of round trips to
             // the control, each of them reflowing it, where the user is reading.
-            Rtf = Document();
+            RichText.Load(this, Document());
 
             // Back to the top, so switching task doesn't leave the box scrolled to where the last
             // one happened to end.
@@ -253,12 +259,34 @@ internal sealed class MarkdownView : RichTextBox
     /// The description as one rich text document, with where each run came from noted as it's
     /// written.
     /// </summary>
-    private string Document()
+    /// <remarks>
+    /// The markdown as it was written when it can't be drawn. Markdig refuses input nested past its
+    /// own limit — a hundred and twenty-eight quote markers, or sixty-four list levels — by
+    /// throwing, and anything else the walk trips over gets the same answer. A description is account
+    /// data: it arrives by sync from the web app or another device, so none of this is only
+    /// reachable by typing, and letting it out would take down the window on the next publish with
+    /// the offending task selected. Worse, the box that would let the user fix the text is the one
+    /// that throws. The raw text is a truthful thing to show and always readable.
+    ///
+    /// Written again from the start rather than finished from where it stopped, so the box and
+    /// what's said about it — the links, the offsets, the count — describe the same document either
+    /// way.
+    /// </remarks>
+    /// <returns>The document, ready to hand to the box</returns>
+    private StringBuilder Document()
     {
-        Forget();
+        try
+        {
+            Forget();
 
-        foreach (var block in Parse())
-            WriteBlock(block, indent: 0);
+            foreach (var block in Markdig.Markdown.Parse(_markdown, Pipeline))
+                WriteBlock(block, indent: 0);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Forget();
+            WritePlain();
+        }
 
         // The last paragraph mark of a document ends the paragraph it's on rather than opening an
         // empty one after it, so the box would otherwise hold one character fewer than was counted —
@@ -266,7 +294,7 @@ internal sealed class MarkdownView : RichTextBox
         if (_endsLine)
             _rtf.Append(@"\par ");
 
-        return _rtf.Append('}').ToString();
+        return _rtf.Append('}');
     }
 
     /// <summary>Throws away the last rendering and everything said about it.</summary>
@@ -282,36 +310,35 @@ internal sealed class MarkdownView : RichTextBox
         _at = 0;
         _paragraph = null;
         _endsLine = false;
-        _rtf = RichText.Open(_markdown.Length * 2 + 256, Font.FontFamily.Name, _theme);
+        _body = Font.SizeInPoints;
+
+        _rtf.Clear();
+        RichText.Open(_rtf, Font.FontFamily.GetName(0), _theme);
     }
 
-    /// <summary>The span covering a whole string, for text that stands for itself.</summary>
-    private static SourceSpan Whole(string text) => new(0, text.Length - 1);
-
     /// <summary>
-    /// The markdown as blocks, or the whole thing as one plain run when it can't be read.
+    /// Writes the markdown as it was written, a line at a time.
     /// </summary>
     /// <remarks>
-    /// Markdig refuses input nested past its own limit — a hundred and twenty-eight quote markers,
-    /// or sixty-four list levels — by throwing. A description is account data: it arrives by sync
-    /// from the web app or another device, so this is not only reachable by typing, and letting it
-    /// out would take down the window on the next publish with the offending task selected. Worse,
-    /// the box that would let the user fix the text is the one that throws. The raw text is a
-    /// truthful thing to show and always readable.
+    /// A run per line, each noted against where it starts in the markdown, because here the two are
+    /// the same characters — so a click still opens the editor where it was aimed rather than at the
+    /// top. Per line rather than as one run because the box keeps a return and newline as one
+    /// character: one run over the lot would put a click a character further back for every line
+    /// above it.
     /// </remarks>
-    private IEnumerable<Block> Parse()
+    private void WritePlain()
     {
-        try
+        var start = 0;
+        while (start < _markdown.Length)
         {
-            return Markdig.Markdown.Parse(_markdown, Pipeline);
+            var end = _markdown.IndexOf("\r\n", start, StringComparison.Ordinal);
+            end = end < 0 ? _markdown.Length : end + 2;
+
+            Write(_markdown[start..end], Style.Plain, newLine: false, from: new SourceSpan(start, end - 1));
+            start = end;
         }
-        catch (ArgumentException)
-        {
-            // One run over the whole markdown, because here the two are the same characters — so a
-            // click still opens the editor where it was aimed rather than at the top.
-            Write(_markdown, Style.Plain, from: Whole(_markdown));
-            return [];
-        }
+
+        Write(string.Empty, Style.Plain);
     }
 
     private void WriteBlock(Block block, int indent)
@@ -602,7 +629,7 @@ internal sealed class MarkdownView : RichTextBox
             : RichText.TextColour;
 
         // RTF counts a size in half-points.
-        var size = (int)Math.Round(Font.SizeInPoints * 2 * (1f + style.Larger));
+        var size = (int)Math.Round(_body * 2 * (1f + style.Larger));
 
         _rtf.Append(@"\f").Append(style.Fixed ? RichText.FixedFace : RichText.BodyFace)
             .Append(@"\fs").Append(size)
@@ -622,7 +649,7 @@ internal sealed class MarkdownView : RichTextBox
     /// </remarks>
     /// <param name="pixels">A distance on the screen</param>
     /// <returns>The same distance in twentieths of a point</returns>
-    private static int Twips(int pixels) => (int)(pixels / ScreenDpi * 72 * 20);
+    private static int Twips(int pixels) => (int)(pixels / (double)ScreenDpi * 72.0 * 20.0);
 
     /// <summary>How many pixels the screen fits into an inch, across.</summary>
     private static readonly float ScreenDpi = ReadScreenDpi();

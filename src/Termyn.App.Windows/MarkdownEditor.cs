@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
@@ -149,7 +150,7 @@ internal sealed class MarkdownEditor : RichTextBox
             // It also settles what used to need a separate pass: the document is built from
             // nothing each time, so a word that was bold until its asterisks were deleted comes
             // back plain without anything having to notice that it changed.
-            Rtf = BuildRtf(text);
+            RichText.Load(this, BuildRtf(text));
             _styled = text;
         }
         finally
@@ -172,11 +173,12 @@ internal sealed class MarkdownEditor : RichTextBox
     /// one message and a selection's formatting in three per run — and a full-length description
     /// is three thousand runs.
     /// </remarks>
-    private string BuildRtf(string text)
+    private StringBuilder BuildRtf(string text)
     {
         var body = (int)Math.Round(Font.SizeInPoints * 2);   // RTF counts in half-points
 
-        var rtf = RichText.Open(text.Length * 2 + 256, Font.FontFamily.Name, _theme);
+        var rtf = new StringBuilder(text.Length * 2 + 256);
+        RichText.Open(rtf, Font.FontFamily.GetName(0), _theme);
 
         foreach (var run in MarkdownHighlight.Runs(text))
         {
@@ -202,7 +204,7 @@ internal sealed class MarkdownEditor : RichTextBox
         if (text.EndsWith('\n'))
             rtf.Append(@"\par ");
 
-        return rtf.Append('}').ToString();
+        return rtf.Append('}');
     }
 
     /// <summary>Which entry of the colour table a style is drawn in.</summary>

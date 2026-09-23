@@ -9,7 +9,7 @@ namespace Termyn.App.Windows;
 /// <remarks>
 /// Both halves build the whole document and hand it over in one message, rather than selecting each
 /// run and styling it where it sits. Run by run, a full-length description is thousands of round
-/// trips to the control, each of them reflowing it, and measured two orders of magnitude slower.
+/// trips to the control, each of them reflowing it, and it measured eighty times slower.
 ///
 /// The two are drawing the same description, so the header is written here once and they can't
 /// drift apart about which face is which or what colour a muted run is.
@@ -37,29 +37,84 @@ internal static class RichText
     /// <remarks>
     /// Declared rather than spelled out on each run, which is what keeps a document proportional to
     /// the text rather than to the number of things in it.
+    ///
+    /// The face wants its name in no particular language — <see cref="FontFamily.GetName"/> with
+    /// nought — rather than in the one the interface is in. A document says it's ANSI, and a face
+    /// named in Japanese would reach the control as question marks and be swapped for another.
     /// </remarks>
-    /// <param name="capacity">Roughly how long the document will be, so it isn't grown a piece at a time</param>
+    /// <param name="rtf">The document to start, which should be empty</param>
     /// <param name="face">The family the body text is set in</param>
     /// <param name="theme">The colours to draw in</param>
-    /// <returns>The document so far, still open for its runs and the closing brace</returns>
-    internal static StringBuilder Open(int capacity, string face, Theme theme)
+    internal static void Open(StringBuilder rtf, string face, Theme theme)
     {
-        var rtf = new StringBuilder(capacity);
-        rtf.Append(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil ")
-           .Append(face)
-           .Append(@";}{\f1\fmodern ")
-           .Append(Faces.FixedWidth)
-           .Append(@";}}");
+        rtf.Append(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil ");
+        Name(rtf, face);
+        rtf.Append(@";}{\f1\fmodern ");
+        Name(rtf, Faces.FixedWidth);
+        rtf.Append(@";}}");
 
-        return rtf.Append(@"{\colortbl ;")
-                  .Append(Colour(theme.Text))
-                  .Append(Colour(theme.Muted))
-                  .Append(Colour(theme.Accent))
-                  .Append('}');
+        rtf.Append(@"{\colortbl ;")
+           .Append(Colour(theme.Text))
+           .Append(Colour(theme.Muted))
+           .Append(Colour(theme.Accent))
+           .Append('}');
+    }
+
+    /// <summary>
+    /// Writes a face's name into the font table without any of it being read as the table's syntax.
+    /// </summary>
+    /// <remarks>
+    /// An entry ends at a semicolon, so one in the name is written as its code instead. The table
+    /// won't take a character's code point the way the text does — the name spills out into the
+    /// description and takes the rest of the table with it — so anything outside ASCII becomes a
+    /// question mark, which at worst draws in the control's default face.
+    /// </remarks>
+    /// <param name="rtf">The document to write into</param>
+    /// <param name="face">The name, exactly as it's installed</param>
+    private static void Name(StringBuilder rtf, string face)
+    {
+        foreach (var c in face)
+        {
+            switch (c)
+            {
+                case '\\' or '{' or '}':
+                    rtf.Append('\\').Append(c);
+                    break;
+
+                case ';':
+                    rtf.Append(@"\'3b");
+                    break;
+
+                case < ' ' or > '~':
+                    rtf.Append('?');
+                    break;
+
+                default:
+                    rtf.Append(c);
+                    break;
+            }
+        }
     }
 
     private static string Colour(Color colour)
         => $@"\red{colour.R}\green{colour.G}\blue{colour.B};";
+
+    /// <summary>
+    /// Hands a finished document to a control, replacing whatever it held.
+    /// </summary>
+    /// <remarks>
+    /// Loaded as a stream rather than assigned to <see cref="RichTextBox.Rtf"/>, which first streams
+    /// the control's whole current document back out to see whether the new one is the same — a
+    /// second pass over the text on every redraw, for an answer that's always no. Everything written
+    /// here is ASCII, the rest having gone as code points, so that's the encoding it goes in.
+    /// </remarks>
+    /// <param name="box">The control to load it into</param>
+    /// <param name="rtf">The document, closing brace and all</param>
+    internal static void Load(RichTextBox box, StringBuilder rtf)
+    {
+        using var stream = new MemoryStream(Encoding.ASCII.GetBytes(rtf.ToString()));
+        box.LoadFile(stream, RichTextBoxStreamType.RichText);
+    }
 
     /// <summary>
     /// Writes text into a rich text document without any of it being read as instructions.
@@ -77,7 +132,8 @@ internal static class RichText
     /// that reaches the view unparsed arrives with whichever the account sent. And the handful of
     /// characters the control won't hold as themselves go in as a space: the specials at the top of
     /// the range, the replacement character among them, are dropped from a document where typing
-    /// one in gets a space, and a nought ends the document where it stands.
+    /// one in gets a space; so is half of a surrogate pair without the other half; and a nought ends
+    /// the document where it stands.
     /// </remarks>
     /// <param name="rtf">The document to write into</param>
     /// <param name="text">The text, exactly as it should read</param>
@@ -105,6 +161,7 @@ internal static class RichText
                     break;
 
                 case '\0' or >= '\uFFF9':
+                case >= '\uD800' and <= '\uDFFF' when Unpaired(text, i):
                     rtf.Append(' ');
                     break;
 
@@ -119,4 +176,13 @@ internal static class RichText
             }
         }
     }
+
+    /// <summary>Whether the surrogate at <paramref name="i"/> is missing the other half of its pair.</summary>
+    /// <param name="text">The text it's in</param>
+    /// <param name="i">Where it is</param>
+    /// <returns>True for a half with nothing to pair with</returns>
+    private static bool Unpaired(ReadOnlySpan<char> text, int i)
+        => char.IsHighSurrogate(text[i])
+            ? i + 1 >= text.Length || !char.IsLowSurrogate(text[i + 1])
+            : i == 0 || !char.IsHighSurrogate(text[i - 1]);
 }

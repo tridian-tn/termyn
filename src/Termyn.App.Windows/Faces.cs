@@ -9,9 +9,9 @@ namespace Termyn.App.Windows;
 /// about it, and pointing somewhere else one day should be a single edit rather than two that can be
 /// made separately.
 ///
-/// Held as a name because a name is all a rich text document wants.
-/// <see cref="FontFamily.GenericMonospace"/> hands back a new family, with a GDI+ handle behind it,
-/// on every read — so it's read once here.
+/// Held as a name because a name is all a rich text document wants, and in no particular language
+/// because that's the name a document can carry. <see cref="FontFamily.GenericMonospace"/> hands
+/// back a new family, with a GDI+ handle behind it, on every read — so it's read once here.
 /// </remarks>
 internal static class Faces
 {
@@ -21,6 +21,6 @@ internal static class Faces
     private static string ReadFixedWidth()
     {
         using var family = FontFamily.GenericMonospace;
-        return family.Name;
+        return family.GetName(0);
     }
 }

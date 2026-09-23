@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Termyn.Core.Settings;
 
 namespace Termyn.App.Windows.Tests;
@@ -152,6 +153,20 @@ public class MarkdownViewTests
         // Indented as a list rather than run together as one paragraph.
         FontAt(view, "first");
         Assert.True(view.SelectionIndent > 0 || view.SelectionHangingIndent > 0);
+    }
+
+    [WinFormsFact]
+    public void A_bullets_words_hang_in_from_the_bullet_rather_than_the_other_way_round()
+    {
+        // The bullet starts the line at the margin and everything after it, wrapped lines included,
+        // sits in from it. The other way round reads as a line indented for no reason with a bullet
+        // somewhere in front of it.
+        using var view = Render("- first\n- second");
+
+        FontAt(view, "first");
+
+        Assert.Equal(0, view.SelectionIndent);
+        Assert.True(view.SelectionHangingIndent > 0, $"hangs by {view.SelectionHangingIndent}");
     }
 
     [WinFormsFact]
@@ -585,6 +600,68 @@ public class MarkdownViewTests
     }
 
     [WinFormsFact]
+    public void A_paragraph_has_air_under_it_and_a_line_broken_inside_one_does_not()
+    {
+        // The difference between a new line and a new thought, which is the reason for having both.
+        // Nothing else says which is which once the markdown's own blank lines are gone.
+        using var view = Render("First line\nSecond line\n\nNext thought\n\n- an item\n- another");
+
+        Assert.Equal(0, SpaceAfter(view, "First line"));
+        Assert.True(SpaceAfter(view, "Second line") > 0, "a paragraph's last line should have air under it");
+        Assert.True(SpaceAfter(view, "Next thought") > 0, "a paragraph should have air under it");
+        Assert.Equal(0, SpaceAfter(view, "an item"));
+    }
+
+    /// <summary>How much air is under the paragraph some words are in, in twips.</summary>
+    private static int SpaceAfter(MarkdownView view, string needle)
+    {
+        FontAt(view, needle);
+
+        var format = new ParaFormat2 { cbSize = Marshal.SizeOf<ParaFormat2>(), dwMask = PfmSpaceAfter };
+        SendMessage(view.Handle, EmGetParaFormat, 0, ref format);
+        return format.dySpaceAfter;
+    }
+
+    private const int EmGetParaFormat = 0x0400 + 61;
+    private const int PfmSpaceAfter = 0x00000080;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, int flags, ref ParaFormat2 format);
+
+    /// <summary>The rich edit control's paragraph format, every field present so its size is right.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ParaFormat2
+    {
+        public int cbSize;
+        public int dwMask;
+        public short wNumbering;
+        public short wEffects;
+        public int dxStartIndent;
+        public int dxRightIndent;
+        public int dxOffset;
+        public short wAlignment;
+        public short cTabCount;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+        public int[] rgxTabs;
+
+        public int dySpaceBefore;
+        public int dySpaceAfter;
+        public int dyLineSpacing;
+        public short sStyle;
+        public byte bLineSpacingRule;
+        public byte bOutlineLevel;
+        public short wShadingWeight;
+        public short wShadingStyle;
+        public short wNumberingStart;
+        public short wNumberingStyle;
+        public short wNumberingTab;
+        public short wBorderSpace;
+        public short wBorderWidth;
+        public short wBorders;
+    }
+
+    [WinFormsFact]
     public void A_run_of_blank_lines_reads_as_one_break_and_not_as_several()
     {
         // Long-standing and not part of the change, but worth writing down beside it: however many
@@ -638,6 +715,18 @@ public class MarkdownViewTests
 
         Assert.Equal(markdown, view.Text.TrimEnd('\n'));
         Assert.Equal(at, view.SourceAt(at));
+    }
+
+    [WinFormsFact]
+    public void Markdown_shown_as_written_maps_past_its_line_endings()
+    {
+        // The box keeps a return and newline as one character, so each one above a click is a
+        // character the rendering has and the markdown has two of.
+        var markdown = new string('>', 200) + " first\r\nsecond\r\nthird line";
+        using var view = Render(markdown);
+
+        Assert.Equal(markdown.IndexOf("third", StringComparison.Ordinal), SourceOf(view, "third"));
+        Assert.Equal(markdown.IndexOf("second", StringComparison.Ordinal), SourceOf(view, "second"));
     }
 
     [WinFormsFact]
@@ -719,6 +808,24 @@ public class MarkdownViewTests
     }
 
     [WinFormsFact]
+    public void Half_an_emoji_still_counts_as_one()
+    {
+        // What's left of a description cut off mid-emoji by whatever wrote it last: one half of a
+        // pair, which the box drops from a document. Parsed and unparsed, since the second is written
+        // through exactly as it came.
+        foreach (var half in new[] { (char)0xD83C, (char)0xDF89 })
+        {
+            var markdown = $"before {half} after";
+
+            using var parsed = Render(markdown);
+            using var unparsed = Render(new string('>', 200) + markdown);
+
+            Assert.Equal(parsed.TextLength, parsed.Counted);
+            Assert.Equal(unparsed.TextLength, unparsed.Counted);
+        }
+    }
+
+    [WinFormsFact]
     public void A_character_the_box_cannot_hold_still_counts_as_one()
     {
         // The replacement character is what text pasted in the wrong encoding is full of, and the box
@@ -751,7 +858,7 @@ public class MarkdownViewTests
 
         // Measured at 7 ms for the full sixteen thousand characters, against 580 ms for the same
         // thing written a run at a time. What this guards against is a return to that shape, which
-        // was two orders of magnitude away rather than a few per cent.
+        // was eighty times slower rather than a few per cent.
         Assert.True(clock.ElapsedMilliseconds < 300, $"drawing a full description took {clock.ElapsedMilliseconds} ms");
     }
 
