@@ -400,23 +400,6 @@ internal sealed class OutlineView : ListView
     /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        // Neither the box nor the expander is the row. Clicking one asks for that one thing and
-        // nothing else — the selection stays where the user put it, which is what every list does
-        // and what stops ticking a task off from moving them away from what they were reading.
-        if (e.Button == MouseButtons.Left && CheckboxAt(e.Location) is { } ticked)
-        {
-            Focus();
-            ToggleRequested?.Invoke(ticked);
-            return;
-        }
-
-        if (e.Button == MouseButtons.Left && ExpanderAt(e.Location) is { } id)
-        {
-            Focus();
-            CollapseRequested?.Invoke(id, !IsCollapsed(id));
-            return;
-        }
-
         if (e.Button == MouseButtons.Right
             && HitTest(e.Location).Item?.Index is { } index
             && index >= 0
@@ -452,21 +435,34 @@ internal sealed class OutlineView : ListView
     /// <summary>Asks for a task to be ticked off, or put back — the box on its row was clicked.</summary>
     public event Action<string>? ToggleRequested;
 
-    /// <summary>Clicks a task's box, for a test with no row to click.</summary>
-    /// <param name="id">The task whose box was clicked</param>
-    internal void ClickCheckbox(string id) => ToggleRequested?.Invoke(id);
-
     /// <summary>
-    /// Presses a mouse button somewhere in the list, for a test with no hand to do it.
+    /// Answers a press on a row's box or expander, which asks for that one thing and not the row.
     /// </summary>
     /// <remarks>
-    /// Straight to the handler rather than through a posted button-down: a list takes the mouse on
-    /// a press and waits inside its own loop for the release, and a release nobody sends never
-    /// arrives — which hangs the test rather than failing it.
+    /// The selection stays where the user put it, which is what every list does and what stops
+    /// ticking a task off, or glancing at what's under it, from moving them away from what they
+    /// were reading.
     /// </remarks>
-    /// <param name="button">Which button went down</param>
-    /// <param name="at">Where, in the list's own coordinates</param>
-    internal void PressAt(MouseButtons button, Point at) => OnMouseDown(new MouseEventArgs(button, 1, at.X, at.Y, 0));
+    /// <param name="at">Where the button went down, in the list's own coordinates</param>
+    /// <returns>True when the press was one of those, and the list shouldn't see it</returns>
+    private bool PressedBoxOrExpander(Point at)
+    {
+        if (CheckboxAt(at) is { } ticked)
+        {
+            Focus();
+            ToggleRequested?.Invoke(ticked);
+            return true;
+        }
+
+        if (ExpanderAt(at) is { } id)
+        {
+            Focus();
+            CollapseRequested?.Invoke(id, !IsCollapsed(id));
+            return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// The task whose box is under a point, or null where there isn't one.
@@ -746,7 +742,14 @@ internal sealed class OutlineView : ListView
         // A day's heading is not a task, so a click on one is dropped where it lands. Letting the
         // list select it and moving the selection off afterwards works, but the row it settles on
         // lights up and goes out again — a flash on a row nobody clicked.
-        if (m.Msg is WmLeftDown or WmLeftDouble or WmRightDown && OverHeading(m.LParam))
+        if (m.Msg is WmLeftDown or WmLeftDouble or WmRightDown && IsHeadingAt(PointOf(m.LParam)))
+            return;
+
+        // Answered here rather than in OnMouseDown, because returning from that doesn't stop
+        // anything: the list raises it first and selects the row under the press afterwards. A
+        // second press that arrives as a double-click is a second press on the box, the way it is
+        // on any checkbox, and not a request to open the task.
+        if (m.Msg is WmLeftDown or WmLeftDouble && PressedBoxOrExpander(PointOf(m.LParam)))
             return;
 
         base.WndProc(ref m);
@@ -784,14 +787,14 @@ internal sealed class OutlineView : ListView
     }
 
     /// <summary>
-    /// Whether a click position packed into an lParam is over a day's heading.
+    /// Where a button went down, from the position a mouse message packs into its lParam.
     /// </summary>
     /// <remarks>
     /// Client coordinates, unlike the context menu's, which the shell sends in screen ones.
     /// </remarks>
     /// <param name="lParam">Where the button went down, as the message carries it</param>
-    /// <returns>True when that is a heading rather than a task</returns>
-    private bool OverHeading(nint lParam) => IsHeadingAt(new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF)));
+    /// <returns>The point, in the list's own coordinates</returns>
+    private static Point PointOf(nint lParam) => new((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF));
 
     /// <summary>Whether a point in the list is over a day's heading.</summary>
     /// <param name="client">Where to look, in the list's own coordinates</param>

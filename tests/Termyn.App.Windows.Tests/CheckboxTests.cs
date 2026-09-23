@@ -64,11 +64,7 @@ public class CheckboxTests
         return null;
     }
 
-    private static void Click(OutlineView outline, Point at)
-    {
-        outline.PressAt(MouseButtons.Left, at);
-        Application.DoEvents();
-    }
+    private static void Click(OutlineView outline, Point at) => RealMouse.Click(outline, at);
 
     [WinFormsFact]
     public void Every_task_has_a_box_and_a_day_has_none()
@@ -131,6 +127,27 @@ public class CheckboxTests
         Click(outline, BoxOf(outline, 0)!.Value);
 
         Assert.Equal(["a"], asked);
+        Assert.Equal("Tomorrow's", outline.SelectedRow?.Content);
+    }
+
+    [WinFormsFact]
+    public void A_second_click_that_arrives_as_a_double_click_is_a_second_click()
+    {
+        // Ticked off and straight back again, the way any checkbox takes it — and not the row's
+        // double-click, which would select the task and open it.
+        using var form = Window();
+        using var outline = Outline(form);
+
+        outline.SelectId("d");
+
+        var asked = new List<string>();
+        outline.ToggleRequested += asked.Add;
+
+        var box = BoxOf(outline, 0)!.Value;
+        Click(outline, box);
+        RealMouse.DoubleClick(outline, box);
+
+        Assert.Equal(["a", "a"], asked);
         Assert.Equal("Tomorrow's", outline.SelectedRow?.Content);
     }
 
