@@ -52,6 +52,58 @@ public class SyncEngineFailureRollbackTests
     }
 
     [Fact]
+    public async Task A_refused_label_delete_keeps_an_edit_to_the_task_that_landed_since()
+    {
+        // The delete records each task wearing the label whole, but only takes the label off it.
+        // Put back whole, an edit that landed since goes with it, and the server has no reason to
+        // send the task again to say otherwise.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 1);
+
+        engine.DeleteLabel("l1");
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited" });
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "label_delete" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        var task = engine.Snapshot().Items.Single();
+        Assert.Equal("Edited", task.Content);
+        Assert.Equal(["home"], task.Labels);
+        Assert.Equal("home", engine.Snapshot().Labels.Single().Name);
+    }
+
+    [Fact]
+    public async Task Undoing_a_label_delete_keeps_an_edit_to_the_task_made_elsewhere_since()
+    {
+        // The same through Ctrl+Z while the delete is still queued, with the edit coming from the
+        // server this time.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 2);
+
+        engine.DeleteLabel("l1");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+            Changes = [new ResourceChange("items", "i1", false, Json.Object("""{"id":"i1","content":"Edited elsewhere","project_id":"p1","labels":["home"]}"""))],
+        };
+        await engine.SyncAsync();
+
+        Assert.True(engine.Undo());
+        var task = engine.Snapshot().Items.Single();
+        Assert.Equal("Edited elsewhere", task.Content);
+        Assert.Equal(["home"], task.Labels);
+        Assert.Equal("home", engine.Snapshot().Labels.Single().Name);
+    }
+
+    [Fact]
     public async Task An_edit_that_fails_for_good_goes_back_to_the_servers_version()
     {
         var store = Seeded();
