@@ -58,18 +58,6 @@ internal sealed class MarkdownView : RichTextBox
     private readonly List<(int Start, int End, string Url)> _links = [];
 
     /// <summary>
-    /// The faces this has drawn with, kept rather than built again.
-    /// </summary>
-    /// <remarks>
-    /// There are only ever a handful. Two families, the body size and the three heading scales, and
-    /// the eight ways bold, italic and strikethrough combine — against which a full-length
-    /// description asked for a font seventeen hundred times and wanted two of them. Every one of
-    /// those carried a GDI+ handle until the finaliser came for it, on a path that runs on every
-    /// selection change and every sync, next to the box the user is typing in.
-    /// </remarks>
-    private readonly Dictionary<(string Family, float Size, FontStyle Style), Font> _faces = [];
-
-    /// <summary>
     /// Where each run of the rendered text came from in the markdown behind it.
     /// </summary>
     /// <remarks>
@@ -81,17 +69,30 @@ internal sealed class MarkdownView : RichTextBox
     private readonly List<(int Start, int Length, int Source, int SourceLength)> _sources = [];
 
     /// <summary>
-    /// Where the next run goes, counted here rather than asked of the control.
+    /// Where the next run goes, counted as the document is written.
     /// </summary>
     /// <remarks>
-    /// A render is a few hundred runs and each one used to ask the box how much text it was holding
-    /// — twice for itself and once more inside <see cref="TextBoxBase.AppendText"/>. One wrong
-    /// answer puts a run somewhere other than the end, and a build agent has answered nought while
-    /// the box held a sentence: the run went to the front, the description read back out of order,
-    /// and every offset after it pointed at the wrong character. The writing already knows how much
-    /// it has written, so it says so instead of asking.
+    /// The box is only handed the document once it's finished, so there's nothing to ask it until
+    /// then — and every offset recorded against a run is this count at the time. It has to come out
+    /// at exactly what the box ends up holding, which is why line endings are counted the way the
+    /// box keeps them rather than the way they were written.
     /// </remarks>
     private int _at;
+
+    /// <summary>The rendering being built, handed to the box whole when it's done.</summary>
+    private StringBuilder _rtf = new();
+
+    /// <summary>
+    /// The paragraph settings last written into the document, so a run that shares them doesn't
+    /// write them again.
+    /// </summary>
+    private (int Indent, bool Hanging, bool Tight)? _paragraph;
+
+    /// <summary>
+    /// Whether what's been written so far ends in a line ending, which is the one place the document
+    /// needs a paragraph mark more than was counted.
+    /// </summary>
+    private bool _endsLine;
 
     /// <summary>Raised when the user asks to type into the description, with where in the markdown.</summary>
     public event Action<int>? EditRequested;
@@ -217,39 +218,23 @@ internal sealed class MarkdownView : RichTextBox
 
     /// <summary>Draws the markdown into the box, from scratch each time.</summary>
     /// <remarks>
-    /// Internal so a test can force the render on a control that was never shown: styling a run
-    /// means selecting it, and a selection needs a window handle behind it.
+    /// Internal so a test can force the render on a control that was never shown: handing a control
+    /// a document needs a window handle behind it.
     /// </remarks>
     internal void Rebuild()
     {
         if (!IsHandleCreated)
             return;
 
-        // Drawing is switched off for the duration. Every run sets a selection and pushes text at
-        // the control, and each of those repaints on its own — which is nearly all of the time a
-        // long description takes to render, and the render happens where the user is typing.
+        // Drawing is switched off for the duration, so the box isn't painted empty and then full in
+        // the place the user is reading.
         SendMessage(Handle, WmSetRedraw, 0, 0);
         try
         {
-            // Drawn again rather than shown wrong. A run whose caret never went where it was put is
-            // written wherever the caret actually was, which moves a paragraph to the wrong part of
-            // the description and leaves every offset after it pointing at the wrong character.
-            // Nothing about the markdown brings it on — the same text drawn again comes out right —
-            // so having noticed it, drawing it again is both the cheapest answer and the whole of
-            // one. Showing a rendering already known to be wrong is the thing worth not doing.
-            Renders = 0;
-            do
-            {
-                Renders++;
-                Draw();
-            }
-            while (MisplacedRuns > 0 && Renders < RenderAttempts);
-
-            // Every go missed. The text as the account wrote it is truthful, always readable, and
-            // the least this can get wrong — one run, at a caret already sitting where it goes.
-            // It is the same answer markdown too deeply nested to parse already gets.
-            if (MisplacedRuns > 0)
-                DrawPlain();
+            // The whole rendering in one message, rather than a selection set, styled and written
+            // for every run — which for a full-length description was thousands of round trips to
+            // the control, each of them reflowing it, where the user is reading.
+            Rtf = Document();
 
             // Back to the top, so switching task doesn't leave the box scrolled to where the last
             // one happened to end.
@@ -265,59 +250,39 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>
-    /// Draws the description once, styled.
+    /// The description as one rich text document, with where each run came from noted as it's
+    /// written.
     /// </summary>
-    /// <remarks>
-    /// Internal for the same reason <see cref="Rebuild"/> is: a test needs the single go, without
-    /// the drawing again that would put it right, to show that a refused caret really does scramble
-    /// the description. Everything else goes through Rebuild.
-    /// </remarks>
-    internal void Draw()
+    private string Document()
     {
         Forget();
-
-        // Spends one of the renders a test asked to have go wrong. Nothing in the running app ever
-        // asks for one, so this is false for every render there.
-        _spoiling = SpoilRenders > 0;
-        if (_spoiling)
-            SpoilRenders--;
 
         foreach (var block in Parse())
             WriteBlock(block, indent: 0);
-    }
 
-    /// <summary>
-    /// Puts the description up as the account wrote it, styling abandoned.
-    /// </summary>
-    /// <remarks>
-    /// What is left when the rendering can't be got right. The whole text is recorded as one run
-    /// over the whole markdown, because here they are the same characters — so a click still opens
-    /// the editor where it was aimed rather than at the top.
-    /// </remarks>
-    private void DrawPlain()
-    {
-        Forget();
-        Plain = true;
+        // The last paragraph mark of a document ends the paragraph it's on rather than opening an
+        // empty one after it, so the box would otherwise hold one character fewer than was counted —
+        // and the offsets are only right while the two agree.
+        if (_endsLine)
+            _rtf.Append(@"\par ");
 
-        Write(_markdown, Style.Plain, from: Whole(_markdown));
+        return _rtf.Append('}').ToString();
     }
 
     /// <summary>Throws away the last rendering and everything said about it.</summary>
     /// <remarks>
-    /// What a reader of any of this is holding it against is the text now in the box, and Clear has
-    /// just thrown away everything an earlier render put there — so anything carried over from one
-    /// would describe a rendering that no longer exists.
+    /// What a reader of any of this is holding it against is the text in the box, which the new
+    /// document replaces whole — so anything carried over from the last one would describe a
+    /// rendering that no longer exists.
     /// </remarks>
     private void Forget()
     {
-        Clear();
         _links.Clear();
         _sources.Clear();
         _at = 0;
-        MisplacedRuns = 0;
-        Plain = false;
-        _run = 0;
-        _spoiling = false;
+        _paragraph = null;
+        _endsLine = false;
+        _rtf = RichText.Open(_markdown.Length * 2 + 256, Font.FontFamily.Name, _theme);
     }
 
     /// <summary>The span covering a whole string, for text that stands for itself.</summary>
@@ -342,7 +307,8 @@ internal sealed class MarkdownView : RichTextBox
         }
         catch (ArgumentException)
         {
-            Plain = true;
+            // One run over the whole markdown, because here the two are the same characters — so a
+            // click still opens the editor where it was aimed rather than at the top.
             Write(_markdown, Style.Plain, from: Whole(_markdown));
             return [];
         }
@@ -567,35 +533,17 @@ internal sealed class MarkdownView : RichTextBox
         if (from is { Length: > 0 } span && text.Length > 0)
             _sources.Add((_at, Shown(text), span.Start, span.Length));
 
-        PlaceCaret();
+        WriteParagraph(style);
+        WriteCharacters(style);
 
-        // Paragraph settings, so every run of a paragraph has to agree about them. The air under
-        // each one is what makes a description read as separate thoughts rather than as a wall —
-        // which is how it looks in Todoist, and the thing most obviously missing without it.
-        SelectionIndent = style.Indent * IndentWidth;
-        SelectionHangingIndent = style.Hanging ? IndentWidth : 0;
-        SetSpacingAfter(style.Tight ? 0 : ParagraphSpacing);
+        RichText.Escape(_rtf, text);
+        if (newLine)
+            _rtf.Append(@"\par ");
 
-        var font = FontStyle.Regular;
-        if (style.Bold) font |= FontStyle.Bold;
-        if (style.Italic) font |= FontStyle.Italic;
-        if (style.Strike) font |= FontStyle.Strikeout;
+        _at += Shown(text) + (newLine ? 1 : 0);
 
-        var family = style.Fixed ? Faces.FixedWidth : Font.FontFamily;
-        SelectionFont = Face(family, Font.Size * (1f + style.Larger), font);
-        // Muted throughout when the pane can't be typed into, which is the only cue that carries in
-        // both themes: the recessed background is a couple of units in the light one and invisible.
-        // Links keep their colour — a completed task's description is still worth following out of, and
-        // drawing them dead while they still work is the mirror of the mistake being avoided here.
-        SelectionColor = style.Link ? Theme.Accent
-            : _inert || style.Muted ? Theme.Muted
-            : Theme.Text;
-
-        // Written at the selection rather than through AppendText, which would look the end of the
-        // text up for itself.
-        var written = newLine ? text + Environment.NewLine : text;
-        SelectedText = written;
-        _at += Shown(written);
+        if (newLine || text.Length > 0)
+            _endsLine = newLine || text[^1] is '\r' or '\n';
     }
 
     /// <summary>
@@ -615,155 +563,89 @@ internal sealed class MarkdownView : RichTextBox
     /// <returns>How many characters of it the box will hold</returns>
     private static int Shown(string written) => written.Length - written.AsSpan().Count("\r\n");
 
-    /// <summary>How many goes the caret gets at moving before this stops asking.</summary>
-    /// <remarks>
-    /// Three, which is two more than has ever been needed. What has been seen is two to four runs
-    /// of a render of several hundred, so whatever the reason is, it doesn't last.
-    /// </remarks>
-    private const int CaretAttempts = 3;
-
-    /// <summary>How many goes the whole rendering gets before it is given up on.</summary>
-    /// <remarks>
-    /// Three, on the same reasoning as the caret's own: what has been seen is two runs of several
-    /// hundred, and the text drawn again comes out right. Whatever the control is doing, it does
-    /// not last — and a description is redrawn on every keystroke in it, so this is not a budget
-    /// worth spending more of.
-    /// </remarks>
-    private const int RenderAttempts = 3;
-
     /// <summary>
-    /// Which run of a spoilt render misses its place, and whether this render is one.
+    /// Sets out the paragraph a run is in, when it differs from the one before.
     /// </summary>
     /// <remarks>
-    /// The second, because the first belongs at the front anyway: refusing the caret to that one
-    /// would count as misplaced without moving a character, and what a test needs to see is the
-    /// description actually come out wrong.
-    /// </remarks>
-    private const int SpoiltRun = 1;
-
-    private bool _spoiling;
-
-    private int _run;
-
-    /// <summary>
-    /// Puts the caret where the next run goes, and makes sure it went there.
-    /// </summary>
-    /// <remarks>
-    /// Asking is not enough. On a build agent this control has been left with its caret at nought
-    /// after being told to put it elsewhere, and the run then written at the caret goes to the
-    /// front — the description comes out scrambled and every offset after it points at the wrong
-    /// character. Two to four runs of a few hundred, so asking again is enough.
+    /// Paragraph settings, so every run of a paragraph has to agree about them — and the document
+    /// takes whichever were in force when the paragraph ends, which is the last run's. The air under
+    /// each one is what makes a description read as separate thoughts rather than as a wall, which
+    /// is how it looks in Todoist and the thing most obviously missing without it.
     ///
-    /// There are two ways to get the place wrong and this is the second of them. The first is the
-    /// place itself being wrong, from asking the box how much it was holding and being told nought,
-    /// which is why the count is kept here instead. This one is the place being right and the caret
-    /// not going to it.
+    /// The indent is where the first line starts and the hanging indent is how much further in the
+    /// rest sit. A document writes the same thing the other way round: where the rest sit, and how
+    /// far back from there the first line comes out.
     /// </remarks>
-    private void PlaceCaret()
+    private void WriteParagraph(Style style)
     {
-        // The run a test is holding the caret back from. Every go at it fails and the caret is left
-        // at the front, so the run is written there — the damage itself rather than a flag saying
-        // it happened, which is the only way what follows can be held to repairing it.
-        if (_spoiling && _run++ == SpoiltRun)
-        {
-            Select(0, 0);
-            MisplacedRuns++;
+        var paragraph = (style.Indent, style.Hanging, style.Tight);
+        if (_paragraph == paragraph)
             return;
-        }
 
-        for (var attempt = 0; attempt < CaretAttempts; attempt++)
-        {
-            Select(_at, 0);
+        _paragraph = paragraph;
 
-            // The length as well as the place. What follows writes over the selection, so a
-            // selection left with anything in it replaces that text instead of adding to it —
-            // which would take the run before this one out of the description on the way past.
-            if (SelectionStart == _at && SelectionLength == 0)
-            {
-                // Once for the run rather than once for each go at it, which is what the name says
-                // and what anyone holding it against a scrambled rendering is counting.
-                if (attempt > 0)
-                    MisplacedRuns++;
+        var indent = Twips(style.Indent * IndentWidth);
+        var hanging = style.Hanging ? Twips(IndentWidth) : 0;
 
-                return;
-            }
-        }
-
-        // Never took. Counted the same as one that took late, since both mean the caret did not go
-        // where it was put on the first ask.
-        MisplacedRuns++;
+        _rtf.Append(@"\pard\li").Append(indent + hanging)
+            .Append(@"\fi").Append(-hanging)
+            .Append(@"\sa").Append(style.Tight ? 0 : ParagraphSpacing);
     }
 
-    /// <summary>
-    /// The face for a run, built the first time it is asked for and kept after that.
-    /// </summary>
-    /// <remarks>
-    /// Keyed by the family's name rather than by the family itself, which is a fresh object on
-    /// every read and would never match twice. Setting a selection's font reads it and sends the
-    /// control a character format; the control doesn't hold on to what it was given, so one of
-    /// these can be handed out as often as it is asked for.
-    /// </remarks>
-    /// <param name="family">The family to draw in</param>
-    /// <param name="size">How big, in points</param>
-    /// <param name="style">Bold, italic and strikethrough, in whatever combination</param>
-    /// <returns>The face, which this keeps ownership of</returns>
-    private Font Face(FontFamily family, float size, FontStyle style)
+    /// <summary>Sets out how a run's characters are drawn, in full, ahead of its text.</summary>
+    private void WriteCharacters(Style style)
     {
-        var key = (family.Name, size, style);
-        if (_faces.TryGetValue(key, out var kept))
-            return kept;
+        // Muted throughout when the pane can't be typed into, which is the only cue that carries in
+        // both themes: the recessed background is a couple of units in the light one and invisible.
+        // Links keep their colour — a completed task's description is still worth following out of, and
+        // drawing them dead while they still work is the mirror of the mistake being avoided here.
+        var colour = style.Link ? RichText.AccentColour
+            : _inert || style.Muted ? RichText.MutedColour
+            : RichText.TextColour;
 
-        var made = new Font(family, size, style);
-        _faces[key] = made;
-        return made;
+        // RTF counts a size in half-points.
+        var size = (int)Math.Round(Font.SizeInPoints * 2 * (1f + style.Larger));
+
+        _rtf.Append(@"\f").Append(style.Fixed ? RichText.FixedFace : RichText.BodyFace)
+            .Append(@"\fs").Append(size)
+            .Append(style.Bold ? @"\b" : @"\b0")
+            .Append(style.Italic ? @"\i" : @"\i0")
+            .Append(style.Strike ? @"\strike" : @"\strike0")
+            .Append(@"\cf").Append(colour)
+            .Append(' ');
     }
 
-    /// <summary>How many faces are being kept. Internal so a test can hold it to a handful.</summary>
-    internal int FacesKept => _faces.Count;
-
     /// <summary>
-    /// Lets the kept faces go.
+    /// Pixels on the screen as twips, the way the control's own indent properties convert them.
     /// </summary>
     /// <remarks>
-    /// Every size here is worked out from the control's own font, so a change to that leaves all of
-    /// them the wrong size and none of them worth keeping.
+    /// Against the screen's resolution rather than this control's, which is what those properties
+    /// do — so an indent comes out where it did when it was set through them.
     /// </remarks>
-    private void ForgetFaces()
-    {
-        foreach (var face in _faces.Values)
-            face.Dispose();
+    /// <param name="pixels">A distance on the screen</param>
+    /// <returns>The same distance in twentieths of a point</returns>
+    private static int Twips(int pixels) => (int)(pixels / ScreenDpi * 72 * 20);
 
-        _faces.Clear();
+    /// <summary>How many pixels the screen fits into an inch, across.</summary>
+    private static readonly float ScreenDpi = ReadScreenDpi();
+
+    private static float ReadScreenDpi()
+    {
+        using var screen = Graphics.FromHwnd(IntPtr.Zero);
+        return screen.DpiX;
     }
 
     /// <summary>
-    /// Drops the kept faces, which were all sized against the font that has just changed.
+    /// Lets go of the tip this shows an address in.
     /// </summary>
     /// <remarks>
-    /// Nothing is redrawn here, which is what happened before as well: what is already in the box
-    /// keeps the sizes it was drawn with until something renders it again.
-    /// </remarks>
-    protected override void OnFontChanged(EventArgs e)
-    {
-        base.OnFontChanged(e);
-        ForgetFaces();
-    }
-
-    /// <summary>
-    /// Lets go of what this owns: the faces it drew with, and the tip it shows an address in.
-    /// </summary>
-    /// <remarks>
-    /// The tip is a window of its own and belongs to nothing else — there is no components
-    /// container here to dispose it — so it lasted until the finaliser. One object against the
-    /// faces' seventeen hundred, and it goes here because this is where the letting go happens.
+    /// The tip is a window of its own and belongs to nothing else — there's no components container
+    /// here to dispose it — so it lasted until the finaliser.
     /// </remarks>
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-        {
-            ForgetFaces();
             _tip.Dispose();
-        }
 
         base.Dispose(disposing);
     }
@@ -773,58 +655,10 @@ internal sealed class MarkdownView : RichTextBox
     /// </summary>
     /// <remarks>
     /// Internal so a test can hold it against what the box says it is holding. The two agreeing is
-    /// what everything written after a run depends on, and a description only has to reach here
-    /// with a line ending the writing counts wrongly for the two to part company.
+    /// what every offset recorded against a run depends on, and a description only has to reach
+    /// here with a line ending the writing counts wrongly for the two to part company.
     /// </remarks>
     internal int Counted => _at;
-
-    /// <summary>
-    /// How many runs had to ask twice for the caret, counted once each however many goes it took.
-    /// </summary>
-    /// <remarks>
-    /// Nought on every machine this has been run on. It is here for the one it isn't: the rendering
-    /// comes out scrambled on a build agent and never anywhere else, and this is what says the
-    /// caret refusing to move is how that happens. The tests carry it into their failure messages,
-    /// so an occurrence reports itself without anyone having to catch it live.
-    /// </remarks>
-    internal int MisplacedRuns { get; private set; }
-
-    /// <summary>
-    /// How many goes it took to draw what is on screen.
-    /// </summary>
-    /// <remarks>
-    /// One on every machine this has been run on, and the number that says the retry did its job
-    /// where it isn't. It is the diagnostic <see cref="MisplacedRuns"/> used to be: now that a
-    /// misplaced run is drawn again rather than shown, a render that had one and recovered leaves
-    /// nothing else behind to say so.
-    /// </remarks>
-    internal int Renders { get; private set; }
-
-    /// <summary>
-    /// Whether what is on screen is the markdown itself rather than a rendering of it.
-    /// </summary>
-    /// <remarks>
-    /// Two ways to end up here and both are the same answer: markdown nested past what the parser
-    /// will take, and a rendering that couldn't be got right in the goes it was given.
-    /// </remarks>
-    internal bool Plain { get; private set; }
-
-    /// <summary>
-    /// How many of the next renders should have a run miss its place, for a test.
-    /// </summary>
-    /// <remarks>
-    /// A seam and nothing else — nought in the running app, where every caret is asked of the
-    /// control as it always was. It is here because the fault it stands in for has only ever
-    /// appeared on a build agent, twice, and an answer to that which couldn't be brought on
-    /// deliberately would be an answer taken on trust.
-    ///
-    /// Counted in renders rather than in runs, because that is what the two answers turn on: one
-    /// spoilt render is drawn again and comes out right, and every render spoilt is what falls back
-    /// to the plain text. How many runs a render has is neither here nor there.
-    /// </remarks>
-    [Browsable(false)]
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    internal int SpoilRenders { get; set; }
 
     /// <summary>
     /// A span with its delimiters taken off each end.
@@ -999,35 +833,6 @@ internal sealed class MarkdownView : RichTextBox
         base.OnKeyDown(e);
     }
 
-    /// <summary>
-    /// Sets the air under the selected paragraph, in twips.
-    /// </summary>
-    /// <remarks>
-    /// By hand, because WinForms exposes the indent side of a paragraph's format and not the
-    /// spacing side. Only the one field is masked in, so everything the managed properties have
-    /// already set on this paragraph is left where it is.
-    /// </remarks>
-    private void SetSpacingAfter(int twips)
-    {
-        const int EmSetParaFormat = 0x0400 + 71;
-        const int ScfSelection = 0x0001;
-        const int PfmSpaceAfter = 0x00000080;
-
-        var format = new ParaFormat2
-        {
-            cbSize = Marshal.SizeOf<ParaFormat2>(),
-            dwMask = PfmSpaceAfter,
-            dySpaceAfter = twips,
-        };
-
-        SendMessage(Handle, EmSetParaFormat, ScfSelection, ref format);
-    }
-
-    // DllImport rather than LibraryImport, matching the platform layer: the generated marshalling
-    // for the latter wants unsafe code for a struct passed by reference.
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern nint SendMessage(nint window, int message, int flags, ref ParaFormat2 format);
-
     /// <summary>Turns drawing off and on around a rebuild.</summary>
     private const int WmSetRedraw = 0x000B;
 
@@ -1036,45 +841,6 @@ internal sealed class MarkdownView : RichTextBox
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern nint SendMessage(nint window, int message, int wParam, nint lParam);
-
-    /// <summary>
-    /// The rich edit control's paragraph format, laid out as the control expects to find it.
-    /// </summary>
-    /// <remarks>
-    /// Every field has to be here whether or not it is set, because the size is what the control
-    /// reads first to tell this structure from the shorter one that came before it.
-    /// </remarks>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ParaFormat2
-    {
-        public int cbSize;
-        public int dwMask;
-        public short wNumbering;
-        public short wEffects;
-        public int dxStartIndent;
-        public int dxRightIndent;
-        public int dxOffset;
-        public short wAlignment;
-        public short cTabCount;
-
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
-        public int[] rgxTabs;
-
-        public int dySpaceBefore;
-        public int dySpaceAfter;
-        public int dyLineSpacing;
-        public short sStyle;
-        public byte bLineSpacingRule;
-        public byte bOutlineLevel;
-        public short wShadingWeight;
-        public short wShadingStyle;
-        public short wNumberingStart;
-        public short wNumberingStyle;
-        public short wNumberingTab;
-        public short wBorderSpace;
-        public short wBorderWidth;
-        public short wBorders;
-    }
 
     /// <summary>
     /// How a run is drawn.

@@ -1,10 +1,12 @@
+using System.Diagnostics;
 using Termyn.Core.Settings;
 
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// The rendered half of the description panel. Styling a run means selecting it, and a selection
-/// needs a window behind it — so each of these realises the control without ever showing it.
+/// The rendered half of the description panel. Handing a control a document needs a window behind
+/// it, and so does reading one back out of a selection — so each of these realises the control
+/// without ever showing it.
 /// </summary>
 public class MarkdownViewTests
 {
@@ -52,28 +54,21 @@ public class MarkdownViewTests
     /// Selects a stretch, and makes sure the selection went there.
     /// </summary>
     /// <remarks>
-    /// This is how the trouble hid behind these tests for so long. Setting a selection on one of
-    /// these controls sometimes doesn't take and leaves it at nought, and everything asked after
-    /// that then answers about character nought — so a monospace face came back as the body face
-    /// and a heading came back body-sized, and the test read that as the styling being wrong rather
-    /// than as its own question having gone astray. Asked again, and said plainly when it still
-    /// won't take.
+    /// A selection that didn't take is left at nought, and everything asked after it then answers
+    /// about character nought — so a monospace face comes back as the body face, and the test reads
+    /// that as the styling being wrong rather than as its own question having gone astray. It's been
+    /// seen when these tests ran alongside others on another thread, which this assembly no longer
+    /// does, and said plainly if it's ever seen again.
     /// </remarks>
     private static void Pick(MarkdownView view, int at, int length)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            view.SelectionStart = at;
-            view.SelectionLength = length;
+        view.SelectionStart = at;
+        view.SelectionLength = length;
 
-            if (view.SelectionStart == at && view.SelectionLength == length)
-                return;
-        }
-
-        Assert.Fail(
+        Assert.True(
+            view.SelectionStart == at && view.SelectionLength == length,
             $"asked for {length} characters at {at} and got {view.SelectionLength} at {view.SelectionStart}. "
             + $"Nothing read from this selection would be about the right place. "
-            + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
             + $"Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
     }
 
@@ -97,33 +92,29 @@ public class MarkdownViewTests
 
         // Read once each, before anything is asserted. A message argument is built whether or not
         // the assertion fails, so asking the control again inside it would double the selections
-        // this test makes — on a test being instrumented precisely because something about it is
-        // occasionally not reproducible — and would let the message describe a different look at
-        // the control from the one that failed.
+        // this test makes, and would let the message describe a different look at the control from
+        // the one that failed.
         var text = view.Text.Trim();
         var bold = FontAt(view, "bold");
         var italic = FontAt(view, "italic");
         var plain = FontAt(view, "Some");
 
-        Assert.True(bold.Bold, Drawn(view, "bold", bold, text));
-        Assert.False(bold.Italic, Drawn(view, "bold", bold, text));
-        Assert.True(italic.Italic, Drawn(view, "italic", italic, text));
-        Assert.False(italic.Bold, Drawn(view, "italic", italic, text));
-        Assert.False(plain.Bold, Drawn(view, "Some", plain, text));
+        Assert.True(bold.Bold, Drawn("bold", bold, text));
+        Assert.False(bold.Italic, Drawn("bold", bold, text));
+        Assert.True(italic.Italic, Drawn("italic", italic, text));
+        Assert.False(italic.Bold, Drawn("italic", italic, text));
+        Assert.False(plain.Bold, Drawn("Some", plain, text));
     }
 
     /// <summary>
     /// How a word actually came out, for an assertion that is about to say it is wrong.
     /// </summary>
     /// <remarks>
-    /// Carries the count of runs the control wrote somewhere other than where they were put, which
-    /// is the thing worth catching: it separates a rendering that came out scrambled from one that
-    /// came out right and was styled wrongly.
+    /// With the rendered text alongside it, which separates a rendering that came out wrong from one
+    /// that came out right and was styled wrongly.
     /// </remarks>
-    private static string Drawn(MarkdownView view, string needle, Font font, string text)
-        => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. "
-           + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
-           + $"Rendered text: '{text}'";
+    private static string Drawn(string needle, Font font, string text)
+        => $"'{needle}' is {font.FontFamily.Name} {font.Size}pt {font.Style}. Rendered text: '{text}'";
 
     [WinFormsFact]
     public void Strikethrough_is_struck_through()
@@ -276,7 +267,7 @@ public class MarkdownViewTests
         // it says whether the rendering went wrong as well or only the styling did.
         Assert.True(
             code.FontFamily.Name == FontFamily.GenericMonospace.Name,
-            $"code wanted {FontFamily.GenericMonospace.Name}. {Drawn(view, "dotnet build", code, text)}");
+            $"code wanted {FontFamily.GenericMonospace.Name}. {Drawn("dotnet build", code, text)}");
 
         Assert.Equal("Run dotnet build first", text);
     }
@@ -462,7 +453,7 @@ public class MarkdownViewTests
 
         // The rendered text alongside the sizes, because these have failed together with the
         // rendering being wrong — and the sizes on their own don't say which of the two it was.
-        var seen = $"Misplaced runs: {view.MisplacedRuns}. Rendered: '{view.Text.ReplaceLineEndings("\\n")}'";
+        var seen = $"Rendered: '{view.Text.ReplaceLineEndings("\\n")}'";
 
         Assert.True(one > two, $"h1 {one} should beat h2 {two}. {seen}");
         Assert.True(two > three, $"h2 {two} should beat h3 {three}. {seen}");
@@ -613,150 +604,22 @@ public class MarkdownViewTests
         Assert.True(
             written == mapped,
             $"'{needle}' was written at {written} and maps to {mapped}. "
-            + $"Misplaced runs: {view.MisplacedRuns} over {view.Renders} render(s), plain: {view.Plain}. "
             + $"Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
     }
 
-    // ---- A rendering that went wrong ------------------------------------------------------------
-
-    /// <summary>The description the build agent scrambled, and what it should come out as.</summary>
-    private const string Fenced = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block";
-
-    private const string FencedShown = "before\nfirst line\nsecond line\nthird line\nafter the block";
-
-    /// <summary>How many goes the rendering gets, and so how many it takes to use them all up.</summary>
-    private const int EveryRender = 3;
-
-    private static MarkdownView Render(string markdown, int spoilRenders)
-    {
-        var view = new MarkdownView { Theme = Theme.Resolve(ThemePreference.Light) };
-        view.CreateControl();
-        view.SpoilRenders = spoilRenders;
-        view.Markdown = markdown;
-        return view;
-    }
-
-    /// <summary>What is on screen, as one line-ending and without the one that closes the last run.</summary>
-    private static string Shown(MarkdownView view) => view.Text.ReplaceLineEndings("\n").TrimEnd('\n');
-
-    /// <summary>
-    /// Holds a finished render to what it promises: the right rendering, or the markdown itself.
-    /// </summary>
-    /// <remarks>
-    /// Both are correct outcomes and the code says so. Insisting on the first is asking about the
-    /// machine rather than about the code — on an agent that refuses the caret every go can be
-    /// lost, and falling back is then exactly what should happen. What must never be true is the
-    /// third thing: a rendering that is neither right nor admitted to.
-    /// </remarks>
-    /// <param name="view">The pane to look at</param>
-    /// <param name="expected">What a rendering that came out right would say</param>
-    /// <returns>True when it is a rendering, so a caller can go on asking about the mapping</returns>
-    private static bool Settled(MarkdownView view, string expected)
-    {
-        if (view.Plain)
-        {
-            // Nothing further is knowable, and the fallback is the promise being kept.
-            Assert.Equal(view.Markdown, Shown(view));
-            return false;
-        }
-
-        Assert.Equal(expected, Shown(view));
-        return true;
-    }
-
     [WinFormsFact]
-    public void A_run_that_missed_its_place_scrambles_the_description()
+    public void Markdown_shown_as_written_still_knows_where_a_click_lands()
     {
-        // What the agent produced, made to happen on purpose: with only one go at drawing it, the
-        // last paragraph is written at the front. This is the fault rather than the fix — here so
-        // that the tests below are known to be answering something.
-        using var view = Render(Fenced, spoilRenders: 0);
+        // Nested past what the parser will take, so it goes up as the account wrote it. It's the
+        // markdown on screen, so a character is where it says it is — and unmapped, every click on
+        // it would open the editor at the top of the description, which is the answer this whole
+        // mapping exists to avoid.
+        var markdown = new string('>', 200) + " still here";
+        using var view = Render(markdown);
+        var at = markdown.IndexOf("still", StringComparison.Ordinal);
 
-        view.SpoilRenders = 1;
-        view.Draw();
-
-        // At least the one that was spoilt on purpose. On a machine where the control refuses a
-        // caret of its own accord there can be more, and that is the fault this whole thing is
-        // about rather than a reason to call the test wrong.
-        Assert.True(view.MisplacedRuns >= 1, $"nothing was misplaced: '{Shown(view)}'");
-        Assert.NotEqual(FencedShown, Shown(view));
-    }
-
-    [WinFormsFact]
-    public void A_render_that_lost_a_run_is_drawn_again()
-    {
-        // And the description that comes out is in the right order. It used to be handed over as
-        // the scrambled one above, with every offset after the misplaced run pointing at the wrong
-        // character and the count saying so read by nothing but a test.
-        using var view = Render(Fenced, spoilRenders: 1);
-
-        // More than one go, because one was lost. Not exactly two: a machine that refuses a caret
-        // of its own accord can lose another, and drawing again is the answer to that as well.
-        Assert.True(view.Renders >= 2, "a lost run should have been drawn again");
-
-        if (Settled(view, FencedShown))
-        {
-            // Still a rendering, and one that knows where its words came from — the whole of what a
-            // misplaced run took away.
-            MapsBack(view, Fenced, "after");
-            MapsBack(view, Fenced, "block");
-        }
-    }
-
-    [WinFormsFact]
-    public void A_render_is_never_drawn_more_often_than_it_is_allowed()
-    {
-        // The other half of it: this runs on every keystroke in a description, so a control having
-        // a bad day costs three goes and not an unending supply of them.
-        //
-        // A ceiling and not a number. Asserting one go for a description with nothing wrong with it
-        // is asking about the machine rather than about the code — on a build agent that refuses
-        // the caret the answer is two or three, and being drawn again is right there.
-        using var view = Render("Some **bold** text", spoilRenders: 0);
-
-        Assert.InRange(view.Renders, 1, EveryRender);
-    }
-
-    [WinFormsFact]
-    public void A_rendering_that_cannot_be_got_right_is_shown_as_written()
-    {
-        // Three goes and every one of them lost a run. The markdown itself is truthful and always
-        // readable, and it is already what markdown too deeply nested to parse falls back to.
-        using var view = Render(Fenced, EveryRender);
-
-        Assert.True(view.Plain);
-        Assert.Equal(EveryRender, view.Renders);
-        Assert.Equal(Fenced, Shown(view));
-    }
-
-    [WinFormsFact]
-    public void The_text_shown_as_written_still_knows_where_a_click_lands()
-    {
-        // It is the markdown on screen, so a character is where it says it is. Unmapped, every
-        // click opened the editor at the top of the description — which is the answer this whole
-        // mapping exists to avoid, reached from the other side.
-        using var view = Render(Fenced, EveryRender);
-        var at = Fenced.IndexOf("second", StringComparison.Ordinal);
-
-        Assert.True(view.Plain);
+        Assert.Equal(markdown, view.Text.TrimEnd('\n'));
         Assert.Equal(at, view.SourceAt(at));
-    }
-
-    [WinFormsFact]
-    public void A_render_drawn_again_does_not_keep_what_the_lost_one_said()
-    {
-        // Each go throws the last one away: the box, the links, the offsets and the count. A
-        // rendering described by an attempt no longer on screen would be worse than one described
-        // by nothing, because it would look answerable.
-        const string markdown = "A [link](https://example.com) and some `code`";
-        using var view = Render(markdown, spoilRenders: 1);
-
-        Assert.True(view.Renders >= 2, "a lost run should have been drawn again");
-
-        // One rendering's worth of text and not two, which is what a Clear that didn't happen on
-        // the second go would have left behind.
-        if (Settled(view, "A link and some code"))
-            MapsBack(view, markdown, "code");
     }
 
     [WinFormsFact]
@@ -813,10 +676,12 @@ public class MarkdownViewTests
     [InlineData("a\nb\nc")]
     [InlineData("```\nfirst line\nsecond line\nthird line\n```")]
     [InlineData("# H\n\n> quoted\n\n- [ ] a box\n\n[a link](https://example.com) after")]
+    [InlineData("An em dash — a résumé, 日本語, an emoji 🎉 and a tab\there")]
+    [InlineData("Pasted in the wrong encoding: caf\uFFFD and na\uFFFDve")]
     public void The_writing_and_the_box_agree_about_how_much_is_in_it(string markdown)
     {
-        // Everything written after a run rides on these two agreeing — where the next one goes,
-        // where a run came from in the markdown, and where a link starts and stops.
+        // Every offset recorded against a run rides on these two agreeing — where a run came from in
+        // the markdown, and where a link starts and stops.
         using var view = Render(markdown);
 
         Assert.Equal(view.TextLength, view.Counted);
@@ -836,26 +701,40 @@ public class MarkdownViewTests
     }
 
     [WinFormsFact]
-    public void A_long_description_is_drawn_with_a_handful_of_faces()
+    public void A_character_the_box_cannot_hold_still_counts_as_one()
     {
-        // It used to build one font per run and let go of it: seventeen hundred of them for a
-        // description this length, of which two were different. Each carried a GDI+ handle until
-        // the finaliser came for it, on a path that runs on every selection change and every sync.
-        //
-        // Held to a handful rather than to a number, since what the ceiling is made of — two
-        // families, four sizes, eight ways of combining bold, italic and strikethrough — is allowed
-        // to change without this test being about it.
+        // The replacement character is what text pasted in the wrong encoding is full of, and the box
+        // drops it from a document where it shows a space for one typed in; a nought ends the
+        // document where it stands. Unparsed, both reach the writing exactly as the account sent
+        // them — the parser swaps a nought for the replacement character, but only when it parses.
+        var markdown = new string('>', 200) + " caf\uFFFD, a\0b and after";
+        using var view = Render(markdown);
+
+        Assert.Equal(view.TextLength, view.Counted);
+        Assert.Contains("and after", view.Text);
+    }
+
+    [WinFormsFact]
+    public void A_description_at_its_full_length_is_drawn_faster_than_a_pause()
+    {
+        // It's drawn again every time a task is selected and every time a sync lands on the one on
+        // screen, next to the box the user may be typing in. Generous by design — this is a
+        // regression gate rather than a benchmark, and it runs on whatever the build agent happens
+        // to be.
         var big = string.Concat(Enumerable.Repeat("Some **bold** and a [link](https://example.com) here.\n\n", 400))[..16_383];
+
+        // Warmed first, so this measures the drawing rather than the first use of everything under
+        // it.
         using var view = Render(big);
 
-        var afterOne = view.FacesKept;
-        Assert.InRange(afterOne, 1, 8);
+        var clock = Stopwatch.StartNew();
+        view.Markdown = big + " ";
+        clock.Stop();
 
-        // And a second description doesn't start the pile again, which is the half that matters:
-        // a window left open renders on every sync for as long as it is up.
-        view.Markdown = "# A heading\n\nSome `code` and **bold** and *italic* and ~~struck~~";
-
-        Assert.InRange(view.FacesKept, afterOne, 8);
+        // Measured at 7 ms for the full sixteen thousand characters, against 580 ms for the same
+        // thing written a run at a time. What this guards against is a return to that shape, which
+        // was two orders of magnitude away rather than a few per cent.
+        Assert.True(clock.ElapsedMilliseconds < 300, $"drawing a full description took {clock.ElapsedMilliseconds} ms");
     }
 
     [WinFormsFact]
