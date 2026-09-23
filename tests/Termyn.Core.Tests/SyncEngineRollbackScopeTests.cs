@@ -71,6 +71,20 @@ public class SyncEngineRollbackScopeTests
     }
 
     [Fact]
+    public async Task Two_failed_edits_to_one_field_leave_it_as_the_server_has_it()
+    {
+        // The second edit's prior has the first one's name in it. Rolled back in the order they
+        // were made, that's the name that would be left, and the server never had it.
+        var (engine, api) = Engine();
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "First" });
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Second" });
+        await Reject(engine, api);
+
+        Assert.Equal("Task", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
     public async Task A_field_the_edit_added_is_taken_off_again_rather_than_nulled()
     {
         // Asserted against the stored JSON rather than the projection, which reads an absent field

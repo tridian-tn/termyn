@@ -275,6 +275,33 @@ public class ClosingAParentTests
     }
 
     [Fact]
+    public async Task Undoing_a_close_after_a_restart_reopens_a_sub_task_the_server_named_before_it()
+    {
+        // Added offline and ticked off with the task, then named by the server while the close
+        // waited. After a restart the undo stack comes from the close's own record, so that has to
+        // have the new name.
+        var store = Family();
+        var (engine, api) = WithApi(store);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["parent_id"] = "a" });
+        engine.CompleteItem("a");
+
+        // No verdict on the close, so it's still queued.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.Where(c => c.Type == "item_add").ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+        };
+        await engine.SyncAsync();
+
+        var restarted = NewEngine(store);
+
+        Assert.True(restarted.Undo());
+        Assert.False(Items(restarted)["real"].Completed);
+    }
+
+    [Fact]
     public void Reopening_a_sub_task_reopens_its_parents_without_asking_the_server_to()
     {
         // The server brings back a reopened task's parents by itself. Left finished here, the

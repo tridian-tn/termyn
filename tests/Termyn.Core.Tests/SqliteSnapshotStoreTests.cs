@@ -118,6 +118,32 @@ public class SqliteSnapshotStoreTests
     }
 
     [Fact]
+    public void A_rewritten_prior_survives_a_reopen()
+    {
+        // Rewritten when the server names something the prior holds by a made-up id. Lost on a
+        // restart, a rollback after it would look for the made-up one.
+        var path = TempDbPath();
+        try
+        {
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                var cmd = Cmd("u1", "item_move", args: """{"id":"i1","project_id":"p2"}""", prior: """[{"id":"t-1","project_id":"p1"}]""");
+                store.ApplyLocalWrite(cmd, [], []);
+
+                cmd.PriorJson = """[{"id":"i1","project_id":"p1"}]""";
+                store.UpdateCommand(cmd);
+            }
+
+            using (var store = new SqliteSnapshotStore(path))
+                Assert.Equal("""[{"id":"i1","project_id":"p1"}]""", Assert.Single(store.Load().Outbox).PriorJson);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
     public void SaveSync_applies_upserts_deletes_and_the_token_together()
     {
         var path = TempDbPath();
