@@ -155,6 +155,95 @@ public class TickedOffTests
         Assert.Null(presenter.LingerEnds);
     }
 
+    // ---- Where it stays --------------------------------------------------------------------------
+
+    [Fact]
+    public void In_Upcoming_it_stays_under_its_day()
+    {
+        // A finished task goes to the bottom of Upcoming, under no day. One only just ticked off
+        // moving there straight away would slide the next task up under the pointer, and a second
+        // click meant to put the first back would tick that one off instead.
+        var (presenter, _) = Seeded(due: "2026-08-01");
+        presenter.Select(ViewSelection.Of(SmartView.Upcoming));
+        var before = presenter.Rows.Select(r => r.Id).ToList();
+
+        presenter.Complete("a");
+
+        Assert.Equal(before, presenter.Rows.Select(r => r.Id).ToList());
+        Assert.True(presenter.Rows.Single(r => r.Id == "a").Completed);
+    }
+
+    [Fact]
+    public void Sorted_by_a_column_it_keeps_its_place()
+    {
+        var (presenter, _) = Seeded();
+        presenter.SortBy(TaskColumn.Content);
+        var before = presenter.Rows.Select(r => r.Id).ToList();
+
+        presenter.Complete("a");
+
+        Assert.Equal(before, presenter.Rows.Select(r => r.Id).ToList());
+    }
+
+    [Fact]
+    public async Task With_finished_work_on_show_it_stays_where_it_was_and_then_joins_it()
+    {
+        var (presenter, clock) = Seeded();
+        await presenter.ToggleCompletedAsync();
+        var before = presenter.Rows.Select(r => r.Id).ToList();
+
+        presenter.Complete("a");
+
+        Assert.Equal(before, presenter.Rows.Select(r => r.Id).ToList());
+
+        clock.Advance(LongEnough);
+        presenter.DropTicked();
+
+        // Below the tasks still to do, where finished ones are listed.
+        Assert.Equal(["b", "a"], presenter.Rows.Select(r => r.Id).ToList());
+    }
+
+    // ---- What it says and counts ---------------------------------------------------------------
+
+    [Fact]
+    public void A_recurring_task_isnt_kept_or_offered_back()
+    {
+        // It moves on to its next date rather than being ticked off, so there's no finished row to
+        // keep — and once the close has gone, Ctrl+Z can't put the date back.
+        var (presenter, _) = Seeded(recurring: true);
+
+        presenter.Complete("a");
+
+        Assert.False(presenter.Lingering);
+        Assert.DoesNotContain("Ctrl+Z", presenter.Status);
+    }
+
+    [Fact]
+    public void Taking_back_something_else_leaves_it_its_moment()
+    {
+        var (presenter, _) = Seeded();
+        presenter.Complete("a");
+        presenter.Delete("b");
+
+        Assert.True(presenter.Undo());
+
+        Assert.True(presenter.Rows.Single(r => r.Id == "a").Completed);
+        Assert.True(presenter.Lingering);
+    }
+
+    [Fact]
+    public void The_counts_drop_straight_away()
+    {
+        // A count is what's left to do, and a task ticked off isn't, however long its row stays.
+        var (presenter, _) = Seeded(due: "2026-07-31");
+        Assert.Equal(2, presenter.DueToday);
+
+        presenter.Complete("a");
+
+        Assert.Equal(1, presenter.DueToday);
+        Assert.Equal(1, presenter.Sidebar.Single(n => n.Kind == SidebarKind.SmartView && n.View == SmartView.Today).Count);
+    }
+
     // ---- A task with sub-tasks -----------------------------------------------------------------
 
     [Fact]
@@ -200,12 +289,19 @@ public class TickedOffTests
         Assert.Equal((2, false), (rows["a2"].Depth, rows["a2"].Completed));
     }
 
-    private static (MainPresenter Presenter, FixedClock Clock) Seeded(bool withSubTasks = false)
+    /// <summary>Two tasks in one project, "a" then "b", with the list showing all of them.</summary>
+    /// <param name="withSubTasks">Whether "a" has a sub-task, with one of its own</param>
+    /// <param name="due">A day both tasks are due, or null for none</param>
+    /// <param name="recurring">Whether "a" repeats</param>
+    private static (MainPresenter Presenter, FixedClock Clock) Seeded(bool withSubTasks = false, string? due = null, bool recurring = false)
     {
+        var dated = due is null ? string.Empty : $$""","due":{"date":"{{due}}"}""";
+        var repeats = recurring ? ""","due":{"date":"2026-07-31","is_recurring":true,"string":"every day"}""" : dated;
+
         var store = new InMemorySnapshotStore();
         store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");
-        store.PutResource("items", "a", """{"id":"a","content":"Ship it","project_id":"p","child_order":1}""");
-        store.PutResource("items", "b", """{"id":"b","content":"Something else","project_id":"p","child_order":2}""");
+        store.PutResource("items", "a", $$"""{"id":"a","content":"Ship it","project_id":"p","child_order":1{{repeats}}}""");
+        store.PutResource("items", "b", $$"""{"id":"b","content":"Something else","project_id":"p","child_order":2{{dated}}}""");
 
         if (withSubTasks)
         {

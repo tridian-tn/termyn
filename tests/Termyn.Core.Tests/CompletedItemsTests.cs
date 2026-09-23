@@ -306,7 +306,9 @@ public class CompletedItemsTests
         var item = Assert.Single(engine.Snapshot().Items);
         Assert.False(item.Completed);
         Assert.Empty(engine.Snapshot().CompletedItems);
-        Assert.Equal(["item_close", "item_uncomplete"], engine.Outbox.Select(c => c.Type).ToArray());
+
+        // The close hadn't gone, so it's dropped rather than sent with a reopen behind it.
+        Assert.Empty(engine.Outbox);
     }
 
     [Fact]

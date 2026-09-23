@@ -1302,27 +1302,39 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// The finished tasks still being shown because they were only just ticked off.
+    /// The finished tasks still being shown where they were, because they were only just ticked
+    /// off.
     /// </summary>
     /// <remarks>
     /// The sub-tasks that went with one are kept as long as it is. They're finished too, and
     /// going on their own would move the rows under the pointer; staying without it, they'd be
     /// sub-tasks with no parent in view, and turn up as top-level tasks.
+    ///
+    /// Kept in place with finished work on show as well, rather than moved straight down among
+    /// it: the next task would slide up under the pointer, and a second click meant to put the
+    /// first one back would tick that one off instead.
     /// </remarks>
-    /// <returns>Their ids, or none with finished work on show, where they're listed anyway</returns>
+    /// <returns>Their ids</returns>
     private HashSet<string> Kept()
-        => ShowingCompleted
-            ? []
-            : _ticked.SelectMany(t => t.Value.Under.Prepend(t.Key)).ToHashSet(StringComparer.Ordinal);
+        => _ticked.SelectMany(t => t.Value.Under.Prepend(t.Key)).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether a row goes where finished work goes, below the rest, rather than where it stood.
+    /// </summary>
+    /// <param name="row">The row to place</param>
+    /// <param name="kept">What's being kept where it was, from <see cref="Kept"/></param>
+    /// <returns>True for a finished task that isn't being kept in place</returns>
+    private static bool Settled(TaskRow row, HashSet<string> kept) => row.Completed && !kept.Contains(row.Id);
 
     public void Complete(string id)
     {
         var named = Named(id);
-        var under = _engine.CompleteItem(id);
 
         // Kept on the list for a moment, so a slip of the mouse doesn't take a task off the screen
-        // with nothing said about where it went.
-        _ticked[id] = new Ticked(_clock.UtcNow, under);
+        // with nothing said about where it went. Not a recurring one, which moves on to its next
+        // date rather than being ticked off, and has nothing to keep.
+        if (_engine.CompleteItem(id) is { } under)
+            _ticked[id] = new Ticked(_clock.UtcNow, under);
 
         History.Note($"Completed {named}", $"complete:{id}");
         Publish();
@@ -1344,9 +1356,13 @@ public sealed class MainPresenter
 
         if (undone)
         {
-            // Whatever was ticked off has either come back or was never the thing undone, so
-            // nothing is waiting to leave the list on its own account.
-            _ticked.Clear();
+            // What the undo reopened has nothing left to wait for. Anything else ticked off lately
+            // is still finished, and still owed its moment — clearing the lot made a task ticked
+            // off a second before vanish because something else was taken back.
+            var open = _engine.Snapshot().Items.Where(i => !i.Completed).Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
+
+            foreach (var reopened in _ticked.Keys.Where(open.Contains).ToList())
+                _ticked.Remove(reopened);
 
             // Its own line rather than rubbing out the one before it. Taking something back is a
             // thing that was done, and a list that quietly forgot it would be the less true account.
@@ -1920,7 +1936,7 @@ public sealed class MainPresenter
     {
         var today = snapshot.Today;
         var inbox = snapshot.InboxProjectId;
-        var active = VisibleItems(snapshot);
+        var active = VisibleItems(snapshot, withKept: false);
 
         // Archived projects and sections are still returned by sync; they don't belong in the sidebar.
         var projects = snapshot.Projects.Where(p => !p.IsArchived && p.Id.Length > 0).ToList();
@@ -2080,10 +2096,15 @@ public sealed class MainPresenter
     }
 
     /// <summary>Active tasks that aren't filed under an archived project.</summary>
-    private List<TaskItem> VisibleItems(ModelSnapshot snapshot)
+    /// <param name="snapshot">The account as it stands</param>
+    /// <param name="withKept">
+    /// Whether to take in the finished tasks still on the list for a moment — true for the list
+    /// itself, false for a count of what's left to do, which one of those is already out of
+    /// </param>
+    private List<TaskItem> VisibleItems(ModelSnapshot snapshot, bool withKept)
     {
         var archived = snapshot.Projects.Where(p => p.IsArchived).Select(p => p.Id).ToHashSet();
-        var kept = Kept();
+        var kept = withKept ? Kept() : [];
         return snapshot.Items
             .Where(i => (!i.Completed || kept.Contains(i.Id)) && (i.ProjectId is null || !archived.Contains(i.ProjectId)))
             .ToList();
@@ -2106,7 +2127,7 @@ public sealed class MainPresenter
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
         var selected = scoped ? InSelection(snapshot) : _ => true;
-        var visible = VisibleItems(snapshot)
+        var visible = VisibleItems(snapshot, withKept: true)
             .Where(i => i.Id.Length > 0 && selected(i))
             .ToList();
         var present = visible.Select(i => i.Id).ToHashSet();
@@ -2124,8 +2145,9 @@ public sealed class MainPresenter
         var emitted = new HashSet<string>();
         Emit(string.Empty, 0);
 
+        // Less what's already up there, kept where it was for a moment after being ticked off.
         if (ShowingCompleted)
-            rows.AddRange(CompletedRows(snapshot, selected, Row));
+            rows.AddRange(CompletedRows(snapshot, i => selected(i) && !present.Contains(i.Id), Row));
 
         return rows;
 
@@ -2379,14 +2401,16 @@ public sealed class MainPresenter
         // column was clicked for — and neither has anything to say about which day comes first.
         var days = new SortedDictionary<DateOnly, List<TaskRow>>();
         var loose = new List<TaskRow>();
+        var kept = Kept();
 
         foreach (var row in rows)
         {
             // The day comes off DueOn rather than the Due column beside it: the column shows the
             // words Todoist gave the task, which for a repeat is "every Monday" and names no day.
             // A finished task keeps to the bottom, and so does anything with no day to file it
-            // under — shown under no heading rather than quietly dropped.
-            if (row.Completed || row.DueOn is not { } due)
+            // under — shown under no heading rather than quietly dropped. One only just ticked off
+            // stays under its day until it goes.
+            if (Settled(row, kept) || row.DueOn is not { } due)
             {
                 loose.Add(row);
                 continue;
@@ -2681,6 +2705,7 @@ public sealed class MainPresenter
             return rows;
 
         var ordered = new List<TaskRow>(rows.Count);
+        var kept = Kept();
         Emit(Nest(rows));
         return ordered;
 
@@ -2699,9 +2724,10 @@ public sealed class MainPresenter
         {
             // Completed rows keep to the bottom whatever the column. Their place stopped meaning
             // anything when they were ticked off, and sorting by priority is not a request to have
-            // last month's finished work back among this week's.
-            if (a.Completed != b.Completed)
-                return a.Completed ? 1 : -1;
+            // last month's finished work back among this week's. One ticked off a moment ago holds
+            // its place until it goes.
+            if (Settled(a, kept) != Settled(b, kept))
+                return Settled(a, kept) ? 1 : -1;
 
             // An empty cell goes to the bottom whichever way the column points: blank is not the
             // smallest value in the column, it is the absence of one.

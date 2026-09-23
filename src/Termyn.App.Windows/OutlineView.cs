@@ -444,25 +444,46 @@ internal sealed class OutlineView : ListView
     /// were reading.
     /// </remarks>
     /// <param name="at">Where the button went down, in the list's own coordinates</param>
+    /// <param name="second">
+    /// Whether this is the second press of a double-click, which only counts on the same box or
+    /// expander as the first
+    /// </param>
     /// <returns>True when the press was one of those, and the list shouldn't see it</returns>
-    private bool PressedBoxOrExpander(Point at)
+    private bool PressedBoxOrExpander(Point at, bool second)
     {
-        if (CheckboxAt(at) is { } ticked)
+        var box = CheckboxAt(at);
+        var expander = box is null ? ExpanderAt(at) : null;
+
+        if (box is null && expander is null)
         {
-            Focus();
-            ToggleRequested?.Invoke(ticked);
-            return true;
+            _pressed = null;
+            return false;
         }
 
-        if (ExpanderAt(at) is { } id)
-        {
-            Focus();
-            CollapseRequested?.Invoke(id, !IsCollapsed(id));
-            return true;
-        }
+        var pressed = box is not null ? $"box:{box}" : $"expander:{expander}";
 
-        return false;
+        // The first press can change the rows under the pointer — a sync lands, or a heading goes
+        // with the last task under it — and the second then arrives over a different task. Taken,
+        // that would tick off something nobody pointed at.
+        if (second && pressed != _pressed)
+            return true;
+
+        _pressed = pressed;
+        Focus();
+
+        if (box is not null)
+            ToggleRequested?.Invoke(box);
+        else
+            CollapseRequested?.Invoke(expander!, !IsCollapsed(expander!));
+
+        return true;
     }
+
+    /// <summary>
+    /// The box or expander the last press landed on, so the second press of a double-click can be
+    /// held to the same one.
+    /// </summary>
+    private string? _pressed;
 
     /// <summary>
     /// The task whose box is under a point, or null where there isn't one.
@@ -488,7 +509,7 @@ internal sealed class OutlineView : ListView
         var bounds = GetItemRect(index, ItemBoundsPortion.Entire);
         bounds.X += (row.Depth * IndentWidth) + ExpanderWidth;
 
-        return new Rectangle(bounds.X, bounds.Y, CheckWidth, bounds.Height).Contains(point) ? row.Id : null;
+        return InTaskColumn(index, point) && new Rectangle(bounds.X, bounds.Y, CheckWidth, bounds.Height).Contains(point) ? row.Id : null;
     }
 
     /// <summary>
@@ -514,8 +535,23 @@ internal sealed class OutlineView : ListView
         var bounds = GetItemRect(index, ItemBoundsPortion.Entire);
         bounds.X += row.Depth * IndentWidth;
 
-        return Expander(bounds).Contains(point) ? row.Id : null;
+        return InTaskColumn(index, point) && Expander(bounds).Contains(point) ? row.Id : null;
     }
+
+    /// <summary>
+    /// Whether a point on a row is inside the Task column, which is where the box and the expander
+    /// are drawn.
+    /// </summary>
+    /// <remarks>
+    /// A column dragged narrower than a deep sub-task's indent draws neither — they're clipped to
+    /// it — so the room they'd have had belongs to the column beside it, and a click there isn't
+    /// one on a box that can't be seen.
+    /// </remarks>
+    /// <param name="index">The row</param>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>True when the point is left of the Task column's right edge</returns>
+    private bool InTaskColumn(int index, Point point)
+        => point.X < GetItemRect(index, ItemBoundsPortion.Entire).X + Columns[0].Width;
 
     /// <summary>Whether the row for a task is currently collapsed, as the last rows said.</summary>
     private bool IsCollapsed(string id)
@@ -749,7 +785,7 @@ internal sealed class OutlineView : ListView
         // anything: the list raises it first and selects the row under the press afterwards. A
         // second press that arrives as a double-click is a second press on the box, the way it is
         // on any checkbox, and not a request to open the task.
-        if (m.Msg is WmLeftDown or WmLeftDouble && PressedBoxOrExpander(PointOf(m.LParam)))
+        if (m.Msg is WmLeftDown or WmLeftDouble && PressedBoxOrExpander(PointOf(m.LParam), second: m.Msg == WmLeftDouble))
             return;
 
         base.WndProc(ref m);

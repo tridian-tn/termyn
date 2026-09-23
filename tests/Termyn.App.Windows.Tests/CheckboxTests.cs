@@ -152,6 +152,46 @@ public class CheckboxTests
     }
 
     [WinFormsFact]
+    public void A_double_click_whose_second_press_lands_on_another_task_does_nothing_to_it()
+    {
+        // The first press can move the rows — the task goes, and the next one slides up into its
+        // place. The second press then arrives over a task nobody pointed at.
+        using var form = Window();
+        using var outline = Outline(form);
+        outline.Rows = [Task("a", "First"), Task("d", "Next along")];
+
+        var asked = new List<string>();
+        outline.ToggleRequested += id =>
+        {
+            asked.Add(id);
+            outline.Rows = outline.Rows.Where(r => r.Id != id).ToList();
+        };
+
+        var box = BoxOf(outline, 0)!.Value;
+        Click(outline, box);
+
+        // The next task's box is where the first one's was, which is the whole of the danger.
+        Assert.Equal("d", outline.CheckboxAt(box));
+
+        RealMouse.DoubleClick(outline, box);
+
+        Assert.Equal(["a"], asked);
+    }
+
+    [WinFormsFact]
+    public void Past_the_edge_of_the_task_column_there_is_no_box()
+    {
+        // Dragged narrower than a sub-task's indent, the column draws no box for it — so the room
+        // it would have had belongs to the column beside it, and a click there ticks nothing off.
+        using var form = Window();
+        using var outline = Outline(form);
+
+        outline.Columns[0].Width = 30;
+
+        Assert.Null(BoxOf(outline, 1));
+    }
+
+    [WinFormsFact]
     public void Clicking_the_words_asks_for_nothing()
     {
         using var form = Window();

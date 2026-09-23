@@ -637,8 +637,11 @@ public sealed class SyncEngine
     /// than finishing it, and working out where that lands is the recurrence guessing that belongs
     /// on the server.
     /// </remarks>
-    /// <returns>The sub-tasks ticked off along with it, nearest first</returns>
-    public IReadOnlyList<string> CompleteItem(string id)
+    /// <returns>
+    /// The sub-tasks ticked off along with it, nearest first — or null when the task itself wasn't
+    /// ticked off here, as a recurring one isn't
+    /// </returns>
+    public IReadOnlyList<string>? CompleteItem(string id)
     {
         lock (_gate)
         {
@@ -653,7 +656,7 @@ public sealed class SyncEngine
             // list when it's closed, so there is nothing there to press twice, and guarding it too
             // would swallow a genuine re-close after an undo.
             if (recurring && HasPendingClose(id))
-                return [];
+                return null;
 
             JsonObject? completed = null;
             string? prior = null;
@@ -704,16 +707,18 @@ public sealed class SyncEngine
                 Model.Upsert(ResourceType.Items, child, json);
 
             if (existing is null)
-                return [];
+                return null;
 
             // Reversible only while it's queued. Once the server has advanced the schedule there is
             // no putting the occurrence back, and item_uncomplete would reopen a task that was
             // never closed — so Ctrl+Z stops here rather than reporting a success it didn't manage.
             if (recurring)
+            {
                 RecordUndoBarrier(cmd);
-            else
-                RecordUndoable(cmd, id, prior);
+                return null;
+            }
 
+            RecordUndoable(cmd, id, prior);
             return carried.Select(c => c.Id).ToList();
         }
     }
@@ -789,16 +794,29 @@ public sealed class SyncEngine
     /// comes from. Reopening it makes it an ordinary active task, so it moves into the model — and
     /// into the snapshot with it, since from here on incremental sync will keep it current.
     ///
-    /// The sub-tasks its last close took with it come back too, each with an uncomplete of its own.
-    /// The server reopens a task's parents along with it but not what's under it, so putting back
-    /// a parent ticked off by mistake would otherwise leave everything under it finished.
+    /// A task ticked off here is put back the way undo would take the tick back, sub-tasks and all:
+    /// the server reopens a task's parents along with it but not what's under it, so putting back a
+    /// parent ticked off by mistake would otherwise leave everything under it finished. And a close
+    /// that hasn't gone yet is simply dropped, rather than sent with a reopen behind it.
+    ///
+    /// The close is used up by it. Left on the undo stack, Ctrl+Z would take it back a second time,
+    /// and a later reopen would bring back sub-tasks that had been finished on purpose since.
     /// </remarks>
     public void ReopenItem(string id)
     {
         lock (_gate)
         {
             id = Promoted(id);
-            Reopen(id, CarriedBy(id, LastClose(id)?.PriorJson));
+
+            if (LastClose(id) is { } last)
+            {
+                ForgetUndoable(last.Uuid);
+
+                if (TakeBack(last.Uuid, last.Write))
+                    return;
+            }
+
+            Reopen(id, []);
         }
     }
 
@@ -830,10 +848,16 @@ public sealed class SyncEngine
         => Model.Get(ResourceType.Items, id) is { } json ? Projections.ToTaskItem(json).ParentId : null;
 
     /// <summary>The most recent close of this task that undo still remembers, if there is one.</summary>
-    private UndoableWrite? LastClose(string id)
-        => Enumerable.Reverse(_undoStack)
-            .Select(uuid => _undoable.GetValueOrDefault(uuid))
-            .FirstOrDefault(w => w is { Type: "item_close" } && w.Id == id);
+    /// <param name="id">The task, already promoted</param>
+    /// <returns>The close's command and what it recorded, or null</returns>
+    private (string Uuid, UndoableWrite Write)? LastClose(string id)
+    {
+        for (var i = _undoStack.Count - 1; i >= 0; i--)
+            if (_undoable.GetValueOrDefault(_undoStack[i]) is { Type: "item_close" } write && write.Id == id)
+                return (_undoStack[i], write);
+
+        return null;
+    }
 
     /// <summary>Takes the tick off one task and queues the <c>item_uncomplete</c> that says so.</summary>
     /// <param name="id">The task to reopen, already promoted</param>
@@ -2227,30 +2251,17 @@ public sealed class SyncEngine
                 var record = _undoable.GetValueOrDefault(uuid);
                 _undoable.Remove(uuid);
 
-                var queued = _outbox.FirstOrDefault(c => c.Uuid == uuid);
-
-                // A close that hasn't gone yet is undone by taking the tick off where the task
-                // stands now, rather than by putting back everything it was before the close.
-                //
-                // The general revert below restores a command's whole prior resource, which is
-                // right for dropping a queued write — the local copy goes back to server truth. It
-                // is wrong for this one, because the user has undone a completion and not the
-                // afternoon: a description, priority or due date edited after ticking the task off
-                // is a later intention that has nothing to do with the tick, and restoring the
-                // snapshot took it with it. Silently, and only for someone who edits a completed
-                // task, which is why it went unnoticed.
-                if (record?.Type == "item_close" && queued is { InFlight: false })
+                // Its undo entry has already been taken off the stack above, so the close itself is
+                // all that's left to deal with.
+                if (record?.Type == "item_close")
                 {
-                    // Its undo entry has already been taken off the stack above, so removing the
-                    // command is all that is left to forget.
-                    RemoveCommand(queued);
-                    Uncheck(record.Id);
+                    if (TakeBack(uuid, record))
+                        return true;
 
-                    foreach (var child in CarriedBy(record.Id, record.PriorJson))
-                        Uncheck(Promoted(child));
-
-                    return true;
+                    continue;
                 }
+
+                var queued = _outbox.FirstOrDefault(c => c.Uuid == uuid);
 
                 if (queued is { InFlight: false })
                 {
@@ -2266,15 +2277,6 @@ public sealed class SyncEngine
                 if (record.Type == UndoBarrier)
                     return false;
 
-                if (record.Type == "item_close")
-                {
-                    // Already applied server-side; only meaningful if the task is still there.
-                    if (Model.Get(ResourceType.Items, record.Id) is null)
-                        continue;
-                    Reopen(Promoted(record.Id), CarriedBy(record.Id, record.PriorJson));
-                    return true;
-                }
-
                 // Todoist cannot undelete, so the task is recreated from the state we last held.
                 if (record.PriorJson is { } json && TryParse(json) is { } prior)
                 {
@@ -2288,6 +2290,46 @@ public sealed class SyncEngine
 
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reverses a close: drops it if it hasn't gone, or asks the server to reopen what it finished
+    /// if it has.
+    /// </summary>
+    /// <remarks>
+    /// One that hasn't gone is undone by taking the tick off where each task stands now, rather
+    /// than by putting back everything it was before the close. The general revert restores a
+    /// command's whole prior resource, which is right for dropping a queued write — the local copy
+    /// goes back to server truth. It's wrong for this one, because what's being undone is a
+    /// completion and not the afternoon: a description, priority or due date edited after ticking
+    /// the task off is a later intention that has nothing to do with the tick, and restoring the
+    /// snapshot took it with it. Silently, and only for someone who edits a completed task, which
+    /// is why it went unnoticed.
+    /// </remarks>
+    /// <param name="uuid">The close's command</param>
+    /// <param name="close">What the close recorded</param>
+    /// <returns>False when the task isn't held any more, so there's nothing to reverse</returns>
+    private bool TakeBack(string uuid, UndoableWrite close)
+    {
+        var id = Promoted(close.Id);
+
+        if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } queued)
+        {
+            RemoveCommand(queued);
+            Uncheck(id);
+
+            foreach (var child in CarriedBy(close.Id, close.PriorJson))
+                Uncheck(Promoted(child));
+
+            return true;
+        }
+
+        // Already applied server-side; only meaningful if the task is still there.
+        if (Model.Get(ResourceType.Items, id) is null)
+            return false;
+
+        Reopen(id, CarriedBy(close.Id, close.PriorJson));
+        return true;
     }
 
     /// <summary>
@@ -2349,6 +2391,20 @@ public sealed class SyncEngine
     {
         if (cmd.PriorJson is not { } prior || TryParseNode(prior) is not { } node)
             return;
+
+        // A close changes one thing on each task it touches, so rolling one back takes the tick off
+        // where each task stands now. Put back whole, a sub-task added offline would come back
+        // under the id it had before the server named it — a second copy of it — or come back
+        // after its add was refused and it was dropped, for good, since the server knows nothing
+        // of it to say otherwise. And an edit made since the close would go with it.
+        if (cmd.Type == "item_close")
+        {
+            foreach (var entry in node is JsonArray array ? array.OfType<JsonObject>() : node is JsonObject single ? [single] : [])
+                if (entry["id"] is JsonValue closed && !JsonRead.Bool(entry, "checked"))
+                    Uncheck(Promoted(closed.ToString()));
+
+            return;
+        }
 
         foreach (var restored in node is JsonArray array ? array.OfType<JsonNode>() : [node])
         {

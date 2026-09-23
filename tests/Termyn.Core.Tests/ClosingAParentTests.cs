@@ -46,7 +46,11 @@ public class ClosingAParentTests
     {
         var engine = NewEngine(Family());
 
-        Assert.Empty(engine.CompleteItem("n"));
+        var under = engine.CompleteItem("n");
+
+        // Ticked off, with nothing under it — which isn't the same answer as a task that wasn't.
+        Assert.NotNull(under);
+        Assert.Empty(under);
     }
 
     [Fact]
@@ -71,7 +75,8 @@ public class ClosingAParentTests
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1,"due":{"date":"2026-07-31","is_recurring":true,"string":"every day"}}""");
         var engine = NewEngine(store);
 
-        Assert.Empty(engine.CompleteItem("a"));
+        // Null rather than empty: the task itself wasn't ticked off here either.
+        Assert.Null(engine.CompleteItem("a"));
 
         var items = Items(engine);
         Assert.False(items["b"].Completed);
@@ -116,6 +121,59 @@ public class ClosingAParentTests
 
         Assert.Equal(1, engine.PendingCount);
         Assert.True(Items(engine)["b"].Completed);
+    }
+
+    [Fact]
+    public async Task A_refused_close_leaves_an_edit_made_since()
+    {
+        // It takes the tick off where the task stands. Put back whole, the rename the server took
+        // would be undone here and nowhere else.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+        engine.CompleteItem("a");
+        engine.UpdateItem("a", new JsonObject { ["content"] = "Renamed" });
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_close" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        var a = Items(engine)["a"];
+        Assert.False(a.Completed);
+        Assert.Equal("Renamed", a.Content);
+    }
+
+    [Fact]
+    public async Task A_refused_close_doesnt_bring_back_a_sub_task_under_the_name_it_had_offline()
+    {
+        // Added offline under the task, then ticked off with it. The server takes the add and names
+        // the sub-task, and refuses the close. Put back whole, the close's copy would come back
+        // under the old name, beside the one the server named — two of it, for good.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Added offline", ["project_id"] = "p", ["parent_id"] = "a" });
+        Assert.Contains(temp, engine.CompleteItem("a")!);
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_close" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
+        };
+        await engine.SyncAsync();
+
+        var added = Assert.Single(engine.Snapshot().Items, i => i.Content == "Added offline");
+        Assert.Equal("real", added.Id);
+        Assert.False(added.Completed);
     }
 
     // ---- Taking it back ------------------------------------------------------------------------
@@ -222,6 +280,57 @@ public class ClosingAParentTests
         Assert.False(items["a"].Completed);
         Assert.False(items["b"].Completed);
         Assert.True(items["c"].Completed);
+    }
+
+    // ---- Putting it back uses the close up -----------------------------------------------------
+
+    [Fact]
+    public void A_close_already_taken_back_isnt_used_again()
+    {
+        // Ticked off with its sub-task, put back, and then the sub-task finished on purpose and
+        // the lot closed from further up. Reopening the task again is about the task: the first
+        // close's list is spent, and using it would bring back a sub-task nobody asked for.
+        var engine = NewEngine(Family());
+        engine.CompleteItem("b");
+        engine.ReopenItem("b");
+
+        engine.CompleteItem("c");
+        engine.CompleteItem("a");
+
+        engine.ReopenItem("b");
+
+        var items = Items(engine);
+        Assert.False(items["b"].Completed);
+        Assert.True(items["c"].Completed);
+    }
+
+    [Fact]
+    public async Task Undo_after_putting_a_task_back_leaves_it_alone()
+    {
+        // The tick has been taken back already. A second go would drop nothing and send nothing
+        // useful — and with the close gone, a reopen of a task the server never closed.
+        var (engine, api) = WithApi(Family());
+        engine.CompleteItem("a");
+        await Flush(engine, api);
+        engine.ReopenItem("a");
+
+        Assert.False(engine.Undo());
+
+        Assert.Equal(["a", "b", "c"], Reopened(engine));
+        Assert.All(["a", "b", "c"], id => Assert.False(Items(engine)[id].Completed));
+    }
+
+    [Fact]
+    public void Undo_after_putting_back_a_close_that_never_went_leaves_nothing_queued()
+    {
+        var engine = NewEngine(Family());
+        engine.CompleteItem("a");
+        engine.ReopenItem("a");
+
+        Assert.False(engine.Undo());
+
+        Assert.Empty(engine.Outbox);
+        Assert.All(["a", "b", "c"], id => Assert.False(Items(engine)[id].Completed));
     }
 
     // ---- Helpers -------------------------------------------------------------------------------

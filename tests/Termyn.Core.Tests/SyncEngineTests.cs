@@ -151,13 +151,31 @@ public class SyncEngineTests
     [Fact]
     public void Reopen_clears_the_check_and_queues_item_uncomplete()
     {
+        // Finished before this session, so there's no close of its own here to take back and the
+        // server has to be told.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"A","checked":true}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        engine.ReopenItem("i1");
+
+        Assert.False(engine.Snapshot().Items.Single().Completed);
+        Assert.Equal("item_uncomplete", engine.Outbox.Single().Type);
+    }
+
+    [Fact]
+    public void Reopening_a_task_whose_close_has_not_gone_drops_the_close()
+    {
+        // Sending both would have the server tick it off and put it back, for nothing — and tell
+        // anybody sharing the project that it was done.
         var engine = SeededEngine();
         engine.CompleteItem("i1");
 
         engine.ReopenItem("i1");
 
         Assert.False(engine.Snapshot().Items.Single().Completed);
-        Assert.Equal("item_uncomplete", engine.Outbox.Last().Type);
+        Assert.Empty(engine.Outbox);
     }
 
     [Fact]

@@ -240,6 +240,17 @@ public class OutlineFoldingTests
     }
 
     [WinFormsFact]
+    public void Past_the_edge_of_the_task_column_there_is_no_expander()
+    {
+        // Narrower than a sub-task's indent, the column draws no expander for it, and the room it
+        // would have had is the next column's.
+        using var view = Outline(Row("a", children: true), Row("b", depth: 1, children: true), Row("c", depth: 2));
+        view.Columns[0].Width = 12;
+
+        Assert.Null(view.ExpanderAt(ExpanderOf(view, 1, depth: 1)));
+    }
+
+    [WinFormsFact]
     public void A_point_past_the_last_row_is_not_an_expander()
     {
         // A list is nearly always taller than the tasks in it, and the room below them belongs to
