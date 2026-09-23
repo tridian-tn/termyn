@@ -2440,7 +2440,11 @@ public sealed class SyncEngine
             if (resource["id"] is not JsonValue idValue)
                 continue;
 
-            var id = idValue.ToString();
+            // An edit or a delete queued against something added here records the name it had
+            // then, and the server can have named it since — in the same round as refusing the
+            // write, or any round before. Put back under the old name, it'd be a second copy
+            // beside the real one, for good.
+            var id = Promoted(idValue.ToString());
 
             // An update puts back only what it wrote. Its prior is the whole resource as it stood
             // when the command was queued, and restoring all of it takes away every change made
@@ -2454,6 +2458,12 @@ public sealed class SyncEngine
             var copy = WritesNamedFields(cmd) && Model.Get(type, id) is { } current
                 ? Rewound(current, resource, ParseArgs(cmd).Select(a => a.Key))
                 : resource.DeepClone().AsObject();
+
+            // What came from the prior still has the names it was recorded with: the resource's
+            // own, and those of the parent, section or project it sits in, any of which can have
+            // been named since the same way.
+            copy["id"] = id;
+            PromoteReferences(copy);
 
             _store.PutResource(type, id, copy.ToJsonString());
             Model.Upsert(type, id, copy);
