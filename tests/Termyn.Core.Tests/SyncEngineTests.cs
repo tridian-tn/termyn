@@ -851,6 +851,12 @@ public class SyncEngineTests
         Assert.Equal(1, items["a"].ChildOrder);
         Assert.Equal(2, items["b"].ChildOrder);
         Assert.Equal(0, engine.PendingCount);
+
+        // And the new task's position isn't put back with the others, which would bring it back.
+        var reloaded = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        reloaded.Load();
+        Assert.DoesNotContain(temp, items.Keys);
+        Assert.DoesNotContain(reloaded.Snapshot().Items, i => i.Id == temp);
     }
 
     [Fact]
