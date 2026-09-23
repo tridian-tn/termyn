@@ -2422,7 +2422,7 @@ public sealed class SyncEngine
         // whole resources as well, and all it changes is a position.
         if (cmd.Type == "item_move" || Reorder.For(cmd.Type) is not null)
         {
-            PutBackWritten(cmd, []);
+            PutBackWritten(cmd);
             return;
         }
 
@@ -2481,8 +2481,7 @@ public sealed class SyncEngine
     /// doesn't have, so one that isn't held any more is left gone.
     /// </remarks>
     /// <param name="cmd">The move or reorder</param>
-    /// <param name="skip">Ids that are about to be removed anyway</param>
-    private void PutBackWritten(OutboxCommand cmd, HashSet<string> skip)
+    private void PutBackWritten(OutboxCommand cmd)
     {
         var later = LaterWrites(cmd);
 
@@ -2490,7 +2489,7 @@ public sealed class SyncEngine
         {
             PassOn(key, prior, fields, later);
 
-            if (skip.Contains(key.Id) || Model.Get(key.Type, key.Id) is not { } current)
+            if (Model.Get(key.Type, key.Id) is not { } current)
                 continue;
 
             var restored = Rewound(current, prior, fields);
@@ -3034,16 +3033,25 @@ public sealed class SyncEngine
 
         foreach (var d in doomed)
         {
-            // A cancelled reorder's other tasks keep a position the server will never be told about,
-            // so put them back — except the ones being rolled back here anyway.
-            if (Reorder.For(d.Type) is not null)
-                PutBackWritten(d, doomedIds);
-
             if (IsCreate(d) && d.TempId is { } temp)
                 RemoveObject(temp);
             _outbox.Remove(d);
             ForgetUndoable(d.Uuid);
         }
+
+        // A cancelled move, reorder or close leaves the tasks it touched where it put them, and the
+        // server will never be told about it — a task indented under one whose add was refused is
+        // left under a parent that isn't there, and one ticked off with it stays ticked. So they're
+        // put back the way a refused one's are. After the removals, so nothing's written to a task
+        // that's going anyway.
+        //
+        // Latest first, so a task two of them moved goes back where the earlier one found it. The
+        // later one's priors have it where the earlier one put it, which can be under a task that's
+        // just gone.
+        foreach (var d in doomed.OrderByDescending(c => c.Seq))
+            if (d.Type is "item_move" or "item_close" || Reorder.For(d.Type) is not null)
+                RestorePriors(d);
+
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());
     }
 
