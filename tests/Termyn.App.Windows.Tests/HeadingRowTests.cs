@@ -137,12 +137,36 @@ public class HeadingRowTests
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
 
-    /// <summary>Presses a key on the list itself, so its own navigation does the moving.</summary>
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int key);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetKeyboardState(byte[] state);
+
+    private const int VkMenu = 0x12;
+
+    /// <summary>
+    /// Presses a key on the list itself, so its own navigation does the moving.
+    /// </summary>
+    /// <remarks>
+    /// With nothing else held. The list asks whether Alt is down, and doesn't move on an arrow
+    /// that comes with it — and this thread's key state follows the machine's real keyboard, so an
+    /// Alt+Tab or an AltGr character typed in another window while these ran was enough to fail
+    /// them. Ctrl and Shift don't matter here: they only change what an arrow does in a list that
+    /// can select more than one row, and this one can't.
+    ///
+    /// Alt is asked about before the state is cleared. A key pressed or let go anywhere reaches
+    /// the thread the next time it asks about one, over the top of anything set in between, so
+    /// cleared without that, a change still on its way would land on the list's own question.
+    /// </remarks>
     /// <param name="outline">The list to press it on</param>
     /// <param name="key">Which key, as Windows numbers them</param>
     private static void Press(OutlineView outline, int key)
     {
         const int WmKeyDown = 0x0100;
+
+        GetKeyState(VkMenu);
+        SetKeyboardState(new byte[256]);
 
         SendMessage(outline.Handle, WmKeyDown, key, 0);
         Application.DoEvents();
@@ -207,6 +231,27 @@ public class HeadingRowTests
         using var form = Window(outline);
 
         outline.SelectId("a");
+
+        Press(outline, 0x28);
+
+        Assert.Equal("Second", outline.SelectedRow?.Content);
+    }
+
+    [WinFormsFact]
+    public void An_alt_held_in_another_window_doesnt_reach_a_press()
+    {
+        // Left down in this thread's key state the way an Alt+Tab elsewhere leaves it. The list
+        // doesn't move on an arrow that comes with Alt, so a press that let it through would fail
+        // the tests above for a reason nothing in the repository could account for.
+        using var outline = Outline();
+        using var form = Window(outline);
+        outline.SelectId("a");
+
+        var held = new byte[256];
+        held[VkMenu] = 0x80;
+        GetKeyState(VkMenu);
+        SetKeyboardState(held);
+        Assert.True(GetKeyState(VkMenu) < 0, "Alt didn't take, so this would pass whatever Press did.");
 
         Press(outline, 0x28);
 
