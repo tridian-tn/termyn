@@ -1043,6 +1043,38 @@ public class SyncEngineStructureTests
     }
 
     [Fact]
+    public async Task A_task_moved_into_a_section_that_goes_with_a_refused_add_is_put_back()
+    {
+        // Moved into a section added offline, and the section deleted, which takes the task with it
+        // here. The section's add is refused, and the move and the delete go with it, so the server
+        // never heard of any of it and still has the task where it was.
+        var store = Projects();
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","child_order":1}""");
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var section = engine.AddSection("New", "p");
+        Assert.True(engine.MoveItemToSection("x", section));
+        engine.DeleteSection(section);
+        Assert.DoesNotContain(engine.Snapshot().Items, i => i.Id == "x");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "section_add" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        var x = Assert.Single(engine.Snapshot().Items, i => i.Id == "x");
+        Assert.Equal("p", x.ProjectId);
+        Assert.Null(x.SectionId);
+        Assert.Empty(engine.Outbox);
+    }
+
+    [Fact]
     public async Task A_refused_move_leaves_a_task_gone_when_a_delete_of_it_is_queued()
     {
         // The other side of putting a real task back: one deleted here since, with the delete still
