@@ -2478,7 +2478,7 @@ public sealed class SyncEngine
             // An edit queued after this one to the same field recorded what this one put there,
             // which the server never took, so it's given what this one found instead.
             if (WritesNamedFields(cmd))
-                PassOn(new ResourceKey(type, id), resource, ParseArgs(cmd).Select(a => a.Key), LaterWrites(cmd));
+                PassOn(new ResourceKey(type, id), resource, ParseArgs(cmd).Select(a => a.Key), NearestWrites(cmd, after: true));
         }
     }
 
@@ -2500,7 +2500,7 @@ public sealed class SyncEngine
     /// <param name="cmd">The move or reorder</param>
     private void PutBackWritten(OutboxCommand cmd)
     {
-        var later = LaterWrites(cmd);
+        var later = NearestWrites(cmd, after: true);
 
         foreach (var (key, prior, fields) in WrittenFields(cmd))
         {
@@ -2580,50 +2580,61 @@ public sealed class SyncEngine
     }
 
     /// <summary>
-    /// The queued writes after a command, by each resource and field they'd put back if they were
-    /// rolled back too.
+    /// The queued writes to one side of a command, by each resource and field they'd put back if
+    /// they were rolled back.
     /// </summary>
     /// <remarks>
     /// By the order the store gave them rather than by place in the outbox, so it still holds for
     /// a command that has already been taken out of it.
     /// </remarks>
-    /// <param name="cmd">The command being rolled back</param>
-    /// <returns>For each resource and field, the nearest queued write after this one to write it</returns>
-    private Dictionary<(ResourceKey Key, string Field), OutboxCommand> LaterWrites(OutboxCommand cmd)
+    /// <param name="cmd">The command they're counted from</param>
+    /// <param name="after">True for the writes queued after it, false for the ones before</param>
+    /// <returns>For each resource and field, the nearest queued write on that side to write it</returns>
+    private Dictionary<(ResourceKey Key, string Field), OutboxCommand> NearestWrites(OutboxCommand cmd, bool after)
     {
-        var later = new Dictionary<(ResourceKey Key, string Field), OutboxCommand>();
+        var nearest = new Dictionary<(ResourceKey Key, string Field), OutboxCommand>();
+        var queued = _outbox.Where(c => c.State == OutboxState.Pending && (after ? c.Seq > cmd.Seq : c.Seq < cmd.Seq));
 
-        // Newest first, so what's left against each field is the nearest.
-        foreach (var queued in _outbox.Where(c => c.State == OutboxState.Pending && c.Seq > cmd.Seq).OrderByDescending(c => c.Seq))
-            foreach (var (key, _, fields) in WrittenFields(queued))
+        // Farthest first, so what's left against each field is the nearest.
+        foreach (var write in after ? queued.OrderByDescending(c => c.Seq) : queued.OrderBy(c => c.Seq))
+            foreach (var (key, _, fields) in WrittenFields(write))
                 foreach (var field in fields)
-                    later[(key, field)] = queued;
+                    nearest[(key, field)] = write;
 
-        return later;
+        return nearest;
     }
 
     /// <summary>
-    /// Gives a queued write after this one this one's prior for the fields they both wrote.
+    /// Writes a resource's values for some fields into the priors of the queued writes that take
+    /// them.
     /// </summary>
     /// <remarks>
-    /// The later write's prior holds what this one put there, which the server never took. Left
-    /// alone, rolling that one back as well would put this one's value back — so two refused moves
-    /// of a task would leave it where the first sent it, and nothing from the server would ever
-    /// say otherwise. Only the nearest later write is given it: that one hands it on in turn.
+    /// A queued write's prior is what the server had before it, and it's read until the write
+    /// resolves, so it has to follow what happens to the writes around it. That goes two ways.
     ///
-    /// The field is still put back here as well. If the later write lands, the server's copy of
-    /// the resource comes back with it and says where it ended up, which the client can't always
-    /// work out for itself: a task moved under a parent goes wherever the parent really is.
+    /// A write that's rolled back gives its prior to the nearest later write of each field. That
+    /// one's prior holds what this one put there, which the server never took. Left alone, rolling
+    /// it back as well would put this one's value back — so two refused moves of a task would leave
+    /// it where the first sent it, and nothing from the server would ever say otherwise. The later
+    /// write hands it on in turn. The field's still put back here as well: if the later write
+    /// lands, the server's copy of the resource comes back with it and says where it ended up,
+    /// which the client can't always work out for itself, since a task moved under a parent goes
+    /// wherever the parent really is.
+    ///
+    /// A write that lands gives what it left to the nearest earlier write of each field that's
+    /// still waiting. That one's prior is what the server had before either of them, and it isn't
+    /// any more. Left alone, a failure of the earlier write would put it back over the one that
+    /// landed, while the earlier write holds the resource so the server's copy can't say otherwise.
     /// </remarks>
-    /// <param name="key">The resource being rolled back</param>
-    /// <param name="prior">The resource as it stood before this command</param>
-    /// <param name="fields">The fields this command wrote</param>
-    /// <param name="later">The queued writes after this command, from <see cref="LaterWrites"/></param>
-    private void PassOn(ResourceKey key, JsonObject prior, IEnumerable<string> fields, Dictionary<(ResourceKey Key, string Field), OutboxCommand> later)
+    /// <param name="key">The resource</param>
+    /// <param name="values">The resource with the values to give, a field left off it meaning the field wasn't there</param>
+    /// <param name="fields">The fields to give</param>
+    /// <param name="takers">The queued write taking each field, from <see cref="NearestWrites"/></param>
+    private void PassOn(ResourceKey key, JsonObject values, IEnumerable<string> fields, Dictionary<(ResourceKey Key, string Field), OutboxCommand> takers)
     {
         var byWrite = fields
-            .Where(f => later.ContainsKey((key, f)))
-            .GroupBy(f => later[(key, f)]);
+            .Where(f => takers.ContainsKey((key, f)))
+            .GroupBy(f => takers[(key, f)]);
 
         foreach (var taken in byWrite)
         {
@@ -2636,7 +2647,7 @@ public sealed class SyncEngine
             {
                 foreach (var field in taken)
                 {
-                    if (prior.TryGetPropertyValue(field, out var was))
+                    if (values.TryGetPropertyValue(field, out var was))
                         entry[field] = was?.DeepClone();
                     else
                         entry.Remove(field);
@@ -2647,6 +2658,56 @@ public sealed class SyncEngine
             _store.UpdateCommand(owner);
         }
     }
+
+    /// <summary>
+    /// Gives what a write that's landed left to the queued writes before it that wrote the same
+    /// fields.
+    /// </summary>
+    /// <remarks>
+    /// What it left is what the nearest later write of each field recorded as its prior when it was
+    /// queued, or with nothing after it, the field as it stands. A field of a resource that isn't
+    /// held and that nothing after it wrote is left alone, as there's nothing to say what it is.
+    /// </remarks>
+    /// <param name="landed">The write the server has just taken</param>
+    private void PassBack(OutboxCommand landed)
+    {
+        // Writes are sent in order, so nearly always everything before this one has been ruled on
+        // and there's nothing waiting to give anything to.
+        if (!_outbox.Any(c => c.State == OutboxState.Pending && c.Seq < landed.Seq))
+            return;
+
+        var earlier = NearestWrites(landed, after: false);
+        var later = NearestWrites(landed, after: true);
+
+        foreach (var (key, _, fields) in WrittenFields(landed))
+        {
+            var left = new JsonObject();
+            var known = new List<string>();
+
+            foreach (var field in fields.Where(f => earlier.ContainsKey((key, f))))
+            {
+                var from = later.TryGetValue((key, field), out var next) ? PriorEntry(next, key) : Model.Get(key.Type, key.Id);
+                if (from is null)
+                    continue;
+
+                if (from.TryGetPropertyValue(field, out var value))
+                    left[field] = value?.DeepClone();
+
+                known.Add(field);
+            }
+
+            PassOn(key, left, known, earlier);
+        }
+    }
+
+    /// <summary>What a queued command recorded of one resource before it changed anything.</summary>
+    /// <param name="cmd">The queued command</param>
+    /// <param name="key">The resource</param>
+    /// <returns>The resource as recorded, or null when the command recorded nothing of it</returns>
+    private static JsonObject? PriorEntry(OutboxCommand cmd, ResourceKey key)
+        => cmd.PriorJson is { } json && TryParseNode(json) is { } node
+            ? PriorEntries(node).FirstOrDefault(e => e["id"]?.ToString() == key.Id)
+            : null;
 
     /// <summary>
     /// Whether a command's arguments name the fields it writes, so a rollback can put back those
@@ -2904,6 +2965,7 @@ public sealed class SyncEngine
 
             if (result.Ok)
             {
+                PassBack(cmd);
                 RemoveCommand(cmd);
                 continue;
             }
