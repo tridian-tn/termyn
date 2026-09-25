@@ -170,6 +170,22 @@ public class MarkdownEditorTests
         Assert.Equal(markdown, editor.Text);
     }
 
+    [WinFormsTheory]
+    [InlineData("one\vtwo")]
+    [InlineData("Notes\v")]
+    [InlineData("Notes\v\v")]
+    [InlineData("Notes\n\v")]
+    public void A_soft_line_break_from_elsewhere_is_left_as_it_is(string markdown)
+    {
+        // Shift and Return no longer makes one here, but a sync or a paste from a word processor
+        // still can. It isn't a markdown line break, but it's what the account holds, and the box
+        // doesn't rewrite that. At the end of a description the styling dropped it the way it used
+        // to drop a newline, and the next save wrote the description back without it.
+        using var editor = Editing(markdown);
+
+        Assert.Equal(markdown, editor.Text);
+    }
+
     [WinFormsFact]
     public void Return_at_the_end_of_a_description_leaves_a_line_to_carry_on_typing_on()
     {

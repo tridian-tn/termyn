@@ -239,7 +239,10 @@ internal sealed class MarkdownEditor : RichTextBox
         // after it, so a description ending in a newline came back a newline shorter — and pressing
         // Return at the end of one, which is where it is nearly always pressed, undid itself as soon
         // as the styling caught up. One more \par gives that final empty line somewhere to be.
-        if (text.EndsWith('\n'))
+        //
+        // A soft line break, U+000B, is swallowed at the end in just the same way, and the same
+        // \par keeps it.
+        if (text.EndsWith('\n') || text.EndsWith('\v'))
             rtf.Append(@"\par ");
 
         return rtf.Append('}');
