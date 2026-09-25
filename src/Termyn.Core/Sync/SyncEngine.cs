@@ -2524,13 +2524,11 @@ public sealed class SyncEngine
     /// list set here since is what the server holds, as an edit writes the whole list, so it's
     /// left as it is. A task that isn't held any more stays gone.
     /// </remarks>
-    /// <param name="recordedId">The id the prior recorded, which may since have been promoted</param>
+    /// <param name="id">The task's id</param>
     /// <param name="prior">The task as it stood when the delete was queued</param>
     /// <param name="name">The label's name</param>
-    private void PutLabelBack(string recordedId, JsonObject prior, string name)
+    private void PutLabelBack(string id, JsonObject prior, string name)
     {
-        var id = Promoted(recordedId);
-
         if (Model.Get(ResourceType.Items, id) is not { } current)
             return;
 
