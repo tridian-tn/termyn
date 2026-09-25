@@ -143,6 +143,10 @@ public class HeadingRowTests
     [DllImport("user32.dll")]
     private static extern bool SetKeyboardState(byte[] state);
 
+    [DllImport("user32.dll")]
+    private static extern nint GetActiveWindow();
+
+    private const int WmKeyDown = 0x0100;
     private const int VkMenu = 0x12;
 
     /// <summary>
@@ -158,12 +162,19 @@ public class HeadingRowTests
     /// Alt is asked about before the state is cleared. A key pressed or let go anywhere reaches
     /// the thread the next time it asks about one, over the top of anything set in between, so
     /// cleared without that, a change still on its way would land on the list's own question.
+    ///
+    /// And the window mustn't have been activated, which <see cref="Window"/> keeps it from and a
+    /// test giving the list the focus would undo. Asked of this thread rather than of the desktop:
+    /// whether an activated window gets the foreground depends on the machine at that moment, so
+    /// a check on the foreground would miss one whenever Windows refused it the switch.
     /// </remarks>
     /// <param name="outline">The list to press it on</param>
     /// <param name="key">Which key, as Windows numbers them</param>
     private static void Press(OutlineView outline, int key)
     {
-        const int WmKeyDown = 0x0100;
+        Assert.True(
+            GetActiveWindow() != outline.FindForm()?.Handle && !outline.Focused,
+            "The list's window has been activated, so anything typed elsewhere could reach it.");
 
         GetKeyState(VkMenu);
         SetKeyboardState(new byte[256]);
@@ -252,6 +263,12 @@ public class HeadingRowTests
         GetKeyState(VkMenu);
         SetKeyboardState(held);
         Assert.True(GetKeyState(VkMenu) < 0, "Alt didn't take, so this would pass whatever Press did.");
+
+        // And the list still ignores an arrow that comes with Alt. If a later Windows stopped
+        // doing that, this would pass whether Press cleared anything or not.
+        SendMessage(outline.Handle, WmKeyDown, 0x28, 0);
+        Application.DoEvents();
+        Assert.Equal("First", outline.SelectedRow?.Content);
 
         Press(outline, 0x28);
 
