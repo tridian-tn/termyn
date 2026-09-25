@@ -833,9 +833,76 @@ public class MarkdownEditorTests
         Press(editor, Keys.Control | Keys.V);
 
         Assert.True(changes > 0, "the box didn't say its text had changed");
+    }
 
-        // And the undo it goes into is the window's, not the control's.
-        Assert.False(editor.CanUndo);
+    [WinFormsTheory]
+    [InlineData(Keys.Control | Keys.V)]
+    [InlineData(Keys.Shift | Keys.Insert)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.V)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Insert)]
+    public void A_paste_in_the_window_is_undone_and_redone_like_typing(Keys keys)
+    {
+        // The window sees every key before the box does, and binds Insert on its own to a new task,
+        // so each chord has to get through it to the box. Then it's the window's Ctrl+Z that takes
+        // the paste back out, since the control's undo queue is off, and its Ctrl+Y that puts it
+        // back.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"First","description":"Notes","project_id":"p1","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-paste-undo.json", store, out _, out var presenter);
+        _ = window.Handle;
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        window.ShowPanelTab(comments: false);
+
+        var outline = TestWindow.Find<OutlineView>(window);
+        var view = TestWindow.Find<MarkdownView>(window);
+        var editor = TestWindow.Find<MarkdownEditor>(window);
+        _ = outline.Handle;
+        _ = view.Handle;
+        _ = editor.Handle;
+        outline.SelectId("a");
+
+        // F2 on the rendering, which is how the panel is opened for writing from the keyboard.
+        Press(view, Keys.F2);
+        Assert.True(window.NewContext(null).WritingDescription);
+        editor.ReadClipboard = () => "one\vtwo";
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, keys);
+        Assert.Equal("Notesone\ntwo", editor.Text);
+
+        Press(editor, Keys.Control | Keys.Z);
+        Assert.Equal("Notes", editor.Text);
+
+        Press(editor, Keys.Control | Keys.Y);
+        Assert.Equal("Notesone\ntwo", editor.Text);
+    }
+
+    [WinFormsFact]
+    public void A_paste_longer_than_the_box_brings_its_last_line_into_view()
+    {
+        // The paste goes in by hand rather than through the control's own, and it has to scroll the
+        // way that one did: a caret below the bottom of the box is typing blind. The control only
+        // scrolls to a caret it believes has the focus, and these windows are never shown, so the
+        // box is told it has it.
+        using var host = new Form();
+        using var editor = Editing(string.Join('\n', Enumerable.Range(1, 80).Select(n => $"Line {n}")), host);
+        editor.Size = new Size(300, 120);
+        SendMessage(editor.Handle, WmSetFocus, 0, 0);
+        editor.Select(editor.TextLength, 0);
+        editor.ScrollToCaret();
+        var before = FirstVisibleLine(editor);
+
+        editor.ReadClipboard = () => string.Concat(Enumerable.Range(1, 60).Select(n => $"\vPasted {n}"));
+        Press(editor, Keys.Control | Keys.V);
+        editor.Restyle();
+
+        var caret = editor.GetPositionFromCharIndex(editor.SelectionStart);
+        Assert.True(
+            caret.Y >= 0 && caret.Y < editor.ClientSize.Height,
+            $"the caret is at {caret.Y} in a box {editor.ClientSize.Height} high. The first line shown "
+            + $"went from {before} to {FirstVisibleLine(editor)}");
     }
 
     [WinFormsFact]
