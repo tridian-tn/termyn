@@ -194,6 +194,86 @@ public class MarkdownEditorTests
         Assert.Equal(6, editor.SelectionStart);
     }
 
+    [WinFormsTheory]
+    [InlineData(Keys.Shift | Keys.Return)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Return)]
+    public void Shift_and_Return_at_the_end_of_a_description_leaves_a_line_as_well(Keys keys)
+    {
+        // A rich edit control takes Return with Shift held as a soft line break, U+000B, and the
+        // styling drops one at the end of the document — so this was the fault above again, reached
+        // through the Shift+Enter a chat app teaches people to press for a new line.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, keys);
+        Assert.Equal("Notes\n", editor.Text);
+
+        editor.Restyle();
+
+        Assert.Equal("Notes\n", editor.Text);
+        Assert.Equal(6, editor.SelectionStart);
+    }
+
+    [WinFormsTheory]
+    [InlineData(4, 0)]
+    [InlineData(5, 4)]
+    public void Shift_and_Return_does_what_Return_does(int at, int length)
+    {
+        // In the middle of a description the soft break survived the styling, and was saved to the
+        // account as a U+000B, which markdown doesn't read as a line break. So what the box holds
+        // after it has to be what it holds after Return: from a caret, and over a selection it
+        // replaces.
+        using var plainHost = new Form();
+        using var plain = Editing("Some bold words", plainHost);
+        Pick(plain, at, length);
+        Press(plain, Keys.Return);
+
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        Pick(editor, at, length);
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.Equal(plain.Text, editor.Text);
+        Assert.Equal(plain.SelectionStart, editor.SelectionStart);
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_is_an_edit_like_any_other()
+    {
+        // The window saves the description and notes it for undo when the box says its text has
+        // changed. A line put in that the box kept quiet about would be on screen and nowhere else.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.Select(editor.TextLength, 0);
+
+        var changes = 0;
+        editor.TextChanged += (_, _) => changes++;
+
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.True(changes > 0, "the box didn't say its text had changed");
+
+        // And the undo it goes into is the window's, not the control's.
+        Assert.False(editor.CanUndo);
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_changes_nothing_in_a_box_that_cannot_be_written_in()
+    {
+        // Read-only is how the box sits with no task under it, or one the account won't let this
+        // user change. The control ignores the key there, and putting the line in by hand mustn't
+        // get round that.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadOnly = true;
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.Equal("Notes", editor.Text);
+    }
+
 
     [WinFormsFact]
     public void Styling_changes_how_the_markdown_looks_and_not_what_it_says()
