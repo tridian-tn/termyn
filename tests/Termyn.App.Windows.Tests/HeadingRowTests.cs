@@ -148,6 +148,34 @@ public class HeadingRowTests
         Application.DoEvents();
     }
 
+    /// <summary>
+    /// Puts the outline in a window of its own, off-screen and never brought to the front.
+    /// </summary>
+    /// <remarks>
+    /// A window that came to the front would take whatever anyone was typing elsewhere: the keys
+    /// would arrive on this thread, the pump in <see cref="Press"/> would hand them to the list,
+    /// and the list would move on them. So it's shown without being activated, and the list isn't
+    /// given the focus either, since asking for that activates the window as well. It doesn't need
+    /// the focus: <see cref="Press"/> sends the key to the list directly.
+    /// </remarks>
+    /// <param name="outline">The list to put in it</param>
+    /// <returns>The window, shown, which the caller disposes</returns>
+    private static Form Window(OutlineView outline)
+    {
+        var form = new InactiveForm { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
+        outline.Dock = DockStyle.Fill;
+        form.Controls.Add(outline);
+        form.Show();
+
+        return form;
+    }
+
+    /// <summary>A window that doesn't activate on being shown.</summary>
+    private sealed class InactiveForm : Form
+    {
+        protected override bool ShowWithoutActivation => true;
+    }
+
     [WinFormsTheory]
     [InlineData(0x28, "b", "Third", "Fourth")]   // down from a day's last task, across, and on again
     [InlineData(0x26, "c", "Second", "First")]   // and the same going up
@@ -157,14 +185,10 @@ public class HeadingRowTests
         // wherever its focus is, so moving only the selection off a heading leaves the focus
         // sitting on it — and the press after that steps the focus onto the row already selected.
         // Nothing moves, and to anyone pressing the key it reads as a keystroke thrown away.
-        using var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
         using var outline = Outline();
-        outline.Dock = DockStyle.Fill;
-        form.Controls.Add(outline);
-        form.Show();
+        using var form = Window(outline);
 
         outline.SelectId(from);
-        outline.Focus();
 
         Press(outline, key);
         Assert.Equal(across, outline.SelectedRow?.Content);
@@ -179,14 +203,10 @@ public class HeadingRowTests
         // The same quirk as crossing a heading, met from the other side: a row selected by a
         // search, the palette or the tray takes the focus with it, or the first arrow key
         // afterwards only brings the focus back and nothing appears to happen.
-        using var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
         using var outline = Outline();
-        outline.Dock = DockStyle.Fill;
-        form.Controls.Add(outline);
-        form.Show();
+        using var form = Window(outline);
 
         outline.SelectId("a");
-        outline.Focus();
 
         Press(outline, 0x28);
 
