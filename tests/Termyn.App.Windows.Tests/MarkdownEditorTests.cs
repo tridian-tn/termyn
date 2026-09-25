@@ -15,6 +15,7 @@ public class MarkdownEditorTests
     private const int WmKeyDown = 0x0100;
     private const int WmKeyUp = 0x0101;
     private const int VkReturn = 0x0D;
+    private const int VkShift = 0x10;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -126,8 +127,15 @@ public class MarkdownEditorTests
     /// Presses Return, which a rich edit control turns into a line break on the key rather than on
     /// the character — sending the character alone puts nothing in the box.
     /// </summary>
+    /// <remarks>
+    /// With nothing else held, said outright. The control asks whether Shift is down, and Shift and
+    /// Return is a soft line break — U+000B, not a newline — so left to the real keyboard, a Shift
+    /// held in another window while this ran was enough to fail it.
+    /// </remarks>
     private static void PressReturn(MarkdownEditor editor)
     {
+        Hold(new byte[256]);
+
         SendMessage(editor.Handle, WmKeyDown, VkReturn, 0);
         SendMessage(editor.Handle, WmChar, VkReturn, 0);
         SendMessage(editor.Handle, WmKeyUp, VkReturn, 0);
@@ -529,19 +537,43 @@ public class MarkdownEditorTests
         try
         {
             state[(int)code] = 0x80;
-            SetKeyboardState(state);
+            Hold(state);
             PostMessage(box.Handle, system ? WmSysKeyDown : WmKeyDown, (nint)code, 1 | context);
             Application.DoEvents();
 
             state[(int)code] = 0;
-            SetKeyboardState(state);
+            Hold(state);
             PostMessage(box.Handle, system ? WmSysKeyUp : WmKeyUp, (nint)code, unchecked((int)0xC0000001) | context);
             Application.DoEvents();
         }
         finally
         {
-            SetKeyboardState(new byte[256]);
+            Hold(new byte[256]);
         }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int key);
+
+    /// <summary>
+    /// Sets which keys this thread takes to be held, whatever the machine's keyboard is doing.
+    /// </summary>
+    /// <remarks>
+    /// A thread's key state follows the real keyboard. A new one starts as a copy of it, and a key
+    /// pressed or let go anywhere on the machine reaches the thread the next time it asks about a
+    /// key — key by key, over the top of anything set in between. So one key is asked about first,
+    /// which takes any change still on its way, and only then is the state set. Set without that, a
+    /// Shift pressed in another window while these ran got through: Return came out as a soft line
+    /// break, and AltGr and E as É in one box and é in the other.
+    ///
+    /// Asked about a key rather than read whole, because reading the whole table leaves the change
+    /// waiting, and it lands on the next key the control asks about.
+    /// </remarks>
+    /// <param name="state">Which keys are down, a byte per virtual key as the thread holds them</param>
+    private static void Hold(byte[] state)
+    {
+        GetKeyState(VkShift);
+        SetKeyboardState(state);
     }
 
     // ---- Not losing the user's place -----------------------------------------------------------
