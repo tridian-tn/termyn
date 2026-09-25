@@ -2379,15 +2379,17 @@ public sealed class SyncEngine
 
     private void RevertLocked(OutboxCommand cmd)
     {
+        // A failed one was rolled back when it failed, and letting it go is only taking it off the
+        // count. Rolled back again, it'd put its prior back over whatever's happened since — a
+        // later write that landed, typically the same change made again — and the server would
+        // never say otherwise.
         if (IsCreate(cmd))
         {
             if (cmd.TempId is { } temp)
                 RemoveObject(temp);
         }
-        else
-        {
+        else if (cmd.State != OutboxState.Failed)
             RestorePriors(cmd);
-        }
 
         _outbox.Remove(cmd);
         _store.DeleteCommands([cmd.Uuid]);
