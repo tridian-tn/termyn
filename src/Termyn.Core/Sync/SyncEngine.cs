@@ -2493,9 +2493,13 @@ public sealed class SyncEngine
     /// </summary>
     /// <remarks>
     /// Their priors are whole resources, but each changes only a field or two on them. Written back
-    /// whole, a prior undoes every edit made since. And a resource dropped since — its add refused,
-    /// or deleted — would come back for good, as the server has nothing to say about something it
-    /// doesn't have, so one that isn't held any more is left gone.
+    /// whole, a prior undoes every edit made since.
+    ///
+    /// One that isn't held any more is another matter. Added here and dropped with its refused add,
+    /// it stays gone: the server never had it, and nothing it sends would ever take it away again.
+    /// A real one goes back whole, since the server still has it where it was. Moved into a project
+    /// that's been deleted since, it went with the project here, but the move never happened
+    /// there, so the delete didn't take it. Unless a delete of it is queued, which is about to.
     /// </remarks>
     /// <param name="cmd">The move or reorder</param>
     private void PutBackWritten(OutboxCommand cmd)
@@ -2506,15 +2510,29 @@ public sealed class SyncEngine
         {
             PassOn(key, prior, fields, later);
 
-            if (Model.Get(key.Type, key.Id) is not { } current)
-                continue;
+            JsonObject restored;
 
-            var restored = Rewound(current, prior, fields);
+            if (Model.Get(key.Type, key.Id) is { } current)
+                restored = Rewound(current, prior, fields);
+            else if (!IsTemporary(key.Id) && !DeleteQueued(key))
+                restored = prior.DeepClone().AsObject();
+            else
+                continue;
 
             _store.PutResource(key.Type, key.Id, restored.ToJsonString());
             Model.Upsert(key.Type, key.Id, restored);
         }
     }
+
+    /// <summary>Whether an id is one this engine made up, which the server has never seen.</summary>
+    private static bool IsTemporary(string id) => id.StartsWith("t-", StringComparison.Ordinal);
+
+    /// <summary>Whether a delete of this resource is queued and hasn't been ruled on yet.</summary>
+    private bool DeleteQueued(ResourceKey key)
+        => _outbox.Any(c => c.State == OutboxState.Pending
+                            && c.Type.EndsWith("_delete", StringComparison.Ordinal)
+                            && ResourceTypeFor(c) == key.Type
+                            && ParseArgs(c)["id"]?.ToString() == key.Id);
 
     /// <summary>
     /// Puts a deleted label back on a task that wore it, where the task stands now.
