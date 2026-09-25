@@ -42,12 +42,41 @@ internal readonly record struct ZoomLevel(int Numerator, int Denominator)
     /// <param name="box">The control to scale, which has to have a handle</param>
     internal void ApplyTo(RichTextBox box)
     {
-        if (Of(box) != this)
-            SendMessage(box.Handle, EmSetZoom, Numerator, Denominator);
+        if (Of(box) == this)
+            return;
+
+        SendMessage(box.Handle, EmSetZoom, Numerator, Denominator);
+
+        // Read back through the property, which is the only way it learns what it's missed. Left
+        // behind, the next set through it that matched its stale memory would be skipped.
+        _ = box.ZoomFactor;
     }
+
+    /// <summary>
+    /// Whether a message is the wheel with Ctrl held, which a rich edit control answers by scaling
+    /// itself without going through its zoom property.
+    /// </summary>
+    /// <remarks>
+    /// Read off the message rather than the keyboard: the control goes by the flag the message
+    /// carries, so this does too.
+    /// </remarks>
+    /// <param name="m">The message the control has just handled</param>
+    /// <returns>True when the control will have scaled itself</returns>
+    internal static bool IsZoomWheel(in Message m)
+        => m.Msg == WmMouseWheel && ((int)(long)m.WParam & MkControl) != 0;
+
+    /// <summary>
+    /// The control's font at the scale it's drawn at, for anything painted over it by hand.
+    /// </summary>
+    /// <param name="box">The control whose font and scale to use</param>
+    /// <returns>A new font, which the caller disposes</returns>
+    internal static Font ScaledFont(RichTextBox box)
+        => new(box.Font.FontFamily, box.Font.Size * box.ZoomFactor, box.Font.Style, box.Font.Unit);
 
     private const int EmGetZoom = 0x0400 + 224;
     private const int EmSetZoom = 0x0400 + 225;
+    private const int WmMouseWheel = 0x020A;
+    private const int MkControl = 0x0008;
 
     // DllImport rather than LibraryImport, matching the rest of the app.
     [DllImport("user32.dll", CharSet = CharSet.Auto)]

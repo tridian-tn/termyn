@@ -71,7 +71,7 @@ public class TickOffTests
     /// <summary>Clicks a task's box the way a mouse would, finding it by asking the list.</summary>
     private static void ClickBoxOf(MainForm window, string id)
     {
-        var outline = Descendants(window).OfType<OutlineView>().Single();
+        var outline = TestWindow.Find<OutlineView>(window);
         var index = outline.Rows.ToList().FindIndex(r => r.Id == id);
         var row = outline.GetItemRect(index);
 
@@ -87,16 +87,5 @@ public class TickOffTests
         }
 
         Assert.Fail($"no box found on '{id}'s row");
-    }
-
-    private static IEnumerable<Control> Descendants(Control parent)
-    {
-        foreach (Control child in parent.Controls)
-        {
-            yield return child;
-
-            foreach (var below in Descendants(child))
-                yield return below;
-        }
     }
 }

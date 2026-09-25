@@ -25,6 +25,7 @@ public class PanelZoomTests
     private const int WheelDelta = 120;
     private const int EmGetFirstVisibleLine = 0x00CE;
     private const int EmGetZoom = 0x0400 + 224;
+    private const int EmSetZoom = 0x0400 + 225;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -91,6 +92,59 @@ public class PanelZoomTests
         Assert.Equal(0, FirstVisibleLine(view));
     }
 
+    [WinFormsFact]
+    public void A_link_answers_across_the_whole_height_of_a_scaled_line()
+    {
+        // Half again the font's height below the top of the line is past the bottom of it at the
+        // font's own size, and well inside it at twice that.
+        using var view = Rendering("[a link](https://example.com)");
+        view.Size = new Size(300, 200);
+        view.ZoomFactor = 2f;
+
+        var top = view.GetPositionFromCharIndex(0);
+        var lower = new Point(top.X + 2, top.Y + (int)(view.Font.Height * 1.5f));
+
+        Assert.NotNull(view.LinkUnder(lower));
+    }
+
+    [WinFormsFact]
+    public void The_hint_over_an_empty_pane_is_drawn_at_its_scale()
+    {
+        using var view = Rendering(string.Empty);
+        view.ZoomFactor = 1.5f;
+
+        using var font = ZoomLevel.ScaledFont(view);
+
+        Assert.Equal(view.Font.Size * 1.5f, font.Size, 0.01f);
+    }
+
+    [WinFormsFact]
+    public void A_box_the_wheel_scaled_can_still_be_set_through_its_property()
+    {
+        // The wheel goes round the property, which went on believing the box was at its own size —
+        // and skipped a set back to that size as having nothing to do.
+        using var view = Rendering("A description");
+        CtrlWheel(view, notches: 2);
+
+        view.ZoomFactor = 1f;
+
+        Assert.Equal((0, 0), Zoom(view));
+    }
+
+    [WinFormsFact]
+    public void A_redrawn_box_can_still_be_set_through_its_property()
+    {
+        // Whatever scaled the box behind the property's back, the scale going back on after a redraw
+        // tells the property what it is.
+        using var view = Rendering("A description");
+        SendMessage(view.Handle, EmSetZoom, 150, 100);
+
+        view.Markdown = "Another description";
+        view.ZoomFactor = 1f;
+
+        Assert.Equal((0, 0), Zoom(view));
+    }
+
     // ---- The editor ---------------------------------------------------------------------------
 
     [WinFormsFact]
@@ -113,6 +167,31 @@ public class PanelZoomTests
         editor.ZoomFactor = 1.5f;
 
         editor.Refill("Some **other** words");
+
+        Assert.Equal(1.5f, editor.ZoomFactor);
+    }
+
+    [WinFormsFact]
+    public void A_scaled_editor_keeps_its_scale_when_it_is_emptied()
+    {
+        // Emptying a rich edit control resets its scale where filling one doesn't, and it happens in
+        // the assignment — before the styling gets the chance to take the scale and put it back.
+        using var editor = Editing("Some words");
+        editor.ZoomFactor = 1.5f;
+
+        editor.Text = string.Empty;
+        editor.Restyle();
+
+        Assert.Equal(1.5f, editor.ZoomFactor);
+    }
+
+    [WinFormsFact]
+    public void A_scaled_editor_keeps_its_scale_when_a_sync_empties_it()
+    {
+        using var editor = Editing("Some words");
+        editor.ZoomFactor = 1.5f;
+
+        editor.Refill(string.Empty);
 
         Assert.Equal(1.5f, editor.ZoomFactor);
     }
@@ -147,18 +226,69 @@ public class PanelZoomTests
         // size on the next. The window also reads the scale off the control to decide whether
         // there's a zoom to reset, so that has to go on saying there is.
         using var window = PanelOnFirstTask("termyn-panel-zoom.json");
-        var view = Find<MarkdownView>(window);
+        var view = TestWindow.Find<MarkdownView>(window);
         Assert.Equal("What the first one is about", view.Markdown);
 
         CtrlWheel(view, notches: 2);
         var wheeled = view.ZoomFactor;
         Assert.NotEqual(1f, wheeled);
 
-        Find<OutlineView>(window).SelectId("b");
+        TestWindow.Find<OutlineView>(window).SelectId("b");
 
         Assert.Equal("What the second one is about", view.Markdown);
         Assert.Equal(wheeled, view.ZoomFactor);
         Assert.True(window.NewContext(null).Zoomed);
+    }
+
+    [WinFormsFact]
+    public void Wheeling_one_half_brings_the_other_with_it()
+    {
+        using var window = PanelOnFirstTask("termyn-panel-zoom-together.json");
+        var view = TestWindow.Find<MarkdownView>(window);
+        var editor = TestWindow.Find<MarkdownEditor>(window);
+
+        CtrlWheel(view, notches: 3);
+
+        Assert.NotEqual(1f, view.ZoomFactor);
+        Assert.Equal(view.ZoomFactor, editor.ZoomFactor);
+    }
+
+    [WinFormsFact]
+    public void A_task_with_no_description_opens_for_writing_at_the_panels_scale()
+    {
+        // Both faults at once: the half you write in never saw the wheel, and emptying it for a task
+        // with nothing written would have put it back to its own size if it had.
+        using var window = PanelOnFirstTask("termyn-panel-zoom-empty.json");
+        var view = TestWindow.Find<MarkdownView>(window);
+        var editor = TestWindow.Find<MarkdownEditor>(window);
+
+        CtrlWheel(view, notches: 3);
+        var wheeled = view.ZoomFactor;
+        Assert.NotEqual(1f, wheeled);
+
+        TestWindow.Find<OutlineView>(window).SelectId("c");
+
+        Assert.True(window.NewContext(null).WritingDescription);
+        Assert.Equal(wheeled, editor.ZoomFactor);
+    }
+
+    [WinFormsFact]
+    public void The_wheel_stops_where_the_menu_does()
+    {
+        // The control's own wheel runs from a tenth to five times. Past the menu's limits, Zoom in
+        // clamped a panel back down and Zoom out pushed one back up.
+        using var window = PanelOnFirstTask("termyn-panel-zoom-bounds.json");
+        var view = TestWindow.Find<MarkdownView>(window);
+
+        CtrlWheel(view, notches: 40);
+        Assert.Equal(4f, view.ZoomFactor);
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.Oemplus, MainForm.Scope.Window));
+        Assert.Equal(4f, view.ZoomFactor);
+
+        CtrlWheel(view, notches: -80);
+        Assert.Equal(0.5f, view.ZoomFactor);
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.OemMinus, MainForm.Scope.Window));
+        Assert.Equal(0.5f, view.ZoomFactor);
     }
 
     // ---- Putting it back ----------------------------------------------------------------------
@@ -169,7 +299,7 @@ public class PanelZoomTests
         // Nothing here reads ZoomFactor between the wheel and the reset. Reading it is what brings
         // the property's memory up to date, and that's the very thing Ctrl+0 used to go without.
         using var window = PanelOnFirstTask("termyn-panel-zoom-reset.json");
-        var view = Find<MarkdownView>(window);
+        var view = TestWindow.Find<MarkdownView>(window);
 
         CtrlWheel(view, notches: 2);
         Assert.NotEqual((0, 0), Zoom(view));
@@ -186,8 +316,8 @@ public class PanelZoomTests
         // Scaled while it was being written in, then left for the rendering. Reset from there, it
         // came back still scaled — and the way to reset it stayed lit, since that asks both halves.
         using var window = PanelOnFirstTask("termyn-panel-zoom-reset-hidden.json");
-        var editor = Find<MarkdownEditor>(window);
-        Assert.False(editor.Visible);
+        var editor = TestWindow.Find<MarkdownEditor>(window);
+        Assert.False(window.NewContext(null).WritingDescription);
 
         CtrlWheel(editor, notches: 2);
         Assert.NotEqual((0, 0), Zoom(editor));
@@ -233,11 +363,11 @@ public class PanelZoomTests
         presenter.Select(ViewSelection.Of(SmartView.All));
         window.ShowPanelTab(comments: false);
 
-        _ = Find<OutlineView>(window).Handle;
-        _ = Find<MarkdownView>(window).Handle;
-        _ = Find<MarkdownEditor>(window).Handle;
+        _ = TestWindow.Find<OutlineView>(window).Handle;
+        _ = TestWindow.Find<MarkdownView>(window).Handle;
+        _ = TestWindow.Find<MarkdownEditor>(window).Handle;
 
-        Find<OutlineView>(window).SelectId("a");
+        TestWindow.Find<OutlineView>(window).SelectId("a");
         return window;
     }
 
@@ -247,6 +377,7 @@ public class PanelZoomTests
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
         store.PutResource("items", "a", """{"id":"a","content":"First","description":"What the first one is about","project_id":"p1","child_order":1}""");
         store.PutResource("items", "b", """{"id":"b","content":"Second","description":"What the second one is about","project_id":"p1","child_order":2}""");
+        store.PutResource("items", "c", """{"id":"c","content":"Third","project_id":"p1","child_order":3}""");
         return store;
     }
 
@@ -255,10 +386,14 @@ public class PanelZoomTests
         => string.Join('\n', Enumerable.Range(1, count).Select(n => $"Line {n}"));
 
     /// <summary>Turns the wheel with Ctrl held, which the control answers by scaling itself.</summary>
+    /// <param name="box">The control under the wheel</param>
+    /// <param name="notches">How far, away from you to scale up and towards you to scale down</param>
     private static void CtrlWheel(RichTextBox box, int notches)
     {
-        for (var i = 0; i < notches; i++)
-            SendMessage(box.Handle, WmMouseWheel, (WheelDelta << 16) | MkControl, 0);
+        var delta = notches > 0 ? WheelDelta : -WheelDelta;
+
+        for (var i = 0; i < Math.Abs(notches); i++)
+            SendMessage(box.Handle, WmMouseWheel, (delta << 16) | MkControl, 0);
     }
 
     private static int FirstVisibleLine(RichTextBox box)
@@ -274,18 +409,5 @@ public class PanelZoomTests
         var denominator = 0;
         SendMessage(box.Handle, EmGetZoom, ref numerator, ref denominator);
         return (numerator, denominator);
-    }
-
-    private static T Find<T>(Control parent) where T : Control => Descendants(parent).OfType<T>().Single();
-
-    private static IEnumerable<Control> Descendants(Control parent)
-    {
-        foreach (Control child in parent.Controls)
-        {
-            yield return child;
-
-            foreach (var below in Descendants(child))
-                yield return below;
-        }
     }
 }

@@ -115,6 +115,9 @@ internal sealed class MarkdownView : RichTextBox
     /// <summary>Raised when a link in the description is clicked, with the address it points at.</summary>
     public event Action<string>? LinkOpened;
 
+    /// <summary>Raised when Ctrl and the wheel have scaled the box, with the scale it's now at.</summary>
+    public event Action<float>? ZoomWheeled;
+
     public MarkdownView()
     {
         ReadOnly = true;
@@ -757,7 +760,10 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>The link under a point on screen, or null.</summary>
-    private string? LinkUnder(Point position)
+    /// <remarks>Internal so a test can point at a scaled line without a mouse to point with.</remarks>
+    /// <param name="position">The point, in the box's own coordinates</param>
+    /// <returns>Where the link there goes, or null when there isn't one</returns>
+    internal string? LinkUnder(Point position)
     {
         var index = GetCharIndexFromPosition(position);
         if (index < 0)
@@ -765,8 +771,10 @@ internal sealed class MarkdownView : RichTextBox
 
         // GetCharIndexFromPosition answers with the nearest character rather than saying there
         // isn't one, so a click past the end of a line would otherwise open whatever finished it.
+        // A line's as tall as the scale makes it, so the allowance is too: unscaled, the bottom of
+        // every line in a zoomed panel stopped being part of its link.
         var box = GetPositionFromCharIndex(index);
-        return Math.Abs(box.Y - position.Y) > Font.Height ? null : LinkAt(index);
+        return Math.Abs(box.Y - position.Y) > Font.Height * ZoomFactor ? null : LinkAt(index);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -808,24 +816,37 @@ internal sealed class MarkdownView : RichTextBox
     }
 
     /// <summary>
-    /// Draws the line explaining an empty pane, over the top of what the control has just painted.
+    /// Draws the line explaining an empty pane, over the top of what the control has just painted,
+    /// and says when the wheel has scaled the box.
     /// </summary>
     /// <remarks>
     /// Only when there is nothing else here: a completed task's description is shown and can't be
     /// edited, and there is no room to say so over the top of them. The recessed background is what
-    /// carries it in that case.
+    /// carries it in that case. Drawn at the scale the text would be, since it stands in for it.
+    ///
+    /// The wheel scales the control behind its zoom property's back, so the property is read
+    /// straight after — which is how it learns — and the window told, so the other half of the panel
+    /// can follow.
     /// </remarks>
     protected override void WndProc(ref Message m)
     {
         base.WndProc(ref m);
+
+        if (ZoomLevel.IsZoomWheel(m))
+        {
+            var scale = ZoomFactor;
+            ZoomWheeled?.Invoke(scale);
+            return;
+        }
 
         if (m.Msg != WmPaint || TextLength > 0 || _placeholder.Length == 0)
             return;
 
         using var graphics = Graphics.FromHwnd(Handle);
         using var brush = new SolidBrush(_theme.Muted);
+        using var font = ZoomLevel.ScaledFont(this);
 
-        graphics.DrawString(_placeholder, Font, brush, 1, 1);
+        graphics.DrawString(_placeholder, font, brush, 1, 1);
     }
 
     /// <summary>
