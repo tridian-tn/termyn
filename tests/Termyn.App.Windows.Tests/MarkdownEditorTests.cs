@@ -181,10 +181,10 @@ public class MarkdownEditorTests
     [InlineData("Notes\n\v")]
     public void A_soft_line_break_from_elsewhere_is_left_as_it_is(string markdown)
     {
-        // Shift and Return no longer makes one here, but a sync or a paste from a word processor
-        // still can. It isn't a markdown line break, but it's what the account holds, and the box
-        // doesn't rewrite that. At the end of a description the styling dropped it the way it used
-        // to drop a newline, and the next save wrote the description back without it.
+        // Neither Shift and Return nor a paste makes one here any more, but a sync still can. It
+        // isn't a markdown line break, but it's what the account holds, and the box doesn't rewrite
+        // that. At the end of a description the styling dropped it the way it used to drop a
+        // newline, and the next save wrote the description back without it.
         using var editor = Editing(markdown);
 
         Assert.Equal(markdown, editor.Text);
@@ -735,6 +735,169 @@ public class MarkdownEditorTests
     {
         GetKeyState(VkShift);
         SetKeyboardState(state);
+    }
+
+    // ---- Pasting, which is typing by other means -----------------------------------------------
+    //
+    // Each of these gives the box its own text to paste rather than using the clipboard, which is
+    // the machine's and not the test's to overwrite.
+
+    [WinFormsTheory]
+    [InlineData(Keys.Control | Keys.V)]
+    [InlineData(Keys.Shift | Keys.Insert)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.V)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Insert)]
+    public void A_paste_goes_in_as_text_with_a_soft_line_break_as_a_newline(Keys keys)
+    {
+        // The fault was met pasting a line broken with Shift+Enter in Word or Outlook: the control
+        // pasted the rich text and kept that break as U+000B, which markdown doesn't read as a line
+        // break, and the account was sent it as it was. Now the clipboard's text goes in instead,
+        // and a U+000B in that is a newline too. On each key the control pastes on.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadClipboard = () => "one\vtwo";
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, keys);
+
+        Assert.Equal("Notesone\ntwo", editor.Text);
+        Assert.Equal(12, editor.SelectionStart);
+    }
+
+    [WinFormsTheory]
+    [InlineData("one\vtwo", "Notesone\ntwo")]
+    [InlineData("one\v\vtwo", "Notesone\n\ntwo")]
+    [InlineData("one\v", "Notesone\n")]
+    [InlineData("one\r\ntwo", "Notesone\ntwo")]
+    [InlineData("one\rtwo", "Notesone\ntwo")]
+    [InlineData("one\r\n\r\ntwo\r\n", "Notesone\n\ntwo\n")]
+    [InlineData("one\u2028two", "Notesone\ntwo")]
+    public void Every_line_break_in_a_paste_goes_in_as_a_newline_and_stays_one(string pasted, string expected)
+    {
+        // A program ends the lines of the text it puts on the clipboard however it likes. What the
+        // box holds is what gets saved, so each has to come out as a newline, and still be one once
+        // the styling has caught up, which is where a break at the end used to go missing.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadClipboard = () => pasted;
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Control | Keys.V);
+        editor.Restyle();
+
+        Assert.Equal(expected, editor.Text);
+    }
+
+    [WinFormsFact]
+    public void A_paste_over_a_selection_takes_its_place()
+    {
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        editor.ReadClipboard = () => "big\vloud";
+        Pick(editor, 5, 4);
+
+        Press(editor, Keys.Control | Keys.V);
+
+        Assert.Equal("Some big\nloud words", editor.Text);
+        Assert.Equal(13, editor.SelectionStart);
+        Assert.Equal(0, editor.SelectionLength);
+    }
+
+    [WinFormsFact]
+    public void A_paste_sent_as_a_message_goes_in_as_text_as_well()
+    {
+        // Paste() sends one, and so does a program that pastes into whatever has the focus. The
+        // control's own keys don't, so the two ways in are checked apart.
+        using var editor = Editing("Notes");
+        editor.ReadClipboard = () => "one\vtwo";
+        editor.Select(editor.TextLength, 0);
+
+        editor.Paste();
+
+        Assert.Equal("Notesone\ntwo", editor.Text);
+    }
+
+    [WinFormsFact]
+    public void A_paste_is_an_edit_like_any_other()
+    {
+        // The window saves the description and notes it for undo when the box says its text has
+        // changed. A paste the box kept quiet about would be on screen and nowhere else.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadClipboard = () => "one\vtwo";
+        editor.Select(editor.TextLength, 0);
+
+        var changes = 0;
+        editor.TextChanged += (_, _) => changes++;
+
+        Press(editor, Keys.Control | Keys.V);
+
+        Assert.True(changes > 0, "the box didn't say its text had changed");
+
+        // And the undo it goes into is the window's, not the control's.
+        Assert.False(editor.CanUndo);
+    }
+
+    [WinFormsFact]
+    public void A_paste_changes_nothing_in_a_box_that_cannot_be_written_in()
+    {
+        // Putting text in place of the selection by hand writes through a read-only box, where the
+        // control's own paste does nothing. By key and by message both.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadOnly = true;
+        editor.ReadClipboard = () => "one\vtwo";
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Control | Keys.V);
+        editor.Paste();
+
+        Assert.Equal("Notes", editor.Text);
+    }
+
+    [WinFormsFact]
+    public void A_clipboard_with_no_text_on_it_leaves_the_selection_where_it_is()
+    {
+        // A picture or a file, which a description has nowhere to put. Putting nothing in place of
+        // the selection would make pasting one a delete.
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        editor.ReadClipboard = () => string.Empty;
+        Pick(editor, 5, 4);
+
+        Press(editor, Keys.Control | Keys.V);
+
+        Assert.Equal("Some bold words", editor.Text);
+        Assert.Equal(5, editor.SelectionStart);
+        Assert.Equal(4, editor.SelectionLength);
+    }
+
+    [WinFormsFact]
+    public void A_clipboard_another_program_is_holding_is_given_up_on_quietly()
+    {
+        // Windows Forms gives up waiting for a clipboard another program has open, and throws. From
+        // a key press that's the unhandled exception dialog, where the control's own paste did
+        // nothing at all. Listened for here, so a failure is an assertion rather than that dialog
+        // sitting over the test run.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadClipboard = () => throw new ExternalException("Requested Clipboard operation did not succeed.");
+        editor.Select(editor.TextLength, 0);
+
+        Exception? thrown = null;
+        ThreadExceptionEventHandler caught = (_, e) => thrown = e.Exception;
+        Application.ThreadException += caught;
+        try
+        {
+            Press(editor, Keys.Control | Keys.V);
+        }
+        finally
+        {
+            Application.ThreadException -= caught;
+        }
+
+        Assert.Null(thrown);
+        Assert.Equal("Notes", editor.Text);
     }
 
     // ---- Not losing the user's place -----------------------------------------------------------
