@@ -48,6 +48,35 @@ public class PromotedIdTests
         => engine.Snapshot().Items.FirstOrDefault(i => i.Id == id);
 
     [Fact]
+    public async Task A_task_named_while_an_edit_to_it_waits_keeps_its_new_name_after_a_restart()
+    {
+        // The edit holds the task, so the server's copy of it doesn't land that round, and the
+        // stored copy is the one written here under the made-up name.
+        var store = new InMemorySnapshotStore();
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "New task" });
+        engine.UpdateItem(temp, new JsonObject { ["description"] = "typed offline" });
+
+        // The add is taken; no verdict on the edit.
+        api.Next = cmds => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = cmds.Where(c => c.Type == "item_add").ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = new Dictionary<string, string> { [temp] = "real1" },
+            Changes = [Json.Change("items", "real1", """{"id":"real1","content":"New task"}""")],
+        };
+        await engine.SyncAsync();
+
+        var restarted = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        restarted.Load();
+
+        Assert.Equal("real1", Assert.Single(restarted.Snapshot().Items).Id);
+    }
+
+    [Fact]
     public async Task A_description_written_against_the_name_we_gave_it_reaches_the_task()
     {
         // The one that cost something. Typing a description into a task you have just created, and

@@ -61,6 +61,17 @@ public sealed class SyncEngine
     /// </summary>
     private static readonly string[] IdKeys = ["id", .. TodoistModel.ReferenceKeys];
 
+    /// <summary>
+    /// What a move changes on the task it names: where it's filed and its place there.
+    /// </summary>
+    private static readonly string[] MovedFields = ["project_id", "section_id", "parent_id", "child_order"];
+
+    /// <summary>
+    /// What a move changes on the sub-tasks it carries. They follow it into its project and
+    /// section, and stay under the same parent in the same place.
+    /// </summary>
+    private static readonly string[] CarriedFields = ["project_id", "section_id"];
+
     private readonly object _gate = new();
     private readonly ITodoistApi _api;
     private readonly ISnapshotStore _store;
@@ -2368,15 +2379,17 @@ public sealed class SyncEngine
 
     private void RevertLocked(OutboxCommand cmd)
     {
+        // A failed one was rolled back when it failed, and letting it go is only taking it off the
+        // count. Rolled back again, it'd put its prior back over whatever's happened since — a
+        // later write that landed, typically the same change made again — and the server would
+        // never say otherwise.
         if (IsCreate(cmd))
         {
             if (cmd.TempId is { } temp)
                 RemoveObject(temp);
         }
-        else
-        {
+        else if (cmd.State != OutboxState.Failed)
             RestorePriors(cmd);
-        }
 
         _outbox.Remove(cmd);
         _store.DeleteCommands([cmd.Uuid]);
@@ -2399,12 +2412,27 @@ public sealed class SyncEngine
         // of it to say otherwise. And an edit made since the close would go with it.
         if (cmd.Type == "item_close")
         {
-            foreach (var entry in node is JsonArray array ? array.OfType<JsonObject>() : node is JsonObject single ? [single] : [])
+            foreach (var entry in PriorEntries(node))
                 if (entry["id"] is JsonValue closed && !JsonRead.Bool(entry, "checked"))
                     Uncheck(Promoted(closed.ToString()));
 
             return;
         }
+
+        // A move changes where the tasks it touches are filed and nothing else, so rolling one back
+        // puts that back on each task as it stands now, for the same reasons. A reorder's priors are
+        // whole resources as well, and all it changes is a position.
+        if (cmd.Type == "item_move" || Reorder.For(cmd.Type) is not null)
+        {
+            PutBackWritten(cmd);
+            return;
+        }
+
+        // The name a label delete took off the tasks that wore it.
+        var takenLabel = cmd.Type == "label_delete"
+                         && PriorEntries(node).FirstOrDefault(e => e["type"]?.ToString() == ResourceType.Labels)?["resource"] is JsonObject label
+            ? Projections.ToLabel(label).Name
+            : null;
 
         foreach (var restored in node is JsonArray array ? array.OfType<JsonNode>() : [node])
         {
@@ -2422,6 +2450,15 @@ public sealed class SyncEngine
 
             var id = idValue.ToString();
 
+            // A label delete records each task wearing the label whole, but all it does to one is
+            // take the label off, so that's all that goes back. The label itself was removed, so it
+            // still goes back whole below.
+            if (takenLabel is not null && type == ResourceType.Items)
+            {
+                PutLabelBack(id, resource, takenLabel);
+                continue;
+            }
+
             // An update puts back only what it wrote. Its prior is the whole resource as it stood
             // when the command was queued, and restoring all of it takes away every change made
             // since — including ones nothing here has any quarrel with. A close queued before an
@@ -2432,13 +2469,263 @@ public sealed class SyncEngine
             // Only where the resource is still here. Gone, there is nothing to rewind and the whole
             // prior goes back as it always did, which is what puts a resource back after a delete.
             var copy = WritesNamedFields(cmd) && Model.Get(type, id) is { } current
-                ? Rewound(current, resource, ParseArgs(cmd))
+                ? Rewound(current, resource, ParseArgs(cmd).Select(a => a.Key))
                 : resource.DeepClone().AsObject();
 
             _store.PutResource(type, id, copy.ToJsonString());
             Model.Upsert(type, id, copy);
+
+            // An edit queued after this one to the same field recorded what this one put there,
+            // which the server never took, so it's given what this one found instead.
+            if (WritesNamedFields(cmd))
+                PassOn(new ResourceKey(type, id), resource, ParseArgs(cmd).Select(a => a.Key), NearestWrites(cmd, after: true));
         }
     }
+
+    /// <summary>
+    /// The entries a command's priors hold, whether it recorded an array or a single resource.
+    /// </summary>
+    private static IEnumerable<JsonObject> PriorEntries(JsonNode node)
+        => node is JsonArray array ? array.OfType<JsonObject>() : node is JsonObject single ? [single] : [];
+
+    /// <summary>
+    /// Puts back what a move or a reorder wrote, on each resource as it stands now.
+    /// </summary>
+    /// <remarks>
+    /// Their priors are whole resources, but each changes only a field or two on them. Written back
+    /// whole, a prior undoes every edit made since.
+    ///
+    /// One that isn't held any more is another matter. Added here and dropped with its refused add,
+    /// it stays gone: the server never had it, and nothing it sends would ever take it away again.
+    /// A real one goes back whole, since the server still has it where it was. Moved into a project
+    /// that's been deleted since, it went with the project here, but the move never happened
+    /// there, so the delete didn't take it. Unless a delete of it is queued, which is about to.
+    /// </remarks>
+    /// <param name="cmd">The move or reorder</param>
+    private void PutBackWritten(OutboxCommand cmd)
+    {
+        var later = NearestWrites(cmd, after: true);
+
+        foreach (var (key, prior, fields) in WrittenFields(cmd))
+        {
+            PassOn(key, prior, fields, later);
+
+            JsonObject restored;
+
+            if (Model.Get(key.Type, key.Id) is { } current)
+                restored = Rewound(current, prior, fields);
+            else if (!IsTemporary(key.Id) && !DeleteQueued(key))
+                restored = prior.DeepClone().AsObject();
+            else
+                continue;
+
+            _store.PutResource(key.Type, key.Id, restored.ToJsonString());
+            Model.Upsert(key.Type, key.Id, restored);
+        }
+    }
+
+    /// <summary>Whether an id is one this engine made up, which the server has never seen.</summary>
+    private static bool IsTemporary(string id) => id.StartsWith("t-", StringComparison.Ordinal);
+
+    /// <summary>Whether a delete of this resource is queued and hasn't been ruled on yet.</summary>
+    private bool DeleteQueued(ResourceKey key)
+        => _outbox.Any(c => c.State == OutboxState.Pending
+                            && c.Type.EndsWith("_delete", StringComparison.Ordinal)
+                            && ResourceTypeFor(c) == key.Type
+                            && ParseArgs(c)["id"]?.ToString() == key.Id);
+
+    /// <summary>
+    /// Puts a deleted label back on a task that wore it, where the task stands now.
+    /// </summary>
+    /// <remarks>
+    /// Only where the task's labels are still as the delete left them, and then the prior's labels
+    /// are exactly those with this one back in its place. Anything else changed since stays. The
+    /// server sending the task since means it still has the label on, and it's already back. A
+    /// list set here since is what the server holds, as an edit writes the whole list, so it's
+    /// left as it is. A task that isn't held any more stays gone.
+    /// </remarks>
+    /// <param name="id">The task's id</param>
+    /// <param name="prior">The task as it stood when the delete was queued</param>
+    /// <param name="name">The label's name</param>
+    private void PutLabelBack(string id, JsonObject prior, string name)
+    {
+        if (Model.Get(ResourceType.Items, id) is not { } current)
+            return;
+
+        var left = Projections.ToTaskItem(prior).Labels.Where(l => !string.Equals(l, name, StringComparison.OrdinalIgnoreCase));
+        if (!Projections.ToTaskItem(current).Labels.SequenceEqual(left, StringComparer.OrdinalIgnoreCase))
+            return;
+
+        var restored = Rewound(current, prior, ["labels"]);
+
+        _store.PutResource(ResourceType.Items, id, restored.ToJsonString());
+        Model.Upsert(ResourceType.Items, id, restored);
+    }
+
+    /// <summary>
+    /// What a command wrote that a rollback puts back field by field: each resource it changed, the
+    /// resource as it was before, and which of its fields the command wrote.
+    /// </summary>
+    /// <remarks>
+    /// A move writes where the task it names is filed and its place there. The sub-tasks it
+    /// carries only follow it into its project and section. A reorder writes a position, and an
+    /// update the fields it's sent with.
+    /// </remarks>
+    /// <returns>Nothing for a command that isn't rolled back field by field</returns>
+    private IEnumerable<(ResourceKey Key, JsonObject Prior, IReadOnlyList<string> Fields)> WrittenFields(OutboxCommand cmd)
+    {
+        if (cmd.PriorJson is null || TryParseNode(cmd.PriorJson) is not { } node)
+            yield break;
+
+        if (cmd.Type == "item_move")
+        {
+            var named = ParseArgs(cmd)["id"]?.ToString();
+
+            foreach (var entry in PriorEntries(node))
+                if (entry["id"] is JsonValue id)
+                    yield return (new ResourceKey(ResourceType.Items, id.ToString()), entry, id.ToString() == named ? MovedFields : CarriedFields);
+        }
+        else if (Reorder.For(cmd.Type) is { } kind)
+        {
+            foreach (var entry in PriorEntries(node))
+                if (entry["id"] is JsonValue id)
+                    yield return (new ResourceKey(kind.Resource, id.ToString()), entry, [kind.Order]);
+        }
+        else if (WritesNamedFields(cmd) && node is JsonObject prior && ParseArgs(cmd) is var args && args["id"] is JsonValue id)
+        {
+            yield return (new ResourceKey(ResourceTypeFor(cmd), id.ToString()), prior, args.Select(a => a.Key).Where(k => k != "id").ToList());
+        }
+    }
+
+    /// <summary>
+    /// The queued writes to one side of a command, by each resource and field they'd put back if
+    /// they were rolled back.
+    /// </summary>
+    /// <remarks>
+    /// By the order the store gave them rather than by place in the outbox, so it still holds for
+    /// a command that has already been taken out of it.
+    /// </remarks>
+    /// <param name="cmd">The command they're counted from</param>
+    /// <param name="after">True for the writes queued after it, false for the ones before</param>
+    /// <returns>For each resource and field, the nearest queued write on that side to write it</returns>
+    private Dictionary<(ResourceKey Key, string Field), OutboxCommand> NearestWrites(OutboxCommand cmd, bool after)
+    {
+        var nearest = new Dictionary<(ResourceKey Key, string Field), OutboxCommand>();
+        var queued = _outbox.Where(c => c.State == OutboxState.Pending && (after ? c.Seq > cmd.Seq : c.Seq < cmd.Seq));
+
+        // Farthest first, so what's left against each field is the nearest.
+        foreach (var write in after ? queued.OrderByDescending(c => c.Seq) : queued.OrderBy(c => c.Seq))
+            foreach (var (key, _, fields) in WrittenFields(write))
+                foreach (var field in fields)
+                    nearest[(key, field)] = write;
+
+        return nearest;
+    }
+
+    /// <summary>
+    /// Writes a resource's values for some fields into the priors of the queued writes that take
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// A queued write's prior is what the server had before it, and it's read until the write
+    /// resolves, so it has to follow what happens to the writes around it. That goes two ways.
+    ///
+    /// A write that's rolled back gives its prior to the nearest later write of each field. That
+    /// one's prior holds what this one put there, which the server never took. Left alone, rolling
+    /// it back as well would put this one's value back — so two refused moves of a task would leave
+    /// it where the first sent it, and nothing from the server would ever say otherwise. The later
+    /// write hands it on in turn. The field's still put back here as well: if the later write
+    /// lands, the server's copy of the resource comes back with it and says where it ended up,
+    /// which the client can't always work out for itself, since a task moved under a parent goes
+    /// wherever the parent really is.
+    ///
+    /// A write that lands gives what it left to the nearest earlier write of each field that's
+    /// still waiting. That one's prior is what the server had before either of them, and it isn't
+    /// any more. Left alone, a failure of the earlier write would put it back over the one that
+    /// landed, while the earlier write holds the resource so the server's copy can't say otherwise.
+    /// </remarks>
+    /// <param name="key">The resource</param>
+    /// <param name="values">The resource with the values to give, a field left off it meaning the field wasn't there</param>
+    /// <param name="fields">The fields to give</param>
+    /// <param name="takers">The queued write taking each field, from <see cref="NearestWrites"/></param>
+    private void PassOn(ResourceKey key, JsonObject values, IEnumerable<string> fields, Dictionary<(ResourceKey Key, string Field), OutboxCommand> takers)
+    {
+        var byWrite = fields
+            .Where(f => takers.ContainsKey((key, f)))
+            .GroupBy(f => takers[(key, f)]);
+
+        foreach (var taken in byWrite)
+        {
+            var owner = taken.Key;
+
+            if (owner.PriorJson is null || TryParseNode(owner.PriorJson) is not { } node)
+                continue;
+
+            foreach (var entry in PriorEntries(node).Where(e => e["id"]?.ToString() == key.Id))
+            {
+                foreach (var field in taken)
+                {
+                    if (values.TryGetPropertyValue(field, out var was))
+                        entry[field] = was?.DeepClone();
+                    else
+                        entry.Remove(field);
+                }
+            }
+
+            owner.PriorJson = node.ToJsonString();
+            _store.UpdateCommand(owner);
+        }
+    }
+
+    /// <summary>
+    /// Gives what a write that's landed left to the queued writes before it that wrote the same
+    /// fields.
+    /// </summary>
+    /// <remarks>
+    /// What it left is what the nearest later write of each field recorded as its prior when it was
+    /// queued, or with nothing after it, the field as it stands. A field of a resource that isn't
+    /// held and that nothing after it wrote is left alone, as there's nothing to say what it is.
+    /// </remarks>
+    /// <param name="landed">The write the server has just taken</param>
+    private void PassBack(OutboxCommand landed)
+    {
+        // Writes are sent in order, so nearly always everything before this one has been ruled on
+        // and there's nothing waiting to give anything to.
+        if (!_outbox.Any(c => c.State == OutboxState.Pending && c.Seq < landed.Seq))
+            return;
+
+        var earlier = NearestWrites(landed, after: false);
+        var later = NearestWrites(landed, after: true);
+
+        foreach (var (key, _, fields) in WrittenFields(landed))
+        {
+            var left = new JsonObject();
+            var known = new List<string>();
+
+            foreach (var field in fields.Where(f => earlier.ContainsKey((key, f))))
+            {
+                var from = later.TryGetValue((key, field), out var next) ? PriorEntry(next, key) : Model.Get(key.Type, key.Id);
+                if (from is null)
+                    continue;
+
+                if (from.TryGetPropertyValue(field, out var value))
+                    left[field] = value?.DeepClone();
+
+                known.Add(field);
+            }
+
+            PassOn(key, left, known, earlier);
+        }
+    }
+
+    /// <summary>What a queued command recorded of one resource before it changed anything.</summary>
+    /// <param name="cmd">The queued command</param>
+    /// <param name="key">The resource</param>
+    /// <returns>The resource as recorded, or null when the command recorded nothing of it</returns>
+    private static JsonObject? PriorEntry(OutboxCommand cmd, ResourceKey key)
+        => cmd.PriorJson is { } json && TryParseNode(json) is { } node
+            ? PriorEntries(node).FirstOrDefault(e => e["id"]?.ToString() == key.Id)
+            : null;
 
     /// <summary>
     /// Whether a command's arguments name the fields it writes, so a rollback can put back those
@@ -2457,12 +2744,12 @@ public sealed class SyncEngine
     /// </summary>
     /// <param name="current">The resource as it is</param>
     /// <param name="prior">The resource as it stood when the command was queued</param>
-    /// <param name="args">What the command was sent with, whose keys are the fields it wrote</param>
-    private static JsonObject Rewound(JsonObject current, JsonObject prior, JsonObject args)
+    /// <param name="fields">The fields the command wrote</param>
+    private static JsonObject Rewound(JsonObject current, JsonObject prior, IEnumerable<string> fields)
     {
         var rewound = current.DeepClone().AsObject();
 
-        foreach (var (field, _) in args)
+        foreach (var field in fields)
         {
             // Names the resource rather than changing it.
             if (field == "id")
@@ -2557,6 +2844,13 @@ public sealed class SyncEngine
             {
                 Model.Rename(found.Type, temp, real);
                 _store.RenameResource(found.Type, temp, real);
+
+                // The store moves the row but keeps the JSON as it was written, which still has
+                // the old id in it. The server's copy usually lands over it in the same round, but
+                // not while a queued write holds it — and after a restart it'd call itself by a
+                // name nothing knows, so an edit to it would find no such task.
+                if (Model.Get(found.Type, real) is { } renamed)
+                    _store.PutResource(found.Type, real, renamed.ToJsonString());
             }
 
             foreach (var (type, id, obj) in Model.RewriteReferences(temp, real).ToList())
@@ -2595,10 +2889,20 @@ public sealed class SyncEngine
                 }
 
                 if (changed)
-                {
                     cmd.ArgsJson = args.ToJsonString();
-                    _store.UpdateCommand(cmd);
+
+                // What a command recorded before it changed anything is what a rollback puts back,
+                // and it's read long after this: a failure rounds later, or after a restart, when
+                // nothing remembers what the server named anything. Left with the old name, a
+                // rollback would find nothing under it, or write a second copy beside the real one.
+                if (Renamed(cmd.PriorJson, temp, real) is { } prior)
+                {
+                    cmd.PriorJson = prior;
+                    changed = true;
                 }
+
+                if (changed)
+                    _store.UpdateCommand(cmd);
             }
 
             // Undo records hold the id as it was at write time; without this an undo after the
@@ -2608,6 +2912,51 @@ public sealed class SyncEngine
                 if (_undoable[uuid].Id == temp)
                     _undoable[uuid] = _undoable[uuid] with { Id = real };
             }
+        }
+    }
+
+    /// <summary>
+    /// Recorded resources with a temporary id replaced by the one the server gave it, wherever
+    /// they name it: as their own id, or as the parent, section, project or task they're under.
+    /// </summary>
+    /// <param name="json">What a command recorded, as it was stored</param>
+    /// <param name="temp">The id we made up</param>
+    /// <param name="real">The id the server gave it</param>
+    /// <returns>The JSON with the new id in place, or null when it doesn't name the old one</returns>
+    private static string? Renamed(string? json, string temp, string real)
+    {
+        // Every command's priors are looked at for every promotion, and hardly any of them name
+        // the task that was promoted. Made-up ids are unique enough for the text to settle it.
+        if (json is null || !json.Contains(temp, StringComparison.Ordinal) || TryParseNode(json) is not { } node)
+            return null;
+
+        RenameIn(node, temp, real);
+        return node.ToJsonString();
+    }
+
+    /// <summary>
+    /// Replaces a temporary id with the server's wherever a node names it, however deep.
+    /// </summary>
+    /// <remarks>
+    /// Deep rather than only at the top of each entry, because a cascading delete wraps each
+    /// resource it took with the type it was.
+    /// </remarks>
+    private static void RenameIn(JsonNode? node, string temp, string real)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (var element in array)
+                RenameIn(element, temp, real);
+        }
+        else if (node is JsonObject obj)
+        {
+            foreach (var key in IdKeys)
+                if (obj[key] is JsonValue value && value.ToString() == temp)
+                    obj[key] = real;
+
+            foreach (var (_, child) in obj)
+                if (child is JsonObject or JsonArray)
+                    RenameIn(child, temp, real);
         }
     }
 
@@ -2634,6 +2983,7 @@ public sealed class SyncEngine
 
             if (result.Ok)
             {
+                PassBack(cmd);
                 RemoveCommand(cmd);
                 continue;
             }
@@ -2808,47 +3158,64 @@ public sealed class SyncEngine
 
         foreach (var d in doomed)
         {
-            // A cancelled reorder's other tasks keep a position the server will never be told about,
-            // so put them back — except the ones being rolled back here anyway.
-            if (Reorder.For(d.Type) is { } kind && d.PriorJson is { } priors)
-                RestorePositions(kind, priors, doomedIds);
-
             if (IsCreate(d) && d.TempId is { } temp)
                 RemoveObject(temp);
             _outbox.Remove(d);
             ForgetUndoable(d.Uuid);
         }
+
+        // A cancelled move, reorder or close leaves the tasks it touched where it put them, and the
+        // server will never be told about it — a task indented under one whose add was refused is
+        // left under a parent that isn't there, and one ticked off with it stays ticked. So they're
+        // put back the way a refused one's are. After the removals, so nothing's written to a task
+        // that's going anyway.
+        //
+        // Latest first, so a task two of them moved goes back where the earlier one found it. The
+        // later one's priors have it where the earlier one put it, which can be under a task that's
+        // just gone.
+        foreach (var d in doomed.OrderByDescending(c => c.Seq))
+            if (d.Type is "item_move" or "item_close" || Reorder.For(d.Type) is not null)
+                RestorePriors(d);
+
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());
+
+        // A command can have recorded one of them without naming it. A project or section delete
+        // records everything it took, and a label delete every task wearing the label, so neither
+        // is cancelled here. Left in, rolling one back would put back something the server never
+        // had, and nothing would ever say to take it away. Saved, so a restart doesn't bring the
+        // entry back with it.
+        foreach (var c in _outbox)
+        {
+            if (c.PriorJson is { } priors && PriorsWithout(priors, doomedIds) is { } kept)
+            {
+                c.PriorJson = kept;
+                _store.UpdateCommand(c);
+            }
+        }
     }
 
-    private void RestorePositions(Reorder kind, string priorJson, HashSet<string> skip)
+    /// <summary>
+    /// A command's priors without the entries for resources whose creates were refused.
+    /// </summary>
+    /// <remarks>
+    /// Only an array of them loses anything. A command whose one prior is such a resource names
+    /// it, so it was cancelled along with it.
+    /// </remarks>
+    /// <param name="priorJson">What the command recorded before it changed anything</param>
+    /// <param name="dropped">The temporary ids of the refused creates</param>
+    /// <returns>The priors without them, or null when none of them were there</returns>
+    private static string? PriorsWithout(string priorJson, HashSet<string> dropped)
     {
-        JsonNode? node;
-        try
-        {
-            node = JsonNode.Parse(priorJson);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
+        // Looked for as text first, the same as when renaming them.
+        if (!dropped.Any(id => priorJson.Contains(id, StringComparison.Ordinal)) || TryParseNode(priorJson) is not JsonArray entries)
+            return null;
 
-        if (node is not JsonArray priors)
-            return;
+        // A cascading delete holds each resource one level down.
+        var removed = entries.RemoveAll(e => e is JsonObject entry
+            && (entry["resource"] as JsonObject ?? entry)["id"] is JsonValue id
+            && dropped.Contains(id.ToString()));
 
-        foreach (var entry in priors)
-        {
-            if (entry is not JsonObject obj || obj["id"] is not JsonValue idValue)
-                continue;
-
-            var id = idValue.ToString();
-            if (skip.Contains(id) || Model.Get(kind.Resource, id) is null)
-                continue;
-
-            var copy = obj.DeepClone().AsObject();
-            _store.PutResource(kind.Resource, id, copy.ToJsonString());
-            Model.Upsert(kind.Resource, id, copy);
-        }
+        return removed > 0 ? entries.ToJsonString() : null;
     }
 
     /// <summary>
@@ -2878,9 +3245,8 @@ public sealed class SyncEngine
 
             // A move carries the sub-tasks with it, and they're in its priors because it changed
             // them. Left unowned, the server's word on one arrives before it has moved them and
-            // pulls the sub-task back to where it was; and a tombstone taken meanwhile is undone
-            // when a refused move puts its priors back, for good, since no second one is sent. A
-            // close ticks off the sub-tasks under it, and holds them for the same reasons.
+            // pulls the sub-task back to where it was. A close ticks off the sub-tasks under it,
+            // and holds them for the same reason.
             if (c.Type is "item_move" or "item_close" && TryParseNode(c.PriorJson) is JsonArray priors)
             {
                 foreach (var prior in priors)

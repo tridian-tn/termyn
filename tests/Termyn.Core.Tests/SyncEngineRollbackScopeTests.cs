@@ -71,6 +71,55 @@ public class SyncEngineRollbackScopeTests
     }
 
     [Fact]
+    public async Task Two_failed_edits_to_one_field_leave_it_as_the_server_has_it()
+    {
+        // The second edit's prior has the first one's name in it. Rolled back in the order they
+        // were made, that's the name that would be left, and the server never had it.
+        var (engine, api) = Engine();
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "First" });
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Second" });
+        await Reject(engine, api);
+
+        Assert.Equal("Task", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
+    public async Task A_failed_edit_leaves_a_later_edit_that_landed_while_it_was_retried()
+    {
+        // The first is refused and tried again, and the second lands meanwhile. The first still
+        // holds the task, so the server's copy doesn't land, and when the first failed for good its
+        // prior — the name before either — went back over the one the server has.
+        var (engine, api) = Engine();
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "First" });
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Second" });
+        await RefuseTheFirstAndTakeTheSecond(engine, api);
+
+        await Reject(engine, api);
+
+        Assert.Equal("Second", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
+    public async Task An_edit_refused_after_one_that_landed_goes_back_to_the_one_that_landed()
+    {
+        // The first failing hands its prior on to the third, which went back to it in turn when it
+        // failed too, rather than to the second, which the server has.
+        var (engine, api) = Engine();
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "First" });
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Second" });
+        await RefuseTheFirstAndTakeTheSecond(engine, api);
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Third" });
+        await Reject(engine, api);
+
+        Assert.Equal(2, engine.FailedCount);
+        Assert.Equal("Second", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
     public async Task A_field_the_edit_added_is_taken_off_again_rather_than_nulled()
     {
         // Asserted against the stored JSON rather than the projection, which reads an absent field
@@ -153,6 +202,27 @@ public class SyncEngineRollbackScopeTests
 
         await engine.SyncAsync();
         await engine.SyncAsync();
+    }
+
+    /// <summary>
+    /// Refuses the first of two queued edits, short of the ceiling, and takes the second, with the
+    /// server sending the task back as the second left it.
+    /// </summary>
+    private static async Task RefuseTheFirstAndTakeTheSecond(SyncEngine engine, FakeApi api)
+    {
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = new Dictionary<string, CommandResult>
+            {
+                [commands[0].Uuid] = new(false, "ERR", "rejected"),
+                [commands[1].Uuid] = new(true, null, null),
+            },
+            Changes = [Json.Change("items", "i1", """{"id":"i1","content":"Second","project_id":"p1","due":null,"description":"before"}""")],
+        };
+
+        await engine.SyncAsync();
+        Assert.Equal(1, engine.PendingCount);
     }
 
     /// <summary>Refuses the commands a predicate picks out, and accepts the rest.</summary>

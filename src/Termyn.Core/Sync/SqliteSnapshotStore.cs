@@ -296,8 +296,9 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
     public void UpdateCommand(OutboxCommand command)
     {
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "UPDATE outbox SET args = $args, attempts = $attempts, no_verdict = $noVerdict, state = $state, last_error = $error WHERE seq = $seq";
+        cmd.CommandText = "UPDATE outbox SET args = $args, prior = $prior, attempts = $attempts, no_verdict = $noVerdict, state = $state, last_error = $error WHERE seq = $seq";
         cmd.Parameters.AddWithValue("$args", command.ArgsJson);
+        cmd.Parameters.AddWithValue("$prior", (object?)command.PriorJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$attempts", command.Attempts);
         cmd.Parameters.AddWithValue("$noVerdict", command.NoVerdictRounds);
         cmd.Parameters.AddWithValue("$state", (int)command.State);

@@ -19,7 +19,12 @@ public sealed class OutboxCommand
     /// The resource's last known server state, captured before this command's optimistic mutation.
     /// Reverting restores it, so a dropped write returns to server truth rather than unwinding a diff.
     /// </summary>
-    public string? PriorJson { get; init; }
+    /// <remarks>
+    /// Kept current while it waits. It's rewritten when the server names something it holds by a
+    /// temporary id, and when an earlier write it built on is rolled back, since what that write
+    /// put there was never the server's.
+    /// </remarks>
+    public string? PriorJson { get; set; }
 
     /// <summary>
     /// True while this command is on the wire. Undo can't simply drop it then — the server is
