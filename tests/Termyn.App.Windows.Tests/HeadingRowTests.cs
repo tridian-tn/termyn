@@ -137,15 +137,78 @@ public class HeadingRowTests
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
 
-    /// <summary>Presses a key on the list itself, so its own navigation does the moving.</summary>
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int key);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetKeyboardState(byte[] state);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetActiveWindow();
+
+    private const int WmKeyDown = 0x0100;
+    private const int VkMenu = 0x12;
+
+    /// <summary>
+    /// Presses a key on the list itself, so its own navigation does the moving.
+    /// </summary>
+    /// <remarks>
+    /// With nothing else held. The list asks whether Alt is down, and doesn't move on an arrow
+    /// that comes with it — and this thread's key state follows the machine's real keyboard, so an
+    /// Alt+Tab or an AltGr character typed in another window while these ran was enough to fail
+    /// them. Ctrl and Shift don't matter here: they only change what an arrow does in a list that
+    /// can select more than one row, and this one can't.
+    ///
+    /// Alt is asked about before the state is cleared. A key pressed or let go anywhere reaches
+    /// the thread the next time it asks about one, over the top of anything set in between, so
+    /// cleared without that, a change still on its way would land on the list's own question.
+    ///
+    /// And the window mustn't have been activated, which <see cref="Window"/> keeps it from and a
+    /// test giving the list the focus would undo. Asked of this thread rather than of the desktop:
+    /// whether an activated window gets the foreground depends on the machine at that moment, so
+    /// a check on the foreground would miss one whenever Windows refused it the switch.
+    /// </remarks>
     /// <param name="outline">The list to press it on</param>
     /// <param name="key">Which key, as Windows numbers them</param>
     private static void Press(OutlineView outline, int key)
     {
-        const int WmKeyDown = 0x0100;
+        Assert.True(
+            GetActiveWindow() != outline.FindForm()?.Handle && !outline.Focused,
+            "The list's window has been activated, so anything typed elsewhere could reach it.");
+
+        GetKeyState(VkMenu);
+        SetKeyboardState(new byte[256]);
 
         SendMessage(outline.Handle, WmKeyDown, key, 0);
         Application.DoEvents();
+    }
+
+    /// <summary>
+    /// Puts the outline in a window of its own, off-screen and never brought to the front.
+    /// </summary>
+    /// <remarks>
+    /// A window that came to the front would take whatever anyone was typing elsewhere: the keys
+    /// would arrive on this thread, the pump in <see cref="Press"/> would hand them to the list,
+    /// and the list would move on them. So it's shown without being activated, and the list isn't
+    /// given the focus either, since asking for that activates the window as well. It doesn't need
+    /// the focus: <see cref="Press"/> sends the key to the list directly.
+    /// </remarks>
+    /// <param name="outline">The list to put in it</param>
+    /// <returns>The window, shown, which the caller disposes</returns>
+    private static Form Window(OutlineView outline)
+    {
+        var form = new InactiveForm { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
+        outline.Dock = DockStyle.Fill;
+        form.Controls.Add(outline);
+        form.Show();
+
+        return form;
+    }
+
+    /// <summary>A window that doesn't activate on being shown.</summary>
+    private sealed class InactiveForm : Form
+    {
+        protected override bool ShowWithoutActivation => true;
     }
 
     [WinFormsTheory]
@@ -157,14 +220,10 @@ public class HeadingRowTests
         // wherever its focus is, so moving only the selection off a heading leaves the focus
         // sitting on it — and the press after that steps the focus onto the row already selected.
         // Nothing moves, and to anyone pressing the key it reads as a keystroke thrown away.
-        using var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
         using var outline = Outline();
-        outline.Dock = DockStyle.Fill;
-        form.Controls.Add(outline);
-        form.Show();
+        using var form = Window(outline);
 
         outline.SelectId(from);
-        outline.Focus();
 
         Press(outline, key);
         Assert.Equal(across, outline.SelectedRow?.Content);
@@ -179,14 +238,37 @@ public class HeadingRowTests
         // The same quirk as crossing a heading, met from the other side: a row selected by a
         // search, the palette or the tray takes the focus with it, or the first arrow key
         // afterwards only brings the focus back and nothing appears to happen.
-        using var form = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(600, 400) };
         using var outline = Outline();
-        outline.Dock = DockStyle.Fill;
-        form.Controls.Add(outline);
-        form.Show();
+        using var form = Window(outline);
 
         outline.SelectId("a");
-        outline.Focus();
+
+        Press(outline, 0x28);
+
+        Assert.Equal("Second", outline.SelectedRow?.Content);
+    }
+
+    [WinFormsFact]
+    public void An_alt_held_in_another_window_doesnt_reach_a_press()
+    {
+        // Left down in this thread's key state the way an Alt+Tab elsewhere leaves it. The list
+        // doesn't move on an arrow that comes with Alt, so a press that let it through would fail
+        // the tests above for a reason nothing in the repository could account for.
+        using var outline = Outline();
+        using var form = Window(outline);
+        outline.SelectId("a");
+
+        var held = new byte[256];
+        held[VkMenu] = 0x80;
+        GetKeyState(VkMenu);
+        SetKeyboardState(held);
+        Assert.True(GetKeyState(VkMenu) < 0, "Alt didn't take, so this would pass whatever Press did.");
+
+        // And the list still ignores an arrow that comes with Alt. If a later Windows stopped
+        // doing that, this would pass whether Press cleared anything or not.
+        SendMessage(outline.Handle, WmKeyDown, 0x28, 0);
+        Application.DoEvents();
+        Assert.Equal("First", outline.SelectedRow?.Content);
 
         Press(outline, 0x28);
 
