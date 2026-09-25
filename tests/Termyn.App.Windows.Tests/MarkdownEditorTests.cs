@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Termyn.Core.Model;
 using Termyn.Core.Settings;
+using Termyn.Core.Sync;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows.Tests;
@@ -16,6 +18,8 @@ public class MarkdownEditorTests
     private const int WmKeyUp = 0x0101;
     private const int VkReturn = 0x0D;
     private const int VkShift = 0x10;
+    private const int WmSetFocus = 0x0007;
+    private const int EmGetFirstVisibleLine = 0x00CE;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -225,9 +229,9 @@ public class MarkdownEditorTests
     }
 
     [WinFormsTheory]
-    [InlineData(4, 0)]
-    [InlineData(5, 4)]
-    public void Shift_and_Return_does_what_Return_does(int at, int length)
+    [InlineData(4, 0, "Some\n bold words")]
+    [InlineData(5, 4, "Some \n words")]
+    public void Shift_and_Return_does_what_Return_does(int at, int length, string expected)
     {
         // In the middle of a description the soft break survived the styling, and was saved to the
         // account as a U+000B, which markdown doesn't read as a line break. So what the box holds
@@ -243,9 +247,43 @@ public class MarkdownEditorTests
         Pick(editor, at, length);
         Press(editor, Keys.Shift | Keys.Return);
 
+        // Said outright as well as compared, since two presses that never arrived would leave the
+        // two boxes agreeing about nothing having happened.
+        Assert.Equal(expected, plain.Text);
         Assert.Equal(plain.Text, editor.Text);
         Assert.Equal(plain.SelectionStart, editor.SelectionStart);
     }
+
+    [WinFormsFact]
+    public void Shift_and_Return_on_the_last_line_brings_the_new_one_into_view_as_Return_does()
+    {
+        // The line goes in by hand rather than through the control's own Return, and the scrolling
+        // that comes with the key had to come with it: a caret below the bottom of the box is
+        // typing blind. The control only scrolls to a caret it believes has the focus, and these
+        // windows are never shown, so each box is told it has it.
+        var scrolled = new List<int>();
+
+        foreach (var keys in new[] { Keys.Return, Keys.Shift | Keys.Return })
+        {
+            using var host = new Form();
+            using var editor = Editing(string.Join('\n', Enumerable.Range(1, 80).Select(n => $"Line {n}")), host);
+            editor.Size = new Size(300, 120);
+            SendMessage(editor.Handle, WmSetFocus, 0, 0);
+            editor.Select(editor.TextLength, 0);
+            editor.ScrollToCaret();
+            var before = FirstVisibleLine(editor);
+
+            Press(editor, keys);
+            editor.Restyle();
+
+            scrolled.Add(FirstVisibleLine(editor) - before);
+        }
+
+        Assert.True(scrolled[0] > 0, "Return didn't scroll either, so this would pass whatever Shift and Return did");
+        Assert.Equal(scrolled[0], scrolled[1]);
+    }
+
+    private static int FirstVisibleLine(RichTextBox box) => (int)SendMessage(box.Handle, EmGetFirstVisibleLine, 0, 0);
 
     [WinFormsFact]
     public void Shift_and_Return_is_an_edit_like_any_other()
@@ -262,9 +300,43 @@ public class MarkdownEditorTests
         Press(editor, Keys.Shift | Keys.Return);
 
         Assert.True(changes > 0, "the box didn't say its text had changed");
+    }
 
-        // And the undo it goes into is the window's, not the control's.
-        Assert.False(editor.CanUndo);
+    [WinFormsFact]
+    public void Shift_and_Return_in_the_window_is_undone_and_redone_like_typing()
+    {
+        // The control's own undo queue is off, so it's the window's Ctrl+Z that has to take the
+        // line back out, and its Ctrl+Y that puts it back.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"First","description":"Notes","project_id":"p1","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-shift-return-undo.json", store, out _, out var presenter);
+        _ = window.Handle;
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        window.ShowPanelTab(comments: false);
+
+        var outline = TestWindow.Find<OutlineView>(window);
+        var view = TestWindow.Find<MarkdownView>(window);
+        var editor = TestWindow.Find<MarkdownEditor>(window);
+        _ = outline.Handle;
+        _ = view.Handle;
+        _ = editor.Handle;
+        outline.SelectId("a");
+
+        // F2 on the rendering, which is how the panel is opened for writing from the keyboard.
+        Press(view, Keys.F2);
+        Assert.True(window.NewContext(null).WritingDescription);
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Shift | Keys.Return);
+        Assert.Equal("Notes\n", editor.Text);
+
+        Press(editor, Keys.Control | Keys.Z);
+        Assert.Equal("Notes", editor.Text);
+
+        Press(editor, Keys.Control | Keys.Y);
+        Assert.Equal("Notes\n", editor.Text);
     }
 
     [WinFormsFact]
