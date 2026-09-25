@@ -310,6 +310,23 @@ internal sealed class MarkdownEditor : RichTextBox
         // an é to type rather than a paragraph to centre.
         if (FormattingOnly.Contains(e.KeyData))
             e.Handled = true;
+
+        // Return with Shift held, Ctrl or not, is a soft line break to the control: U+000B rather
+        // than a newline. Markdown doesn't read that as a line break, so mid-description it went to
+        // the account as a stray character, and at the end of one the styling dropped it and took
+        // the caret back a line. Shift+Enter is what a chat app teaches people to press for a new
+        // line, so it gets the one Return would have put in.
+        //
+        // Suppressed as well as handled, since the key's been answered and Return has no AltGr
+        // character to keep. Left to the control when the box is read-only: it ignores the key
+        // there, and a line put in by hand would get round that.
+        var softBreak = e.KeyData is (Keys.Shift | Keys.Return) or (Keys.Control | Keys.Shift | Keys.Return);
+        if (softBreak && !ReadOnly)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            SelectedText = "\n";
+        }
     }
 
     protected override void OnFontChanged(EventArgs e)

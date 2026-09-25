@@ -15,6 +15,7 @@ public class MarkdownEditorTests
     private const int WmKeyDown = 0x0100;
     private const int WmKeyUp = 0x0101;
     private const int VkReturn = 0x0D;
+    private const int VkShift = 0x10;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -184,6 +185,86 @@ public class MarkdownEditorTests
 
         Assert.Equal("Notes\n", editor.Text);
         Assert.Equal(6, editor.SelectionStart);
+    }
+
+    [WinFormsTheory]
+    [InlineData(Keys.Shift | Keys.Return)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Return)]
+    public void Shift_and_Return_at_the_end_of_a_description_leaves_a_line_as_well(Keys keys)
+    {
+        // A rich edit control takes Return with Shift held as a soft line break, U+000B, and the
+        // styling drops one at the end of the document — so this was the fault above again, reached
+        // through the Shift+Enter a chat app teaches people to press for a new line.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, keys);
+        Assert.Equal("Notes\n", editor.Text);
+
+        editor.Restyle();
+
+        Assert.Equal("Notes\n", editor.Text);
+        Assert.Equal(6, editor.SelectionStart);
+    }
+
+    [WinFormsTheory]
+    [InlineData(4, 0)]
+    [InlineData(5, 4)]
+    public void Shift_and_Return_does_what_Return_does(int at, int length)
+    {
+        // In the middle of a description the soft break survived the styling, and was saved to the
+        // account as a U+000B, which markdown doesn't read as a line break. So what the box holds
+        // after it has to be what it holds after Return: from a caret, and over a selection it
+        // replaces.
+        using var plainHost = new Form();
+        using var plain = Editing("Some bold words", plainHost);
+        Pick(plain, at, length);
+        Press(plain, Keys.Return);
+
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        Pick(editor, at, length);
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.Equal(plain.Text, editor.Text);
+        Assert.Equal(plain.SelectionStart, editor.SelectionStart);
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_is_an_edit_like_any_other()
+    {
+        // The window saves the description and notes it for undo when the box says its text has
+        // changed. A line put in that the box kept quiet about would be on screen and nowhere else.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.Select(editor.TextLength, 0);
+
+        var changes = 0;
+        editor.TextChanged += (_, _) => changes++;
+
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.True(changes > 0, "the box didn't say its text had changed");
+
+        // And the undo it goes into is the window's, not the control's.
+        Assert.False(editor.CanUndo);
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_changes_nothing_in_a_box_that_cannot_be_written_in()
+    {
+        // Read-only is how the box sits with no task under it, or one the account won't let this
+        // user change. The control ignores the key there, and putting the line in by hand mustn't
+        // get round that.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadOnly = true;
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.Equal("Notes", editor.Text);
     }
 
 
@@ -529,19 +610,43 @@ public class MarkdownEditorTests
         try
         {
             state[(int)code] = 0x80;
-            SetKeyboardState(state);
+            Hold(state);
             PostMessage(box.Handle, system ? WmSysKeyDown : WmKeyDown, (nint)code, 1 | context);
             Application.DoEvents();
 
             state[(int)code] = 0;
-            SetKeyboardState(state);
+            Hold(state);
             PostMessage(box.Handle, system ? WmSysKeyUp : WmKeyUp, (nint)code, unchecked((int)0xC0000001) | context);
             Application.DoEvents();
         }
         finally
         {
-            SetKeyboardState(new byte[256]);
+            Hold(new byte[256]);
         }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int key);
+
+    /// <summary>
+    /// Sets which keys this thread takes to be held, whatever the machine's keyboard is doing.
+    /// </summary>
+    /// <remarks>
+    /// A thread's key state follows the real keyboard. A new one starts as a copy of it, and a key
+    /// pressed or let go anywhere on the machine reaches the thread the next time it asks about a
+    /// key — key by key, over the top of anything set in between. So one key is asked about first,
+    /// which takes any change still on its way, and only then is the state set. Set without that, a
+    /// Shift pressed in another window while these ran got through: Return came out as a soft line
+    /// break, and AltGr and E as É in one box and é in the other.
+    ///
+    /// Asked about a key rather than read whole, because reading the whole table leaves the change
+    /// waiting, and it lands on the next key the control asks about.
+    /// </remarks>
+    /// <param name="state">Which keys are down, a byte per virtual key as the thread holds them</param>
+    private static void Hold(byte[] state)
+    {
+        GetKeyState(VkShift);
+        SetKeyboardState(state);
     }
 
     // ---- Not losing the user's place -----------------------------------------------------------
