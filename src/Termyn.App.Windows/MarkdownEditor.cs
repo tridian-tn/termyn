@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using Termyn.Presentation;
@@ -64,6 +65,35 @@ internal sealed class MarkdownEditor : RichTextBox
             Restyle();
         }
     }
+
+    /// <summary>
+    /// The text in the box. Setting it leaves the box at the scale it's drawn at.
+    /// </summary>
+    /// <remarks>
+    /// Emptying a rich edit control puts it back to its own size, though filling one doesn't — so a
+    /// task with no description, an undo back to nothing or a sync that clears one would each hand
+    /// back a panel at its own size, and <see cref="Restyle"/> would be too late to notice.
+    /// </remarks>
+    [AllowNull]
+    public override string Text
+    {
+        get => base.Text;
+        set
+        {
+            if (!IsHandleCreated)
+            {
+                base.Text = value;
+                return;
+            }
+
+            var zoom = ZoomLevel.Of(this);
+            base.Text = value;
+            zoom.ApplyTo(this);
+        }
+    }
+
+    /// <summary>Raised when Ctrl and the wheel have scaled the box, with the scale it's now at.</summary>
+    public event Action<float>? ZoomWheeled;
 
     protected override void OnHandleCreated(EventArgs e)
     {
@@ -141,6 +171,10 @@ internal sealed class MarkdownEditor : RichTextBox
         var length = SelectionLength;
         var scroll = ScrollPosition();
 
+        // Handing the control a document puts it back to its own size, and the user may have it
+        // scaled. Taken with the rest of their place, so it can go back with it.
+        var zoom = ZoomLevel.Of(this);
+
         try
         {
             // The whole document at once, rather than a selection and two property sets per run.
@@ -155,6 +189,10 @@ internal sealed class MarkdownEditor : RichTextBox
         }
         finally
         {
+            // Ahead of the scroll, which was measured at this scale and means somewhere else in the
+            // description at any other.
+            zoom.ApplyTo(this);
+
             Select(selection, length);
             ScrollTo(scroll);
 
@@ -283,15 +321,26 @@ internal sealed class MarkdownEditor : RichTextBox
     }
 
     /// <summary>
-    /// Draws the hint over an empty box.
+    /// Draws the hint over an empty box, and says when the wheel has scaled it.
     /// </summary>
     /// <remarks>
-    /// By hand, because a rich edit control has no placeholder of its own and paints itself. Drawn
-    /// after the control has, so it sits on top of the background it just laid down.
+    /// The hint by hand, because a rich edit control has no placeholder of its own and paints
+    /// itself. Drawn after the control has, so it sits on top of the background it just laid down.
+    ///
+    /// The wheel scales the control behind its zoom property's back, so the property is read
+    /// straight after — which is how it learns — and the window told, so the other half of the panel
+    /// can follow.
     /// </remarks>
     protected override void WndProc(ref Message m)
     {
         base.WndProc(ref m);
+
+        if (ZoomLevel.IsZoomWheel(m))
+        {
+            var scale = ZoomFactor;
+            ZoomWheeled?.Invoke(scale);
+            return;
+        }
 
         if (m.Msg != WmPaint || TextLength > 0 || Placeholder.Length == 0 || Focused)
             return;
@@ -299,9 +348,12 @@ internal sealed class MarkdownEditor : RichTextBox
         using var graphics = Graphics.FromHwnd(Handle);
         using var brush = new SolidBrush(_theme.Muted);
 
+        // At the scale the text would be drawn at, since the hint stands in for it.
+        using var font = ZoomLevel.ScaledFont(this);
+
         // Where the caret sits, so the hint reads as text that would be replaced rather than as a
         // label pasted into the corner.
-        graphics.DrawString(Placeholder, Font, brush, 1, 1);
+        graphics.DrawString(Placeholder, font, brush, 1, 1);
     }
 
     /// <summary>

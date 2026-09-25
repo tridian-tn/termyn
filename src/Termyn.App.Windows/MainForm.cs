@@ -353,6 +353,7 @@ internal sealed class MainForm : Form
         };
         _description.TextChanged += OnDescriptionChanged;
         _description.KeyDown += OnDescriptionKeyDown;
+        _description.ZoomWheeled += OnDescriptionWheeled;
 
         // The box is where the user is from here until the focus moves somewhere else in this
         // window. Deliberately not Focused: alt-tabbing away takes the keyboard focus off every
@@ -374,6 +375,7 @@ internal sealed class MainForm : Form
         _rendered = new MarkdownView { Dock = DockStyle.Fill };
         _rendered.LinkOpened += OnDescriptionLinkOpened;
         _rendered.EditRequested += StartWriting;
+        _rendered.ZoomWheeled += OnDescriptionWheeled;
 
         // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
@@ -2953,6 +2955,18 @@ internal sealed class MainForm : Form
         _description.ZoomFactor = to;
     }
 
+    /// <summary>
+    /// Brings both halves of the panel to the scale the wheel has just taken one of them to.
+    /// </summary>
+    /// <remarks>
+    /// The wheel only scales the control under it, so the half you read and the half you write in
+    /// came apart, and stayed apart now that neither goes back to its own size when it draws. Held to
+    /// the menu's bounds as well: the control's own run from a tenth to five times, and Zoom in on a
+    /// panel wheeled past the top was clamped back down — zooming in made it smaller.
+    /// </remarks>
+    /// <param name="scale">Where the wheel left the half it was turned over</param>
+    private void OnDescriptionWheeled(float scale) => SetZoom(Math.Clamp(scale, MinZoom, MaxZoom));
+
     /// <summary>Whether the panel is showing something that can be scaled at all.</summary>
     private bool CanZoom => !_detail.Panel2Collapsed && !_showingComments;
 
@@ -2960,8 +2974,8 @@ internal sealed class MainForm : Form
     /// The half of the panel on show, which is the half the wheel has been scaling.
     /// </summary>
     /// <remarks>
-    /// Exactly one of the two is ever visible. Reading the other one would take a step from a scale
-    /// nobody has been changing, so zooming after the wheel had been used would jump.
+    /// Exactly one of the two is ever visible. The wheel brings the other along with it, but a step
+    /// taken from the half on show is a step from what's on screen whatever the other one says.
     /// </remarks>
     private RichTextBox Scaled => _writingDescription ? _description : _rendered;
 
@@ -2969,10 +2983,10 @@ internal sealed class MainForm : Form
     /// Whether the panel is scaled away from the size it rests at, for the entry that puts it back.
     /// </summary>
     /// <remarks>
-    /// Either half, because the wheel scales whichever is on show and leaves the other where it was:
-    /// asking only one would leave the way back greyed out on a panel that plainly isn't its own
-    /// size. Read off the controls rather than remembered, for the same reason — a figure of ours
-    /// would only be right until somebody scrolled. Compared with room either side, since the
+    /// Either half, though the two are kept together: were they ever to come apart, asking only one
+    /// could leave the way back greyed out on a panel that plainly isn't its own size. Read off the
+    /// controls rather than remembered, since the wheel scales them without asking us — a figure of
+    /// ours would only be right until somebody scrolled. Compared with room either side, since the
     /// control keeps this as a float and stepping out and back lands near one rather than on it.
     /// </remarks>
     private bool Zoomed
@@ -2985,7 +2999,12 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Runs a command from wherever it was asked for.</summary>
-    private void Run(AppCommand command)
+    /// <remarks>
+    /// Internal so a test can run one the way a keystroke does. A menu isn't the same road: opening
+    /// one reads the window's state on the way, and a keystroke goes straight here.
+    /// </remarks>
+    /// <param name="command">The command to run</param>
+    internal void Run(AppCommand command)
     {
         Noticed();
         Dispatch(command);

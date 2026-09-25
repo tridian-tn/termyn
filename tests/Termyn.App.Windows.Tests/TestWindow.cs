@@ -72,6 +72,25 @@ internal static class TestWindow
         return window;
     }
 
+    /// <summary>Every control under a parent, at any depth.</summary>
+    /// <param name="parent">Where to start</param>
+    /// <returns>Each control below it, parents before their children</returns>
+    internal static IEnumerable<Control> Descendants(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            yield return child;
+
+            foreach (var below in Descendants(child))
+                yield return below;
+        }
+    }
+
+    /// <summary>The one control of a kind somewhere in a window, for a test to drive directly.</summary>
+    /// <param name="parent">Where to look</param>
+    /// <returns>The control, of which there must be exactly one</returns>
+    internal static T Find<T>(Control parent) where T : Control => Descendants(parent).OfType<T>().Single();
+
     // ---- The shell, stood in for --------------------------------------------------------------
 
     private sealed class Paths : IAppPaths
