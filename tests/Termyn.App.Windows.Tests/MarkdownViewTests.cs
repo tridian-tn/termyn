@@ -785,6 +785,7 @@ public class MarkdownViewTests
     [InlineData("# H\n\n> quoted\n\n- [ ] a box\n\n[a link](https://example.com) after")]
     [InlineData("An em dash — a résumé, 日本語, an emoji 🎉 and a tab\there")]
     [InlineData("Pasted in the wrong encoding: caf\uFFFD and na\uFFFDve")]
+    [InlineData("A soft line break\vmid-description, and one at the end\v")]
     public void The_writing_and_the_box_agree_about_how_much_is_in_it(string markdown)
     {
         // Every offset recorded against a run rides on these two agreeing — where a run came from in

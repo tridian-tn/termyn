@@ -239,7 +239,10 @@ internal sealed class MarkdownEditor : RichTextBox
         // after it, so a description ending in a newline came back a newline shorter — and pressing
         // Return at the end of one, which is where it is nearly always pressed, undid itself as soon
         // as the styling caught up. One more \par gives that final empty line somewhere to be.
-        if (text.EndsWith('\n'))
+        //
+        // A soft line break, U+000B, is swallowed at the end in just the same way, and the same
+        // \par keeps it.
+        if (text.EndsWith('\n') || text.EndsWith('\v'))
             rtf.Append(@"\par ");
 
         return rtf.Append('}');
@@ -310,6 +313,23 @@ internal sealed class MarkdownEditor : RichTextBox
         // an é to type rather than a paragraph to centre.
         if (FormattingOnly.Contains(e.KeyData))
             e.Handled = true;
+
+        // Return with Shift held, Ctrl or not, is a soft line break to the control: U+000B rather
+        // than a newline. Markdown doesn't read that as a line break, so mid-description it went to
+        // the account as a stray character, and at the end of one the styling dropped it and took
+        // the caret back a line. Shift+Enter is what a chat app teaches people to press for a new
+        // line, so it gets the one Return would have put in.
+        //
+        // Suppressed as well as handled, since the key's been answered and Return has no AltGr
+        // character to keep. Left to the control when the box is read-only: it ignores the key
+        // there, and a line put in by hand would get round that.
+        var softBreak = e.KeyData is (Keys.Shift | Keys.Return) or (Keys.Control | Keys.Shift | Keys.Return);
+        if (softBreak && !ReadOnly)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            SelectedText = "\n";
+        }
     }
 
     protected override void OnFontChanged(EventArgs e)
