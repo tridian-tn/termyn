@@ -977,6 +977,101 @@ public class SyncEngineStructureTests
     }
 
     [Fact]
+    public async Task A_failed_move_leaves_a_later_move_that_landed_while_it_was_retried()
+    {
+        // The first move is refused and tried again, and the second lands meanwhile. The first still
+        // holds the task, so the server's copy doesn't land, and when the first failed for good it
+        // took the task back to where it started, while the server has it where the second sent it.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 2);
+        engine.Load();
+
+        engine.MoveItemToProject("a", "q");
+        engine.MoveItemToProject("a", "other");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = new Dictionary<string, CommandResult>
+            {
+                [commands[0].Uuid] = new(false, "ERR", "rejected"),
+                [commands[1].Uuid] = new(true, null, null),
+            },
+        };
+        await engine.SyncAsync();
+
+        api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("other", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Null(items[id].SectionId));
+        Assert.Equal(1, engine.FailedCount);
+    }
+
+    [Fact]
+    public async Task A_refused_move_into_a_project_deleted_since_puts_the_task_back()
+    {
+        // The task went with the project here, but the move never happened on the server, so the
+        // delete there didn't take it. Left gone, it'd stay gone until a full sync.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 2);
+        engine.Load();
+
+        engine.MoveItemToProject("a", "q");
+        engine.DeleteProject("q");
+        Assert.DoesNotContain(engine.Snapshot().Items, i => i.Id == "a");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_move" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+            Changes = [Json.Deleted("projects", "q")],
+        };
+        await engine.SyncAsync();
+
+        api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
+        Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
+        Assert.All(["a", "b", "c"], id => Assert.Equal("s1", items[id].SectionId));
+        Assert.Equal("a", items["b"].ParentId);
+        Assert.Equal(1, engine.FailedCount);
+    }
+
+    [Fact]
+    public async Task A_refused_move_leaves_a_task_gone_when_a_delete_of_it_is_queued()
+    {
+        // The other side of putting a real task back: one deleted here since, with the delete still
+        // to be ruled on, is about to go anyway.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Family(), new FakeSecrets { Stored = "tok" }, attemptCeiling: 2);
+        engine.Load();
+
+        engine.MoveItemToProject("a", "q");
+        engine.DeleteItem("a");
+
+        api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
+        await engine.SyncAsync();
+
+        // The move fails for good ahead of the delete, which lands.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s3",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => c.Type == "item_move" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
+        };
+        await engine.SyncAsync();
+
+        Assert.DoesNotContain(engine.Snapshot().Items, i => i.Id == "a");
+        Assert.Equal(1, engine.FailedCount);
+    }
+
+    [Fact]
     public void An_indent_can_be_reverted_back_to_where_it_was()
     {
         var engine = TwoSiblings();

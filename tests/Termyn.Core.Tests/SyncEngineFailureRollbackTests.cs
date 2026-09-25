@@ -530,6 +530,79 @@ public class SyncEngineFailureRollbackTests
         Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
     }
 
+    // ---- Letting a failed write go ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Letting_a_failed_move_go_leaves_a_later_move_that_landed()
+    {
+        // Refused for good and put back when it failed, then the task moved again, which lands.
+        // Letting the failure go put its prior back a second time, over the move that landed.
+        var (engine, api) = Engine(WithProjects("q", "r"), attemptCeiling: 1);
+
+        engine.MoveItemToProject("i1", "q");
+        Fails(api, engine);
+        await engine.SyncAsync();
+        var failed = engine.Outbox.Single(c => c.State == OutboxState.Failed).Uuid;
+
+        engine.MoveItemToProject("i1", "r");
+        Lands(api, """{"id":"i1","content":"Task","project_id":"r","labels":["home"]}""");
+        await engine.SyncAsync();
+
+        engine.Revert(failed);
+
+        Assert.Equal("r", engine.Snapshot().Items.Single().ProjectId);
+        Assert.Equal(0, engine.FailedCount);
+    }
+
+    [Fact]
+    public async Task Letting_a_failed_edit_go_leaves_a_later_edit_that_landed()
+    {
+        // The same change made again, the way anyone would after seeing it fail.
+        var (engine, api) = Engine(Seeded(), attemptCeiling: 1);
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Renamed" });
+        Fails(api, engine);
+        await engine.SyncAsync();
+        var failed = engine.Outbox.Single(c => c.State == OutboxState.Failed).Uuid;
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Renamed again" });
+        Lands(api, """{"id":"i1","content":"Renamed again","project_id":"p1","labels":["home"]}""");
+        await engine.SyncAsync();
+
+        engine.Revert(failed);
+
+        Assert.Equal("Renamed again", engine.Snapshot().Items.Single().Content);
+    }
+
+    [Fact]
+    public async Task Letting_a_failed_move_go_doesnt_hand_its_prior_to_a_queued_one()
+    {
+        // Refused and put back, then moved to r on another device, then moved here again. Letting
+        // the first go handed its prior to the queued move, so when that was refused too the task
+        // went back to where it started rather than to r, where the server has it.
+        var (engine, api) = Engine(WithProjects("q", "r", "q2"), attemptCeiling: 1);
+
+        engine.MoveItemToProject("i1", "q");
+        Fails(api, engine);
+        await engine.SyncAsync();
+        var failed = engine.Outbox.Single(c => c.State == OutboxState.Failed).Uuid;
+
+        api.Next = _ => new SyncResponse
+        {
+            SyncToken = "s3",
+            Changes = [Json.Change("items", "i1", """{"id":"i1","content":"Task","project_id":"r","labels":["home"]}""")],
+        };
+        await engine.SyncAsync();
+
+        engine.MoveItemToProject("i1", "q2");
+        engine.Revert(failed);
+
+        Fails(api, engine);
+        await engine.SyncAsync();
+
+        Assert.Equal("r", engine.Snapshot().Items.Single().ProjectId);
+    }
+
     // ---- Undo across a restart -------------------------------------------------------------------
 
     [Fact]
@@ -642,4 +715,22 @@ public class SyncEngineFailureRollbackTests
             SyncToken = "s2",
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
         };
+
+    /// <summary>Has the server take everything the engine sends, and send back the task as it has it.</summary>
+    private static void Lands(FakeApi api, string task)
+        => api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s3",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            Changes = [Json.Change("items", "i1", task)],
+        };
+
+    /// <summary>The seeded store, with more projects to move its task between.</summary>
+    private static InMemorySnapshotStore WithProjects(params string[] ids)
+    {
+        var store = Seeded();
+        foreach (var id in ids)
+            store.PutResource("projects", id, $$"""{"id":"{{id}}","name":"{{id}}"}""");
+        return store;
+    }
 }
