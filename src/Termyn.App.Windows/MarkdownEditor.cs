@@ -304,6 +304,22 @@ internal sealed class MarkdownEditor : RichTextBox
         Keys.Control | Keys.Shift | Keys.Oemplus,   // subscript again
     ];
 
+    /// <summary>
+    /// The keys the control pastes on, which <see cref="PasteAsText"/> answers instead.
+    /// </summary>
+    /// <remarks>
+    /// Found by pressing each Ctrl, Shift and Alt combination of V and Insert at a rich edit control
+    /// with text on the clipboard, and keeping the ones that pasted it. Nothing with Alt in it does,
+    /// which leaves AltGr and V to type whatever it types.
+    /// </remarks>
+    private static readonly HashSet<Keys> PasteKeys =
+    [
+        Keys.Control | Keys.V,
+        Keys.Shift | Keys.Insert,
+        Keys.Control | Keys.Shift | Keys.V,
+        Keys.Control | Keys.Shift | Keys.Insert,
+    ];
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -330,6 +346,60 @@ internal sealed class MarkdownEditor : RichTextBox
             e.SuppressKeyPress = true;
             SelectedText = "\n";
         }
+
+        // The control never gets the key, so it never pastes the clipboard's formatting. Left to it
+        // when the box is read-only, for the same reason as Shift+Enter.
+        if (PasteKeys.Contains(e.KeyData) && !ReadOnly)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            PasteAsText();
+        }
+    }
+
+    /// <summary>
+    /// Reads the text a paste puts in: the clipboard's, unless a test has given it something else.
+    /// </summary>
+    /// <remarks>
+    /// So a test can paste without taking over the clipboard of whoever's running it.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<string> ReadClipboard { get; set; } = () => Clipboard.GetText(TextDataFormat.UnicodeText);
+
+    /// <summary>
+    /// Puts the clipboard's text in place of the selection, with its line breaks as newlines.
+    /// </summary>
+    /// <remarks>
+    /// Left to itself the control pastes the formatting too, and that part's harmless: the next
+    /// restyle rebuilds the document from the text. What isn't harmless is a line break made with
+    /// Shift+Enter in Word or Outlook. It comes over as a line break in the rich text, the control
+    /// keeps that as U+000B, and markdown doesn't read U+000B as a line break, so it went to the
+    /// account as a stray character. A paste is typing by other means, so it gets the newline
+    /// Shift+Enter gets here. A U+000B that's already in a description came from the account, and
+    /// stays.
+    ///
+    /// When the clipboard has no text — a picture, a file — nothing goes in, rather than the
+    /// selection being replaced by nothing.
+    /// </remarks>
+    private void PasteAsText()
+    {
+        string text;
+        try
+        {
+            text = ReadClipboard();
+        }
+        catch (ExternalException)
+        {
+            // Another program kept the clipboard open for longer than Windows Forms waits. The
+            // control's own paste gives up quietly then, and so does this.
+            return;
+        }
+
+        if (text.Length == 0)
+            return;
+
+        SelectedText = text.Replace('\v', '\n').ReplaceLineEndings("\n");
     }
 
     protected override void OnFontChanged(EventArgs e)
@@ -341,9 +411,14 @@ internal sealed class MarkdownEditor : RichTextBox
     }
 
     /// <summary>
-    /// Draws the hint over an empty box, and says when the wheel has scaled it.
+    /// Takes a paste sent as a message, draws the hint over an empty box, and says when the wheel
+    /// has scaled it.
     /// </summary>
     /// <remarks>
+    /// A paste comes as a message from <see cref="TextBoxBase.Paste()"/>, or from a program that
+    /// pastes into whatever has the focus. The control's own paste keys don't send one, which is why
+    /// <see cref="OnKeyDown"/> has them as well.
+    ///
     /// The hint by hand, because a rich edit control has no placeholder of its own and paints
     /// itself. Drawn after the control has, so it sits on top of the background it just laid down.
     ///
@@ -353,6 +428,12 @@ internal sealed class MarkdownEditor : RichTextBox
     /// </remarks>
     protected override void WndProc(ref Message m)
     {
+        if (m.Msg == WmPaste && !ReadOnly)
+        {
+            PasteAsText();
+            return;
+        }
+
         base.WndProc(ref m);
 
         if (ZoomLevel.IsZoomWheel(m))
@@ -408,6 +489,7 @@ internal sealed class MarkdownEditor : RichTextBox
 
     private const int WmSetRedraw = 0x000B;
     private const int WmPaint = 0x000F;
+    private const int WmPaste = 0x0302;
     private const int EmSetUndoLimit = 0x0400 + 82;
     private const int EmGetScrollPos = 0x0400 + 221;
     private const int EmSetScrollPos = 0x0400 + 222;
