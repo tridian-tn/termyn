@@ -126,12 +126,17 @@ public static class OutlineCells
     /// The due column. A repeat and a reminder are marked here rather than given columns of their
     /// own: both are about when the task comes round, and neither is worth the width.
     /// </summary>
+    /// <remarks>
+    /// A recurring task that's been ticked off reads <c>advancing…</c> in place of its date until
+    /// the server says where it lands next. The date it's leaving would say the press did nothing.
+    /// </remarks>
     private static string DueOf(TaskRow row)
     {
+        var due = row.Advancing ? "advancing…" : row.Due;
         var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.ReminderCount > 0 ? "⏰" : string.Empty);
         if (marks.Length == 0)
-            return row.Due;
+            return due;
 
-        return row.Due.Length == 0 ? marks : $"{marks} {row.Due}";
+        return due.Length == 0 ? marks : $"{marks} {due}";
     }
 }

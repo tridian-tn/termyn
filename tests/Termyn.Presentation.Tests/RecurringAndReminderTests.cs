@@ -136,6 +136,40 @@ public class RecurringAndReminderTests
         Assert.Equal(0, presenter.Rows.Single(r => r.Id == "r1").ReminderCount);
     }
 
+    [Fact]
+    public void A_recurring_task_ticked_off_is_advancing_until_the_server_answers()
+    {
+        // When the server's answer clears it is the engine's to say, and tested there.
+        var presenter = NewPresenter(Store());
+        Assert.False(presenter.Rows.Single(r => r.Id == "r1").Advancing);
+
+        presenter.Complete("r1");
+
+        Assert.True(presenter.Rows.Single(r => r.Id == "r1").Advancing);
+    }
+
+    [Fact]
+    public void An_ordinary_task_ticked_off_isnt_advancing()
+    {
+        // It's ticked off there and then, which says the press did something on its own.
+        var presenter = NewPresenter(Store());
+
+        presenter.Complete("i1");
+
+        Assert.False(presenter.Rows.Single(r => r.Id == "i1").Advancing);
+    }
+
+    [Fact]
+    public void An_undone_close_stops_the_task_advancing()
+    {
+        var presenter = NewPresenter(Store());
+        presenter.Complete("r1");
+
+        presenter.Undo();
+
+        Assert.False(presenter.Rows.Single(r => r.Id == "r1").Advancing);
+    }
+
     // ---- Entitlement -------------------------------------------------------------------------------
 
     [Fact]

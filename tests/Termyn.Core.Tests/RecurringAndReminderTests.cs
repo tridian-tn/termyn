@@ -62,6 +62,62 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
+    public async Task A_recurring_close_is_on_its_way_until_the_server_takes_it()
+    {
+        // Nothing on the task changes until the server says where it lands next, so this is the
+        // only sign there is that the press did anything.
+        var api = new FakeApi();
+        var engine = NewEngine(Store(), api);
+
+        engine.CompleteItem("r1");
+        Assert.Contains("r1", engine.Snapshot().Closing);
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            Changes = [new ResourceChange("items", "r1", false, Json.Object("""{"id":"r1","content":"Water plants","project_id":"p","due":{"date":"2026-08-01","string":"every day","is_recurring":true}}"""))],
+        };
+        await engine.SyncAsync();
+
+        Assert.Empty(engine.Snapshot().Closing);
+        Assert.Equal("2026-08-01", engine.Snapshot().Items.Single(i => i.Id == "r1").DueDate);
+    }
+
+    [Fact]
+    public async Task A_refused_recurring_close_is_on_its_way_until_the_server_has_finished_refusing()
+    {
+        // A refusal is retried up to the ceiling, and the close is still on its way while it is.
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, Store(), new FakeSecrets { Stored = "tok" }, new FixedClock(Today), attemptCeiling: 2);
+        engine.Load();
+        engine.CompleteItem("r1");
+
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+        };
+
+        await engine.SyncAsync();
+        Assert.Contains("r1", engine.Snapshot().Closing);
+
+        await engine.SyncAsync();
+        Assert.Empty(engine.Snapshot().Closing);
+    }
+
+    [Fact]
+    public void An_undone_recurring_close_isnt_on_its_way_any_more()
+    {
+        var engine = Seeded();
+        engine.CompleteItem("r1");
+
+        engine.Undo();
+
+        Assert.Empty(engine.Snapshot().Closing);
+    }
+
+    [Fact]
     public void A_recurring_task_is_recognised_from_its_due_object()
     {
         var engine = Seeded();

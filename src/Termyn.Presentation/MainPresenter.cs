@@ -67,7 +67,17 @@ public sealed record TaskRow(
     /// so a heading is a row like any other, and everything that acts on a task has to know the
     /// difference. It carries the day's name in <c>Content</c> and nothing else.
     /// </remarks>
-    bool IsHeading = false);
+    bool IsHeading = false,
+
+    /// <summary>
+    /// Whether this is a recurring task that's been ticked off and is waiting for the server to say
+    /// when it's next due.
+    /// </summary>
+    /// <remarks>
+    /// Nothing else on the row changes until the answer comes back, which offline can be a long
+    /// while, so without this the press looks like it did nothing.
+    /// </remarks>
+    bool Advancing = false);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -2231,7 +2241,8 @@ public sealed class MainPresenter
                 snapshot.CommentCounts.GetValueOrDefault(item.Id),
                 ProjectColour: project.Name is null ? null : project.Colour,
                 Deadline: DateShown(item.Deadline, snapshot.TimeZone, snapshot.Today),
-                DeadlineOn: SmartViews.DeadlineOn(item, snapshot.TimeZone));
+                DeadlineOn: SmartViews.DeadlineOn(item, snapshot.TimeZone),
+                Advancing: item.IsRecurring && snapshot.Closing.Contains(item.Id));
         }
     }
 
