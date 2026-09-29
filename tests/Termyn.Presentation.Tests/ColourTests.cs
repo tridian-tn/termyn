@@ -134,9 +134,40 @@ public class ColourTests
         store.PutResource("labels", "l1", """{"id":"l1","name":"followup","color":"teal"}""");
         store.PutResource("labels", "l2", """{"id":"l2","name":"waiting","color":"grape"}""");
 
-        var labels = Presenter(store).Labels;
+        var colours = Presenter(store).LabelColours;
 
-        Assert.Equal(TodoistPalette.Of("teal"), TodoistPalette.Of(labels.Single(l => l.Name == "followup").Color));
-        Assert.Equal(TodoistPalette.Of("grape"), TodoistPalette.Of(labels.Single(l => l.Name == "waiting").Color));
+        Assert.Equal(TodoistPalette.Of("teal"), colours["followup"]);
+        Assert.Equal(TodoistPalette.Of("grape"), colours["waiting"]);
+    }
+
+    [Fact]
+    public void Two_labels_of_one_name_are_coloured_as_the_first_of_them()
+    {
+        // Renaming one label onto another is enough to get here. Keyed by name, the second used
+        // to throw, and the window drawing the rows threw with it on every sync.
+        var store = Seeded("""{"id":"p1","name":"Work"}""");
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","color":"teal","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","color":"grape","item_order":2}""");
+
+        var colours = Presenter(store).LabelColours;
+
+        Assert.Equal(TodoistPalette.Of("teal"), Assert.Single(colours).Value);
+    }
+
+    [Fact]
+    public void A_label_is_coloured_the_same_in_the_rows_as_its_dot_in_the_sidebar()
+    {
+        // Names differing only in case are one label as far as the sidebar is concerned, and a
+        // task's label is looked up the same way — so which colour it gets can't depend on which
+        // spelling the task happens to carry.
+        var store = Seeded("""{"id":"p1","name":"Work"}""");
+        store.PutResource("labels", "l1", """{"id":"l1","name":"Home","color":"teal","item_order":1}""");
+        store.PutResource("labels", "l2", """{"id":"l2","name":"home","color":"grape","item_order":2}""");
+
+        var presenter = Presenter(store);
+        var dot = Assert.Single(presenter.Sidebar, n => n.Kind == SidebarKind.Label).Colour;
+
+        Assert.Equal(dot, presenter.LabelColours["home"]);
+        Assert.Equal(dot, presenter.LabelColours["Home"]);
     }
 }

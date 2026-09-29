@@ -1058,49 +1058,32 @@ internal sealed class OutlineView : ListView
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal IReadOnlyDictionary<string, Color> LabelColours { get; set; } =
-        new Dictionary<string, Color>(StringComparer.Ordinal);
-
-    /// <summary>
-    /// The dot in front of a row's project, or null when there is none to draw.
-    /// </summary>
-    /// <remarks>
-    /// Nothing on a selected row: the accent is behind it, and a colour chosen to read against the
-    /// panel has made no promise about that. A task in no project has no colour either — the row
-    /// carries one only when it found the project — so that answers itself.
-    /// </remarks>
-    internal static Color? ProjectDot(TaskRow row, bool selected)
-        => selected || row.ProjectColour is not { } colour
-            ? null
-            : Color.FromArgb(colour.R, colour.G, colour.B);
+        new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The project a task is in, behind the dot Todoist gives that project.</summary>
     private void DrawProject(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
     {
         var text = Inset(bounds);
 
-        if (ProjectDot(row, selected) is { } dot)
-            DrawDot(g, ref text, dot);
+        if (OutlineCells.ProjectDot(row, selected) is { } dot)
+            DrawDot(g, ref text, Theme.ToColor(dot));
 
         TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
     }
 
     /// <summary>
-    /// The labels of a row, each with the colour it is written in.
+    /// The labels of a row as this list writes them, each in its colour.
     /// </summary>
     /// <remarks>
-    /// A selected row comes back as one run in the one colour: the accent behind it is what the row
-    /// is saying, and five colours over it say less than none. A label the window hasn't been told
-    /// the colour of — one just made, before the sync describing it — reads as it always did.
+    /// Which colour each gets is Presentation's; this is only where the list's own colours go in.
+    /// Kept apart from the drawing so a test can check the list uses the colours it's given.
     /// </remarks>
-    internal IReadOnlyList<(string Text, Color Colour)> LabelRuns(TaskRow row, bool selected, Color muted)
-    {
-        if (selected || row.Labels.Count == 0)
-            return OutlineCells.LabelsOf(row) is { Length: > 0 } all ? [(all, muted)] : [];
-
-        return row.Labels
-            .Select(l => ("@" + l, LabelColours.TryGetValue(l, out var found) ? found : muted))
-            .ToList();
-    }
+    /// <param name="row">The task the cell belongs to</param>
+    /// <param name="selected">Whether the row is drawn selected</param>
+    /// <param name="muted">The colour for a label with none of its own</param>
+    /// <returns>Each run of text with the colour to write it in</returns>
+    internal IEnumerable<(string Text, Color Colour)> LabelRuns(TaskRow row, bool selected, Color muted)
+        => OutlineCells.LabelRuns(row, selected, LabelColours).Select(run => (run.Text, run.Colour ?? muted));
 
     /// <summary>Writes the labels along the column, one after another in their own colours.</summary>
     private void DrawLabels(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)

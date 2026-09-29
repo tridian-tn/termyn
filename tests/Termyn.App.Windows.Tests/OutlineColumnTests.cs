@@ -7,7 +7,7 @@ namespace Termyn.App.Windows.Tests;
 /// Which columns the outline stands, and the cells it hands the control for them.
 /// </summary>
 /// <remarks>
-/// The words rather than the pixels, for the reason <see cref="OutlineColourTests"/> gives: a list
+/// The words rather than the pixels, for the reason <c>OutlineColourTests</c> gives: a list
 /// in virtual owner-draw mode won't render its rows into a bitmap. What these do cover is the part
 /// that went wrong when a column was added — a cell drawn under the heading next to its own. What
 /// each cell says, and how it's filled, is Presentation's, and tested there in
@@ -65,5 +65,23 @@ public class OutlineColumnTests
         Assert.Equal(
             ["Plan the week", string.Empty, "Work", "1 Aug", string.Empty, "@followup"],
             outline.Cells(Row() with { Deadline = string.Empty }));
+    }
+
+    [WinFormsFact]
+    public void Labels_are_written_in_the_colours_the_list_was_given()
+    {
+        // Which colour each label gets is Presentation's and tested there. This is the list's
+        // half: that it writes in the colours handed to it, and not, say, in none at all — which
+        // would look like every label being muted, and fail nothing else.
+        var teal = Color.FromArgb(0x15, 0x8F, 0xAD);
+        var muted = Color.FromArgb(0x6B, 0x70, 0x79);
+        using var outline = new OutlineView
+        {
+            LabelColours = new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase) { ["followup"] = teal },
+        };
+
+        var runs = outline.LabelRuns(Row() with { Labels = ["followup", "waiting"] }, selected: false, muted);
+
+        Assert.Equal([("@followup", teal), ("@waiting", muted)], runs);
     }
 }

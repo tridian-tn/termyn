@@ -62,6 +62,57 @@ public sealed record ThemePalette(
         TextPrimary: Rgb.Parse("#1F2126"),
         TextSecondary: Rgb.Parse("#6B7079"));
 
+    /// <summary>The text drawn on an accent-coloured background — the selected row.</summary>
+    public Rgb OnAccent => OnAccentFor(IsDark, Background);
+
+    /// <summary>The selected row of a control that hasn't got the focus.</summary>
+    public Rgb Unfocused => UnfocusedFor(Accent, Background);
+
+    /// <summary>
+    /// The text drawn on an accent-coloured background, for a theme with this background.
+    /// </summary>
+    /// <remarks>
+    /// Static so something holding the palette's colours in its own toolkit's type can ask about
+    /// those, rather than keeping a copy of the answer that could fall behind them.
+    /// </remarks>
+    /// <param name="isDark">Whether the theme is dark</param>
+    /// <param name="background">The theme's background</param>
+    /// <returns>The background in a dark theme, white in a light one</returns>
+    public static Rgb OnAccentFor(bool isDark, Rgb background) => isDark ? background : new Rgb(0xFF, 0xFF, 0xFF);
+
+    /// <summary>
+    /// The selected row of a control that hasn't got the focus, for a theme with these colours.
+    /// </summary>
+    /// <remarks>
+    /// The accent, mostly faded into the background: the same colour the focused selection is, so it
+    /// reads as the same thing rather than as a second kind of highlight, and quiet enough not to
+    /// compete with the one that has the focus. Border was tried first and is about twenty units off
+    /// the background in the light theme, which is to say invisible.
+    /// </remarks>
+    /// <param name="accent">The theme's accent</param>
+    /// <param name="background">The theme's background</param>
+    /// <returns>The accent faded most of the way into the background</returns>
+    public static Rgb UnfocusedFor(Rgb accent, Rgb background) => Blend(accent, background, 0.78);
+
+    /// <summary>Mixes two colours.</summary>
+    /// <param name="from">The colour at 0</param>
+    /// <param name="to">The colour at 1</param>
+    /// <param name="amount">How far to travel, 0 to 1</param>
+    /// <returns>The colour that far between them</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The amount is outside 0 to 1, or not a number</exception>
+    public static Rgb Blend(Rgb from, Rgb to, double amount)
+    {
+        // Past either end the channels would wrap round a byte rather than stop, and come back as
+        // some other colour entirely. Asked this way round so a NaN is refused as well.
+        if (!(amount >= 0 && amount <= 1))
+            throw new ArgumentOutOfRangeException(nameof(amount), amount, "A blend runs from 0 to 1.");
+
+        return new(
+            (byte)Math.Round(from.R + ((to.R - from.R) * amount)),
+            (byte)Math.Round(from.G + ((to.G - from.G) * amount)),
+            (byte)Math.Round(from.B + ((to.B - from.B) * amount)));
+    }
+
     /// <summary>
     /// Priority colours, which match Todoist's so a task reads the same here as in the web app.
     /// Shared by both themes, so a screenshot of one is recognisable next to the other.

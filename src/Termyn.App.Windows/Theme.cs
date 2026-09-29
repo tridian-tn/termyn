@@ -27,28 +27,19 @@ internal sealed record Theme(
     Color AccentHover)
 {
     /// <summary>The text drawn on an accent-coloured background — the selected row.</summary>
-    public Color OnAccent => IsDark ? Background : Color.White;
-
-    /// <summary>
-    /// The selected row of a control that hasn't got the focus.
-    /// </summary>
     /// <remarks>
-    /// The accent, mostly faded into the background: the same colour the focused selection is, so it
-    /// reads as the same thing rather than as a second kind of highlight, and quiet enough not to
-    /// compete with the one that has the focus. Border was tried first and is about twenty units off
-    /// the background in the light theme, which is to say invisible.
+    /// Worked out from this theme's own colours each time, so a copy made with different ones
+    /// can't carry an answer for the old ones. The rule is the palette's, in
+    /// <see cref="ThemePalette.OnAccentFor"/>.
     /// </remarks>
-    public Color Unfocused => Blend(Accent, Background, 0.78);
+    public Color OnAccent => ToColor(ThemePalette.OnAccentFor(IsDark, ToRgb(Background)));
 
-    /// <summary>Mixes two colours.</summary>
-    /// <param name="from">The colour at 0</param>
-    /// <param name="to">The colour at 1</param>
-    /// <param name="amount">How far to travel, 0 to 1</param>
-    /// <returns>The colour that far between them</returns>
-    private static Color Blend(Color from, Color to, double amount) => Color.FromArgb(
-        (int)Math.Round(from.R + ((to.R - from.R) * amount)),
-        (int)Math.Round(from.G + ((to.G - from.G) * amount)),
-        (int)Math.Round(from.B + ((to.B - from.B) * amount)));
+    /// <summary>The selected row of a control that hasn't got the focus.</summary>
+    /// <remarks>
+    /// Worked out the same way. How, and why, is with the palette in
+    /// <see cref="ThemePalette.UnfocusedFor"/>.
+    /// </remarks>
+    public Color Unfocused => ToColor(ThemePalette.UnfocusedFor(ToRgb(Accent), ToRgb(Background)));
 
     public static Theme From(ThemePalette palette) => new(
         palette.IsDark,
@@ -192,4 +183,6 @@ internal sealed record Theme(
     }
 
     internal static Color ToColor(Rgb rgb) => Color.FromArgb(rgb.R, rgb.G, rgb.B);
+
+    private static Rgb ToRgb(Color colour) => new(colour.R, colour.G, colour.B);
 }
