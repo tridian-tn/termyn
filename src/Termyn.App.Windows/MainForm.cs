@@ -1268,7 +1268,12 @@ internal sealed class MainForm : Form
         // Before the rows, so the header's arrow and the order beneath it are put up together.
         _outline.Ordering = _presenter.Sort;
         // Before the rows, so the first paint after a sync already knows what the labels look like.
-        _outline.LabelColours = _presenter.LabelColours;
+        // Converted here, once a sync, rather than on every paint. The presenter's map already has
+        // one entry a name, however it's cased, so this can't meet the same key twice.
+        _outline.LabelColours = _presenter.LabelColours.ToDictionary(
+            l => l.Key,
+            l => Theme.ToColor(l.Value),
+            StringComparer.OrdinalIgnoreCase);
 
         _outline.Rows = _presenter.Rows;
 

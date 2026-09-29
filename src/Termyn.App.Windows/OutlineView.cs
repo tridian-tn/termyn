@@ -1057,8 +1057,8 @@ internal sealed class OutlineView : ListView
     /// </remarks>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    internal IReadOnlyDictionary<string, Rgb> LabelColours { get; set; } =
-        new Dictionary<string, Rgb>(StringComparer.Ordinal);
+    internal IReadOnlyDictionary<string, Color> LabelColours { get; set; } =
+        new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The project a task is in, behind the dot Todoist gives that project.</summary>
     private void DrawProject(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
@@ -1071,17 +1071,31 @@ internal sealed class OutlineView : ListView
         TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
     }
 
+    /// <summary>
+    /// The labels of a row as this list writes them, each in its colour.
+    /// </summary>
+    /// <remarks>
+    /// Which colour each gets is Presentation's; this is only where the list's own colours go in.
+    /// Kept apart from the drawing so a test can check the list uses the colours it's given.
+    /// </remarks>
+    /// <param name="row">The task the cell belongs to</param>
+    /// <param name="selected">Whether the row is drawn selected</param>
+    /// <param name="muted">The colour for a label with none of its own</param>
+    /// <returns>Each run of text with the colour to write it in</returns>
+    internal IEnumerable<(string Text, Color Colour)> LabelRuns(TaskRow row, bool selected, Color muted)
+        => OutlineCells.LabelRuns(row, selected, LabelColours).Select(run => (run.Text, run.Colour ?? muted));
+
     /// <summary>Writes the labels along the column, one after another in their own colours.</summary>
     private void DrawLabels(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
     {
         var text = Inset(bounds);
 
-        foreach (var (written, colour) in OutlineCells.LabelRuns(row, selected, LabelColours))
+        foreach (var (written, colour) in LabelRuns(row, selected, muted))
         {
             if (text.Width <= 0)
                 return;
 
-            TextRenderer.DrawText(g, written, Font, text, colour is { } own ? Theme.ToColor(own) : muted, Flags);
+            TextRenderer.DrawText(g, written, Font, text, colour, Flags);
 
             // Measured with the space that follows it, which is what puts the next one along.
             var width = TextRenderer.MeasureText(g, written + " ", Font, text.Size, Flags).Width;

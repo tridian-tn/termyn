@@ -24,15 +24,23 @@ internal sealed record Theme(
     Color Text,
     Color Muted,
     Color Accent,
-    Color AccentHover,
-
+    Color AccentHover)
+{
     /// <summary>The text drawn on an accent-coloured background — the selected row.</summary>
-    Color OnAccent,
+    /// <remarks>
+    /// Worked out from this theme's own colours each time, so a copy made with different ones
+    /// can't carry an answer for the old ones. The rule is the palette's, in
+    /// <see cref="ThemePalette.OnAccentFor"/>.
+    /// </remarks>
+    public Color OnAccent => ToColor(ThemePalette.OnAccentFor(IsDark, ToRgb(Background)));
 
     /// <summary>The selected row of a control that hasn't got the focus.</summary>
-    /// <remarks>How it's derived, and why, is with the palette in <see cref="ThemePalette.Unfocused"/>.</remarks>
-    Color Unfocused)
-{
+    /// <remarks>
+    /// Worked out the same way. How, and why, is with the palette in
+    /// <see cref="ThemePalette.UnfocusedFor"/>.
+    /// </remarks>
+    public Color Unfocused => ToColor(ThemePalette.UnfocusedFor(ToRgb(Accent), ToRgb(Background)));
+
     public static Theme From(ThemePalette palette) => new(
         palette.IsDark,
         ToColor(palette.Background),
@@ -42,9 +50,7 @@ internal sealed record Theme(
         ToColor(palette.TextPrimary),
         ToColor(palette.TextSecondary),
         ToColor(palette.Accent),
-        ToColor(palette.AccentHover),
-        ToColor(palette.OnAccent),
-        ToColor(palette.Unfocused));
+        ToColor(palette.AccentHover));
 
     public static Theme Resolve(ThemePreference preference)
         => From(ThemePalette.For(preference, SystemPrefersLight()));
@@ -177,4 +183,6 @@ internal sealed record Theme(
     }
 
     internal static Color ToColor(Rgb rgb) => Color.FromArgb(rgb.R, rgb.G, rgb.B);
+
+    private static Rgb ToRgb(Color colour) => new(colour.R, colour.G, colour.B);
 }

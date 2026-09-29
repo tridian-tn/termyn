@@ -106,6 +106,16 @@ public class ThemePaletteTests
         Assert.Equal(to, ThemePalette.Blend(from, to, 1));
         Assert.Equal("#804020", ThemePalette.Blend(from, to, 0.5).ToString());
     }
+
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(-0.1)]
+    [InlineData(double.NaN)]
+    public void A_blend_past_either_end_is_refused_rather_than_wrapped(double amount)
+    {
+        // A byte past 255 comes back round from 0: black to white at 1.5 would have been grey.
+        Assert.Throws<ArgumentOutOfRangeException>(() => ThemePalette.Blend(Rgb.Parse("#000000"), Rgb.Parse("#FFFFFF"), amount));
+    }
 }
 
 public class SettingsStoreTests : IDisposable

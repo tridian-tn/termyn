@@ -1,3 +1,4 @@
+using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
 using SmartView = Termyn.Core.Model.SmartView;
@@ -33,6 +34,10 @@ public class DuplicateLabelTests
 
         presenter.Select(ViewSelection.Of(SmartView.All));
 
-        Assert.Equal(["Ship it"], TestWindow.Find<OutlineView>(window).Rows.Select(r => r.Content));
+        var outline = TestWindow.Find<OutlineView>(window);
+        Assert.Equal(["Ship it"], outline.Rows.Select(r => r.Content));
+
+        // And the list was handed the label's colour: the first of the two, as the sidebar shows it.
+        Assert.Equal(Theme.ToColor(TodoistPalette.Of("teal")), outline.LabelColours["home"]);
     }
 }

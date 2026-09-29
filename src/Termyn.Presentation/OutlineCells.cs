@@ -83,20 +83,25 @@ public static class OutlineCells
     /// row is saying, and five colours over it say less than none. A label the window hasn't been
     /// told the colour of — one just made, before the sync describing it — reads as it always did.
     /// </remarks>
+    /// <typeparam name="TColour">
+    /// Whatever the colours are held as — generic so something drawing the rows can convert them
+    /// into its own toolkit's type once, rather than on every paint
+    /// </typeparam>
     /// <param name="row">The task the cell belongs to</param>
     /// <param name="selected">Whether the row is drawn selected</param>
     /// <param name="colours">What each label is coloured with, by name</param>
     /// <returns>Each run of text with its colour, or null for the muted colour whatever draws it</returns>
-    public static IReadOnlyList<(string Text, Rgb? Colour)> LabelRuns(
+    public static IReadOnlyList<(string Text, TColour? Colour)> LabelRuns<TColour>(
         TaskRow row,
         bool selected,
-        IReadOnlyDictionary<string, Rgb> colours)
+        IReadOnlyDictionary<string, TColour> colours)
+        where TColour : struct
     {
         if (selected || row.Labels.Count == 0)
             return LabelsOf(row) is { Length: > 0 } all ? [(all, null)] : [];
 
         return row.Labels
-            .Select(l => ("@" + l, colours.TryGetValue(l, out var found) ? found : (Rgb?)null))
+            .Select(l => ("@" + l, colours.TryGetValue(l, out var found) ? found : (TColour?)null))
             .ToList();
     }
 
