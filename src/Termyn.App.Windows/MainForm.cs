@@ -1613,19 +1613,6 @@ internal sealed class MainForm : Form
     private const int DotLead = 4;
 
     /// <summary>
-    /// Whether a row sits in the dot column, and so starts where a dot would leave it.
-    /// </summary>
-    /// <remarks>
-    /// Anything with a colour has a dot of its own. A section has none, but it lives under a
-    /// project that does, and leaving it at the tree's own left edge cancelled out the one level of
-    /// indent it gets: a section sat under its project's name rather than in from it.
-    ///
-    /// Headings and the smart views above them are outside that column and keep the edge they had.
-    /// </remarks>
-    internal static bool SitsInDotColumn(SidebarNode node)
-        => node.Colour is not null || node.Kind == SidebarKind.Section;
-
-    /// <summary>
     /// Draws a row of the dot column: its name, and the dot in front of it where it has one.
     /// </summary>
     /// <remarks>
@@ -1646,7 +1633,7 @@ internal sealed class MainForm : Form
         var bounds = Widened(e.Bounds, _sidebar.ClientSize.Width);
         var taken = 0;
 
-        if (SitsInDotColumn(node))
+        if (node.SitsInDotColumn)
         {
             var size = Math.Min(8, bounds.Height - 6);
             var lead = _sidebar.LogicalToDeviceUnits(DotLead);

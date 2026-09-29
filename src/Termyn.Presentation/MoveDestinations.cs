@@ -118,6 +118,32 @@ public static class MoveDestinations
             .ToList();
     }
 
+    /// <summary>
+    /// Which of the ranked destinations the picker rests on.
+    /// </summary>
+    /// <remarks>
+    /// Browsing, the list opens on where the task already is — which says where that is, and
+    /// leaves Move greyed until something else is picked. A sub-task is here nowhere, so nothing
+    /// is picked for it until asked.
+    ///
+    /// Searching, the best match is the one to take, passing over where the task already is. Its
+    /// own section is the likeliest thing to match when the name is shared, and landing there left
+    /// Enter doing nothing with a match sitting right under it. Only when that's all there is does
+    /// the list rest on it.
+    /// </remarks>
+    /// <param name="ranked">What <see cref="Rank"/> gave back for what's been typed</param>
+    /// <param name="searching">Whether anything has been typed</param>
+    /// <returns>The index to select, or -1 for none</returns>
+    public static int Preselect(IReadOnlyList<MoveDestination> ranked, bool searching)
+    {
+        var shown = ranked.ToList();
+        var here = shown.FindIndex(d => d.Here);
+
+        return !searching ? here
+            : shown.FindIndex(d => !d.Here) is var best and >= 0 ? best
+            : here;
+    }
+
     /// <summary>How well a destination matches, or null when it doesn't.</summary>
     /// <remarks>
     /// The name ends the path, so anything that matches the name matches the path as well — which

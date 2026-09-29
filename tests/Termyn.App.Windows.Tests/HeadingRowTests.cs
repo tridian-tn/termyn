@@ -47,38 +47,17 @@ public class HeadingRowTests
     }
 
     [WinFormsFact]
-    public void Arriving_on_a_heading_from_above_carries_on_down()
-    {
-        using var outline = Outline();
-
-        Select(outline, 2);   // "Second", the row above the second heading
-        Select(outline, 3);   // the heading itself, as ↓ would reach it
-
-        Assert.Equal("Third", outline.SelectedRow?.Content);
-    }
-
-    [WinFormsFact]
     public void Arriving_on_a_heading_from_below_carries_on_up()
     {
+        // Which row that is, either way and at either end, is Presentation's and tested there in
+        // OutlineSelectionTests. This one checks the list asks it with the way it was travelling:
+        // with no direction, the step off this heading would go down onto "Third".
         using var outline = Outline();
 
         Select(outline, 4);   // "Third"
         Select(outline, 3);   // the heading above it, as ↑ would reach it
 
         Assert.Equal("Second", outline.SelectedRow?.Content);
-    }
-
-    [WinFormsFact]
-    public void The_heading_at_the_top_hands_the_selection_down_whichever_way_it_came()
-    {
-        // Nothing above it to carry on to, and the list starts on one in Upcoming — so arriving
-        // there from below has to turn round rather than leave the selection on a heading.
-        using var outline = Outline();
-
-        Select(outline, 1);
-        Select(outline, 0);
-
-        Assert.Equal("First", outline.SelectedRow?.Content);
     }
 
     [WinFormsFact]

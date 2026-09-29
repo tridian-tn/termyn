@@ -48,7 +48,20 @@ public sealed record SidebarNode(
     /// rather than the account's, and a dot beside them would be inventing something Todoist
     /// doesn't say. Resolved here so nothing drawing a row has to know what Todoist's names mean.
     /// </remarks>
-    Rgb? Colour = null);
+    Rgb? Colour = null)
+{
+    /// <summary>
+    /// Whether the row sits in the dot column, and so starts where a dot would leave it.
+    /// </summary>
+    /// <remarks>
+    /// Anything with a colour has a dot of its own. A section has none, but it lives under a
+    /// project that does, and leaving it at the tree's own left edge cancelled out the one level of
+    /// indent it gets: a section sat under its project's name rather than in from it.
+    ///
+    /// Headings and the smart views above them are outside that column and keep the edge they had.
+    /// </remarks>
+    public bool SitsInDotColumn => Colour is not null || Kind == SidebarKind.Section;
+}
 
 /// <summary>
 /// Builds the keys that identify sidebar rows. Todoist ids are only unique within a resource type,

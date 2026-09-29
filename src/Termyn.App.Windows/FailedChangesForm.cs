@@ -107,30 +107,7 @@ internal sealed class FailedChangesForm : Form
     {
         _dismiss.Enabled = Selected is not null;
 
-        if (Selected is not { } failure)
-        {
-            _reason.Text = string.Empty;
-            return;
-        }
-
-        var said = failure.Reason is { } reason
-            ? $"Todoist said: {reason}"
-            : "Todoist gave no reason.";
-
-        // Where it ended up, which only a refusal actually settles. Saying "it never reached your
-        // account" of a change the server simply went quiet about would be a guess, and the wrong
-        // guess would have someone delete their only copy of something the account already has.
-        var landed = failure.Unruled
-            ? "Todoist never reported a result, so whether your account has this is unknown."
-            : "Todoist refused it, so your account doesn't have it.";
-
-        // Said before it happens rather than asked about afterwards. Dismissing a change that was
-        // already put back costs nothing, and this is the one time it costs something.
-        var cost = failure.DiscardsWork
-            ? "Dismissing removes Termyn's copy, which is the only one on this machine."
-            : "Termyn has already put this back. Dismissing only clears the notice.";
-
-        _reason.Text = $"{said}\r\n{landed}\r\n\r\n{cost}";
+        _reason.Text = Selected is { } failure ? failure.Explanation : string.Empty;
     }
 
     private void Dismiss()

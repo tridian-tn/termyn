@@ -1,7 +1,4 @@
-using Termyn.Core.Model;
 using Termyn.Presentation;
-
-using Label = System.Windows.Forms.Label;
 
 namespace Termyn.App.Windows;
 
@@ -168,19 +165,12 @@ internal sealed class ReminderForm : Form
 
     private void Remove()
     {
-        if (_existing.SelectedItem is not ReminderRow row || !CanRemove(row.Reminder))
+        if (_existing.SelectedItem is not ReminderRow { CanRemove: true } row)
             return;
 
         _presenter.DeleteReminder(row.Reminder.Id);
         Wrote();
     }
-
-    /// <summary>
-    /// Whether Termyn could put this reminder back if it were removed. A kind it can't author is a
-    /// one-way door, so it isn't offered.
-    /// </summary>
-    private static bool CanRemove(Reminder reminder)
-        => reminder.Kind is ReminderKind.Relative or ReminderKind.Absolute;
 
     /// <summary>
     /// Why an add was turned down. A background sync runs while this dialog is open, so the task
@@ -218,40 +208,5 @@ internal sealed class ReminderForm : Form
     }
 
     private void UpdateRemoveState()
-        => _remove.Enabled = _existing.SelectedItem is ReminderRow row && CanRemove(row.Reminder);
-
-    /// <summary>Wraps a reminder so the list can show it in words.</summary>
-    private sealed record ReminderRow(Reminder Reminder)
-    {
-        public override string ToString() => Reminder.Kind switch
-        {
-            ReminderKind.Absolute => $"At {Moment(Reminder.DueDate)}",
-            ReminderKind.Location => $"At {Reminder.LocationName ?? "a place"} (set in Todoist)",
-            ReminderKind.Unknown => "A reminder set in Todoist",
-            _ => Reminder.MinuteOffset == 0
-                ? "When it's due"
-                : $"{Describe(Reminder.MinuteOffset)} before it's due",
-        };
-
-        /// <summary>
-        /// An absolute reminder's moment, in words rather than the timestamp the server sent, so it
-        /// sits beside the relative ones instead of standing out as raw data.
-        /// </summary>
-        private static string Moment(string? due)
-            => DateTime.TryParse(due, out var when) ? when.ToString("ddd d MMM, HH:mm") : due ?? "a set time";
-
-        /// <summary>
-        /// Offsets aren't limited to the ones this dialog offers — the web app sets whatever it
-        /// likes — so the odd sizes have to read properly too.
-        /// </summary>
-        private static string Describe(int minutes) => minutes switch
-        {
-            < 60 => Plural(minutes, "minute"),
-            < 1440 when minutes % 60 == 0 => Plural(minutes / 60, "hour"),
-            _ when minutes % 1440 == 0 => Plural(minutes / 1440, "day"),
-            _ => Plural(minutes, "minute"),
-        };
-
-        private static string Plural(int count, string unit) => $"{count} {unit}{(count == 1 ? "" : "s")}";
-    }
+        => _remove.Enabled = _existing.SelectedItem is ReminderRow { CanRemove: true };
 }

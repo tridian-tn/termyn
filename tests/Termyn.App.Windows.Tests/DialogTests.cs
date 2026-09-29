@@ -141,6 +141,10 @@ public class DialogTests
         Assert.IsType<TextBox>(picker.ActiveControl);
     }
 
+    // Which place the picker rests on, browsing and searching, is MoveDestinations' to decide and
+    // tested there. These two check the dialog selects what it's told, both ways, and greys Move
+    // to match.
+
     [WinFormsFact]
     public void The_move_picker_opens_on_where_the_task_already_is_with_Move_greyed()
     {
@@ -153,17 +157,6 @@ public class DialogTests
     }
 
     [WinFormsFact]
-    public void A_task_already_nowhere_opens_on_nothing()
-    {
-        // A sub-task, for which every place is a move. Picking the first for it would make Enter
-        // send it to whichever project happens to sort to the top.
-        using var picker = NewPicker(places: Places.Select(p => p with { Here = false }).ToList());
-
-        Assert.Null(picker.Selected);
-        Assert.False(MoveButton(picker).Enabled);
-    }
-
-    [WinFormsFact]
     public void Typing_picks_the_best_match_and_offers_the_move()
     {
         using var picker = NewPicker();
@@ -172,58 +165,6 @@ public class DialogTests
 
         Assert.Equal("garden", picker.Selected?.Id);
         Assert.True(MoveButton(picker).Enabled);
-    }
-
-    [WinFormsFact]
-    public void Typing_passes_over_where_the_task_already_is_for_the_next_best_match()
-    {
-        // Two sections called Admin, and the task is in the first. Landing on that one left Enter
-        // doing nothing with the other match sitting right under it.
-        using var picker = NewPicker(places:
-        [
-            new(SidebarKind.Section, "admin", "Admin", "Work / Admin", 1, Here: true),
-            new(SidebarKind.Section, "hadmin", "Admin", "Home / Admin", 1),
-        ]);
-
-        Every(picker).OfType<TextBox>().Single().Text = "adm";
-
-        Assert.Equal("hadmin", picker.Selected?.Id);
-        Assert.True(MoveButton(picker).Enabled);
-    }
-
-    [WinFormsFact]
-    public void Typing_only_where_the_task_already_is_rests_there_with_Move_greyed()
-    {
-        using var picker = NewPicker();
-
-        Every(picker).OfType<TextBox>().Single().Text = "adm";
-
-        Assert.Equal("admin", picker.Selected?.Id);
-        Assert.False(MoveButton(picker).Enabled);
-    }
-
-    [WinFormsFact]
-    public void Typing_something_nothing_is_called_leaves_nothing_to_move_to()
-    {
-        using var picker = NewPicker();
-
-        Every(picker).OfType<TextBox>().Single().Text = "zzz";
-
-        Assert.Null(picker.Selected);
-        Assert.False(MoveButton(picker).Enabled);
-    }
-
-    [WinFormsFact]
-    public void Clearing_the_box_goes_back_to_where_the_task_is()
-    {
-        using var picker = NewPicker();
-        var box = Every(picker).OfType<TextBox>().Single();
-
-        box.Text = "gard";
-        box.Text = string.Empty;
-
-        Assert.Equal("admin", picker.Selected?.Id);
-        Assert.False(MoveButton(picker).Enabled);
     }
 
     [WinFormsFact]

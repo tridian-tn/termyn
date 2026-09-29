@@ -155,6 +155,66 @@ public class MoveDestinationsTests
         Assert.Empty(MoveDestinations.Rank(all, "zzz"));
     }
 
+    // ---- Which one the picker rests on ---------------------------------------------------------
+
+    private static readonly MoveDestination[] Places =
+    [
+        new(SidebarKind.Project, "work", "Work", "Work", 0),
+        new(SidebarKind.Section, "admin", "Admin", "Work / Admin", 1, Here: true),
+        new(SidebarKind.Project, "home", "Home", "Home", 0),
+        new(SidebarKind.Section, "garden", "Garden", "Home / Garden", 1),
+    ];
+
+    /// <summary>The place the picker rests on for what's been typed, or null for none.</summary>
+    private static string? Rests(IReadOnlyList<MoveDestination> places, string query)
+    {
+        var ranked = MoveDestinations.Rank(places, query);
+        var at = MoveDestinations.Preselect(ranked, searching: query.Trim().Length > 0);
+
+        return at >= 0 ? ranked[at].Id : null;
+    }
+
+    [Fact]
+    public void Browsing_rests_on_where_the_task_already_is()
+    {
+        // Which says where that is, and means a bare Enter on opening sends the task nowhere.
+        Assert.Equal("admin", Rests(Places, string.Empty));
+    }
+
+    [Fact]
+    public void A_task_already_nowhere_rests_on_nothing()
+    {
+        // A sub-task, for which every place is a move. Picking the first for it would make Enter
+        // send it to whichever project happens to sort to the top.
+        Assert.Null(Rests(Places.Select(p => p with { Here = false }).ToList(), string.Empty));
+    }
+
+    [Fact]
+    public void Searching_rests_on_the_best_match()
+        => Assert.Equal("garden", Rests(Places, "gard"));
+
+    [Fact]
+    public void Searching_passes_over_where_the_task_already_is_for_the_next_best_match()
+    {
+        // Two sections called Admin, and the task is in the first. Landing on that one left Enter
+        // doing nothing with the other match sitting right under it.
+        MoveDestination[] places =
+        [
+            new(SidebarKind.Section, "admin", "Admin", "Work / Admin", 1, Here: true),
+            new(SidebarKind.Section, "hadmin", "Admin", "Home / Admin", 1),
+        ];
+
+        Assert.Equal("hadmin", Rests(places, "adm"));
+    }
+
+    [Fact]
+    public void Searching_that_only_finds_where_the_task_already_is_rests_there()
+        => Assert.Equal("admin", Rests(Places, "adm"));
+
+    [Fact]
+    public void Searching_that_finds_nothing_rests_on_nothing()
+        => Assert.Null(Rests(Places, "zzz"));
+
     // ---- Moving --------------------------------------------------------------------------------
 
     [Fact]

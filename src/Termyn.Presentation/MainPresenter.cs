@@ -97,6 +97,32 @@ public sealed record CommentRow(
                 ? $"{file.FileName} ({Size(file.FileSize)})"
                 : file.FileName;
 
+    /// <summary>
+    /// The line above a comment: when it was posted, and the file on it if it has one.
+    /// </summary>
+    /// <remarks>
+    /// One with no posted time is one this client has only just queued. Saying so is the honest
+    /// answer offline, where it may sit unsent for a while.
+    /// </remarks>
+    public string Meta
+    {
+        get
+        {
+            var when = Posted.Length == 0 ? "Not sent yet" : Posted;
+            return AttachmentLabel is { } file ? $"{when}   📎 {file}" : when;
+        }
+    }
+
+    /// <summary>
+    /// What a comment says, or a stand-in when it says nothing.
+    /// </summary>
+    /// <remarks>
+    /// A comment can carry a file and no words at all. Drawn from its content alone that's a blank
+    /// row, which reads as a comment that failed to load rather than one that's a file.
+    /// </remarks>
+    public string Body
+        => Content.Length > 0 ? Content : AttachmentName is not null ? "(no message)" : "(empty)";
+
     /// <summary>A byte count as somebody would say it out loud.</summary>
     private static string Size(long bytes) => bytes switch
     {
