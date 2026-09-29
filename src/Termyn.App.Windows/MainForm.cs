@@ -396,6 +396,10 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
             FixedPanel = FixedPanel.Panel2,
+
+            // Out of the tab order, so Tab goes from the list to the panel under it instead of
+            // stopping on the divider between them. It's still dragged with the mouse.
+            TabStop = false,
         };
         // The outline first and the path after it: a docked control added later sits nearer the
         // edge, so this is what puts the line above the list rather than below it.
@@ -416,7 +420,9 @@ internal sealed class MainForm : Form
         _commentsTab = new TabPage("Comments");
         _commentsTab.Controls.Add(_comments);
 
-        _tabs = new TabControl { Dock = DockStyle.Fill };
+        // Out of the tab order as well, so Tab goes straight to what the tab shows. The strip's
+        // a click, or F6 and F7, and stopping on it only meant pressing Tab once more.
+        _tabs = new TabControl { Dock = DockStyle.Fill, TabStop = false };
         _tabs.TabPages.Add(_descriptionTab);
         _tabs.TabPages.Add(_commentsTab);
         _tabs.SelectedIndexChanged += OnPanelTabChanged;
@@ -475,12 +481,21 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             FixedPanel = FixedPanel.Panel1,
+
+            // The same as the divider under the list: Tab goes from the tree straight to the list.
+            TabStop = false,
         };
         _split.Panel1.Controls.Add(_sidebar);
         _split.Panel2.Controls.Add(_detail);
 
         // Above the outline, so it reads as an explanation of the empty list below it.
         _split.Panel2.Controls.Add(_unsupported);
+
+        // And reached before it by Tab too. Left to the order these were added in, which is about
+        // docking, Tab got to it last, after the panel. It stays a stop, unlike the path above the
+        // list: its link is the only way from the keyboard to a filter Termyn can't read.
+        _unsupported.TabIndex = 0;
+        _detail.TabIndex = 1;
 
         _status = new Label
         {
@@ -1514,6 +1529,12 @@ internal sealed class MainForm : Form
 
         foreach (var link in line.Links)
             _crumbs.Links.Add(link.Start, link.Length, link.Target);
+
+        // Out of the tab order. With a link on it, it was a stop reached after the list though
+        // it's drawn above it, and the tree goes to the same places anyway. Said here, after the
+        // text and the links, since a LinkLabel decides for itself whether it's a stop as they
+        // change, and a TabStop set once when it was made didn't last.
+        _crumbs.TabStop = false;
     }
 
     private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
