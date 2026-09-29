@@ -132,7 +132,7 @@ public static class OutlineCells
     /// </remarks>
     private static string DueOf(TaskRow row)
     {
-        var due = row.Advancing ? "advancing…" : row.Due;
+        var due = row.Advancing ? Strings.DueAdvancing : row.Due;
         var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.ReminderCount > 0 ? "⏰" : string.Empty);
         if (marks.Length == 0)
             return due;

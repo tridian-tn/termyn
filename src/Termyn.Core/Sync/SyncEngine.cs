@@ -242,7 +242,7 @@ public sealed class SyncEngine
                 _outbox.Count(c => c.State == OutboxState.Failed),
                 CompletedItems(items),
                 Model.CommentCounts(),
-                PendingCloses().ToHashSet(StringComparer.Ordinal));
+                PendingCloses());
         }
     }
 
@@ -770,13 +770,19 @@ public sealed class SyncEngine
     /// A close the server has taken is gone from the outbox, and one it has finished refusing is
     /// no longer pending — so a task leaves this once the server has settled it either way. One
     /// being retried after a refusal is still on its way, and stays.
+    ///
+    /// Call it holding the gate: it reads the outbox, which the sync worker changes. The answer is
+    /// a set made there and then, rather than a query that reads the outbox again whenever it's
+    /// looked at, so it's safe to keep once the gate is let go.
     /// </remarks>
-    private IEnumerable<string> PendingCloses()
+    /// <returns>The ids of the tasks, as the queued closes name them</returns>
+    private HashSet<string> PendingCloses()
         => _outbox
             .Where(c => c is { State: OutboxState.Pending, Type: "item_close" })
             .Select(c => ParseArgs(c)["id"])
             .OfType<JsonValue>()
-            .Select(v => v.ToString());
+            .Select(v => v.ToString())
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Sets a task's due date from words for the server to resolve, and queues an

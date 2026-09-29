@@ -27,6 +27,11 @@ namespace Termyn.Presentation;
 /// of the view it is being shown in doesn't leave its parent claiming children nobody can see.
 /// </param>
 /// <param name="Collapsed">Whether what is filed under it is currently being kept out of sight.</param>
+/// <param name="Advancing">
+/// Whether this is a recurring task that's been ticked off and is waiting for the server to say when
+/// it's next due. Nothing else on the row changes until the answer comes back, which offline can be
+/// a long while, so without this the press looks like it did nothing
+/// </param>
 public sealed record TaskRow(
     string Id,
     string Content,
@@ -68,15 +73,6 @@ public sealed record TaskRow(
     /// difference. It carries the day's name in <c>Content</c> and nothing else.
     /// </remarks>
     bool IsHeading = false,
-
-    /// <summary>
-    /// Whether this is a recurring task that's been ticked off and is waiting for the server to say
-    /// when it's next due.
-    /// </summary>
-    /// <remarks>
-    /// Nothing else on the row changes until the answer comes back, which offline can be a long
-    /// while, so without this the press looks like it did nothing.
-    /// </remarks>
     bool Advancing = false);
 
 /// <summary>
