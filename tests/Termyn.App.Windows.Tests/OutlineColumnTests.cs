@@ -7,7 +7,7 @@ namespace Termyn.App.Windows.Tests;
 /// Which columns the outline stands, and the cells it hands the control for them.
 /// </summary>
 /// <remarks>
-/// The words rather than the pixels, for the reason <see cref="OutlineColourTests"/> gives: a list
+/// The words rather than the pixels, for the reason <c>OutlineColourTests</c> gives: a list
 /// in virtual owner-draw mode won't render its rows into a bitmap. What these do cover is the part
 /// that went wrong when a column was added — a cell drawn under the heading next to its own. What
 /// each cell says, and how it's filled, is Presentation's, and tested there in

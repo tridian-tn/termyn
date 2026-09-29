@@ -80,6 +80,32 @@ public class ThemePaletteTests
         Assert.Equal("#16181D", ThemePalette.Dark.Background.ToString());
         Assert.Equal("#C77D1E", ThemePalette.Light.Accent.ToString());
     }
+
+    [Fact]
+    public void Text_on_the_accent_is_white_in_the_light_theme_and_the_background_in_the_dark()
+    {
+        Assert.Equal("#FFFFFF", ThemePalette.Light.OnAccent.ToString());
+        Assert.Equal(ThemePalette.Dark.Background, ThemePalette.Dark.OnAccent);
+    }
+
+    [Fact]
+    public void An_unfocused_selection_is_the_accent_mostly_faded_into_the_background()
+    {
+        // The colours the window drew before this moved out of it, so moving it changed nothing.
+        Assert.Equal("#F0DFCA", ThemePalette.Light.Unfocused.ToString());
+        Assert.Equal("#463624", ThemePalette.Dark.Unfocused.ToString());
+    }
+
+    [Fact]
+    public void A_blend_runs_from_one_colour_to_the_other()
+    {
+        var from = Rgb.Parse("#000000");
+        var to = Rgb.Parse("#FF8040");
+
+        Assert.Equal(from, ThemePalette.Blend(from, to, 0));
+        Assert.Equal(to, ThemePalette.Blend(from, to, 1));
+        Assert.Equal("#804020", ThemePalette.Blend(from, to, 0.5).ToString());
+    }
 }
 
 public class SettingsStoreTests : IDisposable

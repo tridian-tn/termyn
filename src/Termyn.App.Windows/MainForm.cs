@@ -1270,7 +1270,7 @@ internal sealed class MainForm : Form
         // Before the rows, so the first paint after a sync already knows what the labels look like.
         _outline.LabelColours = _presenter.Labels.ToDictionary(
             l => l.Name,
-            l => Theme.ToColor(TodoistPalette.Of(l.Color)),
+            l => TodoistPalette.Of(l.Color),
             StringComparer.Ordinal);
 
         _outline.Rows = _presenter.Rows;

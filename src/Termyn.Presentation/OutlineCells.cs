@@ -1,3 +1,5 @@
+using Termyn.Core.Settings;
+
 namespace Termyn.Presentation;
 
 /// <summary>How the outline fills a cell: with words, or with one of the marks it paints.</summary>
@@ -59,6 +61,44 @@ public static class OutlineCells
         TaskColumn.Labels => LabelsOf(row),
         _ => string.Empty,
     };
+
+    /// <summary>
+    /// The dot in front of a row's project, or null when there's none to draw.
+    /// </summary>
+    /// <remarks>
+    /// Nothing on a selected row: the accent is behind it, and a colour chosen to read against the
+    /// panel has made no promise about that. A task in no project has no colour either — the row
+    /// carries one only when it found the project — so that answers itself.
+    /// </remarks>
+    /// <param name="row">The task the cell belongs to</param>
+    /// <param name="selected">Whether the row is drawn selected</param>
+    /// <returns>The project's colour, or null for no dot</returns>
+    public static Rgb? ProjectDot(TaskRow row, bool selected) => selected ? null : row.ProjectColour;
+
+    /// <summary>
+    /// The labels of a row, each with the colour it's written in.
+    /// </summary>
+    /// <remarks>
+    /// A selected row comes back as one run in the muted colour: the accent behind it is what the
+    /// row is saying, and five colours over it say less than none. A label the window hasn't been
+    /// told the colour of — one just made, before the sync describing it — reads as it always did.
+    /// </remarks>
+    /// <param name="row">The task the cell belongs to</param>
+    /// <param name="selected">Whether the row is drawn selected</param>
+    /// <param name="colours">What each label is coloured with, by name</param>
+    /// <returns>Each run of text with its colour, or null for the muted colour whatever draws it</returns>
+    public static IReadOnlyList<(string Text, Rgb? Colour)> LabelRuns(
+        TaskRow row,
+        bool selected,
+        IReadOnlyDictionary<string, Rgb> colours)
+    {
+        if (selected || row.Labels.Count == 0)
+            return LabelsOf(row) is { Length: > 0 } all ? [(all, null)] : [];
+
+        return row.Labels
+            .Select(l => ("@" + l, colours.TryGetValue(l, out var found) ? found : (Rgb?)null))
+            .ToList();
+    }
 
     /// <summary>Labels as they are written in quick-add, so the row reads the way it was typed.</summary>
     /// <param name="row">The task whose labels to write</param>

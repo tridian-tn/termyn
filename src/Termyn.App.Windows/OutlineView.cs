@@ -1057,49 +1057,18 @@ internal sealed class OutlineView : ListView
     /// </remarks>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    internal IReadOnlyDictionary<string, Color> LabelColours { get; set; } =
-        new Dictionary<string, Color>(StringComparer.Ordinal);
-
-    /// <summary>
-    /// The dot in front of a row's project, or null when there is none to draw.
-    /// </summary>
-    /// <remarks>
-    /// Nothing on a selected row: the accent is behind it, and a colour chosen to read against the
-    /// panel has made no promise about that. A task in no project has no colour either — the row
-    /// carries one only when it found the project — so that answers itself.
-    /// </remarks>
-    internal static Color? ProjectDot(TaskRow row, bool selected)
-        => selected || row.ProjectColour is not { } colour
-            ? null
-            : Color.FromArgb(colour.R, colour.G, colour.B);
+    internal IReadOnlyDictionary<string, Rgb> LabelColours { get; set; } =
+        new Dictionary<string, Rgb>(StringComparer.Ordinal);
 
     /// <summary>The project a task is in, behind the dot Todoist gives that project.</summary>
     private void DrawProject(Graphics g, Rectangle bounds, TaskRow row, bool selected, Color muted)
     {
         var text = Inset(bounds);
 
-        if (ProjectDot(row, selected) is { } dot)
-            DrawDot(g, ref text, dot);
+        if (OutlineCells.ProjectDot(row, selected) is { } dot)
+            DrawDot(g, ref text, Theme.ToColor(dot));
 
         TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
-    }
-
-    /// <summary>
-    /// The labels of a row, each with the colour it is written in.
-    /// </summary>
-    /// <remarks>
-    /// A selected row comes back as one run in the one colour: the accent behind it is what the row
-    /// is saying, and five colours over it say less than none. A label the window hasn't been told
-    /// the colour of — one just made, before the sync describing it — reads as it always did.
-    /// </remarks>
-    internal IReadOnlyList<(string Text, Color Colour)> LabelRuns(TaskRow row, bool selected, Color muted)
-    {
-        if (selected || row.Labels.Count == 0)
-            return OutlineCells.LabelsOf(row) is { Length: > 0 } all ? [(all, muted)] : [];
-
-        return row.Labels
-            .Select(l => ("@" + l, LabelColours.TryGetValue(l, out var found) ? found : muted))
-            .ToList();
     }
 
     /// <summary>Writes the labels along the column, one after another in their own colours.</summary>
@@ -1107,12 +1076,12 @@ internal sealed class OutlineView : ListView
     {
         var text = Inset(bounds);
 
-        foreach (var (written, colour) in LabelRuns(row, selected, muted))
+        foreach (var (written, colour) in OutlineCells.LabelRuns(row, selected, LabelColours))
         {
             if (text.Width <= 0)
                 return;
 
-            TextRenderer.DrawText(g, written, Font, text, colour, Flags);
+            TextRenderer.DrawText(g, written, Font, text, colour is { } own ? Theme.ToColor(own) : muted, Flags);
 
             // Measured with the space that follows it, which is what puts the next one along.
             var width = TextRenderer.MeasureText(g, written + " ", Font, text.Size, Flags).Width;

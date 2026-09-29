@@ -62,6 +62,30 @@ public sealed record ThemePalette(
         TextPrimary: Rgb.Parse("#1F2126"),
         TextSecondary: Rgb.Parse("#6B7079"));
 
+    /// <summary>The text drawn on an accent-coloured background — the selected row.</summary>
+    public Rgb OnAccent => IsDark ? Background : new Rgb(0xFF, 0xFF, 0xFF);
+
+    /// <summary>
+    /// The selected row of a control that hasn't got the focus.
+    /// </summary>
+    /// <remarks>
+    /// The accent, mostly faded into the background: the same colour the focused selection is, so it
+    /// reads as the same thing rather than as a second kind of highlight, and quiet enough not to
+    /// compete with the one that has the focus. Border was tried first and is about twenty units off
+    /// the background in the light theme, which is to say invisible.
+    /// </remarks>
+    public Rgb Unfocused => Blend(Accent, Background, 0.78);
+
+    /// <summary>Mixes two colours.</summary>
+    /// <param name="from">The colour at 0</param>
+    /// <param name="to">The colour at 1</param>
+    /// <param name="amount">How far to travel, 0 to 1</param>
+    /// <returns>The colour that far between them</returns>
+    public static Rgb Blend(Rgb from, Rgb to, double amount) => new(
+        (byte)Math.Round(from.R + ((to.R - from.R) * amount)),
+        (byte)Math.Round(from.G + ((to.G - from.G) * amount)),
+        (byte)Math.Round(from.B + ((to.B - from.B) * amount)));
+
     /// <summary>
     /// Priority colours, which match Todoist's so a task reads the same here as in the web app.
     /// Shared by both themes, so a screenshot of one is recognisable next to the other.
