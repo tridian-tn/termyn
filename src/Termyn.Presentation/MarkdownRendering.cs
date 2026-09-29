@@ -42,10 +42,9 @@ public readonly record struct RenderedStyle(
 /// <param name="Style">How they're drawn</param>
 /// <param name="EndsLine">Whether a line ending follows them</param>
 /// <param name="Source">
-/// Where in the markdown they were written, or null for a run the markdown doesn't contain — a
-/// bullet, a rule, the empty run that closes a paragraph
+/// Where in the markdown they were written and how much of it they were written with, or null for a
+/// run the markdown doesn't contain — a bullet, the empty run that closes a paragraph
 /// </param>
-/// <param name="SourceLength">How much of the markdown they were written with</param>
 /// <param name="Link">
 /// Where the run points when it's part of a link that would be followed, or null. A link to
 /// anywhere that wouldn't be — a file, a script — is drawn as plain text, and has none
@@ -54,8 +53,7 @@ public sealed record RenderedRun(
     string Text,
     RenderedStyle Style,
     bool EndsLine,
-    int? Source = null,
-    int SourceLength = 0,
+    (int Start, int Length)? Source = null,
     string? Link = null);
 
 /// <summary>
@@ -73,21 +71,18 @@ public sealed record RenderedRun(
 /// </remarks>
 public sealed class MarkdownRendering
 {
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        // What Todoist's own editor can produce: bold, italic, strikethrough, headings, quotes,
-        // code, lists and links. The extras cover the strikethrough, which plain markdown has no
-        // syntax for, and bare URLs, which people paste far more often than they write links.
-        .UseEmphasisExtras()
-        .UseAutoLinks()
-        .UseTaskLists()
-        // Markdown proper reads a single newline as a space and wants a blank line or two trailing
-        // spaces before it will break a line. Todoist doesn't: press Return once there and the line
-        // breaks, which is how the descriptions in an account are already written. Following the
-        // spec here would run those lines together and be right about nothing anybody typed.
+    /// <summary>
+    /// The grammar the markdown is written in, and one thing more.
+    /// </summary>
+    /// <remarks>
+    /// Markdown proper reads a single newline as a space and wants a blank line or two trailing
+    /// spaces before it will break a line. Todoist doesn't: press Return once there and the line
+    /// breaks, which is how the descriptions in an account are already written. Following the spec
+    /// here would run those lines together and be right about nothing anybody typed. The editor
+    /// keeps the newline as it was typed, and has no line to break.
+    /// </remarks>
+    private static readonly MarkdownPipeline Pipeline = MarkdownHighlight.Grammar()
         .UseSoftlineBreakAsHardlineBreak()
-        // So a click on the rendering knows which character of the markdown it landed on. Without
-        // it the spans are good enough to find a block by and not to put a caret with.
-        .UsePreciseSourceLocation()
         .Build();
 
     /// <summary>Nothing at all, before there's been a description to render.</summary>
@@ -131,8 +126,8 @@ public sealed class MarkdownRendering
 
             // A run's own line ending isn't part of what it maps: the markdown behind it may not have
             // one there at all.
-            if (run is { Source: { } source, SourceLength: > 0, Text.Length: > 0 })
-                _sources.Add((at, shown, source, run.SourceLength));
+            if (run is { Source: { Length: > 0 } source, Text.Length: > 0 })
+                _sources.Add((at, shown, source.Start, source.Length));
 
             at += length;
         }
@@ -154,8 +149,11 @@ public sealed class MarkdownRendering
     /// is an offset into the rendering. Only returns and newlines are folded, which is what a line
     /// ending is to <see cref="Shown"/>.
     /// </remarks>
-    public string Text => string.Concat(_runs.Select(r =>
+    public string Text => _text ??= string.Concat(_runs.Select(r =>
         r.Text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n') + (r.EndsLine ? "\n" : string.Empty)));
+
+    /// <summary>The text, once it's been asked for. A rendering never changes after it's built.</summary>
+    private string? _text;
 
     /// <summary>
     /// Renders a description.
@@ -184,9 +182,26 @@ public sealed class MarkdownRendering
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            walk = new Walk();
-            walk.Plain(markdown);
+            return AsWritten(markdown);
         }
+
+        return new MarkdownRendering(walk.Runs);
+    }
+
+    /// <summary>
+    /// The markdown exactly as it was written, for when it can't be drawn any other way.
+    /// </summary>
+    /// <remarks>
+    /// What <see cref="Of"/> falls back to when the markdown can't be parsed, and what something
+    /// drawing a rendering can fall back to when drawing it fails — the same truthful, always
+    /// readable answer either way.
+    /// </remarks>
+    /// <param name="markdown">The description, as the account holds it</param>
+    /// <returns>Its text as it stands, a run a line</returns>
+    public static MarkdownRendering AsWritten(string markdown)
+    {
+        var walk = new Walk();
+        walk.Plain(markdown);
 
         return new MarkdownRendering(walk.Runs);
     }
@@ -491,8 +506,7 @@ public sealed class MarkdownRendering
                 text,
                 style,
                 endsLine,
-                from is { Length: > 0 } span ? span.Start : null,
-                from is { Length: > 0 } counted ? counted.Length : 0,
+                from is { Length: > 0 } span ? (span.Start, span.Length) : null,
                 _link));
 
         /// <summary>

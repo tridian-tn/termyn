@@ -69,15 +69,23 @@ public readonly record struct MarkdownRun(int Start, int Length, MarkdownStyle S
 public static class MarkdownHighlight
 {
     /// <summary>
-    /// The same grammar the rendered view reads, so a description can't mean one thing written and
-    /// another read. Precise source locations because every answer here is an offset.
+    /// The grammar a description is read in, as it's written here and as <see cref="MarkdownRendering"/>
+    /// draws it, so a description can't mean one thing written and another read.
     /// </summary>
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+    /// <remarks>
+    /// What Todoist's own editor can produce: bold, italic, strikethrough, headings, quotes, code,
+    /// lists and links. The extras cover the strikethrough, which plain markdown has no syntax for,
+    /// and bare URLs, which people paste far more often than they write links. Precise source
+    /// locations because every answer here is an offset, and so is every click on the rendering.
+    /// </remarks>
+    /// <returns>A builder with the grammar in it, for the caller to add to and build</returns>
+    internal static MarkdownPipelineBuilder Grammar() => new MarkdownPipelineBuilder()
         .UseEmphasisExtras()
         .UseAutoLinks()
         .UseTaskLists()
-        .UsePreciseSourceLocation()
-        .Build();
+        .UsePreciseSourceLocation();
+
+    private static readonly MarkdownPipeline Pipeline = Grammar().Build();
 
     /// <summary>The deepest heading there is a style for. Anything below it is drawn as that.</summary>
     private const int MaxHeading = 6;

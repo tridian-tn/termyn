@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Termyn.Core.Settings;
+using Termyn.Presentation;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -486,6 +487,52 @@ public class MarkdownViewTests
         // thing written a run at a time. What this guards against is a return to that shape, which
         // was eighty times slower rather than a few per cent.
         Assert.True(clock.ElapsedMilliseconds < 300, $"drawing a full description took {clock.ElapsedMilliseconds} ms");
+    }
+
+    [WinFormsTheory]
+    [InlineData("before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block")]
+    [InlineData("# H\n\n> quoted\n\n- [ ] a box\n- **bold** item\n\n[a link](https://example.com) after\n\n---\n\nend")]
+    [InlineData("a\nb  \nc\n\n1. one\n2. two")]
+    public void The_box_holds_the_rendering_character_for_character(string markdown)
+    {
+        // Every offset the rendering hands out — where a link is, where a click maps back to — is an
+        // offset into its own text, so the box has to hold that text in that order, not just as much
+        // of it. A run written after its line ending instead of before would keep the length right
+        // and move a fenced block's lines, the rule, everything inside them.
+        using var view = Render(markdown);
+
+        Assert.Equal(MarkdownRendering.Of(markdown).Text, view.Text.ReplaceLineEndings("\n"));
+    }
+
+    [WinFormsTheory]
+    [InlineData("after")]
+    [InlineData("block")]
+    [InlineData("and")]
+    [InlineData("docs")]
+    [InlineData("here")]
+    public void A_word_in_the_box_maps_back_to_where_it_was_written(string needle)
+    {
+        // The rendering's own tests look words up in the text it builds itself. This looks them up in
+        // what the box actually holds — past a fenced block of several lines, past broken lines, and
+        // inside a link — so a document that put the same characters in a different order couldn't
+        // pass for one that agrees with the rendering just by being the right length.
+        const string markdown = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block\nand [the docs](https://example.com) here";
+        using var view = Render(markdown);
+
+        var at = view.Text.IndexOf(needle, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"'{needle}' is not in the box: '{view.Text.ReplaceLineEndings("\\n")}'");
+
+        Assert.Equal(markdown.IndexOf(needle, StringComparison.Ordinal), view.SourceAt(at));
+    }
+
+    [WinFormsFact]
+    public void A_link_further_down_is_found_where_the_box_has_it()
+    {
+        // The same agreement for the address a click follows.
+        using var view = Render("A first line\n\n```\none\ntwo\n```\n\nthen [the docs](https://example.com) here");
+
+        Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("the docs", StringComparison.Ordinal)));
+        Assert.Null(view.LinkAt(view.Text.IndexOf("here", StringComparison.Ordinal)));
     }
 
     [WinFormsFact]

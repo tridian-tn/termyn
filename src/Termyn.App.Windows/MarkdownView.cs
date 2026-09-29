@@ -230,13 +230,35 @@ internal sealed class MarkdownView : RichTextBox
     {
         _rendering = MarkdownRendering.Of(_markdown);
 
+        try
+        {
+            return Written(_rendering);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The markdown as it was written if the runs can't be written down, for the reason the
+            // rendering falls back to it when they can't be worked out: a description is account
+            // data, and the box that would let the user fix it mustn't be the thing that throws.
+            // Written again from the start, so the box and the rendering it answers from agree.
+            _rendering = MarkdownRendering.AsWritten(_markdown);
+            return Written(_rendering);
+        }
+    }
+
+    /// <summary>
+    /// Writes a rendering down as a rich text document, from the start.
+    /// </summary>
+    /// <param name="rendering">The runs to write</param>
+    /// <returns>The document, closing brace and all</returns>
+    private StringBuilder Written(MarkdownRendering rendering)
+    {
         _paragraph = null;
         _body = Font.SizeInPoints;
         _rtf.Clear();
         RichText.Open(_rtf, Font.FontFamily.GetName(0), _theme);
 
         var endsLine = false;
-        foreach (var run in _rendering.Runs)
+        foreach (var run in rendering.Runs)
         {
             WriteParagraph(run.Style);
             WriteCharacters(run.Style, link: run.Link is not null);
