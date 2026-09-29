@@ -109,7 +109,7 @@ public sealed class MarkdownRendering
     /// written with is gone. This is what a click looks that up in, so opening the text to type into
     /// it lands the caret where the user was pointing rather than at the top.
     /// </remarks>
-    private readonly List<(int Start, int Length, int Source, int SourceLength)> _sources = [];
+    private readonly List<(int Start, int Length, int Source, int SourceLength, bool EndsLine)> _sources = [];
 
     private MarkdownRendering(List<RenderedRun> runs)
     {
@@ -124,10 +124,11 @@ public sealed class MarkdownRendering
             if (run.Link is { } url && length > 0)
                 _links.Add((at, at + length, url));
 
-            // A run's own line ending isn't part of what it maps: the markdown behind it may not have
-            // one there at all.
+            // A run's own line ending isn't part of what it maps through: the markdown behind it may
+            // not have one there at all. It's noted instead, for SourceAt to answer with the end of
+            // the run's source.
             if (run is { Source: { Length: > 0 } source, Text.Length: > 0 })
-                _sources.Add((at, shown, source.Start, source.Length));
+                _sources.Add((at, shown, source.Start, source.Length, run.EndsLine));
 
             at += length;
         }
@@ -226,6 +227,10 @@ public sealed class MarkdownRendering
     /// An index in something the markdown doesn't contain — a bullet, the gap after a paragraph —
     /// belongs to no run, and answers with the start of the next one rather than the end of the
     /// last: the text after a bullet is what a click on the bullet was aiming at.
+    ///
+    /// The line ending after a run that ends its own line — a line of code, or a rule — answers with
+    /// the end of that line instead. That's where a click in the space to the right of it was aiming,
+    /// not the start of the line below.
     /// </remarks>
     /// <param name="index">An offset into the rendering</param>
     /// <returns>The offset into the markdown, or zero when there is nothing to map</returns>
@@ -233,12 +238,15 @@ public sealed class MarkdownRendering
     {
         var after = -1;
 
-        foreach (var (start, length, source, sourceLength) in _sources)
+        foreach (var (start, length, source, sourceLength, endsLine) in _sources)
         {
             // Clamped against the source's length, not the run's: a run of code is shorter than the
             // backticks it was written with, and a rule is longer than the three dashes that made it.
             if (index >= start && index < start + length)
                 return source + Math.Min(index - start, sourceLength - 1);
+
+            if (endsLine && index == start + length)
+                return source + sourceLength;
 
             if (start > index && after < 0)
                 after = source;
@@ -384,17 +392,43 @@ public sealed class MarkdownRendering
             }
         }
 
-        /// <summary>Adds a block that carries its text as raw lines rather than as inlines.</summary>
+        /// <summary>
+        /// Adds a block that carries its text as raw lines rather than as inlines.
+        /// </summary>
+        /// <remarks>
+        /// A run a line, each mapped from where that line sits in the markdown. Mapped from the block
+        /// as a whole, the fence above a fenced block — written but not drawn — put every click inside
+        /// it that many characters early, and an indented block drifted further on each line for the
+        /// indent every line loses.
+        ///
+        /// Blank lines at the bottom and spaces at the end of the last line are left off, so the block
+        /// doesn't leave a gap under it that isn't in anything the user wrote to see.
+        /// </remarks>
         private void Lines(LeafBlock block, RenderedStyle style)
         {
             // By count rather than by walking the array behind it, which is longer than the lines it
             // holds and isn't there at all for a fence with nothing in it — the first thing on screen
             // after typing three backticks.
-            var text = new System.Text.StringBuilder();
-            for (var i = 0; i < block.Lines.Count; i++)
-                text.AppendLine(block.Lines.Lines[i].Slice.ToString());
+            //
+            // Each line's checked where it sits rather than copied out first. Not with Markdig's own
+            // IsEmptyOrWhitespace, which counts fewer characters as white space than TrimEnd does.
+            var last = block.Lines.Count - 1;
+            while (last >= 0 && block.Lines.Lines[last].Slice.AsSpan().IsWhiteSpace())
+                last--;
 
-            Add(text.ToString().TrimEnd(), style, from: block.Span);
+            if (last < 0)
+            {
+                Add(string.Empty, style);
+                return;
+            }
+
+            for (var i = 0; i <= last; i++)
+            {
+                var slice = block.Lines.Lines[i].Slice;
+                var text = slice.ToString();
+
+                Add(i == last ? text.TrimEnd() : text, style, from: new SourceSpan(slice.Start, slice.End));
+            }
         }
 
         private void Paragraph(ContainerInline? inlines, RenderedStyle style)
