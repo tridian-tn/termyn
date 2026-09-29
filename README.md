@@ -64,6 +64,7 @@ Written where a decision took long enough to be worth explaining twice.
 | Document | What it covers |
 |---|---|
 | [docs/packaging.md](docs/packaging.md) | How the installer and the portable zip are built and released |
+| [docs/release-checklist.md](docs/release-checklist.md) | What to run by hand against a release build before publishing it |
 | [docs/performance.md](docs/performance.md) | The start-up and rendering budgets, and what was measured against them |
 | [docs/description-editor.md](docs/description-editor.md) | How the markdown panel draws and edits the same text |
 | [docs/comments-pane.md](docs/comments-pane.md) | How comments and their attachments are shown |
