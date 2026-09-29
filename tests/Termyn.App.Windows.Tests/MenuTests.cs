@@ -32,7 +32,7 @@ public class MenuTests
     {
         var ran = new List<AppCommand>();
         var menu = new ContextMenuStrip();
-        MainForm.FillMenu(menu.Items, entries, context, MainForm.ShortcutFor, ran.Add);
+        MainForm.FillMenu(menu.Items, entries, context, Shortcuts.ShortcutFor, ran.Add);
         return new Built(menu, ran);
     }
 

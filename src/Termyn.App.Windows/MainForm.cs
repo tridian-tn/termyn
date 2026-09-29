@@ -1738,7 +1738,7 @@ internal sealed class MainForm : Form
 
     private void OnSidebarKeyDown(object? sender, KeyEventArgs e)
     {
-        var command = CommandFor(e.KeyData, Scope.Sidebar);
+        var command = CommandFor(e.KeyData, ShortcutScope.Sidebar);
         if (command == AppCommand.None)
             return;
 
@@ -2601,167 +2601,19 @@ internal sealed class MainForm : Form
 
     // ---- Commands ------------------------------------------------------------------------------
 
-    /// <summary>Where a keystroke has to be pressed for it to mean what the table says.</summary>
-    internal enum Scope
-    {
-        /// <summary>Anywhere in the window, whatever has the focus.</summary>
-        Window,
-
-        /// <summary>With the task outline focused.</summary>
-        Outline,
-
-        /// <summary>With the sidebar focused.</summary>
-        Sidebar,
-    }
-
     /// <summary>
-    /// Every keystroke the app answers to, and what it asks for.
+    /// What a key event in the window asks for where it happened.
     /// </summary>
     /// <remarks>
-    /// One table, read from both directions: the key handlers match against it, and the menus print
-    /// from it — so a menu can't advertise a shortcut nothing is bound to. Where a command answers
-    /// to two keystrokes the first is the one written down. Internal so a test can walk it.
+    /// Which keystroke means which command is <see cref="Shortcuts"/>' to say; this only turns
+    /// WinForms' key codes into the keystrokes that table is written in. Internal so a test can
+    /// press a key by its WinForms code without a window to type into.
     /// </remarks>
-    internal static readonly (Keys Keys, AppCommand Command, Scope Scope)[] Shortcuts =
-    [
-        // On a row of the outline.
-        (Keys.Space, AppCommand.ToggleComplete, Scope.Outline),
-        (Keys.Control | Keys.Enter, AppCommand.ToggleComplete, Scope.Outline),
-        (Keys.F2, AppCommand.Rename, Scope.Outline),
-        (Keys.Control | Keys.Shift | Keys.N, AppCommand.NewSubtask, Scope.Outline),
-        (Keys.Control | Keys.D, AppCommand.Due, Scope.Outline),
-
-        // Shift on the same letter, because it's the same question about a different date.
-        (Keys.Control | Keys.Shift | Keys.D, AppCommand.Deadline, Scope.Outline),
-        (Keys.Control | Keys.D1, AppCommand.Priority1, Scope.Outline),
-        (Keys.Control | Keys.D2, AppCommand.Priority2, Scope.Outline),
-        (Keys.Control | Keys.D3, AppCommand.Priority3, Scope.Outline),
-        (Keys.Control | Keys.D4, AppCommand.Priority4, Scope.Outline),
-        (Keys.Control | Keys.L, AppCommand.Labels, Scope.Outline),
-        (Keys.Control | Keys.R, AppCommand.Reminders, Scope.Outline),
-        // Ctrl and an arrow, all four of them: the two that change a task's depth and the two
-        // that change its place, laid out the way the outline itself is. Tab is left to move
-        // the focus, which is the one thing every other window in Windows uses it for.
-        (Keys.Control | Keys.Right, AppCommand.Indent, Scope.Outline),
-        (Keys.Control | Keys.Left, AppCommand.Outdent, Scope.Outline),
-        (Keys.Control | Keys.Up, AppCommand.MoveUp, Scope.Outline),
-        (Keys.Control | Keys.Down, AppCommand.MoveDown, Scope.Outline),
-
-        // M for move. Only in the outline, where there's a task under the cursor to send somewhere:
-        // window-wide it would fire over the description editor and the comment box as well.
-        (Keys.Control | Keys.M, AppCommand.MoveTo, Scope.Outline),
-
-        // O for open, and the outline's alone for the same reason as the move: it's the task under
-        // the cursor that goes to the browser.
-        (Keys.Control | Keys.O, AppCommand.ShowInTodoist, Scope.Outline),
-        (Keys.Delete, AppCommand.Delete, Scope.Outline),
-
-        // Kept off the window, where it would take Ctrl+Z away from every text box in it — undoing
-        // a queued write instead of the word the user has just typed.
-        (Keys.Control | Keys.Z, AppCommand.Undo, Scope.Outline),
-
-        // On a row of the sidebar. F2 and Delete belong to the outline as well, which is what the
-        // scope is for: the same key acts on whichever list the user is actually in.
-        (Keys.F2, AppCommand.RenameSelection, Scope.Sidebar),
-        (Keys.Delete, AppCommand.DeleteSelection, Scope.Sidebar),
-
-        // Modified: a bare letter is TreeView's type-ahead, and favouriting is a write.
-        (Keys.Control | Keys.Shift | Keys.F, AppCommand.ToggleFavourite, Scope.Sidebar),
-
-        // Shift as well as Ctrl, where a task makes do with Ctrl. Reordering the sidebar is a rare
-        // and deliberate thing, and the harder reach is the point: a project shifted by a stray
-        // finger is a change nobody sees happen and nobody thinks to look for.
-        (Keys.Control | Keys.Shift | Keys.Up, AppCommand.MoveSelectionUp, Scope.Sidebar),
-        (Keys.Control | Keys.Shift | Keys.Down, AppCommand.MoveSelectionDown, Scope.Sidebar),
-
-        // Anywhere in the window.
-        (Keys.Control | Keys.N, AppCommand.NewTask, Scope.Window),
-        (Keys.Insert, AppCommand.NewTask, Scope.Window),
-        // Moved off Ctrl+Shift+N, which now adds a sub-task to whatever the outline is on. A new
-        // project is the rarer of the two by a long way, and it keeps the shape of the shortcut.
-        (Keys.Control | Keys.Alt | Keys.Shift | Keys.N, AppCommand.NewProject, Scope.Window),
-        (Keys.F5, AppCommand.SyncNow, Scope.Window),
-        (Keys.Control | Keys.H, AppCommand.ToggleCompleted, Scope.Window),
-        // F4 shows and hides the panel; F6 and F7 pick which of its tabs is in front.
-        (Keys.F4, AppCommand.ToggleDescription, Scope.Window),
-        (Keys.F6, AppCommand.ViewDescription, Scope.Window),
-        (Keys.F7, AppCommand.ViewComments, Scope.Window),
-
-        // The key the menu shows first, then the number pad's own, which people reach for without
-        // thinking and which is a different key code entirely.
-        (Keys.Control | Keys.Oemplus, AppCommand.ZoomIn, Scope.Window),
-        (Keys.Control | Keys.Add, AppCommand.ZoomIn, Scope.Window),
-        (Keys.Control | Keys.OemMinus, AppCommand.ZoomOut, Scope.Window),
-        (Keys.Control | Keys.Subtract, AppCommand.ZoomOut, Scope.Window),
-        (Keys.Control | Keys.D0, AppCommand.ZoomReset, Scope.Window),
-        (Keys.Control | Keys.NumPad0, AppCommand.ZoomReset, Scope.Window),
-        (Keys.Control | Keys.F, AppCommand.Search, Scope.Window),
-        (Keys.Control | Keys.K, AppCommand.Palette, Scope.Window),
-        // Alt and an arrow, since Ctrl and one now moves the task under the cursor. Moving a
-        // task is the thing done often and from the outline; changing view is the rarer move
-        // and has to work from anywhere, which is what earns it the window-wide binding.
-        (Keys.Alt | Keys.Up, AppCommand.PreviousView, Scope.Window),
-        (Keys.Alt | Keys.Down, AppCommand.NextView, Scope.Window),
-        (Keys.Control | Keys.Oemcomma, AppCommand.Settings, Scope.Window),
-    ];
-
-    /// <summary>
-    /// What a keystroke asks for where it was pressed, or <see cref="AppCommand.None"/> when it
-    /// asks for nothing there. Internal so a test can check what each surface answers to without a
-    /// window to type into.
-    /// </summary>
-    internal static AppCommand CommandFor(Keys keys, Scope scope)
-        => Shortcuts.FirstOrDefault(s => s.Keys == keys && s.Scope == scope).Command;
-
-    /// <summary>
-    /// How a command's shortcut is written in a menu, or empty when it has none. Internal for the
-    /// same reason: a menu that prints a shortcut nothing is bound to is the failure worth catching.
-    /// </summary>
-    internal static string ShortcutFor(AppCommand command)
-    {
-        var bound = Shortcuts.FirstOrDefault(s => s.Command == command);
-        return bound.Command == AppCommand.None ? string.Empty : ShortcutText(bound.Keys);
-    }
-
-    /// <summary>
-    /// A keystroke as a menu writes it — "Ctrl+1", "Shift+Tab", "Alt+↑". The framework's own
-    /// converter is no use for the digits: it names them after the enum, so Ctrl+1 comes out
-    /// "Ctrl+D1". Internal so a test can read what the menu will say.
-    /// </summary>
-    internal static string ShortcutText(Keys keys)
-    {
-        var parts = new List<string>(4);
-
-        if (keys.HasFlag(Keys.Control))
-            parts.Add("Ctrl");
-        if (keys.HasFlag(Keys.Shift))
-            parts.Add("Shift");
-        if (keys.HasFlag(Keys.Alt))
-            parts.Add("Alt");
-
-        var code = keys & Keys.KeyCode;
-        parts.Add(code switch
-        {
-            >= Keys.D0 and <= Keys.D9 => ((char)('0' + (code - Keys.D0))).ToString(),
-            Keys.Up => "↑",
-            Keys.Down => "↓",
-            Keys.Left => "←",
-            Keys.Right => "→",
-            Keys.Delete => "Del",
-            Keys.Oemcomma => ",",
-
-            // Named after the key's other legend, or after the pad it sits on, and neither is what
-            // the key does here. Written the way a menu writes a zoom.
-            Keys.Oemplus or Keys.Add => "+",
-            Keys.OemMinus or Keys.Subtract => "-",
-            Keys.NumPad0 => "0",
-            // The enum's own name for this one is Return, which is not what the key says on it.
-            Keys.Return => "Enter",
-            _ => code.ToString(),
-        });
-
-        return string.Join("+", parts);
-    }
+    /// <param name="keys">The key and its modifiers, as a key event carries them</param>
+    /// <param name="scope">Where it was pressed</param>
+    /// <returns>The command, or <see cref="AppCommand.None"/> when it asks for nothing there</returns>
+    internal static AppCommand CommandFor(Keys keys, ShortcutScope scope)
+        => KeyMap.KeystrokeOf(keys) is { } keystroke ? Shortcuts.CommandFor(keystroke, scope) : AppCommand.None;
 
     /// <summary>
     /// What the menus should be reading from right now — what is selected where, and what can be
@@ -2802,7 +2654,7 @@ internal sealed class MainForm : Form
     /// </summary>
     private string MenuShortcut(AppCommand command)
         => command != AppCommand.QuickAdd
-            ? ShortcutFor(command)
+            ? Shortcuts.ShortcutFor(command)
             : _settings.HotkeyEnabled ? _settings.HotkeyBinding.ToString() : string.Empty;
 
     /// <summary>
@@ -3350,7 +3202,7 @@ internal sealed class MainForm : Form
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
-        var command = CommandFor(e.KeyData, Scope.Outline);
+        var command = CommandFor(e.KeyData, ShortcutScope.Outline);
         if (command == AppCommand.None)
             return;
 
@@ -3387,7 +3239,7 @@ internal sealed class MainForm : Form
             return true;
         }
 
-        var command = CommandFor(keyData, Scope.Window);
+        var command = CommandFor(keyData, ShortcutScope.Window);
         if (command == AppCommand.None)
             return base.ProcessCmdKey(ref msg, keyData);
 

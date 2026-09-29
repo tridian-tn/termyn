@@ -2,7 +2,10 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Termyn.Core.Settings;
 
-/// <summary>Modifier keys a global hotkey can be held with.</summary>
+/// <summary>
+/// Modifier keys a keystroke can be held with — the global hotkey's, or a shortcut's inside the
+/// window.
+/// </summary>
 [Flags]
 public enum HotkeyModifiers
 {

@@ -282,12 +282,12 @@ public class PanelZoomTests
 
         CtrlWheel(view, notches: 40);
         Assert.Equal(4f, view.ZoomFactor);
-        window.Run(MainForm.CommandFor(Keys.Control | Keys.Oemplus, MainForm.Scope.Window));
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.Oemplus, ShortcutScope.Window));
         Assert.Equal(4f, view.ZoomFactor);
 
         CtrlWheel(view, notches: -80);
         Assert.Equal(0.5f, view.ZoomFactor);
-        window.Run(MainForm.CommandFor(Keys.Control | Keys.OemMinus, MainForm.Scope.Window));
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.OemMinus, ShortcutScope.Window));
         Assert.Equal(0.5f, view.ZoomFactor);
     }
 
@@ -304,7 +304,7 @@ public class PanelZoomTests
         CtrlWheel(view, notches: 2);
         Assert.NotEqual((0, 0), Zoom(view));
 
-        window.Run(MainForm.CommandFor(Keys.Control | Keys.D0, MainForm.Scope.Window));
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.D0, ShortcutScope.Window));
 
         Assert.Equal(1f, view.ZoomFactor);
         Assert.False(window.NewContext(null).Zoomed);
@@ -322,7 +322,7 @@ public class PanelZoomTests
         CtrlWheel(editor, notches: 2);
         Assert.NotEqual((0, 0), Zoom(editor));
 
-        window.Run(MainForm.CommandFor(Keys.Control | Keys.D0, MainForm.Scope.Window));
+        window.Run(MainForm.CommandFor(Keys.Control | Keys.D0, ShortcutScope.Window));
 
         Assert.Equal(1f, editor.ZoomFactor);
         Assert.False(window.NewContext(null).Zoomed);
