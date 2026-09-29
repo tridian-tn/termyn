@@ -312,7 +312,7 @@ internal sealed class OutlineView : ListView
 
         // A day's heading is not a task, so the selection carries on past it the way it arrived —
         // down onto the day's first task, or up onto the last of the day before.
-        if (index >= 0 && index < _rows.Count && _rows[index].IsHeading && PastHeading(index) is { } landed)
+        if (index >= 0 && index < _rows.Count && _rows[index].IsHeading && OutlineSelection.PastHeading(_rows, index, _lastOnTask) is { } landed)
             index = Step(landed);
 
         _selectedIndex = index;
@@ -336,33 +336,6 @@ internal sealed class OutlineView : ListView
 
     /// <summary>The last row the selection settled on that was a task, which says which way it moves.</summary>
     private int _lastOnTask = -1;
-
-    /// <summary>
-    /// The row to carry a selection on to, having landed on a heading.
-    /// </summary>
-    /// <remarks>
-    /// The way it was already going, so an arrow key keeps its direction and a click on a heading
-    /// takes the day it heads. Turned round at either end, where carrying on would mean leaving
-    /// the list — the top of Upcoming is a heading, and arriving there from below has to land on
-    /// something.
-    /// </remarks>
-    /// <param name="index">The heading the selection landed on</param>
-    /// <returns>The row to take instead, or null when there is no task either way</returns>
-    private int? PastHeading(int index)
-    {
-        var forwards = index > _lastOnTask;
-
-        return Task(index, forwards ? 1 : -1) ?? Task(index, forwards ? -1 : 1);
-
-        int? Task(int from, int step)
-        {
-            for (var at = from + step; at >= 0 && at < _rows.Count; at += step)
-                if (!_rows[at].IsHeading)
-                    return at;
-
-            return null;
-        }
-    }
 
     /// <summary>
     /// Moves the selection, without publishing the half of it that lands nowhere.
@@ -644,7 +617,7 @@ internal sealed class OutlineView : ListView
     {
         var cells = new string[Columns.Count];
         for (var i = 0; i < cells.Length; i++)
-            cells[i] = Columns[i].Tag is TaskColumn column ? CellOf(row, column) : string.Empty;
+            cells[i] = Columns[i].Tag is TaskColumn column ? OutlineCells.CellOf(row, column) : string.Empty;
 
         return cells;
     }
@@ -880,7 +853,7 @@ internal sealed class OutlineView : ListView
             return;
         }
 
-        switch (PaintOf(column))
+        switch (OutlineCells.PaintOf(column))
         {
             case CellPaint.Priority:
                 DrawPriority(e.Graphics, e.Bounds, row.Priority);
@@ -913,13 +886,13 @@ internal sealed class OutlineView : ListView
 
                 bounds.X += CheckWidth;
                 bounds.Width -= CheckWidth;
-                TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(bounds), text, Flags);
+                TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Inset(bounds), text, Flags);
                 break;
 
             // The same face the task's own column uses, so a finished task's dates are struck
             // through with its name rather than left reading as though they still stood.
             default:
-                TextRenderer.DrawText(e.Graphics, CellOf(row, column), font, Inset(e.Bounds), muted, Flags);
+                TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Inset(e.Bounds), muted, Flags);
                 break;
         }
     }
@@ -962,85 +935,6 @@ internal sealed class OutlineView : ListView
     private Pen Rule => _rule ??= new Pen(Theme.Border);
 
     private Pen? _rule;
-
-    /// <summary>How the outline fills a cell: with words, or with one of the marks it paints.</summary>
-    internal enum CellPaint
-    {
-        /// <summary>Written out, which is what a column is unless it's one of the three below.</summary>
-        Written,
-
-        Priority,
-        Project,
-        Labels,
-    }
-
-    /// <summary>
-    /// Which of those a column gets.
-    /// </summary>
-    /// <remarks>
-    /// Kept out of the drawing so a test can hold it to this. The paint itself can't be asserted —
-    /// a virtual owner-drawn list won't render its rows into a bitmap — so a column that quietly
-    /// stopped being painted would go on writing the same words with the colour gone, and nothing
-    /// would fail. Here, dropping one is a test away.
-    /// </remarks>
-    /// <param name="column">The column being drawn</param>
-    /// <returns>What fills its cells</returns>
-    internal static CellPaint PaintOf(TaskColumn column) => column switch
-    {
-        TaskColumn.Priority => CellPaint.Priority,
-        TaskColumn.Project => CellPaint.Project,
-        TaskColumn.Labels => CellPaint.Labels,
-        _ => CellPaint.Written,
-    };
-
-    /// <summary>
-    /// What a cell says, for the columns that are words rather than marks.
-    /// </summary>
-    /// <remarks>
-    /// One table for the text the control is handed and the text that's drawn, so a column can't
-    /// end up saying one thing to the screen and another to a screen reader. The priority column
-    /// is a flag with no words to it, and answers empty.
-    /// </remarks>
-    /// <param name="row">The task the cell belongs to</param>
-    /// <param name="column">Which of its columns is being asked for</param>
-    /// <returns>The words for that cell, or empty when the column is drawn rather than written</returns>
-    internal static string CellOf(TaskRow row, TaskColumn column) => column switch
-    {
-        TaskColumn.Content => ContentOf(row),
-        TaskColumn.Project => row.Project,
-        TaskColumn.Due => DueOf(row),
-        TaskColumn.Deadline => row.Deadline,
-        TaskColumn.Labels => LabelsOf(row),
-        _ => string.Empty,
-    };
-
-    /// <summary>Labels as they are written in quick-add, so the row reads the way it was typed.</summary>
-    private static string LabelsOf(TaskRow row)
-        => row.Labels.Count == 0 ? string.Empty : "@" + string.Join(" @", row.Labels);
-
-    /// <summary>
-    /// The task's own column: its name, and a mark when there's a conversation on it.
-    /// </summary>
-    /// <remarks>
-    /// Marked here rather than beside the repeat and the reminder, which share the due column
-    /// because both are about when the task comes round. A comment isn't about timing at all, and
-    /// without a mark somewhere it's invisible until you open the pane.
-    /// </remarks>
-    private static string ContentOf(TaskRow row)
-        => row.CommentCount > 0 ? $"{row.Content}  💬" : row.Content;
-
-    /// <summary>
-    /// The due column. A repeat and a reminder are marked here rather than given columns of their
-    /// own: both are about when the task comes round, and neither is worth the width.
-    /// </summary>
-    private static string DueOf(TaskRow row)
-    {
-        var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.ReminderCount > 0 ? "⏰" : string.Empty);
-        if (marks.Length == 0)
-            return row.Due;
-
-        return row.Due.Length == 0 ? marks : $"{marks} {row.Due}";
-    }
 
     /// <summary>Where the expander sits, given the row's first column already moved in by its depth.</summary>
     private static Rectangle Expander(Rectangle indented)
@@ -1201,7 +1095,7 @@ internal sealed class OutlineView : ListView
     internal IReadOnlyList<(string Text, Color Colour)> LabelRuns(TaskRow row, bool selected, Color muted)
     {
         if (selected || row.Labels.Count == 0)
-            return LabelsOf(row) is { Length: > 0 } all ? [(all, muted)] : [];
+            return OutlineCells.LabelsOf(row) is { Length: > 0 } all ? [(all, muted)] : [];
 
         return row.Labels
             .Select(l => ("@" + l, LabelColours.TryGetValue(l, out var found) ? found : muted))

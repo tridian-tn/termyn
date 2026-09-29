@@ -216,6 +216,34 @@ public class FailuresTests
     }
 
     [Fact]
+    public void A_refused_change_already_put_back_says_so_and_that_dismissing_costs_nothing()
+    {
+        var failure = new FailedChange("u1", "Changing a task", "Buy milk", "Item not found", DiscardsWork: false, Unruled: false);
+
+        Assert.Equal(
+            "Todoist said: Item not found\n"
+            + "Todoist refused it, so your account doesn't have it.\n"
+            + "\n"
+            + "Termyn has already put this back. Dismissing only clears the notice.",
+            failure.Explanation);
+    }
+
+    [Fact]
+    public void One_the_server_never_ruled_on_doesnt_claim_the_account_lacks_it()
+    {
+        // The wrong guess here would have someone delete their only copy of something the account
+        // already has — and dismissing it is the one time that costs something, so that's said too.
+        var failure = new FailedChange("u1", "Adding a task", "Buy milk", null, DiscardsWork: true, Unruled: true);
+
+        Assert.Equal(
+            "Todoist gave no reason.\n"
+            + "Todoist never reported a result, so whether your account has this is unknown.\n"
+            + "\n"
+            + "Dismissing removes Termyn's copy, which is the only one on this machine.",
+            failure.Explanation);
+    }
+
+    [Fact]
     public void Only_what_the_server_has_finished_with_is_listed()
     {
         // A command still being retried is not a failure yet, and offering it to be dismissed would

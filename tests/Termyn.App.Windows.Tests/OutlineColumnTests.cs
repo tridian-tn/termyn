@@ -4,12 +4,14 @@ using Termyn.Presentation;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// Which columns the outline stands, and what each of them reads.
+/// Which columns the outline stands, and the cells it hands the control for them.
 /// </summary>
 /// <remarks>
 /// The words rather than the pixels, for the reason <see cref="OutlineColourTests"/> gives: a list
 /// in virtual owner-draw mode won't render its rows into a bitmap. What these do cover is the part
-/// that went wrong when a column was added — a cell drawn under the heading next to its own.
+/// that went wrong when a column was added — a cell drawn under the heading next to its own. What
+/// each cell says, and how it's filled, is Presentation's, and tested there in
+/// <c>OutlineCellsTests</c>.
 /// </remarks>
 public class OutlineColumnTests
 {
@@ -44,21 +46,6 @@ public class OutlineColumnTests
     }
 
     [WinFormsFact]
-    public void Each_column_reads_the_part_of_the_row_it_stands_for()
-    {
-        var row = Row();
-
-        Assert.Equal("Plan the week", OutlineView.CellOf(row, TaskColumn.Content));
-        Assert.Equal("Work", OutlineView.CellOf(row, TaskColumn.Project));
-        Assert.Equal("1 Aug", OutlineView.CellOf(row, TaskColumn.Due));
-        Assert.Equal("4 Aug", OutlineView.CellOf(row, TaskColumn.Deadline));
-        Assert.Equal("@followup", OutlineView.CellOf(row, TaskColumn.Labels));
-
-        // The priority is a flag, so there are no words to hand over for it.
-        Assert.Equal(string.Empty, OutlineView.CellOf(row, TaskColumn.Priority));
-    }
-
-    [WinFormsFact]
     public void A_row_is_handed_over_one_cell_per_column_in_the_order_they_stand()
     {
         // The control is given these as the row's sub-items, which is what a screen reader reads
@@ -78,23 +65,5 @@ public class OutlineColumnTests
         Assert.Equal(
             ["Plan the week", string.Empty, "Work", "1 Aug", string.Empty, "@followup"],
             outline.Cells(Row() with { Deadline = string.Empty }));
-    }
-
-    [WinFormsFact]
-    public void Each_column_is_filled_the_way_it_says()
-    {
-        // The drawing itself can't be asserted, so this holds the decision that routes it. A column
-        // that stopped being painted would write the same words with the colour gone — the
-        // project's dot and the labels' own colours are what would go missing without a sound.
-        //
-        // Named rather than typed: the enum is internal to a control that is itself internal, and a
-        // public test method can't take one as an argument.
-        using var outline = new OutlineView();
-
-        Assert.Equal(
-            ["Written", "Priority", "Project", "Written", "Written", "Labels"],
-            outline.Columns.Cast<ColumnHeader>()
-                .Select(c => OutlineView.PaintOf((TaskColumn)c.Tag!).ToString())
-                .ToArray());
     }
 }

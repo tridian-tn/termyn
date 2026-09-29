@@ -112,6 +112,22 @@ public class ColourTests
     }
 
     [Fact]
+    public void A_row_with_a_dot_and_a_section_under_one_line_up_in_the_dot_column()
+    {
+        // A section has no dot, but left at the tree's edge it sat under its project's name rather
+        // than in from it. The smart views and the headings keep the edge they had.
+        var store = Seeded("""{"id":"p1","name":"Work","color":"berry_red"}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Reports","project_id":"p1"}""");
+
+        var sidebar = Presenter(store).Sidebar;
+        Assert.Contains(sidebar, n => n.Kind == SidebarKind.Section);
+        Assert.Contains(sidebar, n => n.Kind == SidebarKind.Header);
+
+        Assert.All(sidebar.Where(n => n.Kind is SidebarKind.Project or SidebarKind.Section), n => Assert.True(n.SitsInDotColumn, n.Label));
+        Assert.All(sidebar.Where(n => n.Kind is SidebarKind.SmartView or SidebarKind.Header), n => Assert.False(n.SitsInDotColumn, n.Label));
+    }
+
+    [Fact]
     public void The_labels_a_window_draws_carry_their_own_colours()
     {
         var store = Seeded("""{"id":"p1","name":"Work"}""");

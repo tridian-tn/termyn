@@ -447,7 +447,7 @@ internal sealed class CommentsView : UserControl
         var meta = _list.Font.Height;
         var body = TextRenderer.MeasureText(
             e.Graphics,
-            BodyOf(_comments[e.Index]),
+            _comments[e.Index].Body,
             _list.Font,
             new Size(TextWidth, int.MaxValue),
             TextFormatFlags.WordBreak).Height;
@@ -470,7 +470,7 @@ internal sealed class CommentsView : UserControl
         var muted = selected ? _theme.OnAccent : _theme.Muted;
 
         var meta = new Rectangle(e.Bounds.X + Gap, e.Bounds.Y + Gap, TextWidth, _list.Font.Height);
-        TextRenderer.DrawText(e.Graphics, MetaOf(comment), _list.Font, meta, muted, TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(e.Graphics, comment.Meta, _list.Font, meta, muted, TextFormatFlags.EndEllipsis);
 
         var body = new Rectangle(
             e.Bounds.X + Gap,
@@ -478,35 +478,7 @@ internal sealed class CommentsView : UserControl
             TextWidth,
             e.Bounds.Height - _list.Font.Height - (Gap * 2));
 
-        TextRenderer.DrawText(e.Graphics, BodyOf(comment), _list.Font, body, text, TextFormatFlags.WordBreak);
-    }
-
-    /// <summary>
-    /// The line above a comment: when it was posted, and the file on it if it has one.
-    /// </summary>
-    /// <remarks>
-    /// One with no posted time is one this client has only just queued. Saying so is the honest
-    /// answer offline, where it may sit unsent for a while.
-    /// </remarks>
-    private static string MetaOf(CommentRow comment)
-    {
-        var when = comment.Posted.Length == 0 ? "Not sent yet" : comment.Posted;
-        return comment.AttachmentLabel is { } file ? $"{when}   📎 {file}" : when;
-    }
-
-    /// <summary>
-    /// What a comment says, or a stand-in when it says nothing.
-    /// </summary>
-    /// <remarks>
-    /// A comment can carry a file and no words at all. Drawn from its content alone that is a blank
-    /// row, which reads as a comment that failed to load rather than one that is a file.
-    /// </remarks>
-    private static string BodyOf(CommentRow comment)
-    {
-        if (comment.Content.Length > 0)
-            return comment.Content;
-
-        return comment.AttachmentName is not null ? "(no message)" : "(empty)";
+        TextRenderer.DrawText(e.Graphics, comment.Body, _list.Font, body, text, TextFormatFlags.WordBreak);
     }
 
     // ---- Keys -----------------------------------------------------------------------------------

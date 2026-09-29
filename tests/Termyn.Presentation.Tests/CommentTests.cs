@@ -54,6 +54,44 @@ public class CommentTests
         Assert.Equal("agenda.pdf", Assert.Single(presenter.CommentsOn("i1")).AttachmentName);
     }
 
+    // ---- How a row reads -------------------------------------------------------------------------
+
+    [Fact]
+    public void The_line_above_a_comment_says_when_it_was_posted()
+        => Assert.Equal("12 Aug", new CommentRow("n1", "words", "12 Aug", null).Meta);
+
+    [Fact]
+    public void One_not_sent_yet_says_so_where_the_time_would_be()
+    {
+        // Rather than a blank, which reads as a comment whose time failed to load.
+        Assert.Equal("Not sent yet", new CommentRow("n1", "written offline", string.Empty, null).Meta);
+    }
+
+    [Fact]
+    public void A_file_is_named_on_the_line_above_after_the_time()
+    {
+        var row = new CommentRow("n1", "see attached", "12 Aug", new FileAttachment("agenda.pdf", 2048, "application/pdf", "https://x/a", false));
+
+        Assert.Equal("12 Aug   📎 agenda.pdf (2 KB)", row.Meta);
+    }
+
+    [Fact]
+    public void A_comment_reads_what_it_says()
+        => Assert.Equal("the first thing said", new CommentRow("n1", "the first thing said", "12 Aug", null).Body);
+
+    [Fact]
+    public void A_file_with_nothing_said_alongside_it_reads_as_no_message_rather_than_as_blank()
+    {
+        // A blank row reads as a comment that failed to load.
+        var row = new CommentRow("n1", string.Empty, "12 Aug", new FileAttachment("agenda.pdf", 0, string.Empty, string.Empty, true));
+
+        Assert.Equal("(no message)", row.Body);
+    }
+
+    [Fact]
+    public void A_comment_with_neither_words_nor_a_file_says_it_is_empty()
+        => Assert.Equal("(empty)", new CommentRow("n1", string.Empty, "12 Aug", null).Body);
+
     // ---- Writing ---------------------------------------------------------------------------------
 
     [Fact]
