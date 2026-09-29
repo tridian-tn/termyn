@@ -9,6 +9,12 @@ namespace Termyn.App.Windows.Tests;
 /// it, and so does reading one back out of a selection — so each of these realises the control
 /// without ever showing it.
 /// </summary>
+/// <remarks>
+/// What each run says, how it's styled, where its links go and where a click maps back to is
+/// Presentation's, and tested without a control in <c>MarkdownRenderingTests</c>. What's here is the
+/// control's half: that the box draws each run the way its style says, holds exactly as much text as
+/// the rendering counts, and answers from the rendering it's showing now rather than the last one.
+/// </remarks>
 public class MarkdownViewTests
 {
     private static MarkdownView Render(string markdown)
@@ -74,14 +80,6 @@ public class MarkdownViewTests
     }
 
     // ---- What it reads as ----------------------------------------------------------------------
-
-    [WinFormsFact]
-    public void The_markers_are_drawn_rather_than_shown()
-    {
-        using var view = Render("Some **bold** and some *italic* here");
-
-        Assert.Equal("Some bold and some italic here", view.Text.Trim());
-    }
 
     [WinFormsFact]
     public void Bold_is_bold_and_italic_is_italic()
@@ -170,26 +168,6 @@ public class MarkdownViewTests
     }
 
     [WinFormsFact]
-    public void A_numbered_list_keeps_its_numbers()
-    {
-        using var view = Render("1. first\n2. second");
-
-        Assert.Contains("1.", view.Text);
-        Assert.Contains("2.", view.Text);
-    }
-
-    [WinFormsFact]
-    public void A_link_shows_its_words_and_not_its_address()
-    {
-        // A description pasted off a web page is mostly link text, and printing every target
-        // alongside it would drown the thing being read.
-        using var view = Render("See [the docs](https://example.com/very/long/path) for more");
-
-        Assert.Equal("See the docs for more", view.Text.Trim());
-        Assert.DoesNotContain("example.com", view.Text);
-    }
-
-    [WinFormsFact]
     public void A_link_is_coloured_apart_from_the_words_around_it()
     {
         var theme = Theme.Resolve(ThemePreference.Light);
@@ -197,51 +175,6 @@ public class MarkdownViewTests
 
         Assert.Equal(theme.Accent, ColourAt(view, "the docs"));
         Assert.NotEqual(theme.Accent, ColourAt(view, "See"));
-    }
-
-    [WinFormsFact]
-    public void A_link_can_be_followed_from_the_words_it_is_on()
-    {
-        // Colour alone said nothing you could act on. The address is kept against the span the
-        // words occupy, because by the time it is on screen there is nothing else left to open.
-        using var view = Render("See [the docs](https://example.com/path) for more");
-
-        var at = view.Text.IndexOf("the docs", StringComparison.Ordinal);
-
-        Assert.Equal("https://example.com/path", view.LinkAt(at));
-        Assert.Equal("https://example.com/path", view.LinkAt(at + "the docs".Length - 1));
-    }
-
-    [WinFormsFact]
-    public void The_words_either_side_of_a_link_are_not_part_of_it()
-    {
-        using var view = Render("See [the docs](https://example.com) for more");
-
-        Assert.Null(view.LinkAt(view.Text.IndexOf("See", StringComparison.Ordinal)));
-        Assert.Null(view.LinkAt(view.Text.IndexOf("for more", StringComparison.Ordinal)));
-    }
-
-    [WinFormsFact]
-    public void Several_links_each_keep_their_own_address()
-    {
-        using var view = Render("[first](https://one.example) and [second](https://two.example)");
-
-        Assert.Equal("https://one.example/", view.LinkAt(view.Text.IndexOf("first", StringComparison.Ordinal)));
-        Assert.Equal("https://two.example/", view.LinkAt(view.Text.IndexOf("second", StringComparison.Ordinal)));
-    }
-
-    [WinFormsFact]
-    public void A_link_that_is_not_a_web_address_is_not_offered_as_one()
-    {
-        // A description syncs from an account and gets pasted into from anywhere. A scheme that
-        // means "open this document" or "run this" is not something a description gets to ask for.
-        using var view = Render("[a file](file:///C:/Windows/System32/cmd.exe) and [a script](javascript:alert(1))");
-
-        Assert.Null(view.LinkAt(view.Text.IndexOf("a file", StringComparison.Ordinal)));
-        Assert.Null(view.LinkAt(view.Text.IndexOf("a script", StringComparison.Ordinal)));
-
-        // Still readable — it just isn't clickable.
-        Assert.Contains("a file", view.Text);
     }
 
     [WinFormsFact]
@@ -287,16 +220,6 @@ public class MarkdownViewTests
         Assert.Equal("Run dotnet build first", text);
     }
 
-    [WinFormsFact]
-    public void A_fenced_block_keeps_its_lines()
-    {
-        using var view = Render("```\nfirst line\nsecond line\n```");
-
-        Assert.Contains("first line", view.Text);
-        Assert.Contains("second line", view.Text);
-        Assert.DoesNotContain("```", view.Text);
-    }
-
     [WinFormsTheory]
     [InlineData("```")]
     [InlineData("```js")]
@@ -315,87 +238,9 @@ public class MarkdownViewTests
         Assert.DoesNotContain("```", view.Text);
     }
 
-    [WinFormsFact]
-    public void A_bare_url_is_shown_as_it_was_typed()
-    {
-        // People paste these far more often than they write proper links.
-        using var view = Render("See https://example.com for more");
-
-        Assert.Contains("https://example.com", view.Text);
-
-        // Asserted as a link, not just as text: Markdig writes the URL out either way, so without
-        // this the test passes with the autolink extension taken out of the pipeline.
-        Assert.Equal("https://example.com/", view.LinkAt(view.Text.IndexOf("https://example.com", StringComparison.Ordinal)));
-    }
-
     // ---- Not falling over ----------------------------------------------------------------------
 
     // ---- What used to vanish, and what used to throw -------------------------------------------
-
-    [WinFormsFact]
-    public void Markdown_nested_past_what_the_parser_will_take_still_shows_its_words()
-    {
-        // The parser refuses this by throwing, and a description arrives by sync — so a description
-        // written on another device could take the window down on the next publish, with the box
-        // that would let you fix it being the thing that threw.
-        using var view = Render(new string('>', 200) + " still here");
-
-        Assert.Contains("still here", view.Text);
-    }
-
-    [WinFormsFact]
-    public void A_list_nested_past_what_the_parser_will_take_still_shows_its_words()
-    {
-        // Lists give out sooner than quotes do — depth sixty-four rather than a hundred and
-        // twenty-eight — so this is the one a pasted outline reaches first.
-        var deep = string.Concat(Enumerable.Range(0, 80).Select(i => new string(' ', i * 2) + "- level" + Environment.NewLine));
-
-        using var view = Render(deep);
-
-        Assert.Contains("level", view.Text);
-    }
-
-    [WinFormsFact]
-    public void A_pasted_block_of_html_shows_its_words_rather_than_disappearing()
-    {
-        // A leaf rather than a container, so it matched nothing and its text was dropped whole —
-        // and a blank preview reads as a task with no description on it.
-        using var view = Render("<div class=\"x\">something worth reading</div>\n\nand after it");
-
-        Assert.Contains("something worth reading", view.Text);
-        Assert.Contains("and after it", view.Text);
-    }
-
-    [WinFormsFact]
-    public void An_angle_bracketed_link_is_shown_and_can_be_followed()
-    {
-        // The form markdown copied out of docs and READMEs uses. It was rendering as nothing at
-        // all: no words, no link, no sign there had been a URL there.
-        using var view = Render("See <https://example.com/x> for more");
-
-        Assert.Contains("https://example.com/x", view.Text);
-        Assert.Equal("https://example.com/x", view.LinkAt(view.Text.IndexOf("https://example.com/x", StringComparison.Ordinal)));
-    }
-
-    [WinFormsFact]
-    public void An_email_in_angle_brackets_is_shown_but_not_offered_as_a_link()
-    {
-        using var view = Render("Mail <bob@example.com> about it");
-
-        Assert.Contains("bob@example.com", view.Text);
-        Assert.Null(view.LinkAt(view.Text.IndexOf("bob@example.com", StringComparison.Ordinal)));
-    }
-
-    [WinFormsFact]
-    public void An_escaped_character_is_shown_as_the_character()
-    {
-        // Anything that generates markdown out of HTML writes ampersands this way, and they were
-        // going missing mid-sentence.
-        using var view = Render("Tom &amp; Jerry");
-
-        Assert.Contains("Tom & Jerry", view.Text);
-        Assert.DoesNotContain("&amp;", view.Text);
-    }
 
     [WinFormsFact]
     public void A_link_that_is_not_a_web_address_is_not_coloured_as_one_either()
@@ -407,32 +252,6 @@ public class MarkdownViewTests
 
         Assert.Equal("a file", view.Text.Trim());
         Assert.NotEqual(theme.Accent, ColourAt(view, "a file"));
-    }
-
-    [WinFormsFact]
-    public void Nothing_at_all_renders_to_nothing_at_all()
-    {
-        using var view = Render(string.Empty);
-
-        Assert.Equal(string.Empty, view.Text.Trim());
-    }
-
-    [WinFormsFact]
-    public void Plain_text_with_no_markdown_in_it_comes_through_unchanged()
-    {
-        using var view = Render("Just a sentence, with a comma and a full stop.");
-
-        Assert.Equal("Just a sentence, with a comma and a full stop.", view.Text.Trim());
-    }
-
-    [WinFormsFact]
-    public void Markdown_it_has_no_way_to_draw_still_shows_its_words()
-    {
-        // A table is beyond what Todoist's editor can produce, but not beyond what someone can
-        // paste. It doesn't have to be drawn as a table; it does have to be readable.
-        using var view = Render("| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter the table");
-
-        Assert.Contains("After the table", view.Text);
     }
 
     [WinFormsFact]
@@ -462,17 +281,6 @@ public class MarkdownViewTests
     }
 
     // ---- The rest of the grammar ---------------------------------------------------------------
-
-    [WinFormsFact]
-    public void A_checklist_keeps_its_boxes_ticked_and_unticked()
-    {
-        // The description shape Todoist users write most.
-        using var view = Render("- [x] done\n- [ ] still to do");
-
-        Assert.Contains("[x]", view.Text);
-        Assert.Contains("[ ]", view.Text);
-        Assert.Contains("still to do", view.Text);
-    }
 
     [WinFormsFact]
     public void Each_heading_level_is_smaller_than_the_one_above_it()
@@ -519,34 +327,6 @@ public class MarkdownViewTests
     }
 
     [WinFormsFact]
-    public void A_numbered_list_starts_where_it_says_it_does()
-    {
-        using var view = Render("3. third\n4. fourth");
-
-        Assert.Contains("3.", view.Text);
-        Assert.Contains("4.", view.Text);
-    }
-
-    [WinFormsFact]
-    public void A_link_with_no_words_is_not_a_link_at_all()
-    {
-        // A zero-width span would make whatever follows it clickable.
-        using var view = Render("[](https://example.com) after");
-
-        Assert.Null(view.LinkAt(0));
-    }
-
-    [WinFormsFact]
-    public void A_rule_is_drawn_between_what_it_divides()
-    {
-        using var view = Render("above\n\n---\n\nbelow");
-
-        Assert.Contains("above", view.Text);
-        Assert.Contains("below", view.Text);
-        Assert.Contains('—', view.Text);
-    }
-
-    [WinFormsFact]
     public void Changing_the_theme_redraws_what_is_already_on_screen()
     {
         // The only thing that recolours the panel when the app switches theme.
@@ -559,45 +339,6 @@ public class MarkdownViewTests
     }
 
     // ---- Line breaks ----------------------------------------------------------------------------
-
-    /// <summary>
-    /// The rendered text as lines, with the trailing blank the last line ending leaves off the end.
-    /// </summary>
-    private static string[] Lines(MarkdownView view)
-        => view.Text.ReplaceLineEndings("\n").TrimEnd('\n').Split('\n');
-
-
-    [WinFormsFact]
-    public void A_line_typed_on_its_own_is_drawn_on_its_own()
-    {
-        // Markdown proper would run these together with a space between them. Todoist breaks the
-        // line on a single Return and the descriptions in an account are written that way, so the
-        // spec's answer here is right about nothing anybody typed.
-        using var view = Render("Azure.Storage.Blobs = 12.17.0\nAzure.Messaging.ServiceBus = 7.15.0");
-
-        Assert.Equal(2, Lines(view).Length);
-        Assert.Equal("Azure.Storage.Blobs = 12.17.0", Lines(view)[0]);
-    }
-
-    [WinFormsFact]
-    public void A_blank_line_still_starts_a_new_paragraph_rather_than_a_third_line()
-    {
-        // Breaking on every newline mustn't turn the blank line between two thoughts into a blank
-        // line of its own on screen.
-        using var view = Render("First thought\n\nSecond thought");
-
-        Assert.Equal(["First thought", "Second thought"], Lines(view));
-    }
-
-    [WinFormsFact]
-    public void A_break_written_the_markdown_way_still_breaks_and_does_not_double()
-    {
-        // Two trailing spaces were already a line break, and now that a bare newline is one too
-        // they must not add up to two.
-        using var view = Render("First line  \nSecond line");
-
-        Assert.Equal(["First line", "Second line"], Lines(view));
-    }
 
     [WinFormsFact]
     public void A_paragraph_has_air_under_it_and_a_line_broken_inside_one_does_not()
@@ -661,123 +402,7 @@ public class MarkdownViewTests
         public short wBorders;
     }
 
-    [WinFormsFact]
-    public void A_run_of_blank_lines_reads_as_one_break_and_not_as_several()
-    {
-        // Long-standing and not part of the change, but worth writing down beside it: however many
-        // blank lines are left between two thoughts, they arrive as one paragraph break with the
-        // usual air under it. Somebody spacing a description out with three Returns gets one gap.
-        using var view = Render("One\n\n\nTwo");
-
-        Assert.Equal(["One", "Two"], Lines(view));
-    }
-
-    // ---- Finding the way back to the markdown ---------------------------------------------------
-
-    /// <summary>Where the markdown behind the rendered word <paramref name="needle"/> starts.</summary>
-    private static int SourceOf(MarkdownView view, string needle)
-    {
-        var at = view.Text.IndexOf(needle, StringComparison.Ordinal);
-        Assert.True(at >= 0, $"'{needle}' is not in the rendered text: {view.Text}");
-        return view.SourceAt(at);
-    }
-
-    /// <summary>
-    /// Asserts that a word in the rendering maps back to where it was written, saying what it saw
-    /// when it doesn't.
-    /// </summary>
-    /// <remarks>
-    /// Assert.Equal has no room for a message, and an offset on its own says nothing about why it
-    /// is wrong. These have failed alongside a rendering that came out wrong, and the rendered text
-    /// is what tells a bad map from a bad render.
-    /// </remarks>
-    private static void MapsBack(MarkdownView view, string markdown, string needle)
-    {
-        var written = markdown.IndexOf(needle, StringComparison.Ordinal);
-        var mapped = SourceOf(view, needle);
-
-        Assert.True(
-            written == mapped,
-            $"'{needle}' was written at {written} and maps to {mapped}. "
-            + $"Rendered: '{view.Text.ReplaceLineEndings("\\n")}'");
-    }
-
-    [WinFormsFact]
-    public void Markdown_shown_as_written_still_knows_where_a_click_lands()
-    {
-        // Nested past what the parser will take, so it goes up as the account wrote it. It's the
-        // markdown on screen, so a character is where it says it is — and unmapped, every click on
-        // it would open the editor at the top of the description, which is the answer this whole
-        // mapping exists to avoid.
-        var markdown = new string('>', 200) + " still here";
-        using var view = Render(markdown);
-        var at = markdown.IndexOf("still", StringComparison.Ordinal);
-
-        Assert.Equal(markdown, view.Text.TrimEnd('\n'));
-        Assert.Equal(at, view.SourceAt(at));
-    }
-
-    [WinFormsFact]
-    public void Markdown_shown_as_written_maps_past_its_line_endings()
-    {
-        // The box keeps a return and newline as one character, so each one above a click is a
-        // character the rendering has and the markdown has two of.
-        var markdown = new string('>', 200) + " first\r\nsecond\r\nthird line";
-        using var view = Render(markdown);
-
-        Assert.Equal(markdown.IndexOf("third", StringComparison.Ordinal), SourceOf(view, "third"));
-        Assert.Equal(markdown.IndexOf("second", StringComparison.Ordinal), SourceOf(view, "second"));
-    }
-
-    [WinFormsFact]
-    public void A_word_in_the_rendering_knows_where_it_was_written()
-    {
-        // What puts the caret where the user was pointing when they ask to type. Without it the
-        // only honest answer is the top of the description, and a click halfway down a description is
-        // then a click that scrolls you away from what you were reading.
-        const string markdown = "Some **bold** text";
-        using var view = Render(markdown);
-
-        Assert.Equal(markdown.IndexOf("bold", StringComparison.Ordinal), SourceOf(view, "bold"));
-        Assert.Equal(markdown.IndexOf("Some", StringComparison.Ordinal), SourceOf(view, "Some"));
-        Assert.Equal(markdown.IndexOf("text", StringComparison.Ordinal), SourceOf(view, "text"));
-    }
-
-    [WinFormsFact]
-    public void An_offset_inside_a_word_maps_through_it_rather_than_to_its_start()
-    {
-        const string markdown = "abcdefgh";
-        using var view = Render(markdown);
-
-        Assert.Equal(0, view.SourceAt(0));
-        Assert.Equal(3, view.SourceAt(3));
-        Assert.Equal(7, view.SourceAt(7));
-    }
-
-    [WinFormsFact]
-    public void A_line_below_the_first_maps_past_the_lines_above_it()
-    {
-        // The rendering drops markers, so the two texts drift apart as they go — which is the whole
-        // reason the offset can't just be carried across.
-        const string markdown = "# A heading\n\nThe *body* of it";
-        using var view = Render(markdown);
-
-        MapsBack(view, markdown, "body");
-    }
-
-    [WinFormsFact]
-    public void A_word_after_a_broken_line_still_knows_where_it_was_written()
-    {
-        // A soft break used to be drawn as a space and is now drawn as a line ending, which is a
-        // different number of characters on some platforms — and every offset after it in the
-        // description rides on that count being right.
-        const string markdown = "ZMATMAS - core data\nBOMMAT - the BOM for a FERT\nand a third line";
-        using var view = Render(markdown);
-
-        Assert.Equal(markdown.IndexOf("BOMMAT", StringComparison.Ordinal), SourceOf(view, "BOMMAT"));
-        Assert.Equal(markdown.IndexOf("third", StringComparison.Ordinal), SourceOf(view, "third"));
-    }
-
+    // ---- The box and the rendering agreeing -----------------------------------------------------
     [WinFormsTheory]
     [InlineData("plain words")]
     [InlineData("a\nb\nc")]
@@ -861,95 +486,6 @@ public class MarkdownViewTests
         // thing written a run at a time. What this guards against is a return to that shape, which
         // was eighty times slower rather than a few per cent.
         Assert.True(clock.ElapsedMilliseconds < 300, $"drawing a full description took {clock.ElapsedMilliseconds} ms");
-    }
-
-    [WinFormsFact]
-    public void A_word_below_a_fenced_block_still_knows_where_it_was_written()
-    {
-        // A fenced block arrives as a single run carrying its own line endings, where every other
-        // run carries at most the one that closes it. The writing counts what it has written rather
-        // than asking the box, so a run holding several endings has to be counted as it will be
-        // held — and getting that wrong leaves every offset below the block pointing at the wrong
-        // character, which is the offset a click on the rendering opens the text at.
-        // Three lines rather than two, because the ending that closes the run absorbs one of the
-        // ones inside it — so a block of two hides a miscount that a block of three shows.
-        const string markdown = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block";
-        using var view = Render(markdown);
-
-        // Asked of the word starting the run below the block and of one inside it, because the two
-        // fail to different faults. A run whose recorded length reaches past its own last character
-        // answers for the first character of the next one, which is "after"; a run recorded as
-        // starting too late is answered from the run following it, which hides a miscount at
-        // "after" and shifts "block".
-        MapsBack(view, markdown, "after");
-        MapsBack(view, markdown, "block");
-    }
-
-    [WinFormsFact]
-    public void The_words_of_a_link_map_to_the_words_and_not_to_the_address()
-    {
-        // The address isn't drawn at all, so an offset that landed in it would put the caret
-        // somewhere the user never saw.
-        const string markdown = "See [the docs](https://example.com/path) for more";
-        using var view = Render(markdown);
-
-        Assert.Equal(markdown.IndexOf("the docs", StringComparison.Ordinal), SourceOf(view, "the docs"));
-    }
-
-    [WinFormsFact]
-    public void Code_maps_to_the_code_and_not_to_the_backtick_in_front_of_it()
-    {
-        // The backticks are written and not drawn, so mapping the whole span would put the first
-        // character of what is on screen onto the marker before it — and every offset into the run
-        // one short of where it was aimed.
-        const string markdown = "Run `dotnet build` first";
-        using var view = Render(markdown);
-
-        MapsBack(view, markdown, "dotnet");
-    }
-
-    [WinFormsFact]
-    public void An_angle_bracketed_url_maps_to_the_url_and_not_to_the_bracket()
-    {
-        const string markdown = "See <https://example.com/x> for more";
-        using var view = Render(markdown);
-
-        Assert.Equal(markdown.IndexOf("https", StringComparison.Ordinal), SourceOf(view, "https"));
-    }
-
-    [WinFormsFact]
-    public void A_bullet_maps_to_the_item_it_marks_rather_than_to_the_line_before_it()
-    {
-        // The marker is drawn rather than written, so it belongs to no run of the markdown. Landing
-        // on the text it introduces is what a click on it was aiming at; landing at the end of the
-        // previous line is the caret going backwards from where the user pointed.
-        const string markdown = "before\n\n- the item";
-        using var view = Render(markdown);
-
-        var bullet = view.Text.IndexOf('•');
-
-        Assert.True(bullet >= 0, $"no bullet in: {view.Text}");
-        Assert.Equal(markdown.IndexOf("the item", StringComparison.Ordinal), view.SourceAt(bullet));
-    }
-
-    [WinFormsFact]
-    public void An_offset_past_everything_lands_at_the_end_of_the_markdown()
-    {
-        // Clicking in the empty space below a short description. The end is where a caret goes when
-        // there is nothing under the pointer, since that is where more of it would be written.
-        const string markdown = "a short description";
-        using var view = Render(markdown);
-
-        Assert.Equal(markdown.Length, view.SourceAt(view.TextLength + 500));
-    }
-
-    [WinFormsFact]
-    public void Nothing_at_all_maps_to_the_start()
-    {
-        using var view = Render(string.Empty);
-
-        Assert.Equal(0, view.SourceAt(0));
-        Assert.Equal(0, view.SourceAt(40));
     }
 
     [WinFormsFact]
