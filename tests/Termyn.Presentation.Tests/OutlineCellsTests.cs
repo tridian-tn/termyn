@@ -72,6 +72,14 @@ public class OutlineCellsTests
     }
 
     [Fact]
+    public void A_recurring_task_waiting_for_its_next_date_says_so_in_place_of_the_old_one()
+    {
+        // The date it's leaving would say the press did nothing.
+        Assert.Equal("↻ advancing…", OutlineCells.CellOf(Row() with { IsRecurring = true, Advancing = true }, TaskColumn.Due));
+        Assert.Equal("↻⏰ advancing…", OutlineCells.CellOf(Row() with { IsRecurring = true, ReminderCount = 1, Advancing = true }, TaskColumn.Due));
+    }
+
+    [Fact]
     public void A_mark_with_no_due_date_to_go_with_it_stands_on_its_own()
     {
         // Without a date there's nothing to space it from, and a space in front would push the mark

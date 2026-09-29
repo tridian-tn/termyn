@@ -9,6 +9,10 @@ using Termyn.Core.Platform;
 namespace Termyn.Core.Sync;
 
 /// <summary>A consistent view of the model, taken while the engine is locked.</summary>
+/// <param name="Closing">
+/// The tasks with a close queued that the server hasn't taken yet. A recurring task among them is
+/// waiting to hear its next date, and nothing else about it changes until it does
+/// </param>
 public sealed record ModelSnapshot(
     IReadOnlyList<TaskItem> Items,
     IReadOnlyList<Project> Projects,
@@ -24,7 +28,8 @@ public sealed record ModelSnapshot(
     int PendingCount,
     int FailedCount,
     IReadOnlyList<TaskItem> CompletedItems,
-    IReadOnlyDictionary<string, int> CommentCounts)
+    IReadOnlyDictionary<string, int> CommentCounts,
+    IReadOnlySet<string> Closing)
 {
     /// <summary>The Inbox, which tasks fall back to when they name no project.</summary>
     public string? InboxProjectId => Projects.FirstOrDefault(p => p.IsInboxProject)?.Id;
@@ -236,7 +241,8 @@ public sealed class SyncEngine
                 _outbox.Count(c => c.State == OutboxState.Pending),
                 _outbox.Count(c => c.State == OutboxState.Failed),
                 CompletedItems(items),
-                Model.CommentCounts());
+                Model.CommentCounts(),
+                PendingCloses());
         }
     }
 
@@ -755,9 +761,28 @@ public sealed class SyncEngine
             : [];
 
     /// <summary>Whether a close for this task is already queued and unsent.</summary>
-    private bool HasPendingClose(string id)
-        => _outbox.Any(c => c is { State: OutboxState.Pending, Type: "item_close" }
-                            && ParseArgs(c)["id"] is JsonValue v && v.ToString() == id);
+    private bool HasPendingClose(string id) => PendingCloses().Contains(id);
+
+    /// <summary>
+    /// The tasks with a close queued and unsent.
+    /// </summary>
+    /// <remarks>
+    /// A close the server has taken is gone from the outbox, and one it has finished refusing is
+    /// no longer pending — so a task leaves this once the server has settled it either way. One
+    /// being retried after a refusal is still on its way, and stays.
+    ///
+    /// Call it holding the gate: it reads the outbox, which the sync worker changes. The answer is
+    /// a set made there and then, rather than a query that reads the outbox again whenever it's
+    /// looked at, so it's safe to keep once the gate is let go.
+    /// </remarks>
+    /// <returns>The ids of the tasks, as the queued closes name them</returns>
+    private HashSet<string> PendingCloses()
+        => _outbox
+            .Where(c => c is { State: OutboxState.Pending, Type: "item_close" })
+            .Select(c => ParseArgs(c)["id"])
+            .OfType<JsonValue>()
+            .Select(v => v.ToString())
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Sets a task's due date from words for the server to resolve, and queues an

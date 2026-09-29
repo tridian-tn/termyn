@@ -21,4 +21,8 @@
     <value>{0} pending</value>
     <comment>How many writes are queued. {0} is the count, and this reads the same at one as at ten.</comment>
   </data>
+  <data name="DueAdvancing" xml:space="preserve">
+    <value>advancing…</value>
+    <comment>In a recurring task's due column, in place of its date, from ticking it off until the server says when it's next due. Lower case: it sits after the repeat mark, where a date would.</comment>
+  </data>
 </root>
