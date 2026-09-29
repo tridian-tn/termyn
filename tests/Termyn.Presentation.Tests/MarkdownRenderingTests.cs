@@ -498,6 +498,44 @@ public class MarkdownRenderingTests
         MapsBack("before\n\n    first line\n    second line\n\nafter", needle);
     }
 
+    [Theory]
+    [InlineData("> ```\n> first line\n> second line\n> ```\n\nafter")]
+    [InlineData("- an item\n\n  ```\n  first line\n  second line\n  ```\n\nafter")]
+    public void A_word_inside_a_code_block_in_a_quote_or_a_list_knows_where_it_was_written(string markdown)
+    {
+        // Every line loses the quote marker or the item's indent as well as the fence, so a line's
+        // mapping has to start after both of them.
+        MapsBack(markdown, "first");
+        MapsBack(markdown, "second");
+        MapsBack(markdown, "after");
+    }
+
+    [Theory]
+    [InlineData("first line")]
+    [InlineData("second line")]
+    public void A_click_past_the_end_of_a_line_of_code_lands_at_the_end_of_that_line(string line)
+    {
+        // The line ending after it is written nowhere in the run, so it used to answer with the next
+        // run instead — the line below, or the paragraph after the block.
+        const string markdown = "```\nfirst line\nsecond line\n```\n\nafter";
+        var rendering = Render(markdown);
+        var ending = rendering.Text.IndexOf(line, StringComparison.Ordinal) + line.Length;
+
+        Assert.Equal(markdown.IndexOf(line, StringComparison.Ordinal) + line.Length, rendering.SourceAt(ending));
+    }
+
+    [Fact]
+    public void A_code_block_written_with_returns_and_newlines_has_no_blank_line_under_each_line()
+    {
+        // A description synced from somewhere that ends its lines that way. A return left on each line
+        // of code would be drawn as a line of its own, and put everything below it further out.
+        const string markdown = "```\r\nfirst line\r\nsecond line\r\n```\r\n\r\nafter";
+
+        Assert.Equal(["first line", "second line", "after"], Lines(markdown));
+        MapsBack(markdown, "second");
+        MapsBack(markdown, "after");
+    }
+
     [Fact]
     public void A_line_of_a_pasted_html_block_knows_where_it_was_written()
         => MapsBack("<div>\nsomething worth reading\n</div>\n\nafter", "something");
@@ -558,6 +596,7 @@ public class MarkdownRenderingTests
     [InlineData("plain words")]
     [InlineData("a\nb\nc")]
     [InlineData("```\nfirst line\nsecond line\nthird line\n```")]
+    [InlineData("```\r\nfirst line\r\nsecond line\r\n```")]
     [InlineData("# H\n\n> quoted\n\n- [ ] a box\n\n[a link](https://example.com) after")]
     [InlineData("A soft line break\vmid-description, and one at the end\v")]
     public void The_text_is_as_long_as_the_rendering_says(string markdown)
