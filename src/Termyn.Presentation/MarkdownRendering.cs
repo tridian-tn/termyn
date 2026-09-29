@@ -384,17 +384,40 @@ public sealed class MarkdownRendering
             }
         }
 
-        /// <summary>Adds a block that carries its text as raw lines rather than as inlines.</summary>
+        /// <summary>
+        /// Adds a block that carries its text as raw lines rather than as inlines.
+        /// </summary>
+        /// <remarks>
+        /// A run a line, each mapped from where that line sits in the markdown. Mapped from the block
+        /// as a whole, the fence above a fenced block — written but not drawn — put every click inside
+        /// it that many characters early, and an indented block drifted further on each line for the
+        /// indent every line loses.
+        ///
+        /// Blank lines at the bottom and spaces at the end of the last line are left off, so the block
+        /// doesn't leave a gap under it that isn't in anything the user wrote to see.
+        /// </remarks>
         private void Lines(LeafBlock block, RenderedStyle style)
         {
             // By count rather than by walking the array behind it, which is longer than the lines it
             // holds and isn't there at all for a fence with nothing in it — the first thing on screen
             // after typing three backticks.
-            var text = new System.Text.StringBuilder();
-            for (var i = 0; i < block.Lines.Count; i++)
-                text.AppendLine(block.Lines.Lines[i].Slice.ToString());
+            var last = block.Lines.Count - 1;
+            while (last >= 0 && string.IsNullOrWhiteSpace(block.Lines.Lines[last].Slice.ToString()))
+                last--;
 
-            Add(text.ToString().TrimEnd(), style, from: block.Span);
+            if (last < 0)
+            {
+                Add(string.Empty, style, from: block.Span);
+                return;
+            }
+
+            for (var i = 0; i <= last; i++)
+            {
+                var slice = block.Lines.Lines[i].Slice;
+                var text = slice.ToString();
+
+                Add(i == last ? text.TrimEnd() : text, style, from: new SourceSpan(slice.Start, slice.End));
+            }
         }
 
         private void Paragraph(ContainerInline? inlines, RenderedStyle style)

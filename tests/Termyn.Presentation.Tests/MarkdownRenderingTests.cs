@@ -466,14 +466,48 @@ public class MarkdownRenderingTests
     [Fact]
     public void A_word_below_a_fenced_block_still_knows_where_it_was_written()
     {
-        // A fenced block arrives as a single run carrying its own line endings. Three lines rather
-        // than two, because the ending that closes the run absorbs one of the ones inside it — so a
-        // block of two hides a miscount that a block of three shows. Asked of the word starting the
-        // run below and of one inside it, because the two fail to different faults.
+        // Every line of the block is a run and a line ending of its own, and every offset below it
+        // rides on all of them being counted — the fence lines too, which are written but not drawn.
+        // Asked of the word starting the run below and of one inside it, because the two fail to
+        // different faults.
         const string markdown = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block";
 
         MapsBack(markdown, "after");
         MapsBack(markdown, "block");
+    }
+
+    [Theory]
+    [InlineData("first")]
+    [InlineData("second")]
+    [InlineData("third")]
+    public void A_word_inside_a_fenced_block_knows_where_it_was_written(string needle)
+    {
+        // Mapped from the block as a whole, a click inside it landed the length of the opening fence
+        // and its newline early — the fence is written but not drawn.
+        MapsBack("before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter", needle);
+        MapsBack("before\n\n```csharp\nfirst line\nsecond line\nthird line\n```", needle);
+    }
+
+    [Theory]
+    [InlineData("first")]
+    [InlineData("second")]
+    public void A_word_inside_an_indented_code_block_knows_where_it_was_written(string needle)
+    {
+        // The four spaces that make it code are dropped from what's drawn, on every line — so mapped
+        // as one run it drifted further on each line down.
+        MapsBack("before\n\n    first line\n    second line\n\nafter", needle);
+    }
+
+    [Fact]
+    public void A_line_of_a_pasted_html_block_knows_where_it_was_written()
+        => MapsBack("<div>\nsomething worth reading\n</div>\n\nafter", "something");
+
+    [Fact]
+    public void A_code_blocks_trailing_blank_lines_are_not_drawn()
+    {
+        // Blank lines left at the bottom of a fence, or spaces at the end of its last line, would
+        // otherwise leave a gap under the block that isn't in anything the user wrote to see.
+        Assert.Equal(["code", "after"], Lines("```\ncode   \n\n\n```\n\nafter"));
     }
 
     [Fact]

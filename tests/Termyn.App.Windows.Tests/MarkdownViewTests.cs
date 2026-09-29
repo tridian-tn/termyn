@@ -505,6 +505,8 @@ public class MarkdownViewTests
     }
 
     [WinFormsTheory]
+    [InlineData("second")]
+    [InlineData("third")]
     [InlineData("after")]
     [InlineData("block")]
     [InlineData("and")]
@@ -513,9 +515,8 @@ public class MarkdownViewTests
     public void A_word_in_the_box_maps_back_to_where_it_was_written(string needle)
     {
         // The rendering's own tests look words up in the text it builds itself. This looks them up in
-        // what the box actually holds — past a fenced block of several lines, past broken lines, and
-        // inside a link — so a document that put the same characters in a different order couldn't
-        // pass for one that agrees with the rendering just by being the right length.
+        // what the box actually holds — inside a fenced block and past it, past broken lines, and
+        // inside a link — which is what a double-click opens the editor from.
         const string markdown = "before\n\n```\nfirst line\nsecond line\nthird line\n```\n\nafter the block\nand [the docs](https://example.com) here";
         using var view = Render(markdown);
 
