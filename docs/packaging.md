@@ -36,8 +36,9 @@ discovered to be broken later by whoever is trying to cut a release.
 
 Pushing a `v*` tag does that and then attaches both files to the GitHub release for that tag,
 creating it as a **draft** if it isn't there already. Draft rather than published because nothing is
-signed yet: somebody should look before these are downloadable. Press publish to make the release
-real, or delete the draft to abandon it.
+signed yet: somebody should look before these are downloadable. Run
+[the release checklist](release-checklist.md) against the draft's files, then press publish to make
+the release real, or delete the draft to abandon it.
 
 There's nothing to bump beforehand. Tag the commit you want to release (`v1.2.0`) and push the tag,
 and that commit is built as 1.2.0.
