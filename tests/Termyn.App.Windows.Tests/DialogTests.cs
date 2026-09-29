@@ -283,7 +283,7 @@ public class DialogTests
 
         var warning = Every(form).OfType<Label>().Single(l => l.Text.Length == 0);
         var longest = TextRenderer.MeasureText(
-            $"Needs Ctrl, Alt or Win — otherwise {HotkeyBinding.Default} is used.",
+            $"{HotkeyBinding.Requirement} — otherwise {HotkeyBinding.Default} is used.",
             form.Font);
 
         Assert.True(warning.Width >= longest.Width, $"the warning has {warning.Width} and needs {longest.Width}");
@@ -325,17 +325,35 @@ public class DialogTests
     }
 
     [WinFormsFact]
-    public void No_warning_while_the_hotkey_is_off()
+    public void The_warning_stays_when_the_hotkey_is_switched_off()
     {
-        // Nothing will be registered, so there's nothing to turn down.
+        // Save swaps a combination the binding turns down for the default whether the hotkey is on
+        // or not, so switching it off mustn't hide that. It used to, and the swap then went unsaid.
         using var form = NewSettings();
         var boxes = Every(form).OfType<CheckBox>().ToList();
         var warning = Every(form).OfType<Label>().Single(l => l.Text.Length == 0);
 
         foreach (var box in boxes.Where(b => b.Text is "Ctrl" or "Alt" or "Win"))
             box.Checked = false;
+        Assert.NotEmpty(warning.Text);
+
         boxes.Single(b => b.Text == "Global quick-add hotkey").Checked = false;
 
-        Assert.Empty(warning.Text);
+        Assert.NotEmpty(warning.Text);
+    }
+
+    [WinFormsFact]
+    public void Save_keeps_a_combination_that_registers_and_swaps_one_that_wont_for_the_default()
+    {
+        using var form = NewSettings();
+        var boxes = Every(form).OfType<CheckBox>().ToList();
+
+        boxes.Single(b => b.Text == "Shift").Checked = true;
+        Assert.Equal("Ctrl+Alt+Shift+A", form.Apply(new AppSettings()).Hotkey);
+
+        // Shift and a letter would take that letter from every other application.
+        foreach (var box in boxes.Where(b => b.Text is "Ctrl" or "Alt" or "Win"))
+            box.Checked = false;
+        Assert.Equal(HotkeyBinding.Default.ToString(), form.Apply(new AppSettings()).Hotkey);
     }
 }

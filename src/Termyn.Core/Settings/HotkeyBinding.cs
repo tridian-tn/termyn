@@ -45,6 +45,16 @@ public sealed record HotkeyBinding(HotkeyModifiers Modifiers, string Key)
         => Allowed.Contains(Key) && (Modifiers & (HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Meta)) != 0;
 
     /// <summary>
+    /// What <see cref="IsValid"/> asks of a combination, in the words someone choosing one reads.
+    /// </summary>
+    /// <remarks>
+    /// Kept beside the rule so the two change together. Only the modifiers are said: whatever offers
+    /// a choice of key offers <see cref="AllowedKeys"/>, so a missing modifier is the only way to
+    /// fall short of it.
+    /// </remarks>
+    public const string Requirement = "Needs Ctrl, Alt or Win";
+
+    /// <summary>
     /// Reads a binding written as <c>Ctrl+Alt+A</c>. Returns false for anything unreadable or not
     /// registrable, so a hand-edited config falls back to the default rather than silently losing
     /// the hotkey.

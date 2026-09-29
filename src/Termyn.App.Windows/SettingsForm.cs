@@ -174,7 +174,13 @@ internal sealed class SettingsForm : Form
         return form.ShowDialog(owner) == DialogResult.OK ? form.Apply(settings) : null;
     }
 
-    private AppSettings Apply(AppSettings settings) => settings with
+    /// <summary>
+    /// The settings as the dialog has them, which is what Save hands back.
+    /// </summary>
+    /// <remarks>Internal so a test can see what Save would write without showing the dialog.</remarks>
+    /// <param name="settings">The settings the dialog was opened on</param>
+    /// <returns>Those settings, amended with whatever the dialog now says</returns>
+    internal AppSettings Apply(AppSettings settings) => settings with
     {
         Hotkey = Binding().ToString(),
         HotkeyEnabled = _hotkeyEnabled.Checked,
@@ -228,11 +234,11 @@ internal sealed class SettingsForm : Form
 
         _interval.Enabled = (SyncMode)_syncMode.SelectedItem! == SyncMode.Automatic;
 
-        // Asked of the binding rather than worked out here, so the warning can't disagree with what
-        // Binding does on Save. The key comes from the binding's own list, so a missing modifier is
-        // the only way this dialog can build one it turns down, and that's what the words say.
-        _warning.Text = on && !Chosen().IsValid
-            ? $"Needs Ctrl, Alt or Win — otherwise {HotkeyBinding.Default} is used."
+        // Asked of the binding and said in its words, so the warning can't disagree with what Binding
+        // does on Save. Shown whether the hotkey is on or not: Save swaps the combination for the
+        // default either way, and switching the hotkey off shouldn't hide that it's about to.
+        _warning.Text = !Chosen().IsValid
+            ? $"{HotkeyBinding.Requirement} — otherwise {HotkeyBinding.Default} is used."
             : string.Empty;
     }
 
