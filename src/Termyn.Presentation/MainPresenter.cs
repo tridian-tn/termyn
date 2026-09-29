@@ -323,6 +323,19 @@ public sealed class MainPresenter
     public IReadOnlyList<Label> Labels { get; private set; } = [];
 
     /// <summary>
+    /// What each label is coloured with, by name, for drawing the labels on a task.
+    /// </summary>
+    /// <remarks>
+    /// One colour a name, since a task refers to a label by name, and looked up however the name's
+    /// cased, as labels are everywhere else. Two labels can share a name — renaming one onto
+    /// another is enough — and they take the colour of the one the sidebar lists for it: the
+    /// first in sidebar order. Built here rather than by whatever draws the rows, which used to
+    /// key it by name and threw on the second one.
+    /// </remarks>
+    public IReadOnlyDictionary<string, Rgb> LabelColours { get; private set; }
+        = new Dictionary<string, Rgb>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Publishes the cached model immediately, then reconciles with the server and publishes again.
     /// Losing the network leaves the cached rows on screen; only a rejected token propagates.
     /// </summary>
@@ -1927,6 +1940,10 @@ public sealed class MainPresenter
             _unsupportedFilter = null;
 
             Labels = snapshot.Labels.OrderBy(l => l.ItemOrder).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            LabelColours = Labels
+                .Where(l => l.Id.Length > 0)
+                .DistinctBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(l => l.Name, l => TodoistPalette.Of(l.Color), StringComparer.OrdinalIgnoreCase);
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
