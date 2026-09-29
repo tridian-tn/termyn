@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Termyn.Core.Model;
 using Termyn.Core.Settings;
+using Termyn.Core.Sync;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows.Tests;
@@ -16,6 +18,8 @@ public class MarkdownEditorTests
     private const int WmKeyUp = 0x0101;
     private const int VkReturn = 0x0D;
     private const int VkShift = 0x10;
+    private const int WmSetFocus = 0x0007;
+    private const int EmGetFirstVisibleLine = 0x00CE;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -177,6 +181,22 @@ public class MarkdownEditorTests
         Assert.Equal(markdown, editor.Text);
     }
 
+    [WinFormsTheory]
+    [InlineData("one\vtwo")]
+    [InlineData("Notes\v")]
+    [InlineData("Notes\v\v")]
+    [InlineData("Notes\n\v")]
+    public void A_soft_line_break_from_elsewhere_is_left_as_it_is(string markdown)
+    {
+        // Shift and Return no longer makes one here, but a sync or a paste from a word processor
+        // still can. It isn't a markdown line break, but it's what the account holds, and the box
+        // doesn't rewrite that. At the end of a description the styling dropped it the way it used
+        // to drop a newline, and the next save wrote the description back without it.
+        using var editor = Editing(markdown);
+
+        Assert.Equal(markdown, editor.Text);
+    }
+
     [WinFormsFact]
     public void Return_at_the_end_of_a_description_leaves_a_line_to_carry_on_typing_on()
     {
@@ -192,6 +212,154 @@ public class MarkdownEditorTests
 
         Assert.Equal("Notes\n", editor.Text);
         Assert.Equal(6, editor.SelectionStart);
+    }
+
+    [WinFormsTheory]
+    [InlineData(Keys.Shift | Keys.Return)]
+    [InlineData(Keys.Control | Keys.Shift | Keys.Return)]
+    public void Shift_and_Return_at_the_end_of_a_description_leaves_a_line_as_well(Keys keys)
+    {
+        // A rich edit control takes Return with Shift held as a soft line break, U+000B, and the
+        // styling drops one at the end of the document — so this was the fault above again, reached
+        // through the Shift+Enter a chat app teaches people to press for a new line.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, keys);
+        Assert.Equal("Notes\n", editor.Text);
+
+        editor.Restyle();
+
+        Assert.Equal("Notes\n", editor.Text);
+        Assert.Equal(6, editor.SelectionStart);
+    }
+
+    [WinFormsTheory]
+    [InlineData(4, 0, "Some\n bold words")]
+    [InlineData(5, 4, "Some \n words")]
+    public void Shift_and_Return_does_what_Return_does(int at, int length, string expected)
+    {
+        // In the middle of a description the soft break survived the styling, and was saved to the
+        // account as a U+000B, which markdown doesn't read as a line break. So what the box holds
+        // after it has to be what it holds after Return: from a caret, and over a selection it
+        // replaces.
+        using var plainHost = new Form();
+        using var plain = Editing("Some bold words", plainHost);
+        Pick(plain, at, length);
+        Press(plain, Keys.Return);
+
+        using var host = new Form();
+        using var editor = Editing("Some bold words", host);
+        Pick(editor, at, length);
+        Press(editor, Keys.Shift | Keys.Return);
+
+        // Said outright as well as compared, since two presses that never arrived would leave the
+        // two boxes agreeing about nothing having happened.
+        Assert.Equal(expected, plain.Text);
+        Assert.Equal(plain.Text, editor.Text);
+        Assert.Equal(plain.SelectionStart, editor.SelectionStart);
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_on_the_last_line_brings_the_new_one_into_view_as_Return_does()
+    {
+        // The line goes in by hand rather than through the control's own Return, and the scrolling
+        // that comes with the key had to come with it: a caret below the bottom of the box is
+        // typing blind. The control only scrolls to a caret it believes has the focus, and these
+        // windows are never shown, so each box is told it has it.
+        var scrolled = new List<int>();
+
+        foreach (var keys in new[] { Keys.Return, Keys.Shift | Keys.Return })
+        {
+            using var host = new Form();
+            using var editor = Editing(string.Join('\n', Enumerable.Range(1, 80).Select(n => $"Line {n}")), host);
+            editor.Size = new Size(300, 120);
+            SendMessage(editor.Handle, WmSetFocus, 0, 0);
+            editor.Select(editor.TextLength, 0);
+            editor.ScrollToCaret();
+            var before = FirstVisibleLine(editor);
+
+            Press(editor, keys);
+            editor.Restyle();
+
+            scrolled.Add(FirstVisibleLine(editor) - before);
+        }
+
+        Assert.True(scrolled[0] > 0, "Return didn't scroll either, so this would pass whatever Shift and Return did");
+        Assert.Equal(scrolled[0], scrolled[1]);
+    }
+
+    private static int FirstVisibleLine(RichTextBox box) => (int)SendMessage(box.Handle, EmGetFirstVisibleLine, 0, 0);
+
+    [WinFormsFact]
+    public void Shift_and_Return_is_an_edit_like_any_other()
+    {
+        // The window saves the description and notes it for undo when the box says its text has
+        // changed. A line put in that the box kept quiet about would be on screen and nowhere else.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.Select(editor.TextLength, 0);
+
+        var changes = 0;
+        editor.TextChanged += (_, _) => changes++;
+
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.True(changes > 0, "the box didn't say its text had changed");
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_in_the_window_is_undone_and_redone_like_typing()
+    {
+        // The control's own undo queue is off, so it's the window's Ctrl+Z that has to take the
+        // line back out, and its Ctrl+Y that puts it back.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"First","description":"Notes","project_id":"p1","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-shift-return-undo.json", store, out _, out var presenter);
+        _ = window.Handle;
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        window.ShowPanelTab(comments: false);
+
+        var outline = TestWindow.Find<OutlineView>(window);
+        var view = TestWindow.Find<MarkdownView>(window);
+        var editor = TestWindow.Find<MarkdownEditor>(window);
+        _ = outline.Handle;
+        _ = view.Handle;
+        _ = editor.Handle;
+        outline.SelectId("a");
+
+        // F2 on the rendering, which is how the panel is opened for writing from the keyboard.
+        Press(view, Keys.F2);
+        Assert.True(window.NewContext(null).WritingDescription);
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Shift | Keys.Return);
+        Assert.Equal("Notes\n", editor.Text);
+
+        Press(editor, Keys.Control | Keys.Z);
+        Assert.Equal("Notes", editor.Text);
+
+        Press(editor, Keys.Control | Keys.Y);
+        Assert.Equal("Notes\n", editor.Text);
+    }
+
+    [WinFormsFact]
+    public void Shift_and_Return_changes_nothing_in_a_box_that_cannot_be_written_in()
+    {
+        // Read-only is how the box sits with no task under it, or one the account won't let this
+        // user change. The control ignores the key there, and putting the line in by hand mustn't
+        // get round that.
+        using var host = new Form();
+        using var editor = Editing("Notes", host);
+        editor.ReadOnly = true;
+        editor.Select(editor.TextLength, 0);
+
+        Press(editor, Keys.Shift | Keys.Return);
+
+        Assert.Equal("Notes", editor.Text);
     }
 
 
