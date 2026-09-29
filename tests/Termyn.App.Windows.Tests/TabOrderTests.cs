@@ -67,6 +67,25 @@ public class TabOrderTests
         Assert.All(stops.Skip(3), stop => Assert.True(page.Contains(stop), $"{stop.GetType().Name} isn't part of what the tab shows"));
     }
 
+    [WinFormsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_way_out_of_a_filter_Termyn_cant_read_comes_between_the_tree_and_the_list(bool forward)
+    {
+        // It's drawn above the list, and Tab used to reach it last, after the panel. It stays a
+        // stop, though: nothing else from the keyboard opens the filter in Todoist.
+        using var window = OnUnreadableFilter();
+        var round = Round(window, forward);
+        List<Control> stops = forward ? round : [round[0], .. round.Skip(1).Reverse()];
+
+        Assert.Collection(
+            stops.Take(4),
+            first => Assert.True(first is TextBox, $"the search box should come first, not {first.GetType().Name}"),
+            then => Assert.True(then is TreeView, $"the tree should come next, not {then.GetType().Name}"),
+            then => Assert.True(then is LinkLabel { Text: var text } && text.Contains("can't read"), $"the notice should come after the tree, not {then.GetType().Name}"),
+            then => Assert.True(then is ListView, $"the list should come after the notice, not {then.GetType().Name}"));
+    }
+
     [WinFormsFact]
     public void The_status_line_and_the_menu_bar_are_not_stops_on_the_way()
     {
@@ -76,7 +95,10 @@ public class TabOrderTests
         Assert.DoesNotContain(Order(window).Where(c => c.TabStop), c => c is Label or MenuStrip);
     }
 
-    /// <summary>The window's children, in the order Tab visits them.</summary>
+    /// <summary>
+    /// The controls the window steps between for Tab, in order. It doesn't look inside the split,
+    /// whose contents are the split's own to order.
+    /// </summary>
     private static List<Control> Order(Form window)
     {
         var order = new List<Control>();
@@ -185,11 +207,7 @@ public class TabOrderTests
         store.PutResource("items", "a", """{"id":"a","content":"Ship it","description":"Notes","project_id":"p2","child_order":1}""");
 
         var window = TestWindow.Build("termyn-tab-round.json", store, out _, out var presenter);
-
-        // A control on a window nobody has shown can't take the focus.
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.Show();
+        ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfProject("p2"));
         TestWindow.Find<OutlineView>(window).SelectId("a");
@@ -200,5 +218,40 @@ public class TabOrderTests
         Assert.Contains(TestWindow.Descendants(window).OfType<LinkLabel>(), l => l.Text.StartsWith("Work") && l.Links.Count > 0);
 
         return window;
+    }
+
+    /// <summary>
+    /// A window on a filter Termyn can't read, with the panel open, shown so its controls can take
+    /// the focus.
+    /// </summary>
+    /// <returns>The window, shown off-screen, which the caller disposes</returns>
+    private static MainForm OnUnreadableFilter()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("filters", "f1", """{"id":"f1","name":"Home","query":"workspace: Home","item_order":1}""");
+
+        var window = TestWindow.Build("termyn-tab-unreadable.json", store, out _, out var presenter);
+        ShowOffScreen(window);
+
+        presenter.Select(ViewSelection.OfFilter("f1"));
+        window.ShowPanelTab(comments: false);
+
+        // Without the notice up there'd be nothing to put in order, and the test would fail on the
+        // list for a reason that has nothing to do with Tab.
+        Assert.Contains(TestWindow.Descendants(window).OfType<LinkLabel>(), l => l.Visible && l.Text.Contains("can't read"));
+
+        return window;
+    }
+
+    /// <summary>
+    /// Shows a window off the screen, since a control on a window nobody has shown can't take the
+    /// focus.
+    /// </summary>
+    /// <param name="window">The window to show</param>
+    private static void ShowOffScreen(Form window)
+    {
+        window.StartPosition = FormStartPosition.Manual;
+        window.Location = new Point(-2000, -2000);
+        window.Show();
     }
 }

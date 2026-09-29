@@ -491,6 +491,12 @@ internal sealed class MainForm : Form
         // Above the outline, so it reads as an explanation of the empty list below it.
         _split.Panel2.Controls.Add(_unsupported);
 
+        // And reached before it by Tab too. Left to the order these were added in, which is about
+        // docking, Tab got to it last, after the panel. It stays a stop, unlike the path above the
+        // list: its link is the only way from the keyboard to a filter Termyn can't read.
+        _unsupported.TabIndex = 0;
+        _detail.TabIndex = 1;
+
         _status = new Label
         {
             Dock = DockStyle.Bottom,
