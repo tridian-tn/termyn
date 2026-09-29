@@ -288,4 +288,54 @@ public class DialogTests
 
         Assert.True(warning.Width >= longest.Width, $"the warning has {warning.Width} and needs {longest.Width}");
     }
+
+    [WinFormsFact]
+    public void The_warning_shows_for_exactly_the_combinations_the_binding_turns_down()
+    {
+        // Every combination of the four boxes, held to the binding's own answer rather than to a
+        // copy of its rule. Saving one it turns down gets the default instead, so a warning that
+        // disagreed would either cry wolf or let the hotkey be swapped without a word.
+        using var form = NewSettings();
+        var boxes = Every(form).OfType<CheckBox>().ToList();
+        var warning = Every(form).OfType<Label>().Single(l => l.Text.Length == 0);
+
+        boxes.Single(b => b.Text == "Global quick-add hotkey").Checked = true;
+        var modifiers = new (string Box, HotkeyModifiers Flag)[]
+        {
+            ("Ctrl", HotkeyModifiers.Control),
+            ("Alt", HotkeyModifiers.Alt),
+            ("Shift", HotkeyModifiers.Shift),
+            ("Win", HotkeyModifiers.Meta),
+        };
+
+        for (var combination = 0; combination < 1 << modifiers.Length; combination++)
+        {
+            var chosen = HotkeyModifiers.None;
+            for (var i = 0; i < modifiers.Length; i++)
+            {
+                var ticked = (combination & (1 << i)) != 0;
+                boxes.Single(b => b.Text == modifiers[i].Box).Checked = ticked;
+                if (ticked)
+                    chosen |= modifiers[i].Flag;
+            }
+
+            var turnedDown = !new HotkeyBinding(chosen, HotkeyBinding.Default.Key).IsValid;
+            Assert.True(turnedDown == warning.Text.Length > 0, $"{chosen}: warning {(warning.Text.Length > 0 ? "shown" : "not shown")}");
+        }
+    }
+
+    [WinFormsFact]
+    public void No_warning_while_the_hotkey_is_off()
+    {
+        // Nothing will be registered, so there's nothing to turn down.
+        using var form = NewSettings();
+        var boxes = Every(form).OfType<CheckBox>().ToList();
+        var warning = Every(form).OfType<Label>().Single(l => l.Text.Length == 0);
+
+        foreach (var box in boxes.Where(b => b.Text is "Ctrl" or "Alt" or "Win"))
+            box.Checked = false;
+        boxes.Single(b => b.Text == "Global quick-add hotkey").Checked = false;
+
+        Assert.Empty(warning.Text);
+    }
 }

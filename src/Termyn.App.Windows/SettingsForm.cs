@@ -151,8 +151,11 @@ internal sealed class SettingsForm : Form
 
         _hotkeyEnabled.CheckedChanged += (_, _) => Sync();
         _syncMode.SelectedIndexChanged += (_, _) => Sync();
-        foreach (var box in new[] { _ctrl, _alt, _win })
+        // Everything the binding is made from, so the warning is asked again whenever its answer
+        // could change — not only when one of the modifiers today's rule happens to look at does.
+        foreach (var box in new[] { _ctrl, _alt, _shift, _win })
             box.CheckedChanged += (_, _) => Sync();
+        _key.SelectedIndexChanged += (_, _) => Sync();
 
         theme.Apply(this);
         _warning.ForeColor = theme.Accent;
@@ -195,7 +198,17 @@ internal sealed class SettingsForm : Form
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public Func<int>? ClearDownloads { get; set; }
 
-    private HotkeyBinding Binding()
+    /// <summary>
+    /// The combination to save.
+    /// </summary>
+    /// <remarks>
+    /// Saving an unregistrable combination would leave the hotkey silently dead; the default is
+    /// better than that, and the warning says so before Save is pressed.
+    /// </remarks>
+    private HotkeyBinding Binding() => Chosen() is { IsValid: true } chosen ? chosen : HotkeyBinding.Default;
+
+    /// <summary>The combination the boxes and the key say, whether or not it would register.</summary>
+    private HotkeyBinding Chosen()
     {
         var modifiers = HotkeyModifiers.None;
         if (_ctrl.Checked) modifiers |= HotkeyModifiers.Control;
@@ -203,11 +216,7 @@ internal sealed class SettingsForm : Form
         if (_shift.Checked) modifiers |= HotkeyModifiers.Shift;
         if (_win.Checked) modifiers |= HotkeyModifiers.Meta;
 
-        var binding = new HotkeyBinding(modifiers, (string)_key.SelectedItem!);
-
-        // Saving an unregistrable combination would leave the hotkey silently dead; the default is
-        // better than that, and the warning below says so before Save is pressed.
-        return binding.IsValid ? binding : HotkeyBinding.Default;
+        return new HotkeyBinding(modifiers, (string)_key.SelectedItem!);
     }
 
     /// <summary>Keeps the dialog honest about what is in effect and what won't be accepted.</summary>
@@ -219,8 +228,10 @@ internal sealed class SettingsForm : Form
 
         _interval.Enabled = (SyncMode)_syncMode.SelectedItem! == SyncMode.Automatic;
 
-        var needsModifier = on && !(_ctrl.Checked || _alt.Checked || _win.Checked);
-        _warning.Text = needsModifier
+        // Asked of the binding rather than worked out here, so the warning can't disagree with what
+        // Binding does on Save. The key comes from the binding's own list, so a missing modifier is
+        // the only way this dialog can build one it turns down, and that's what the words say.
+        _warning.Text = on && !Chosen().IsValid
             ? $"Needs Ctrl, Alt or Win — otherwise {HotkeyBinding.Default} is used."
             : string.Empty;
     }
