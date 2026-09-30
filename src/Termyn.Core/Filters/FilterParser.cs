@@ -475,7 +475,10 @@ public static class FilterParser
     /// </summary>
     /// <remarks>
     /// A run with an asterisk in it names something when it fits one of the account's names, which
-    /// is how "#Welcome *" reaches past its space to a project called "Welcome" and an emoji.
+    /// is how "#Welcome *" reaches past its space to a project called "Welcome" and an emoji. A word
+    /// that's nothing but asterisks ends the name even when nothing fits: it can't be a term of its
+    /// own, so once the project's gone "#Welcome *" matches nothing, as "#Ghost" does, rather than
+    /// refusing the filter.
     /// </remarks>
     private static string? ReadName(List<string> tokens, IReadOnlySet<string> known, ref int at, int prefix, out string? failed)
     {
@@ -489,17 +492,30 @@ public static class FilterParser
         failed = null;
         var consumed = 1;
         var candidate = new StringBuilder(name);
+        var longest = known.Count > 0 ? known.Max(k => k.Length) : 0;
 
         for (var i = at + 1; i < tokens.Count && !IsOperator(tokens[i]); i++)
         {
             candidate.Append(' ').Append(tokens[i]);
 
+            // Every character a run writes has to be in the name it fits, so once it's longer than
+            // any name the account has, no longer run can fit one either.
             var run = candidate.ToString();
-            if (known.Contains(run) || (Wildcard.In(run) && known.Any(k => Wildcard.Matches(run, k))))
+            var fit = Wildcard.Of(run);
+            if (fit.Length > longest)
+                break;
+
+            if (fit.IsPattern ? known.Any(fit.Matches) : known.Contains(fit.Name))
             {
                 name = run;
                 consumed = i - at + 1;
             }
+        }
+
+        if (at + consumed < tokens.Count && Wildcard.FitsAnything(tokens[at + consumed]))
+        {
+            name = $"{name} {tokens[at + consumed]}";
+            consumed++;
         }
 
         at += consumed;
@@ -526,8 +542,9 @@ public static class FilterParser
             return null;
         }
 
+        // Searched for as written: an asterisk here is only an asterisk, however it was typed.
         failed = null;
-        return new FilterExpression.Search(text.ToString());
+        return new FilterExpression.Search(Wildcard.Unescaped(text.ToString()));
     }
 
     /// <summary>
@@ -816,7 +833,9 @@ public static class FilterParser
     /// Quotes and backslashes are how Todoist lets a name carry a character the grammar would
     /// otherwise take for its own — <c>/"Wed &amp; Thu"</c>, or <c>#Books\&amp;Papers</c>. Both put the
     /// character into the word being built rather than starting a new one, so a name is one token
-    /// however it is written.
+    /// however it is written. An asterisk or a backslash goes in with a backslash still in front of
+    /// it: a bare asterisk in a name is a wildcard, and <see cref="Wildcard"/> has to be able to
+    /// tell the two apart.
     ///
     /// Either can be left open, and the caller is told when one is: a query that stops in the
     /// middle of a name is a broken query, not a shorter one.
@@ -838,7 +857,7 @@ public static class FilterParser
 
             if (escaped)
             {
-                word.Append(c);
+                Literal(c);
                 escaped = false;
                 continue;
             }
@@ -857,7 +876,7 @@ public static class FilterParser
 
             if (quoted)
             {
-                word.Append(c);
+                Literal(c);
                 continue;
             }
 
@@ -888,6 +907,14 @@ public static class FilterParser
         Flush();
         unclosed = quoted || escaped;
         return tokens;
+
+        void Literal(char c)
+        {
+            if (c is '*' or '\\')
+                word.Append('\\');
+
+            word.Append(c);
+        }
 
         void Flush()
         {

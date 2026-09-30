@@ -95,6 +95,15 @@ public class FilterParserTests
         Assert.IsType<FilterExpression.DueToday>(and.Right);
     }
 
+    [Fact]
+    public void A_lone_asterisk_ends_the_name_before_it_even_when_nothing_fits()
+    {
+        // It can't be a term of its own, so taking it as one would refuse a filter Todoist answers
+        // with nothing — which is what "#Ghost" gets here too.
+        var and = Assert.IsType<FilterExpression.And>(Parse("#Gone * & today").Expression);
+        Assert.Equal("Gone *", Assert.IsType<FilterExpression.InProject>(and.Left).Name);
+    }
+
     [Theory]
     [InlineData("p1", Priority.P1)]
     [InlineData("p4", Priority.P4)]

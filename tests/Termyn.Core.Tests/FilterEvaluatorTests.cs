@@ -16,6 +16,7 @@ public class FilterEvaluatorTests
         new() { Id = "home", Name = "Home" },
         new() { Id = "work2", Name = "Work" }, // Todoist allows two projects to share a name
         new() { Id = "team", Name = "Team", IsShared = true },
+        new() { Id = "welcome", Name = "Welcome 👋" }, // an emoji after a space, as Todoist names its own
     ];
 
     /// <summary>The account these tests run as. Everyone else is somebody else.</summary>
@@ -85,6 +86,22 @@ public class FilterEvaluatorTests
     {
         Assert.True(Matches("##W*", Item(projectId: "deep")));
         Assert.False(Matches("##W*", Item(projectId: "home")));
+    }
+
+    [Fact]
+    public void An_asterisk_after_a_space_fits_a_name_ending_in_an_emoji()
+    {
+        // Todoist's help says to write "#Welcome *" rather than typing the emoji.
+        Assert.True(Matches("#Welcome *", Item(projectId: "welcome")));
+        Assert.False(Matches("#Welcome *", Item(projectId: "work")));
+    }
+
+    [Fact]
+    public void A_spaced_pattern_nothing_fits_matches_nothing_rather_than_refusing()
+    {
+        // As "#Ghost" does. The project behind a saved filter can be renamed or deleted.
+        Assert.False(Matches("#Gone *", Item(projectId: "welcome")));
+        Assert.True(Matches("!#Gone * & #Home", Item(projectId: "home")));
     }
 
     [Fact]
@@ -218,6 +235,10 @@ public class FilterEvaluatorTests
         Assert.True(Matches("search: milk", Item(content: "Buy milk today")));
         Assert.True(Matches("search: MILK", Item(content: "Buy milk today")));
         Assert.False(Matches("search: milk", Item(content: "Buy bread")));
+
+        // An asterisk searches for an asterisk, however it was written.
+        Assert.True(Matches("""search: 5\*3""", Item(content: "Work out 5*3")));
+        Assert.True(Matches("search: 5*3", Item(content: "Work out 5*3")));
     }
 
     [Fact]
@@ -270,6 +291,15 @@ public class FilterEvaluatorTests
     }
 
     [Fact]
+    public void A_task_in_a_section_the_account_has_not_sent_is_still_in_a_section()
+    {
+        // "/*" asks about the task's own field. Fitted against the sections held, this one would be
+        // in none of them, and so in no section.
+        Assert.True(Matches("/*", Item(projectId: "work", sectionId: "not-yet-synced")));
+        Assert.False(Matches("!/*", Item(projectId: "work", sectionId: "not-yet-synced")));
+    }
+
+    [Fact]
     public void A_subtask_is_one_filed_under_another_task()
     {
         Assert.True(Matches("subtask", Item(parentId: "parent")));
@@ -319,6 +349,29 @@ public class FilterEvaluatorTests
 
         // A name that really has an asterisk in it still fits itself.
         Assert.True(Matches("%a*b", Item(labels: ["a*b"])));
+    }
+
+    [Fact]
+    public void An_escaped_or_quoted_asterisk_is_the_character_itself()
+    {
+        // The way a backslash or quotes hand the name any other character the grammar would take.
+        Assert.True(Matches("""%a\*b""", Item(labels: ["a*b"])));
+        Assert.False(Matches("""%a\*b""", Item(labels: ["aXb"])));
+        Assert.True(Matches("""%"a*b" """, Item(labels: ["a*b"])));
+        Assert.False(Matches("""%"a*b" """, Item(labels: ["aXb"])));
+
+        // Escaped next to a bare one, each keeps its own meaning.
+        Assert.True(Matches("""%a\**""", Item(labels: ["a*bc"])));
+        Assert.False(Matches("""%a\**""", Item(labels: ["abc"])));
+    }
+
+    [Fact]
+    public void An_escaped_backslash_is_still_one_backslash()
+    {
+        // Which the tokenizer now passes on as two, so it can't be taken for an escaped asterisk.
+        Assert.True(Matches("""%a\\b""", Item(labels: [@"a\b"])));
+        Assert.True(Matches("""%a\\*""", Item(labels: [@"a\bc"])));
+        Assert.False(Matches("""%a\\*""", Item(labels: ["a*"])));
     }
 
     [Fact]
