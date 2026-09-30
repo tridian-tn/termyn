@@ -13,6 +13,7 @@ public sealed class FilterContext
     private readonly IReadOnlyList<Section> _sections;
     private readonly Dictionary<(string Name, bool IncludeSubProjects), HashSet<string>> _resolved = new();
     private readonly Dictionary<string, HashSet<string>> _resolvedSections = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Wildcard> _labels = new(StringComparer.Ordinal);
     private HashSet<string>? _shared;
 
     public FilterContext(
@@ -72,14 +73,16 @@ public sealed class FilterContext
     /// <summary>
     /// The projects a <c>#name</c> refers to. Names aren't unique in Todoist, so every project of
     /// that name counts — matching only the first would drop tasks the user can see under the name.
+    /// A name with an asterisk in it refers to every project it fits.
     /// </summary>
     public HashSet<string> ProjectIds(string name, bool includeSubProjects)
     {
         if (_resolved.TryGetValue((name, includeSubProjects), out var cached))
             return cached;
 
+        var written = Wildcard.Of(name);
         var named = _projects
-            .Where(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Where(p => written.Matches(p.Name))
             .Select(p => p.Id);
 
         var ids = includeSubProjects
@@ -96,7 +99,8 @@ public sealed class FilterContext
     /// <remarks>
     /// Every section of that name, in every project. Section names repeat far more than project
     /// names do — half an account's projects can have a "Later" — and a filter naming one means all
-    /// of them, which is why narrowing it down is what the project term is for.
+    /// of them, which is why narrowing it down is what the project term is for. A name with an
+    /// asterisk in it means every section it fits, so <c>/*</c> is every section there is.
     /// </remarks>
     /// <param name="name">The name as the query wrote it</param>
     /// <returns>The ids of every section called that</returns>
@@ -105,13 +109,31 @@ public sealed class FilterContext
         if (_resolvedSections.TryGetValue(name, out var cached))
             return cached;
 
+        var written = Wildcard.Of(name);
         var ids = _sections
-            .Where(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Where(s => written.Matches(s.Name))
             .Select(s => s.Id)
             .ToHashSet(StringComparer.Ordinal);
 
         _resolvedSections[name] = ids;
         return ids;
+    }
+
+    /// <summary>
+    /// What a <c>%name</c> stands for, read once rather than for every label of every task.
+    /// </summary>
+    /// <remarks>
+    /// Fitted against the task's own labels rather than resolved to a set up front, as projects and
+    /// sections are: a task can carry a label the account's list doesn't hold.
+    /// </remarks>
+    /// <param name="name">The name as the query wrote it</param>
+    /// <returns>The name, or the pattern it's written as</returns>
+    internal Wildcard Label(string name)
+    {
+        if (!_labels.TryGetValue(name, out var label))
+            _labels[name] = label = Wildcard.Of(name);
+
+        return label;
     }
 }
 
@@ -125,11 +147,12 @@ public static class FilterEvaluator
         FilterExpression.InProject e =>
             item.ProjectId is { } id && context.ProjectIds(e.Name, e.IncludeSubProjects).Contains(id),
 
+        // A name that fits any name at all only asks whether the task's in a section, so one the
+        // account hasn't sent yet still counts.
         FilterExpression.InSection e =>
-            item.SectionId is { } id && context.SectionIds(e.Name).Contains(id),
+            item.SectionId is { } id && (Wildcard.FitsAnything(e.Name) || context.SectionIds(e.Name).Contains(id)),
 
-        FilterExpression.HasLabel e =>
-            item.Labels.Contains(e.Name, StringComparer.OrdinalIgnoreCase),
+        FilterExpression.HasLabel e => item.Labels.Any(context.Label(e.Name).Matches),
 
         FilterExpression.NoLabels => item.Labels.Count == 0,
 

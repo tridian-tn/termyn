@@ -52,12 +52,14 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// </summary>
 /// <remarks>
 /// Where it goes: <c>#project</c> and <c>##project</c> (with sub-projects), <c>/section</c>,
-/// <c>%label</c> and <c>@label</c>, <c>no labels</c>. What it is: <c>p1</c>–<c>p4</c> (or
-/// <c>priority 1</c>–<c>priority 4</c>, or <c>no priority</c>), <c>recurring</c>, <c>subtask</c>,
-/// <c>view all</c>. When it is: <c>today</c>, <c>tomorrow</c>, <c>yesterday</c>, <c>overdue</c>
-/// (<c>over due</c>, <c>od</c>), <c>no date</c>, <c>no time</c>, <c>next N days</c>, <c>N days</c>,
-/// <c>-N days</c>, and <c>due:</c>, <c>date:</c>, <c>deadline:</c>, <c>created:</c> with their
-/// <c>before:</c> and <c>after:</c> forms. Plus <c>no deadline</c> and <c>search: text</c>.
+/// <c>%label</c> and <c>@label</c>, <c>no labels</c>. Any of those names can carry an asterisk to
+/// stand for every name it fits — <c>%home*</c>, <c>#*Work</c> — so <c>!/*</c> is the tasks in no
+/// section. What it is: <c>p1</c>–<c>p4</c> (or <c>priority 1</c>–<c>priority 4</c>, or
+/// <c>no priority</c>), <c>recurring</c>, <c>subtask</c>, <c>view all</c>. When it is:
+/// <c>today</c>, <c>tomorrow</c>, <c>yesterday</c>, <c>overdue</c> (<c>over due</c>, <c>od</c>),
+/// <c>no date</c>, <c>no time</c>, <c>next N days</c>, <c>N days</c>, <c>-N days</c>, and
+/// <c>due:</c>, <c>date:</c>, <c>deadline:</c>, <c>created:</c> with their <c>before:</c> and
+/// <c>after:</c> forms. Plus <c>no deadline</c> and <c>search: text</c>.
 ///
 /// Who it's for: <c>assigned</c>, <c>assigned to: me</c> (or <c>:to_me:</c>), <c>assigned to:
 /// others</c> (or <c>:to_others:</c>), <c>assigned by: me</c>, <c>added by: me</c>, and
@@ -73,9 +75,8 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// operator between them are an implicit <c>&amp;</c>, which is how "#Work today" reads.
 ///
 /// Left out, and refused by name rather than guessed at: naming a person rather than yourself,
-/// which needs the account's collaborators; which workspace a task is in; the wildcard forms
-/// (<c>%email*</c>, <c>#\*name</c>, and the <c>!/*</c> that means "in no section"); and
-/// <c>uncompletable</c>, which no field here is known to answer.
+/// which needs the account's collaborators, whether it's written in full or with an asterisk;
+/// which workspace a task is in; and <c>uncompletable</c>, which no field here is known to answer.
 /// </remarks>
 public static class FilterParser
 {
@@ -472,6 +473,13 @@ public static class FilterParser
     /// can say where one ends: "#My Project" is a single project, while "#Work today" is a project
     /// and a date. The longest run that names something wins; failing that, the first word alone.
     /// </summary>
+    /// <remarks>
+    /// A run with an asterisk in it names something when it fits one of the account's names, which
+    /// is how "#Welcome *" reaches past its space to a project called "Welcome" and an emoji. A word
+    /// that's nothing but asterisks ends the name even when nothing fits: it can't be a term of its
+    /// own, so once the project's gone "#Welcome *" matches nothing, as "#Ghost" does, rather than
+    /// refusing the filter.
+    /// </remarks>
     private static string? ReadName(List<string> tokens, IReadOnlySet<string> known, ref int at, int prefix, out string? failed)
     {
         var name = tokens[at][prefix..];
@@ -484,15 +492,30 @@ public static class FilterParser
         failed = null;
         var consumed = 1;
         var candidate = new StringBuilder(name);
+        var longest = known.Count > 0 ? known.Max(k => k.Length) : 0;
 
         for (var i = at + 1; i < tokens.Count && !IsOperator(tokens[i]); i++)
         {
             candidate.Append(' ').Append(tokens[i]);
-            if (known.Contains(candidate.ToString()))
+
+            // Every character a run writes has to be in the name it fits, so once it's longer than
+            // any name the account has, no longer run can fit one either.
+            var run = candidate.ToString();
+            var fit = Wildcard.Of(run);
+            if (fit.Length > longest)
+                break;
+
+            if (fit.IsPattern ? known.Any(fit.Matches) : known.Contains(fit.Name))
             {
-                name = candidate.ToString();
+                name = run;
                 consumed = i - at + 1;
             }
+        }
+
+        if (at + consumed < tokens.Count && Wildcard.FitsAnything(tokens[at + consumed]))
+        {
+            name = $"{name} {tokens[at + consumed]}";
+            consumed++;
         }
 
         at += consumed;
@@ -519,8 +542,9 @@ public static class FilterParser
             return null;
         }
 
+        // Searched for as written: an asterisk here is only an asterisk, however it was typed.
         failed = null;
-        return new FilterExpression.Search(text.ToString());
+        return new FilterExpression.Search(Wildcard.Unescaped(text.ToString()));
     }
 
     /// <summary>
@@ -809,7 +833,9 @@ public static class FilterParser
     /// Quotes and backslashes are how Todoist lets a name carry a character the grammar would
     /// otherwise take for its own — <c>/"Wed &amp; Thu"</c>, or <c>#Books\&amp;Papers</c>. Both put the
     /// character into the word being built rather than starting a new one, so a name is one token
-    /// however it is written.
+    /// however it is written. An asterisk or a backslash goes in with a backslash still in front of
+    /// it: a bare asterisk in a name is a wildcard, and <see cref="Wildcard"/> has to be able to
+    /// tell the two apart.
     ///
     /// Either can be left open, and the caller is told when one is: a query that stops in the
     /// middle of a name is a broken query, not a shorter one.
@@ -831,7 +857,7 @@ public static class FilterParser
 
             if (escaped)
             {
-                word.Append(c);
+                Literal(c);
                 escaped = false;
                 continue;
             }
@@ -850,7 +876,7 @@ public static class FilterParser
 
             if (quoted)
             {
-                word.Append(c);
+                Literal(c);
                 continue;
             }
 
@@ -881,6 +907,14 @@ public static class FilterParser
         Flush();
         unclosed = quoted || escaped;
         return tokens;
+
+        void Literal(char c)
+        {
+            if (c is '*' or '\\')
+                word.Append('\\');
+
+            word.Append(c);
+        }
 
         void Flush()
         {
