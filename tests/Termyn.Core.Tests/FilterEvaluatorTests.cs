@@ -69,6 +69,25 @@ public class FilterEvaluatorTests
         => Assert.False(Matches("#Work", Item()));
 
     [Fact]
+    public void A_project_name_with_an_asterisk_matches_every_project_it_fits()
+    {
+        Assert.True(Matches("#W*", Item(projectId: "work")));
+        Assert.True(Matches("#W*", Item(projectId: "work2")));
+        Assert.True(Matches("#w*", Item(projectId: "work")));
+        Assert.False(Matches("#W*", Item(projectId: "admin")));
+
+        Assert.True(Matches("#*e", Item(projectId: "home")));
+        Assert.False(Matches("#*e", Item(projectId: "work")));
+    }
+
+    [Fact]
+    public void A_double_hash_with_an_asterisk_reaches_under_every_project_it_fits()
+    {
+        Assert.True(Matches("##W*", Item(projectId: "deep")));
+        Assert.False(Matches("##W*", Item(projectId: "home")));
+    }
+
+    [Fact]
     public void Labels_match_by_name_ignoring_case()
     {
         Assert.True(Matches("@home", Item(labels: ["home"])));
@@ -232,6 +251,25 @@ public class FilterEvaluatorTests
         => Assert.False(Matches("/Later", Item(projectId: "work")));
 
     [Fact]
+    public void A_section_name_with_an_asterisk_matches_every_section_it_fits()
+    {
+        Assert.True(Matches("/*ee*", Item(projectId: "work", sectionId: "meetings")));
+        Assert.False(Matches("/*ee*", Item(projectId: "work", sectionId: "later-work")));
+    }
+
+    [Fact]
+    public void Not_in_any_section_is_a_task_in_none()
+    {
+        // Read as a section called "*", which there isn't, this was every task in the account.
+        Assert.True(Matches("!/*", Item(projectId: "work")));
+        Assert.False(Matches("!/*", Item(projectId: "work", sectionId: "later-work")));
+        Assert.False(Matches("!/*", Item(projectId: "home", sectionId: "later-home")));
+
+        Assert.True(Matches("/*", Item(projectId: "work", sectionId: "meetings")));
+        Assert.True(Matches("#Work & !/*", Item(projectId: "work")));
+    }
+
+    [Fact]
     public void A_subtask_is_one_filed_under_another_task()
     {
         Assert.True(Matches("subtask", Item(parentId: "parent")));
@@ -254,6 +292,33 @@ public class FilterEvaluatorTests
         // Todoist writes "%home" now and is retiring "@home", so an account can hold either.
         Assert.True(Matches("%home", Item(labels: ["home"])));
         Assert.True(Matches("@home", Item(labels: ["home"])));
+    }
+
+    [Fact]
+    public void A_label_name_with_an_asterisk_matches_any_label_it_fits()
+    {
+        // Todoist's own example: every label starting "home".
+        Assert.True(Matches("%home*", Item(labels: ["homework"])));
+        Assert.True(Matches("%home*", Item(labels: ["work", "Home Office"])));
+        Assert.True(Matches("%home*", Item(labels: ["home"])));
+        Assert.False(Matches("%home*", Item(labels: ["at home"])));
+        Assert.False(Matches("%home*", Item()));
+
+        Assert.True(Matches("@*work", Item(labels: ["homework"])));
+    }
+
+    [Fact]
+    public void The_pieces_either_side_of_an_asterisk_are_found_in_order()
+    {
+        Assert.True(Matches("%a*b*c", Item(labels: ["a-b-c"])));
+        Assert.False(Matches("%a*b*c", Item(labels: ["a-c-b"])));
+
+        // Both ends are needed in full, without sharing a character between them.
+        Assert.True(Matches("%ab*ba", Item(labels: ["abba"])));
+        Assert.False(Matches("%ab*ba", Item(labels: ["aba"])));
+
+        // A name that really has an asterisk in it still fits itself.
+        Assert.True(Matches("%a*b", Item(labels: ["a*b"])));
     }
 
     [Fact]

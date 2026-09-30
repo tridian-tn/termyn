@@ -72,6 +72,7 @@ public sealed class FilterContext
     /// <summary>
     /// The projects a <c>#name</c> refers to. Names aren't unique in Todoist, so every project of
     /// that name counts — matching only the first would drop tasks the user can see under the name.
+    /// A name with an asterisk in it refers to every project it fits.
     /// </summary>
     public HashSet<string> ProjectIds(string name, bool includeSubProjects)
     {
@@ -79,7 +80,7 @@ public sealed class FilterContext
             return cached;
 
         var named = _projects
-            .Where(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Where(p => Wildcard.Matches(name, p.Name))
             .Select(p => p.Id);
 
         var ids = includeSubProjects
@@ -96,7 +97,8 @@ public sealed class FilterContext
     /// <remarks>
     /// Every section of that name, in every project. Section names repeat far more than project
     /// names do — half an account's projects can have a "Later" — and a filter naming one means all
-    /// of them, which is why narrowing it down is what the project term is for.
+    /// of them, which is why narrowing it down is what the project term is for. A name with an
+    /// asterisk in it means every section it fits, so <c>/*</c> is every section there is.
     /// </remarks>
     /// <param name="name">The name as the query wrote it</param>
     /// <returns>The ids of every section called that</returns>
@@ -106,7 +108,7 @@ public sealed class FilterContext
             return cached;
 
         var ids = _sections
-            .Where(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Where(s => Wildcard.Matches(name, s.Name))
             .Select(s => s.Id)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -129,7 +131,7 @@ public static class FilterEvaluator
             item.SectionId is { } id && context.SectionIds(e.Name).Contains(id),
 
         FilterExpression.HasLabel e =>
-            item.Labels.Contains(e.Name, StringComparer.OrdinalIgnoreCase),
+            item.Labels.Any(label => Wildcard.Matches(e.Name, label)),
 
         FilterExpression.NoLabels => item.Labels.Count == 0,
 

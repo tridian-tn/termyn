@@ -52,12 +52,14 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// </summary>
 /// <remarks>
 /// Where it goes: <c>#project</c> and <c>##project</c> (with sub-projects), <c>/section</c>,
-/// <c>%label</c> and <c>@label</c>, <c>no labels</c>. What it is: <c>p1</c>–<c>p4</c> (or
-/// <c>priority 1</c>–<c>priority 4</c>, or <c>no priority</c>), <c>recurring</c>, <c>subtask</c>,
-/// <c>view all</c>. When it is: <c>today</c>, <c>tomorrow</c>, <c>yesterday</c>, <c>overdue</c>
-/// (<c>over due</c>, <c>od</c>), <c>no date</c>, <c>no time</c>, <c>next N days</c>, <c>N days</c>,
-/// <c>-N days</c>, and <c>due:</c>, <c>date:</c>, <c>deadline:</c>, <c>created:</c> with their
-/// <c>before:</c> and <c>after:</c> forms. Plus <c>no deadline</c> and <c>search: text</c>.
+/// <c>%label</c> and <c>@label</c>, <c>no labels</c>. Any of those names can carry an asterisk to
+/// stand for every name it fits — <c>%home*</c>, <c>#*Work</c> — so <c>!/*</c> is the tasks in no
+/// section. What it is: <c>p1</c>–<c>p4</c> (or <c>priority 1</c>–<c>priority 4</c>, or
+/// <c>no priority</c>), <c>recurring</c>, <c>subtask</c>, <c>view all</c>. When it is:
+/// <c>today</c>, <c>tomorrow</c>, <c>yesterday</c>, <c>overdue</c> (<c>over due</c>, <c>od</c>),
+/// <c>no date</c>, <c>no time</c>, <c>next N days</c>, <c>N days</c>, <c>-N days</c>, and
+/// <c>due:</c>, <c>date:</c>, <c>deadline:</c>, <c>created:</c> with their <c>before:</c> and
+/// <c>after:</c> forms. Plus <c>no deadline</c> and <c>search: text</c>.
 ///
 /// Who it's for: <c>assigned</c>, <c>assigned to: me</c> (or <c>:to_me:</c>), <c>assigned to:
 /// others</c> (or <c>:to_others:</c>), <c>assigned by: me</c>, <c>added by: me</c>, and
@@ -73,9 +75,8 @@ public sealed record FilterParse(FilterExpression? Expression, string? Unsupport
 /// operator between them are an implicit <c>&amp;</c>, which is how "#Work today" reads.
 ///
 /// Left out, and refused by name rather than guessed at: naming a person rather than yourself,
-/// which needs the account's collaborators; which workspace a task is in; the wildcard forms
-/// (<c>%email*</c>, <c>#\*name</c>, and the <c>!/*</c> that means "in no section"); and
-/// <c>uncompletable</c>, which no field here is known to answer.
+/// which needs the account's collaborators, whether it's written in full or with an asterisk;
+/// which workspace a task is in; and <c>uncompletable</c>, which no field here is known to answer.
 /// </remarks>
 public static class FilterParser
 {
@@ -472,6 +473,10 @@ public static class FilterParser
     /// can say where one ends: "#My Project" is a single project, while "#Work today" is a project
     /// and a date. The longest run that names something wins; failing that, the first word alone.
     /// </summary>
+    /// <remarks>
+    /// A run with an asterisk in it names something when it fits one of the account's names, which
+    /// is how "#Welcome *" reaches past its space to a project called "Welcome" and an emoji.
+    /// </remarks>
     private static string? ReadName(List<string> tokens, IReadOnlySet<string> known, ref int at, int prefix, out string? failed)
     {
         var name = tokens[at][prefix..];
@@ -488,9 +493,11 @@ public static class FilterParser
         for (var i = at + 1; i < tokens.Count && !IsOperator(tokens[i]); i++)
         {
             candidate.Append(' ').Append(tokens[i]);
-            if (known.Contains(candidate.ToString()))
+
+            var run = candidate.ToString();
+            if (known.Contains(run) || (Wildcard.In(run) && known.Any(k => Wildcard.Matches(run, k))))
             {
-                name = candidate.ToString();
+                name = run;
                 consumed = i - at + 1;
             }
         }

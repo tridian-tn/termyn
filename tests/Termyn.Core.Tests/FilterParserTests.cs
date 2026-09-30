@@ -64,6 +64,37 @@ public class FilterParserTests
         Assert.Equal("deep work", Assert.IsType<FilterExpression.HasLabel>(Parse("@deep work").Expression).Name);
     }
 
+    [Fact]
+    public void A_name_with_an_asterisk_is_read_asterisk_and_all()
+    {
+        // Kept as written for the evaluator to fit against the account's names — none of these is
+        // a name the account has, and each is still a query.
+        Assert.Equal("home*", Assert.IsType<FilterExpression.HasLabel>(Parse("%home*").Expression).Name);
+        Assert.Equal("*Work", Assert.IsType<FilterExpression.InProject>(Parse("#*Work").Expression).Name);
+        Assert.Equal("*Work", Assert.IsType<FilterExpression.InProject>(Parse("##*Work").Expression).Name);
+        Assert.Equal("*Up*", Assert.IsType<FilterExpression.InSection>(Parse("/*Up*").Expression).Name);
+    }
+
+    [Fact]
+    public void In_no_section_is_written_as_not_in_any()
+    {
+        // Todoist has no keyword for it: this is the only way it's written.
+        var not = Assert.IsType<FilterExpression.Not>(Parse("!/*").Expression);
+        Assert.Equal("*", Assert.IsType<FilterExpression.InSection>(not.Operand).Name);
+    }
+
+    [Fact]
+    public void An_asterisk_reaches_past_a_space_to_a_name_it_fits()
+    {
+        // How Todoist's help says to name a project with an emoji after a space: "#Welcome *".
+        Assert.Equal("My *", Assert.IsType<FilterExpression.InProject>(Parse("#My *").Expression).Name);
+
+        // But no further than a name it fits. No project ends " today", so that's a term of its own.
+        var and = Assert.IsType<FilterExpression.And>(Parse("#My * today").Expression);
+        Assert.Equal("My *", Assert.IsType<FilterExpression.InProject>(and.Left).Name);
+        Assert.IsType<FilterExpression.DueToday>(and.Right);
+    }
+
     [Theory]
     [InlineData("p1", Priority.P1)]
     [InlineData("p4", Priority.P4)]
@@ -499,6 +530,7 @@ public class FilterParserTests
     [InlineData("assigned to: Sam")]    // collaborators are out of scope, so only "me" can be named
     [InlineData("assigned by: Sam")]
     [InlineData("added by: Sam")]
+    [InlineData("assigned to: m*")]     // a person is still a person with an asterisk
     [InlineData("assigned by: others")] // Todoist has no such term, and inventing one is a fiction
     [InlineData("added by: others")]
     [InlineData("added")]               // half a term
@@ -517,6 +549,7 @@ public class FilterParserTests
     [InlineData("@")]
     [InlineData("%")]
     [InlineData("/")]
+    [InlineData("*")]                   // fits anything, but with nothing to say what kind
     [InlineData("search:")]
     [InlineData("today &")]             // dangling operator
     [InlineData("| today")]
