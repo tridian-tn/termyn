@@ -114,6 +114,7 @@ public class TextCatalogueTests
     [InlineData("yyyy-MM-dd")]
     [InlineData("DELETE FROM outbox WHERE uuid = $uuid")]
     [InlineData("select json from resources where id = $id")]
+    [InlineData("select json\nfrom resources")]
     [InlineData(" od \n")]
     public void Protocol_is_told_apart_from_prose(string text)
         => Assert.True(ProtocolText.IsProtocol(text), $"'{text}' should read as protocol");
@@ -145,6 +146,25 @@ public class TextCatalogueTests
         // The reminder list already says "day" to people. Flagged here, a catalogue couldn't take it
         // when the presentation text moves — and the parser reading one is caught above anyway.
         Assert.False(ProtocolText.IsProtocol(word));
+    }
+
+    [Fact]
+    public void Protocol_in_a_catalogue_is_reported_and_nothing_else_is()
+    {
+        // The checks above all expect nothing, so one that read nothing would pass them too. This
+        // assembly's own sample has a protocol entry beside prose and a designer's bookkeeping.
+        var found = ProtocolText.InCataloguesOf(typeof(TextCatalogueTests).Assembly);
+
+        Assert.Equal(["Termyn.Core.Tests.ProtocolSample.resources: CloseCommand = \"item_close\""], found);
+    }
+
+    [Fact]
+    public void A_setting_the_file_never_holds_is_not_a_settings_key()
+    {
+        // Worked out from the others and left out of the file, so "cadence" in a catalogue is just
+        // a word.
+        Assert.False(ProtocolText.IsProtocol("cadence"));
+        Assert.True(ProtocolText.IsProtocol("theme"));
     }
 
     [Fact]

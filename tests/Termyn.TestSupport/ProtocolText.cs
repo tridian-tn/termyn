@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Resources;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
@@ -190,9 +191,15 @@ public static partial class ProtocolText
         .Select(f => (OpCode)f.GetValue(null)!)
         .ToDictionary(c => c.Value);
 
-    /// <summary>The keys the settings file is written with, as its serialiser names them.</summary>
+    /// <summary>
+    /// The keys the settings file is written with, as its serialiser names them. Not the properties
+    /// it's told to leave out, which are worked out from the others and never reach the file.
+    /// </summary>
     private static IEnumerable<string> SettingsKeys(params Type[] types)
-        => types.SelectMany(t => t.GetProperties()).Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name));
+        => types
+            .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always })
+            .Select(p => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(p.Name));
 
     /// <summary>A filter query's keyword and its colon, lower-case, anywhere in the text.</summary>
     [GeneratedRegex(@"(^|[\s(!&|,])(search|due|date|deadline|created|workspace|assigned to|assigned by|added by)( before| after)?:")]
@@ -208,8 +215,8 @@ public static partial class ProtocolText
 
     /// <summary>
     /// SQL: a statement's first keyword in capitals, or in lower case with the clause that makes it
-    /// a statement after it — "Select a project" is neither.
+    /// a statement after it — "Select a project" is neither. The clause can be on a line of its own.
     /// </summary>
-    [GeneratedRegex(@"^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT)\b|^(select|insert|update|delete|create|drop|alter|pragma)\s.*\b(from|into|set|table|index|where|values)\b")]
+    [GeneratedRegex(@"^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT)\b|^(select|insert|update|delete|create|drop|alter|pragma)\s.*\b(from|into|set|table|index|where|values)\b", RegexOptions.Singleline)]
     private static partial Regex Sql();
 }
