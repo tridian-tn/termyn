@@ -17,7 +17,7 @@
   <!-- Shared helpers, not a test project: xunit would make it one, and a test host would be spun
        up for a project holding nothing but fakes. -->
   <ItemGroup Condition="'$(MSBuildProjectName)' != 'Termyn.TestSupport'">
-    <PackageReference Include="xunit.v3" Version="4.0.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
     <Using Include="Xunit" />
   </ItemGroup>
 
