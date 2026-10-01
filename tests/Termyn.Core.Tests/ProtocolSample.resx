@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A catalogue for ProtocolText to find something wrong in: prose and a designer's bookkeeping it
+     reads past, and one entry it has to report. No number or image: those need
+     System.Resources.Extensions to build, which nothing here references. -->
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="CloseCommand" xml:space="preserve"><value>item_close</value></data>
+  <data name="CloseLabel" xml:space="preserve"><value>Close</value></data>
+  <data name="&gt;&gt;closeButton.Name" xml:space="preserve"><value>closeButton</value></data>
+</root>

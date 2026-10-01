@@ -1,4 +1,5 @@
 using System.Globalization;
+using Termyn.TestSupport;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -34,4 +35,8 @@ public class TextCatalogueTests
             CultureInfo.CurrentUICulture = was;
         }
     }
+
+    [WinFormsFact]
+    public void Nothing_in_the_catalogue_is_protocol()
+        => Assert.Empty(ProtocolText.InCataloguesOf(typeof(Strings).Assembly));
 }
