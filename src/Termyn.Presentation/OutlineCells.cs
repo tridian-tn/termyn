@@ -63,6 +63,18 @@ public static class OutlineCells
     };
 
     /// <summary>
+    /// Whether a row is drawn finished: greyed, struck through, and its box ticked.
+    /// </summary>
+    /// <remarks>
+    /// A recurring task that's advancing is drawn the same way. As far as the press goes it's done,
+    /// and all that's left is the server saying when it comes round next. Until then a row that
+    /// looked untouched would say the press hadn't taken.
+    /// </remarks>
+    /// <param name="row">The task the row belongs to</param>
+    /// <returns>True for a finished task, or a recurring one on its way to its next date</returns>
+    public static bool DrawnDone(TaskRow row) => row.Completed || row.Advancing;
+
+    /// <summary>
     /// The dot in front of a row's project, or null when there's none to draw.
     /// </summary>
     /// <remarks>

@@ -89,9 +89,9 @@ The remaining §16.2 criteria in the spec, in the words of the app.
 
 - [ ] Change the priority of the task with a duration. After it syncs, the web app still shows the
       duration.
-- [ ] **Space** on the `every weekday` task: its due column reads *↻ advancing…*, and comes back
-      with the next weekday once the server replies. Offline, it stays *advancing…* until the
-      reconnect.
+- [ ] **Space** on the `every weekday` task: its row is ticked and struck through, and its due
+      column reads *↻ advancing…*. It comes back unstruck with the next weekday once the server
+      replies. Offline, it stays that way until the reconnect.
 - [ ] Delete a task in the web app. After **Sync now** it's gone from Termyn.
 - [ ] Open the filter Termyn can't read: the list is empty, with *Termyn can't read this filter*
       above it, and **Open in Todoist** opens that filter in the browser.
