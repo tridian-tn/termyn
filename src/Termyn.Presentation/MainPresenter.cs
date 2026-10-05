@@ -842,7 +842,7 @@ public sealed class MainPresenter
     public string SelectedKey { get; private set; } = ViewSelection.Default.Key;
 
     /// <summary>
-    /// Opens the view a sidebar key names — how a remembered selection is restored across a restart.
+    /// Opens the view a sidebar key names. A restart goes through <see cref="RestoreView"/> instead.
     /// </summary>
     /// <returns>False when nothing in the sidebar has that key, so the caller can leave things be.</returns>
     public bool SelectByKey(string? key)
@@ -852,6 +852,49 @@ public sealed class MainPresenter
 
         Open(SelectionOf(node), node.Key);
         return true;
+    }
+
+    /// <summary>
+    /// Opens the view the window was left on last time, or leaves it on Today when there's none to
+    /// go back to.
+    /// </summary>
+    /// <remarks>
+    /// Today covers a view that was never saved and one the cache no longer has. A view the cache
+    /// does have opens straight away, so the window comes up where it was left, and is checked
+    /// again once the first sync is back — see <see cref="SettleRestore"/>.
+    /// </remarks>
+    /// <param name="key">The sidebar key that was saved, or null when nothing was</param>
+    public void RestoreView(string? key) => _unconfirmedRestore = SelectByKey(key);
+
+    /// <summary>
+    /// Whether a restart reopened a view from the cache, and no sync has come back since to say
+    /// whether the account still has it.
+    /// </summary>
+    private bool _unconfirmedRestore;
+
+    /// <summary>
+    /// Falls back to Today, after a restart, when the view on screen is one the account no longer
+    /// has.
+    /// </summary>
+    /// <remarks>
+    /// The cache a view is reopened from is only as fresh as the last sync before the restart, so a
+    /// label deleted on the phone in between came back as an empty view of nothing. The first sync
+    /// to return is the first word on whether it's really there. It's asked of whatever's on screen
+    /// by then, which may be a view opened since out of the same stale cache.
+    ///
+    /// The selection is checked as well as the row it was opened from: a favourited project that's
+    /// been unstarred elsewhere has lost its row under Favourites, but it's still a project, and
+    /// it's still there to show.
+    /// </remarks>
+    private void SettleRestore()
+    {
+        _unconfirmedRestore = false;
+
+        if (Sidebar.Any(n => n.Key == SelectedKey || n.Key == Selection.Key))
+            return;
+
+        Selection = ViewSelection.Default;
+        SelectedKey = Selection.Key;
     }
 
     /// <summary>
@@ -1953,6 +1996,12 @@ public sealed class MainPresenter
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
+
+            // After the sidebar, which is what it's checked against, and before the path and the
+            // rows, which follow from wherever it leaves the selection.
+            if (_unconfirmedRestore && _lastSyncedAt is not null)
+                SettleRestore();
+
             _viewPath = ViewPath.For(Selection, snapshot);
 
             // The selected row can go — deleted here, or removed by a sync — and every path that

@@ -1086,14 +1086,10 @@ internal sealed class MainForm : Form
             WindowState = FormWindowState.Maximized;
 
         // Given to the presenter, not just to the tree: highlighting the saved row while the outline
-        // showed Today was the opposite of remembering where the user was. It can refuse — the
-        // project may have been deleted elsewhere — in which case the key is still worth holding, so
-        // the row is picked up if a sync brings it back.
-        if (state.SelectedKey is { Length: > 0 } key)
-        {
-            _presenter.SelectByKey(key);
-            _sidebarKey = key;
-        }
+        // showed Today was the opposite of remembering where the user was. It falls back to Today
+        // when the view has gone, and the tree takes whatever it settled on.
+        _presenter.RestoreView(state.SelectedKey);
+        _sidebarKey = _presenter.SelectedKey;
 
         _restoreCollapsed = state.CollapsedKeys.Count > 0
             ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
@@ -1133,6 +1129,24 @@ internal sealed class MainForm : Form
         var view = CurrentViewState();
         _settings = _settings with { View = SignedOut ? view.WithoutAccount() : view };
         return _shell.Store.Save(_settings);
+    }
+
+    /// <summary>
+    /// Writes the view on screen to the settings as soon as it changes, rather than only when the
+    /// window closes.
+    /// </summary>
+    /// <remarks>
+    /// A process ended without closing its window — from the debugger, or Task Manager — never gets
+    /// that far, and came back on whatever view it had been on the time before. Only the key goes
+    /// in: the rest of the window's state is still written on the way out.
+    /// </remarks>
+    private void SaveSelectedView()
+    {
+        if (SignedOut || _sidebarKey == (_settings.View.SelectedKey ?? ViewSelection.Default.Key))
+            return;
+
+        _settings = _settings with { View = _settings.View with { SelectedKey = _sidebarKey } };
+        _shell.Store.Save(_settings);
     }
 
     /// <summary>
@@ -1249,6 +1263,9 @@ internal sealed class MainForm : Form
             return;
 
         RenderSidebar();
+
+        // After the sidebar, which is what moves the key on when the view it named has gone.
+        SaveSelectedView();
         RenderCrumbs();
 
         // The box follows the presenter rather than leading it. Opening a view drops the search,

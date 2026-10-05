@@ -44,8 +44,41 @@ internal static class TestWindow
         InMemorySnapshotStore? store,
         out Notifier notifier,
         out MainPresenter presenter)
+        => Build(
+            new SettingsStore(Path.Combine(Path.GetTempPath(), settingsName)),
+            new AppSettings(),
+            store ?? new InMemorySnapshotStore(),
+            new FakeApi(),
+            out notifier,
+            out presenter);
+
+    /// <summary>
+    /// A window that starts the way the app does, from the settings the last one wrote.
+    /// </summary>
+    /// <param name="settingsPath">The settings file to read and write, which the caller deletes</param>
+    /// <param name="store">What the account holds</param>
+    /// <param name="api">The server, for a test that needs to say what a sync brings back</param>
+    /// <param name="presenter">The presenter, for a test that needs to drive it</param>
+    /// <returns>The window, laid out but not shown, which the caller disposes</returns>
+    internal static MainForm Start(
+        string settingsPath,
+        InMemorySnapshotStore store,
+        FakeApi api,
+        out MainPresenter presenter)
     {
-        var engine = new SyncEngine(new FakeApi(), store ?? new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
+        var settings = new SettingsStore(settingsPath);
+        return Build(settings, settings.Load(), store, api, out _, out presenter);
+    }
+
+    private static MainForm Build(
+        SettingsStore settingsStore,
+        AppSettings settings,
+        InMemorySnapshotStore store,
+        FakeApi api,
+        out Notifier notifier,
+        out MainPresenter presenter)
+    {
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
         engine.Load();
 
         var clock = new SystemClock();
@@ -55,8 +88,8 @@ internal static class TestWindow
 
         var shell = new Shell(
             new Paths(),
-            new SettingsStore(Path.Combine(Path.GetTempPath(), settingsName)),
-            new AppSettings(),
+            settingsStore,
+            settings,
             new Hotkey(),
             new AutoStart(),
             notifier,
@@ -90,6 +123,33 @@ internal static class TestWindow
     /// <param name="parent">Where to look</param>
     /// <returns>The control, of which there must be exactly one</returns>
     internal static T Find<T>(Control parent) where T : Control => Descendants(parent).OfType<T>().Single();
+
+    /// <summary>Picks a row in the sidebar, the way a click does.</summary>
+    /// <param name="window">The window whose sidebar to click in</param>
+    /// <param name="key">The sidebar key of the row to pick</param>
+    internal static void Click(MainForm window, string key)
+    {
+        var tree = Find<TreeView>(window);
+        tree.SelectedNode = Nodes(tree.Nodes).Single(n => n.Tag is SidebarNode node && node.Key == key);
+    }
+
+    /// <summary>The row the sidebar has lit.</summary>
+    /// <param name="window">The window to look in</param>
+    /// <returns>Its sidebar key, or null when nothing is selected</returns>
+    internal static string? Highlighted(MainForm window)
+        => (Find<TreeView>(window).SelectedNode?.Tag as SidebarNode)?.Key;
+
+    /// <summary>Every node in a tree, at any depth.</summary>
+    private static IEnumerable<TreeNode> Nodes(TreeNodeCollection nodes)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            yield return node;
+
+            foreach (var below in Nodes(node.Nodes))
+                yield return below;
+        }
+    }
 
     // ---- The shell, stood in for --------------------------------------------------------------
 

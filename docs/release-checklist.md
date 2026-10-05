@@ -45,6 +45,9 @@ A step that fails is an issue before the release, not a note after it.
 - [ ] Closing the window leaves Termyn in the tray. Its menu has **Open Termyn**, **Quick add…**,
       recent views, **Sync now**, **Settings…**, **Check for updates…** and **Exit**.
 - [ ] **Check for updates…** answers without an error.
+- [ ] Open a label, end Termyn from Task Manager, and start it again: it opens on that label. Exit,
+      delete the label in the web app, and start it again: it moves to Today once the first sync
+      lands.
 - [ ] Tick **Start Termyn when I sign in**, sign out of Windows and back in: Termyn starts in the
       tray without opening a window.
 
