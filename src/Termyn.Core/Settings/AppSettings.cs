@@ -104,28 +104,43 @@ public sealed record ViewState
     /// </remarks>
     public IReadOnlyList<string> CollapsedTasks { get; init; } = [];
 
-    public int SidebarWidth { get; init; } = 220;
+    /// <summary>How wide the sidebar is, in pixels, or null until the window has saved it.</summary>
+    /// <remarks>
+    /// This and the other sizes are null on a first start rather than a figure in pixels, which
+    /// can't be right at every display scale. The window works out a default for the screen it
+    /// opens on instead.
+    /// </remarks>
+    public int? SidebarWidth { get; init; }
 
     /// <summary>Whether the description panel under the outline is open.</summary>
     public bool ShowDescription { get; init; }
 
     /// <summary>
-    /// How tall the description panel is, in pixels off the bottom of the outline.
+    /// How tall the description panel is, in pixels off the bottom of the outline, or null until the
+    /// window has saved it.
     /// </summary>
-    /// <remarks>
-    /// Taller than it was when the panel was split down the middle. One pane gets the whole width,
-    /// so the height is the only thing left deciding how much of a description you can see at once.
-    /// </remarks>
-    public int DescriptionHeight { get; init; } = 260;
+    public int? DescriptionHeight { get; init; }
 
     /// <summary>Null means "wherever the window manager puts it" — the first run, or a lost monitor.</summary>
     public int? WindowX { get; init; }
 
     public int? WindowY { get; init; }
 
-    public int WindowWidth { get; init; } = 940;
+    /// <summary>The window's width in pixels, or null until it has been saved.</summary>
+    public int? WindowWidth { get; init; }
 
-    public int WindowHeight { get; init; } = 580;
+    /// <summary>The window's height in pixels, or null until it has been saved.</summary>
+    public int? WindowHeight { get; init; }
+
+    /// <summary>
+    /// How wide each of the outline's columns is, in pixels, by the column's name.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the window has saved them, which leaves the window to fit them to the outline it
+    /// opens with. Named rather than listed in order, so a column added or taken away later doesn't
+    /// hand its neighbours each other's widths.
+    /// </remarks>
+    public IReadOnlyDictionary<string, int> ColumnWidths { get; init; } = new Dictionary<string, int>();
 
     public bool Maximized { get; init; }
 
@@ -157,6 +172,8 @@ public sealed record ViewState
            && WindowWidth == other.WindowWidth
            && WindowHeight == other.WindowHeight
            && Maximized == other.Maximized
+           && ColumnWidths.Count == other.ColumnWidths.Count
+           && ColumnWidths.All(c => other.ColumnWidths.TryGetValue(c.Key, out var width) && width == c.Value)
            && CollapsedKeys.Count == other.CollapsedKeys.Count
            && !CollapsedKeys.Except(other.CollapsedKeys, StringComparer.Ordinal).Any()
            && CollapsedTasks.Count == other.CollapsedTasks.Count
@@ -180,6 +197,7 @@ public sealed record ViewState
         // ids come out of a set as well, which has an order of its own and no promise about it.
         hash.Add(Unordered(CollapsedKeys));
         hash.Add(Unordered(CollapsedTasks));
+        hash.Add(Unordered([.. ColumnWidths.Select(c => $"{c.Key}={c.Value}")]));
 
         return hash.ToHashCode();
     }

@@ -249,7 +249,7 @@ internal sealed class MainForm : Form
 
         Text = "Termyn";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(640, 400);
+        MinimumSize = new Size(AtScale(StartupLayout.MinimumWidth), AtScale(StartupLayout.MinimumHeight));
         KeyPreview = true;
 
         _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = Strings.SearchPlaceholder };
@@ -1056,7 +1056,7 @@ internal sealed class MainForm : Form
         // Only remembered here. The splitters are set once the window has a size to divide, which
         // is not yet: before it is parented a SplitContainer clamps every distance it is given
         // against its own default and quietly sticks there.
-        _descriptionHeight = state.DescriptionHeight;
+        _descriptionHeight = state.DescriptionHeight ?? AtScale(StartupLayout.DescriptionHeight);
 
         // _adjustingPanels is still true here, so the layout this sets off doesn't record the
         // container's unparented default over what has just been read.
@@ -1065,9 +1065,10 @@ internal sealed class MainForm : Form
         // Outer bounds throughout, matching what CurrentViewState saves. Saving the outer size and
         // restoring it as the client size grew the window by the frame on every maximise-and-exit
         // cycle, compounding until it walked off the screen.
+        var (width, height) = NewWindowSize();
         var size = new Size(
-            Math.Max(state.WindowWidth, MinimumSize.Width),
-            Math.Max(state.WindowHeight, MinimumSize.Height));
+            Math.Max(state.WindowWidth ?? width, MinimumSize.Width),
+            Math.Max(state.WindowHeight ?? height, MinimumSize.Height));
 
         if (state is { WindowX: { } x, WindowY: { } y })
         {
@@ -1091,6 +1092,17 @@ internal sealed class MainForm : Form
         _presenter.RestoreView(state.SelectedKey);
         _sidebarKey = _presenter.SelectedKey;
 
+        // By name, so a column added since they were saved keeps its default. With none saved, the
+        // columns are fitted to the outline once the window has a size to give it.
+        var widths = new Dictionary<TaskColumn, int>();
+        foreach (var (name, saved) in state.ColumnWidths)
+        {
+            if (Enum.TryParse<TaskColumn>(name, ignoreCase: true, out var column))
+                widths[column] = saved;
+        }
+
+        _outline.ColumnWidths = widths;
+
         _restoreCollapsed = state.CollapsedKeys.Count > 0
             ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
             : null;
@@ -1098,6 +1110,25 @@ internal sealed class MainForm : Form
         // Straight to the presenter rather than held like the sidebar's: which rows exist is its
         // answer, so it needs these before it works the outline out rather than after.
         _presenter.RestoreCollapsed(state.CollapsedTasks);
+    }
+
+    /// <summary>A size at 100% as it is at the window's display scale.</summary>
+    /// <param name="logical">The size at 100%</param>
+    /// <returns>The size in the display's pixels</returns>
+    private int AtScale(int logical) => StartupLayout.Scaled(logical, DeviceDpi);
+
+    /// <summary>
+    /// The size the window opens at when none has been saved.
+    /// </summary>
+    /// <remarks>
+    /// For the screen under the pointer, which is the one a window opened from the taskbar or a
+    /// shortcut is most likely to land on.
+    /// </remarks>
+    /// <returns>The outer width and height in pixels</returns>
+    private (int Width, int Height) NewWindowSize()
+    {
+        var working = Screen.FromPoint(MousePosition).WorkingArea;
+        return StartupLayout.Window(DeviceDpi, working.Width, working.Height);
     }
 
     private ViewState CurrentViewState()
@@ -1111,6 +1142,7 @@ internal sealed class MainForm : Form
             SelectedKey = _sidebarKey,
             CollapsedKeys = CollapsedKeys().ToList(),
             CollapsedTasks = _presenter.CollapsedTasks,
+            ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => c.Value),
             SidebarWidth = _split.SplitterDistance,
             ShowDescription = !_detail.Panel2Collapsed,
             DescriptionHeight = _descriptionHeight,
@@ -3592,8 +3624,16 @@ internal sealed class MainForm : Form
     {
         // Restored here rather than in the constructor: before the splitter is parented and sized it
         // clamps the distance against the container's default width and silently sticks there.
-        _split.SplitterDistance = Math.Clamp(_settings.View.SidebarWidth, 120, Math.Max(120, ClientSize.Width - 200));
+        var least = AtScale(StartupLayout.SidebarLeast);
+        _split.SplitterDistance = Math.Clamp(
+            _settings.View.SidebarWidth ?? AtScale(StartupLayout.SidebarWidth),
+            least,
+            Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
         ApplyPanelSizes();
+
+        // After the sidebar, whose width decides what the outline is left with.
+        if (_settings.View.ColumnWidths.Count == 0)
+            _outline.FitColumns();
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
         _scheduler.Start();

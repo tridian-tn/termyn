@@ -80,12 +80,57 @@ internal sealed class OutlineView : ListView
 
         // Each header carries the column it stands for, so a click has something to name without a
         // second table of indices to keep in step with this one.
-        Columns.Add("Task", 360).Tag = TaskColumn.Content;
-        Columns.Add("!", 46, HorizontalAlignment.Center).Tag = TaskColumn.Priority;
-        Columns.Add("Project", 140).Tag = TaskColumn.Project;
-        Columns.Add("Due", 120).Tag = TaskColumn.Due;
-        Columns.Add("Deadline", 100).Tag = TaskColumn.Deadline;
-        Columns.Add("Labels", 140).Tag = TaskColumn.Labels;
+        Column("Task", TaskColumn.Content);
+        Column("!", TaskColumn.Priority, HorizontalAlignment.Center);
+        Column("Project", TaskColumn.Project);
+        Column("Due", TaskColumn.Due);
+        Column("Deadline", TaskColumn.Deadline);
+        Column("Labels", TaskColumn.Labels);
+
+        void Column(string heading, TaskColumn column, HorizontalAlignment align = HorizontalAlignment.Left)
+            => Columns.Add(heading, StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi), align).Tag = column;
+    }
+
+    /// <summary>
+    /// How wide each column is, by the column it stands for.
+    /// </summary>
+    /// <remarks>
+    /// Setting it takes the widths it names and leaves the rest as they are, so a column added since
+    /// they were saved keeps its default.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public IReadOnlyDictionary<TaskColumn, int> ColumnWidths
+    {
+        get => Columns.Cast<ColumnHeader>()
+            .Where(c => c.Tag is TaskColumn)
+            .ToDictionary(c => (TaskColumn)c.Tag!, c => c.Width);
+        set
+        {
+            foreach (ColumnHeader header in Columns)
+            {
+                if (header.Tag is TaskColumn column && value.TryGetValue(column, out var width))
+                    header.Width = width;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives the task column whatever the others leave, so every column shows without scrolling
+    /// sideways.
+    /// </summary>
+    /// <remarks>
+    /// For a window with no widths saved, once it's laid out. A scroll bar is allowed for, showing or
+    /// not: this runs before the rows are in, and a real account soon has more than fit. Run with one
+    /// already showing, it leaves that much spare rather than too little.
+    /// </remarks>
+    public void FitColumns()
+    {
+        var others = Columns.Cast<ColumnHeader>().Where(c => c.Tag is not TaskColumn.Content).Sum(c => c.Width);
+        var room = ClientSize.Width - SystemInformation.GetVerticalScrollBarWidthForDpi(DeviceDpi);
+
+        foreach (var header in Columns.Cast<ColumnHeader>().Where(c => c.Tag is TaskColumn.Content))
+            header.Width = StartupLayout.TaskColumnWidth(room, others, DeviceDpi);
     }
 
     /// <summary>Raised when a header is clicked, with the column it stands for.</summary>

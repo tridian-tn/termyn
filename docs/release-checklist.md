@@ -37,6 +37,8 @@ A step that fails is an issue before the release, not a note after it.
 - [ ] It asks to **Connect Termyn to Todoist**. A wrong token says *That token was rejected*.
 - [ ] The right token syncs, and the status line reaches *Synced*.
 - [ ] **Help › About Termyn** shows the release's version.
+- [ ] The window opens centred, at a size that suits the screen's scaling, with every column of the
+      outline in view. Drag a column's edge and restart: it's the width it was left at.
 
 ## Hotkey, tray, launch at login
 
