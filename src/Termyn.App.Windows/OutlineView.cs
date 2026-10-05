@@ -834,10 +834,12 @@ internal sealed class OutlineView : ListView
         var selected = IsSelected(e.ItemIndex);
 
         // A completed row is greyed and struck through: it is here to be seen and reopened, not
-        // read alongside the work that is still outstanding.
-        var text = selected ? Theme.OnAccent : row.Completed ? Theme.Muted : Theme.Text;
+        // read alongside the work that is still outstanding. A recurring one waiting to hear its
+        // next date looks the same, so ticking it off visibly does something.
+        var done = OutlineCells.DrawnDone(row);
+        var text = selected ? Theme.OnAccent : done ? Theme.Muted : Theme.Text;
         var muted = selected ? Theme.OnAccent : Theme.Muted;
-        var font = row.Completed ? Struck : Font;
+        var font = done ? Struck : Font;
 
         using (var background = new SolidBrush(selected ? Theme.Accent : Theme.Panel))
             e.Graphics.FillRectangle(background, e.Bounds);
@@ -882,7 +884,7 @@ internal sealed class OutlineView : ListView
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
 
-                DrawCheck(e.Graphics, Checkbox(bounds), row.Completed, selected ? Theme.OnAccent : Theme.Muted);
+                DrawCheck(e.Graphics, Checkbox(bounds), done, selected ? Theme.OnAccent : Theme.Muted);
 
                 bounds.X += CheckWidth;
                 bounds.Width -= CheckWidth;

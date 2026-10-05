@@ -149,6 +149,17 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
+    public void A_recurring_task_ticked_off_is_struck_through_while_it_advances()
+    {
+        var presenter = NewPresenter(Store());
+        Assert.False(OutlineCells.DrawnDone(presenter.Rows.Single(r => r.Id == "r1")));
+
+        presenter.Complete("r1");
+
+        Assert.True(OutlineCells.DrawnDone(presenter.Rows.Single(r => r.Id == "r1")));
+    }
+
+    [Fact]
     public void An_ordinary_task_ticked_off_isnt_advancing()
     {
         // It's ticked off there and then, which says the press did something on its own.

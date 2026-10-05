@@ -80,6 +80,15 @@ public class OutlineCellsTests
     }
 
     [Fact]
+    public void A_recurring_task_waiting_for_its_next_date_is_drawn_finished()
+    {
+        // Struck through like any task that's been ticked off, so the press visibly did something.
+        Assert.True(OutlineCells.DrawnDone(Row() with { IsRecurring = true, Advancing = true }));
+        Assert.True(OutlineCells.DrawnDone(Row() with { Completed = true }));
+        Assert.False(OutlineCells.DrawnDone(Row() with { IsRecurring = true }));
+    }
+
+    [Fact]
     public void A_mark_with_no_due_date_to_go_with_it_stands_on_its_own()
     {
         // Without a date there's nothing to space it from, and a space in front would push the mark
