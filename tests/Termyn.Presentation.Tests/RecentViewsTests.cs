@@ -256,4 +256,60 @@ public class RecentViewsTests
     [Fact]
     public void Nothing_is_offered_before_anywhere_has_been_opened()
         => Assert.Empty(Seeded().Presenter.RecentViews);
+
+    /// <summary>The id a row made here goes by until the server names it, found by its name.</summary>
+    private static string Made(MainPresenter presenter, SidebarKind kind, string name)
+        => presenter.Sidebar.First(n => n.Kind == kind && n.Label == name).Id;
+
+    [Fact]
+    public async Task A_project_made_here_is_still_offered_once_the_server_names_it()
+    {
+        // Opened under an id of our own, which the sync that sends it replaces.
+        var (presenter, _, api) = Seeded();
+        presenter.AddProject("Errands");
+        presenter.Select(ViewSelection.OfProject(Made(presenter, SidebarKind.Project, "Errands")));
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["project_add"] = "p9" },
+            Json.Change("projects", "p9", """{"id":"p9","name":"Errands","child_order":9}"""));
+        await presenter.SyncAsync();
+
+        Assert.Equal(["Errands"], Offered(presenter));
+    }
+
+    [Fact]
+    public async Task A_section_made_here_is_still_offered_once_the_server_names_it()
+    {
+        var (presenter, _, api) = Seeded();
+        presenter.AddSection("Later", "p1");
+        presenter.Select(ViewSelection.OfSection(Made(presenter, SidebarKind.Section, "Later")));
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["section_add"] = "s9" },
+            Json.Change("sections", "s9", """{"id":"s9","name":"Later","project_id":"p1","section_order":1}"""));
+        await presenter.SyncAsync();
+
+        Assert.Equal(["Work › Later"], Offered(presenter));
+    }
+
+    [Fact]
+    public async Task A_project_made_here_and_opened_from_Favourites_is_still_offered_once_named()
+    {
+        // Its row under Favourites carries the id too, and is renamed with it.
+        var (presenter, _, api) = Seeded();
+        presenter.AddProject("Errands");
+        var made = Made(presenter, SidebarKind.Project, "Errands");
+        presenter.ToggleProjectFavorite(made);
+        presenter.SelectByKey(SidebarKeys.Favourite(SidebarKind.Project, made));
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["project_add"] = "p9" },
+            Json.Change("projects", "p9", """{"id":"p9","name":"Errands","child_order":9,"is_favorite":true}"""));
+        await presenter.SyncAsync();
+
+        Assert.Equal(["Errands"], Offered(presenter));
+    }
 }

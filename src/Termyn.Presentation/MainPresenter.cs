@@ -759,7 +759,9 @@ public sealed class MainPresenter
     /// </summary>
     /// <remarks>
     /// Read against the sidebar each time rather than stored as labels, so a project renamed or
-    /// deleted elsewhere doesn't linger here under a name the account no longer uses.
+    /// deleted elsewhere doesn't linger here under a name the account no longer uses. One made here
+    /// is looked for under the id the server has given it since, which it didn't have yet when it
+    /// was opened.
     ///
     /// The view being looked at now is left out. From the tray, where this is offered, that view is
     /// what opening the window gives you anyway, and an entry that lands you where you already are
@@ -776,6 +778,7 @@ public sealed class MainPresenter
             var here = Sidebar.FirstOrDefault(n => n.Key == SelectedKey);
 
             return _recent
+                .Select(RenamedKey)
                 .Select(k => Sidebar.FirstOrDefault(n => n.Key == k))
                 .OfType<SidebarNode>()
                 .Where(n => here is null || !Identity(n).Equals(Identity(here)))
@@ -918,13 +921,33 @@ public sealed class MainPresenter
         if (renamed == Selection)
             return;
 
-        // The Favourites copy of a project is a row of its own, and if that's the one it was opened
-        // from, that's the one to stay on.
-        var favourite = Selection.ProjectId is { } was && SelectedKey == SidebarKeys.Favourite(SidebarKind.Project, was);
-
+        // The key is renamed as it stands rather than worked out again from the selection, so a
+        // project opened from its copy under Favourites stays on that row.
         Selection = renamed;
-        SelectedKey = favourite ? SidebarKeys.Favourite(SidebarKind.Project, renamed.ProjectId!) : renamed.Key;
+        SelectedKey = RenamedKey(SelectedKey);
     }
+
+    /// <summary>The start of each sidebar key that carries an id the server can rename.</summary>
+    private static readonly string[] Renameable =
+    [
+        SidebarKeys.For(SidebarKind.Project, string.Empty),
+        SidebarKeys.Favourite(SidebarKind.Project, string.Empty),
+        SidebarKeys.For(SidebarKind.Section, string.Empty),
+    ];
+
+    /// <summary>
+    /// The key a sidebar row goes by now, given the one it was opened by.
+    /// </summary>
+    /// <remarks>
+    /// Only a project's rows and a section's carry an id the server can rename. Every other key
+    /// comes back as it was.
+    /// </remarks>
+    /// <param name="key">A sidebar key that's been held since the row was opened</param>
+    /// <returns>The key under the server's id, or the same key when nothing has renamed it</returns>
+    private string RenamedKey(string key)
+        => Renameable.FirstOrDefault(p => key.StartsWith(p, StringComparison.Ordinal)) is { } prefix
+            ? prefix + _engine.Resolve(key[prefix.Length..])
+            : key;
 
     /// <summary>
     /// Moves to the next or previous view, skipping the group labels and stopping at either end.
