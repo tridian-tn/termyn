@@ -755,13 +755,17 @@ public sealed class MainPresenter
     private readonly List<string> _recent = [];
 
     /// <summary>
+    /// Held while <see cref="_recent"/> is read or changed: a view is opened on the window's thread,
+    /// and the list is renamed in a publish, which can be on the sync loop's.
+    /// </summary>
+    private readonly Lock _recentGate = new();
+
+    /// <summary>
     /// The views most recently opened, newest first, as a way back to them.
     /// </summary>
     /// <remarks>
     /// Read against the sidebar each time rather than stored as labels, so a project renamed or
-    /// deleted elsewhere doesn't linger here under a name the account no longer uses. One made here
-    /// is looked for under the id the server has given it since, which it didn't have yet when it
-    /// was opened.
+    /// deleted elsewhere doesn't linger here under a name the account no longer uses.
     ///
     /// The view being looked at now is left out. From the tray, where this is offered, that view is
     /// what opening the window gives you anyway, and an entry that lands you where you already are
@@ -777,8 +781,11 @@ public sealed class MainPresenter
         {
             var here = Sidebar.FirstOrDefault(n => n.Key == SelectedKey);
 
-            return _recent
-                .Select(RenamedKey)
+            List<string> recent;
+            lock (_recentGate)
+                recent = [.. _recent];
+
+            return recent
                 .Select(k => Sidebar.FirstOrDefault(n => n.Key == k))
                 .OfType<SidebarNode>()
                 .Where(n => here is null || !Identity(n).Equals(Identity(here)))
@@ -831,11 +838,32 @@ public sealed class MainPresenter
     /// <param name="key">The sidebar key of the view just opened</param>
     private void Remember(string key)
     {
-        _recent.Remove(key);
-        _recent.Insert(0, key);
+        lock (_recentGate)
+        {
+            _recent.Remove(key);
+            _recent.Insert(0, key);
 
-        if (_recent.Count > RecentKept)
-            _recent.RemoveRange(RecentKept, _recent.Count - RecentKept);
+            if (_recent.Count > RecentKept)
+                _recent.RemoveRange(RecentKept, _recent.Count - RecentKept);
+        }
+    }
+
+    /// <summary>
+    /// Puts each view in <see cref="_recent"/> under the id the server has given it.
+    /// </summary>
+    /// <remarks>
+    /// Done as the server's ids arrive rather than when the list is read. The engine only remembers
+    /// a rename for so long, and a view still held under its old key once it had forgotten would
+    /// drop out for good. It's also what lets opening the view again under its new key find it,
+    /// rather than hold it a second time and take two of the places kept.
+    /// </remarks>
+    private void FollowRenameInRecent()
+    {
+        lock (_recentGate)
+        {
+            for (var i = 0; i < _recent.Count; i++)
+                _recent[i] = RenamedKey(_recent[i]);
+        }
     }
 
     /// <summary>
@@ -2052,6 +2080,7 @@ public sealed class MainPresenter
             // Ahead of everything that asks whether the view is still in the sidebar. One made here
             // is in it under the server's id by now, and under the old one it would read as gone.
             FollowRename();
+            FollowRenameInRecent();
 
             // After the sidebar, which is what it's checked against, and before the path and the
             // rows, which follow from wherever it leaves the selection.

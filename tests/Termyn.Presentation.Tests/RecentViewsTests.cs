@@ -295,6 +295,36 @@ public class RecentViewsTests
     }
 
     [Fact]
+    public async Task One_opened_again_under_its_new_id_takes_one_of_the_places_kept_not_two()
+    {
+        // Twelve are kept, so filling the rest of them is what shows whether it's held once. The
+        // ones opened after it are deleted again so that the oldest is somewhere it can be seen.
+        var (presenter, _, api) = Seeded(upTo: 13);
+        presenter.Select(ViewSelection.OfProject("p1"));
+        presenter.AddProject("Errands");
+        presenter.Select(ViewSelection.OfProject(Made(presenter, SidebarKind.Project, "Errands")));
+
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["project_add"] = "p99" },
+            Json.Change("projects", "p99", """{"id":"p99","name":"Errands","child_order":99}"""));
+        await presenter.SyncAsync();
+
+        presenter.Select(ViewSelection.OfProject("p99"));
+        for (var i = 4; i <= 13; i++)
+            presenter.Select(ViewSelection.OfProject($"p{i}"));
+
+        api.Next = null;
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s2",
+            Changes = Enumerable.Range(4, 9).Select(i => Json.Deleted("projects", $"p{i}")).ToList(),
+        };
+        await presenter.SyncAsync();
+
+        Assert.Equal(["Errands", "Work"], Offered(presenter));
+    }
+
+    [Fact]
     public async Task A_project_made_here_and_opened_from_Favourites_is_still_offered_once_named()
     {
         // Its row under Favourites carries the id too, and is renamed with it.
