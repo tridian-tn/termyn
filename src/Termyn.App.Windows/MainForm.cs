@@ -1450,11 +1450,13 @@ internal sealed class MainForm : Form
             _sidebar.ExpandAll();
             Recollapse(_sidebar.Nodes, collapsed);
 
-            // The selected row may have gone — deleted here, or removed by a sync. Fall back to
-            // whatever the presenter is actually showing rather than highlighting nothing.
+            // The selected row may have gone — deleted here, removed by a sync, or renamed by the
+            // server. Fall back to whatever the presenter is actually showing rather than
+            // highlighting nothing: its row, which keeps the Favourites copy of a project that was
+            // opened from there.
             if (_sidebar.SelectedNode is null)
             {
-                _sidebarKey = _presenter.Selection.Key;
+                _sidebarKey = _presenter.SelectedKey;
                 _sidebar.SelectedNode = FindByKey(_sidebar.Nodes, _sidebarKey);
             }
         }

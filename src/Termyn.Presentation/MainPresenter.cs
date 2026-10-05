@@ -898,6 +898,35 @@ public sealed class MainPresenter
     }
 
     /// <summary>
+    /// Moves the selection onto the id the server has given a project or section made here.
+    /// </summary>
+    /// <remarks>
+    /// One made here goes by an id of our own until the sync that sends it comes back with the
+    /// server's. The selection kept the old one, so a project opened as soon as it was made went
+    /// empty a moment later with nothing lit in the sidebar: its tasks had moved to the new id, and
+    /// so had its row. Labels are selected by name and filters are never made here, so neither of
+    /// them is renamed under it.
+    /// </remarks>
+    private void FollowRename()
+    {
+        var renamed = Selection with
+        {
+            ProjectId = Selection.ProjectId is { } project ? _engine.Resolve(project) : null,
+            SectionId = Selection.SectionId is { } section ? _engine.Resolve(section) : null,
+        };
+
+        if (renamed == Selection)
+            return;
+
+        // The Favourites copy of a project is a row of its own, and if that's the one it was opened
+        // from, that's the one to stay on.
+        var favourite = Selection.ProjectId is { } was && SelectedKey == SidebarKeys.Favourite(SidebarKind.Project, was);
+
+        Selection = renamed;
+        SelectedKey = favourite ? SidebarKeys.Favourite(SidebarKind.Project, renamed.ProjectId!) : renamed.Key;
+    }
+
+    /// <summary>
     /// Moves to the next or previous view, skipping the group labels and stopping at either end.
     /// </summary>
     /// <remarks>
@@ -1996,6 +2025,10 @@ public sealed class MainPresenter
             RemindersAvailable = snapshot.RemindersAvailable;
             PlanName = snapshot.PlanLimits?.PlanName ?? string.Empty;
             Sidebar = BuildSidebar(snapshot);
+
+            // Ahead of everything that asks whether the view is still in the sidebar. One made here
+            // is in it under the server's id by now, and under the old one it would read as gone.
+            FollowRename();
 
             // After the sidebar, which is what it's checked against, and before the path and the
             // rows, which follow from wherever it leaves the selection.

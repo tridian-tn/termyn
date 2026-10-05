@@ -147,4 +147,28 @@ public class RestoredViewTests
 
         Assert.Equal(ViewSelection.Default, presenter.Selection);
     }
+
+    [Fact]
+    public async Task A_project_the_server_names_in_the_first_sync_stays_open()
+    {
+        // Made offline before the restart, so it was saved under an id of our own and the first
+        // sync is the one that sends it. Renamed rather than gone.
+        var store = new InMemorySnapshotStore();
+        var api = new FakeApi();
+
+        var before = Started(store, api);
+        before.AddProject("Errands");
+        var made = before.Sidebar.First(n => n.Kind == SidebarKind.Project && n.Label == "Errands").Key;
+
+        var presenter = Started(store, api);
+        presenter.RestoreView(made);
+
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["project_add"] = "p2" },
+            Json.Change("projects", "p2", """{"id":"p2","name":"Errands","child_order":1}"""));
+        await presenter.SyncAsync();
+
+        Assert.Equal(ViewSelection.OfProject("p2"), presenter.Selection);
+        Assert.Equal(Project("p2"), presenter.SelectedKey);
+    }
 }
