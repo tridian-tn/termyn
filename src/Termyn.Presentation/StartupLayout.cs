@@ -90,6 +90,21 @@ public static class StartupLayout
             Math.Min(Scaled(WindowHeight, dpi), (int)(workingHeight * MostOfScreen)));
 
     /// <summary>
+    /// The smallest the window can be made.
+    /// </summary>
+    /// <remarks>
+    /// Held to the same share of the screen as a new window, which it would otherwise push past: a
+    /// small screen at a high scale has room for less than the minimum at that scale.
+    /// </remarks>
+    /// <param name="dpi">The dots per inch of the screen it's on</param>
+    /// <param name="workingWidth">How wide that screen's working area is, in its pixels</param>
+    /// <param name="workingHeight">How tall that screen's working area is, in its pixels</param>
+    /// <returns>The least outer width and height, in pixels</returns>
+    public static (int Width, int Height) Minimum(int dpi, int workingWidth, int workingHeight)
+        => (Math.Min(Scaled(MinimumWidth, dpi), (int)(workingWidth * MostOfScreen)),
+            Math.Min(Scaled(MinimumHeight, dpi), (int)(workingHeight * MostOfScreen)));
+
+    /// <summary>
     /// How wide the task column is made when no widths have been saved.
     /// </summary>
     /// <remarks>

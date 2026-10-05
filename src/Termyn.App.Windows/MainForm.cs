@@ -162,6 +162,9 @@ internal sealed class MainForm : Form
     /// <summary>The panel size as the user last left it, which is what gets saved.</summary>
     private int _descriptionHeight;
 
+    /// <summary>The outline's column widths as they were saved, until the window lays them out.</summary>
+    private readonly Dictionary<TaskColumn, int> _savedColumns = [];
+
     /// <summary>
     /// True while the panels are being sized by us rather than dragged by the user, so the layout
     /// settling doesn't get recorded as a size anybody chose. Starts true: everything up to the
@@ -249,7 +252,6 @@ internal sealed class MainForm : Form
 
         Text = "Termyn";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(AtScale(StartupLayout.MinimumWidth), AtScale(StartupLayout.MinimumHeight));
         KeyPreview = true;
 
         _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = Strings.SearchPlaceholder };
@@ -1053,10 +1055,19 @@ internal sealed class MainForm : Form
 
     private void RestoreViewState(ViewState state)
     {
+        // What isn't saved is sized for the screen the window opens on: the one under the pointer,
+        // which is where a window with no owner is centred. At that screen's scale, asked of Windows,
+        // since the window itself only knows the scale of the screen the app started on.
+        var screen = Screen.FromPoint(MousePosition).WorkingArea;
+        var dpi = ScreenScale.At(MousePosition) ?? DeviceDpi;
+
+        var (leastWidth, leastHeight) = StartupLayout.Minimum(dpi, screen.Width, screen.Height);
+        MinimumSize = new Size(leastWidth, leastHeight);
+
         // Only remembered here. The splitters are set once the window has a size to divide, which
         // is not yet: before it is parented a SplitContainer clamps every distance it is given
         // against its own default and quietly sticks there.
-        _descriptionHeight = state.DescriptionHeight ?? AtScale(StartupLayout.DescriptionHeight);
+        _descriptionHeight = state.DescriptionHeight ?? StartupLayout.Scaled(StartupLayout.DescriptionHeight, dpi);
 
         // _adjustingPanels is still true here, so the layout this sets off doesn't record the
         // container's unparented default over what has just been read.
@@ -1065,7 +1076,7 @@ internal sealed class MainForm : Form
         // Outer bounds throughout, matching what CurrentViewState saves. Saving the outer size and
         // restoring it as the client size grew the window by the frame on every maximise-and-exit
         // cycle, compounding until it walked off the screen.
-        var (width, height) = NewWindowSize();
+        var (width, height) = StartupLayout.Window(dpi, screen.Width, screen.Height);
         var size = new Size(
             Math.Max(state.WindowWidth ?? width, MinimumSize.Width),
             Math.Max(state.WindowHeight ?? height, MinimumSize.Height));
@@ -1092,16 +1103,14 @@ internal sealed class MainForm : Form
         _presenter.RestoreView(state.SelectedKey);
         _sidebarKey = _presenter.SelectedKey;
 
-        // By name, so a column added since they were saved keeps its default. With none saved, the
-        // columns are fitted to the outline once the window has a size to give it.
-        var widths = new Dictionary<TaskColumn, int>();
+        // By name, so a column added since they were saved keeps its default. Laid out once the
+        // window is on its screen and has a size to give the outline.
+        _savedColumns.Clear();
         foreach (var (name, saved) in state.ColumnWidths)
         {
             if (Enum.TryParse<TaskColumn>(name, ignoreCase: true, out var column))
-                widths[column] = saved;
+                _savedColumns[column] = saved;
         }
-
-        _outline.ColumnWidths = widths;
 
         _restoreCollapsed = state.CollapsedKeys.Count > 0
             ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
@@ -1116,20 +1125,6 @@ internal sealed class MainForm : Form
     /// <param name="logical">The size at 100%</param>
     /// <returns>The size in the display's pixels</returns>
     private int AtScale(int logical) => StartupLayout.Scaled(logical, DeviceDpi);
-
-    /// <summary>
-    /// The size the window opens at when none has been saved.
-    /// </summary>
-    /// <remarks>
-    /// For the screen under the pointer, which is the one a window opened from the taskbar or a
-    /// shortcut is most likely to land on.
-    /// </remarks>
-    /// <returns>The outer width and height in pixels</returns>
-    private (int Width, int Height) NewWindowSize()
-    {
-        var working = Screen.FromPoint(MousePosition).WorkingArea;
-        return StartupLayout.Window(DeviceDpi, working.Width, working.Height);
-    }
 
     private ViewState CurrentViewState()
     {
@@ -3632,8 +3627,7 @@ internal sealed class MainForm : Form
         ApplyPanelSizes();
 
         // After the sidebar, whose width decides what the outline is left with.
-        if (_settings.View.ColumnWidths.Count == 0)
-            _outline.FitColumns();
+        _outline.LayColumns(_savedColumns);
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
         _scheduler.Start();

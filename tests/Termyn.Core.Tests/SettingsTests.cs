@@ -789,6 +789,22 @@ public class AppSettingsTests
     }
 
     [Fact]
+    public void Column_names_are_compared_however_they_re_cased_and_the_same_way_round_either_way()
+    {
+        // The file is read ignoring case and a state made in code isn't, so a comparison that went
+        // by either side's own rules answered differently depending on which side asked.
+        var made = new ViewState { ColumnWidths = new Dictionary<string, int> { ["Content"] = 300 } };
+        var read = new ViewState
+        {
+            ColumnWidths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["content"] = 300 },
+        };
+
+        Assert.True(made.Equals(read));
+        Assert.True(read.Equals(made));
+        Assert.Equal(made.GetHashCode(), read.GetHashCode());
+    }
+
+    [Fact]
     public void A_hand_edited_hotkey_that_cannot_be_registered_falls_back_to_the_default()
         => Assert.Equal(HotkeyBinding.Default, new AppSettings { Hotkey = "Shift+A" }.HotkeyBinding);
 }

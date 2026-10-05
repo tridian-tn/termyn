@@ -60,11 +60,22 @@ public class NewWindowLayoutTests : IDisposable
         using var window = Shown();
 
         var working = Screen.FromPoint(Control.MousePosition).WorkingArea;
-        var (width, height) = StartupLayout.Window(window.DeviceDpi, working.Width, working.Height);
+        var dpi = ScreenScale.At(Control.MousePosition) ?? window.DeviceDpi;
+        var (width, height) = StartupLayout.Window(dpi, working.Width, working.Height);
 
-        Assert.Equal(
-            new Size(Math.Max(width, window.MinimumSize.Width), Math.Max(height, window.MinimumSize.Height)),
-            window.Size);
+        Assert.Equal(StartupLayout.Minimum(dpi, working.Width, working.Height), (window.MinimumSize.Width, window.MinimumSize.Height));
+        Assert.Equal(new Size(width, height), window.Size);
+    }
+
+    [WinFormsFact]
+    public void The_scale_asked_of_Windows_for_a_screen_is_the_one_a_window_on_it_has()
+    {
+        // The default size is worked out from this before the window is on a screen to ask, so it
+        // has to answer, and answer the same as the window does once it's there.
+        using var window = Shown();
+        var middle = new Point(window.Left + (window.Width / 2), window.Top + (window.Height / 2));
+
+        Assert.Equal(window.DeviceDpi, ScreenScale.At(middle));
     }
 
     [WinFormsTheory]
@@ -74,6 +85,25 @@ public class NewWindowLayoutTests : IDisposable
     public void Every_column_shows_when_none_has_been_sized_yet(int width, int height)
     {
         File.WriteAllText(_config, $$$"""{"view":{"windowWidth":{{{width}}},"windowHeight":{{{height}}}}}""");
+
+        using var window = Shown();
+        var outline = TestWindow.Find<OutlineView>(window);
+        var taken = Widths(window).Sum();
+
+        Assert.True(
+            taken <= outline.ClientSize.Width,
+            $"the columns take {taken}px of an outline {outline.ClientSize.Width}px wide");
+    }
+
+    [WinFormsTheory]
+    [InlineData("Gone")]
+    [InlineData("None")]
+    public void A_width_saved_for_a_column_the_outline_hasn_t_got_doesn_t_stop_the_rest_fitting(string column)
+    {
+        // From a version with a column this one doesn't show: one it has no name for at all, or
+        // one it can name but never draws. None of the columns on show was ever sized, so they're
+        // fitted as though nothing had been saved.
+        File.WriteAllText(_config, $$$$"""{"view":{"windowWidth":1100,"windowHeight":700,"columnWidths":{"{{{{column}}}}":200}}}""");
 
         using var window = Shown();
         var outline = TestWindow.Find<OutlineView>(window);
@@ -120,10 +150,11 @@ public class NewWindowLayoutTests : IDisposable
     [WinFormsFact]
     public void A_window_sized_by_hand_comes_back_that_size()
     {
-        File.WriteAllText(_config, """{"view":{"windowWidth":1300,"windowHeight":800}}""");
+        // Smaller than the 1024 by 768 a build agent's screen can be, which Windows holds a window to.
+        File.WriteAllText(_config, """{"view":{"windowWidth":900,"windowHeight":600}}""");
 
         using var window = Shown();
 
-        Assert.Equal(new Size(1300, 800), window.Size);
+        Assert.Equal(new Size(900, 600), window.Size);
     }
 }

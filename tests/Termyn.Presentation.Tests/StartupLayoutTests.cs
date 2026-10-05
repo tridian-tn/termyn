@@ -31,6 +31,22 @@ public class StartupLayoutTests
         => Assert.Equal((921, 655), StartupLayout.Window(96, 1024, 728));
 
     [Fact]
+    public void The_smallest_a_window_can_be_grows_with_the_scale_of_the_screen()
+    {
+        Assert.Equal((640, 400), StartupLayout.Minimum(96, 1920, 1040));
+        Assert.Equal((960, 600), StartupLayout.Minimum(144, 2880, 1560));
+    }
+
+    [Fact]
+    public void The_smallest_a_window_can_be_is_held_to_a_small_screen_like_a_new_one()
+    {
+        // At 200% the minimum would be 1280 wide, past the edge of a 1024 screen. A new window on
+        // it is held to 921, and the minimum mustn't push it past that.
+        Assert.Equal((921, 655), StartupLayout.Minimum(192, 1024, 728));
+        Assert.Equal(StartupLayout.Window(192, 1024, 728), StartupLayout.Minimum(192, 1024, 728));
+    }
+
+    [Fact]
     public void The_task_column_takes_what_the_others_leave()
         => Assert.Equal(350, StartupLayout.TaskColumnWidth(room: 840, others: 490, dpi: 96));
 

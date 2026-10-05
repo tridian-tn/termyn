@@ -172,8 +172,7 @@ public sealed record ViewState
            && WindowWidth == other.WindowWidth
            && WindowHeight == other.WindowHeight
            && Maximized == other.Maximized
-           && ColumnWidths.Count == other.ColumnWidths.Count
-           && ColumnWidths.All(c => other.ColumnWidths.TryGetValue(c.Key, out var width) && width == c.Value)
+           && SameWidths(ColumnWidths, other.ColumnWidths)
            && CollapsedKeys.Count == other.CollapsedKeys.Count
            && !CollapsedKeys.Except(other.CollapsedKeys, StringComparer.Ordinal).Any()
            && CollapsedTasks.Count == other.CollapsedTasks.Count
@@ -197,9 +196,53 @@ public sealed record ViewState
         // ids come out of a set as well, which has an order of its own and no promise about it.
         hash.Add(Unordered(CollapsedKeys));
         hash.Add(Unordered(CollapsedTasks));
-        hash.Add(Unordered([.. ColumnWidths.Select(c => $"{c.Key}={c.Value}")]));
+        hash.Add(UnorderedWidths(ColumnWidths));
 
         return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Column widths keyed by name however it's cased, which is how the file is read.
+    /// </summary>
+    /// <remarks>
+    /// Compared and hashed through this rather than as they come: a set built in code is
+    /// case-sensitive and one read from the file isn't, and comparing through whichever the other
+    /// side happened to be made a comparison that could answer differently each way round.
+    /// </remarks>
+    /// <param name="widths">The widths as held</param>
+    /// <returns>The same widths, one per name</returns>
+    private static Dictionary<string, int> ByName(IReadOnlyDictionary<string, int> widths)
+    {
+        var byName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, width) in widths)
+            byName[name] = width;
+
+        return byName;
+    }
+
+    /// <summary>Whether two sets of column widths say the same, whatever case their names are in.</summary>
+    /// <param name="first">One set of widths</param>
+    /// <param name="second">The other</param>
+    /// <returns>True when each names the same columns at the same widths</returns>
+    private static bool SameWidths(IReadOnlyDictionary<string, int> first, IReadOnlyDictionary<string, int> second)
+    {
+        var a = ByName(first);
+        var b = ByName(second);
+
+        return a.Count == b.Count && a.All(c => b.TryGetValue(c.Key, out var width) && width == c.Value);
+    }
+
+    /// <summary>A hash of column widths that agrees with <see cref="SameWidths"/>.</summary>
+    /// <param name="widths">The widths to fold together</param>
+    /// <returns>The same answer for widths that compare the same</returns>
+    private static int UnorderedWidths(IReadOnlyDictionary<string, int> widths)
+    {
+        var byName = ByName(widths);
+        var folded = byName.Count;
+        foreach (var (name, width) in byName)
+            folded ^= HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(name), width);
+
+        return folded;
     }
 
     /// <summary>A hash of what a list holds, taking no notice of the order it holds it in.</summary>
