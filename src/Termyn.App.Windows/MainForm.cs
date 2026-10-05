@@ -162,6 +162,9 @@ internal sealed class MainForm : Form
     /// <summary>The panel size as the user last left it, which is what gets saved.</summary>
     private int _descriptionHeight;
 
+    /// <summary>The outline's column widths as they were saved, until the window lays them out.</summary>
+    private readonly Dictionary<TaskColumn, int> _savedColumns = [];
+
     /// <summary>
     /// True while the panels are being sized by us rather than dragged by the user, so the layout
     /// settling doesn't get recorded as a size anybody chose. Starts true: everything up to the
@@ -249,7 +252,6 @@ internal sealed class MainForm : Form
 
         Text = "Termyn";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(640, 400);
         KeyPreview = true;
 
         _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = Strings.SearchPlaceholder };
@@ -1053,10 +1055,19 @@ internal sealed class MainForm : Form
 
     private void RestoreViewState(ViewState state)
     {
+        // What isn't saved is sized for the screen the window opens on: the one under the pointer,
+        // which is where a window with no owner is centred. At that screen's scale, asked of Windows,
+        // since the window itself only knows the scale of the screen the app started on.
+        var screen = Screen.FromPoint(MousePosition).WorkingArea;
+        var dpi = ScreenScale.At(MousePosition) ?? DeviceDpi;
+
+        var (leastWidth, leastHeight) = StartupLayout.Minimum(dpi, screen.Width, screen.Height);
+        MinimumSize = new Size(leastWidth, leastHeight);
+
         // Only remembered here. The splitters are set once the window has a size to divide, which
         // is not yet: before it is parented a SplitContainer clamps every distance it is given
         // against its own default and quietly sticks there.
-        _descriptionHeight = state.DescriptionHeight;
+        _descriptionHeight = state.DescriptionHeight ?? StartupLayout.Scaled(StartupLayout.DescriptionHeight, dpi);
 
         // _adjustingPanels is still true here, so the layout this sets off doesn't record the
         // container's unparented default over what has just been read.
@@ -1065,9 +1076,10 @@ internal sealed class MainForm : Form
         // Outer bounds throughout, matching what CurrentViewState saves. Saving the outer size and
         // restoring it as the client size grew the window by the frame on every maximise-and-exit
         // cycle, compounding until it walked off the screen.
+        var (width, height) = StartupLayout.Window(dpi, screen.Width, screen.Height);
         var size = new Size(
-            Math.Max(state.WindowWidth, MinimumSize.Width),
-            Math.Max(state.WindowHeight, MinimumSize.Height));
+            Math.Max(state.WindowWidth ?? width, MinimumSize.Width),
+            Math.Max(state.WindowHeight ?? height, MinimumSize.Height));
 
         if (state is { WindowX: { } x, WindowY: { } y })
         {
@@ -1091,6 +1103,15 @@ internal sealed class MainForm : Form
         _presenter.RestoreView(state.SelectedKey);
         _sidebarKey = _presenter.SelectedKey;
 
+        // By name, so a column added since they were saved keeps its default. Laid out once the
+        // window is on its screen and has a size to give the outline.
+        _savedColumns.Clear();
+        foreach (var (name, saved) in state.ColumnWidths)
+        {
+            if (Enum.TryParse<TaskColumn>(name, ignoreCase: true, out var column))
+                _savedColumns[column] = saved;
+        }
+
         _restoreCollapsed = state.CollapsedKeys.Count > 0
             ? state.CollapsedKeys.ToHashSet(StringComparer.Ordinal)
             : null;
@@ -1099,6 +1120,11 @@ internal sealed class MainForm : Form
         // answer, so it needs these before it works the outline out rather than after.
         _presenter.RestoreCollapsed(state.CollapsedTasks);
     }
+
+    /// <summary>A size at 100% as it is at the window's display scale.</summary>
+    /// <param name="logical">The size at 100%</param>
+    /// <returns>The size in the display's pixels</returns>
+    private int AtScale(int logical) => StartupLayout.Scaled(logical, DeviceDpi);
 
     private ViewState CurrentViewState()
     {
@@ -1111,6 +1137,7 @@ internal sealed class MainForm : Form
             SelectedKey = _sidebarKey,
             CollapsedKeys = CollapsedKeys().ToList(),
             CollapsedTasks = _presenter.CollapsedTasks,
+            ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => c.Value),
             SidebarWidth = _split.SplitterDistance,
             ShowDescription = !_detail.Panel2Collapsed,
             DescriptionHeight = _descriptionHeight,
@@ -3592,8 +3619,15 @@ internal sealed class MainForm : Form
     {
         // Restored here rather than in the constructor: before the splitter is parented and sized it
         // clamps the distance against the container's default width and silently sticks there.
-        _split.SplitterDistance = Math.Clamp(_settings.View.SidebarWidth, 120, Math.Max(120, ClientSize.Width - 200));
+        var least = AtScale(StartupLayout.SidebarLeast);
+        _split.SplitterDistance = Math.Clamp(
+            _settings.View.SidebarWidth ?? AtScale(StartupLayout.SidebarWidth),
+            least,
+            Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
         ApplyPanelSizes();
+
+        // After the sidebar, whose width decides what the outline is left with.
+        _outline.LayColumns(_savedColumns);
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
         _scheduler.Start();

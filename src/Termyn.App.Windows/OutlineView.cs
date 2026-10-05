@@ -80,12 +80,60 @@ internal sealed class OutlineView : ListView
 
         // Each header carries the column it stands for, so a click has something to name without a
         // second table of indices to keep in step with this one.
-        Columns.Add("Task", 360).Tag = TaskColumn.Content;
-        Columns.Add("!", 46, HorizontalAlignment.Center).Tag = TaskColumn.Priority;
-        Columns.Add("Project", 140).Tag = TaskColumn.Project;
-        Columns.Add("Due", 120).Tag = TaskColumn.Due;
-        Columns.Add("Deadline", 100).Tag = TaskColumn.Deadline;
-        Columns.Add("Labels", 140).Tag = TaskColumn.Labels;
+        Column("Task", TaskColumn.Content);
+        Column("!", TaskColumn.Priority, HorizontalAlignment.Center);
+        Column("Project", TaskColumn.Project);
+        Column("Due", TaskColumn.Due);
+        Column("Deadline", TaskColumn.Deadline);
+        Column("Labels", TaskColumn.Labels);
+
+        void Column(string heading, TaskColumn column, HorizontalAlignment align = HorizontalAlignment.Left)
+            => Columns.Add(heading, StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi), align).Tag = column;
+    }
+
+    /// <summary>How wide each column is, by the column it stands for.</summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public IReadOnlyDictionary<TaskColumn, int> ColumnWidths
+        => Columns.Cast<ColumnHeader>()
+            .Where(c => c.Tag is TaskColumn)
+            .ToDictionary(c => (TaskColumn)c.Tag!, c => c.Width);
+
+    /// <summary>
+    /// Sizes the columns for a window that has just opened: as they were saved, or to fit.
+    /// </summary>
+    /// <remarks>
+    /// Once the list is on its screen and laid out. Before that it only knows the scale of the screen
+    /// the app started on, and on a second screen scaled differently that's the wrong one.
+    ///
+    /// A column with no saved width takes its default. When none of them had one, the task column
+    /// then takes whatever the others leave of the outline, so every column shows without scrolling
+    /// sideways. A scroll bar is allowed for, showing or not: this runs before the rows are in, and a
+    /// real account soon has more than fit.
+    /// </remarks>
+    /// <param name="saved">The widths saved last time, by column</param>
+    public void LayColumns(IReadOnlyDictionary<TaskColumn, int> saved)
+    {
+        var headers = Columns.Cast<ColumnHeader>().Where(c => c.Tag is TaskColumn).ToList();
+
+        foreach (var header in headers)
+        {
+            var column = (TaskColumn)header.Tag!;
+            header.Width = saved.TryGetValue(column, out var width)
+                ? width
+                : StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi);
+        }
+
+        // Asked of the outline's own columns, so a width saved for one it no longer has doesn't
+        // count as the user having sized it.
+        if (headers.Any(h => saved.ContainsKey((TaskColumn)h.Tag!)))
+            return;
+
+        var others = headers.Where(h => h.Tag is not TaskColumn.Content).Sum(h => h.Width);
+        var room = ClientSize.Width - SystemInformation.GetVerticalScrollBarWidthForDpi(DeviceDpi);
+
+        foreach (var header in headers.Where(h => h.Tag is TaskColumn.Content))
+            header.Width = StartupLayout.TaskColumnWidth(room, others, DeviceDpi);
     }
 
     /// <summary>Raised when a header is clicked, with the column it stands for.</summary>

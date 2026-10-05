@@ -208,15 +208,39 @@ public sealed class SettingsStore
             CollapsedTasks = Array(view, "collapsedTasks") is { } folded
                 ? folded.OfType<JsonValue>().Select(t => t.ToString()).ToList()
                 : defaults.CollapsedTasks,
-            SidebarWidth = Int(view, "sidebarWidth", defaults.SidebarWidth),
+            SidebarWidth = Nullable(view, "sidebarWidth"),
             ShowDescription = Flag(view, "showDescription", defaults.ShowDescription),
-            DescriptionHeight = Int(view, "descriptionHeight", defaults.DescriptionHeight),
+            DescriptionHeight = Nullable(view, "descriptionHeight"),
             WindowX = Nullable(view, "windowX"),
             WindowY = Nullable(view, "windowY"),
-            WindowWidth = Int(view, "windowWidth", defaults.WindowWidth),
-            WindowHeight = Int(view, "windowHeight", defaults.WindowHeight),
+            WindowWidth = Nullable(view, "windowWidth"),
+            WindowHeight = Nullable(view, "windowHeight"),
             Maximized = Flag(view, "maximized", defaults.Maximized),
+            ColumnWidths = Object(view, "columnWidths") is { } columns ? Widths(columns) : defaults.ColumnWidths,
         };
+    }
+
+    /// <summary>
+    /// The column widths a file holds, leaving out any that aren't a width at all.
+    /// </summary>
+    /// <remarks>
+    /// Nothing narrower than a pixel is kept. A column at nothing is one there's no edge left to
+    /// drag it back out by, and the list reads a negative width as an instruction to size it to fit.
+    /// Names are matched however they're cased, like every other key in the file, and a name
+    /// written twice keeps the last of them.
+    /// </remarks>
+    /// <param name="columns">The <c>columnWidths</c> object</param>
+    /// <returns>Each width in it, by column name</returns>
+    private static Dictionary<string, int> Widths(JsonObject columns)
+    {
+        var widths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in columns)
+        {
+            if (value is JsonValue v && v.TryGetValue(out int width) && width > 0)
+                widths[name] = width;
+        }
+
+        return widths;
     }
 
     /// <summary>

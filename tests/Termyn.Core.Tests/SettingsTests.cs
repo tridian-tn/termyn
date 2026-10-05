@@ -187,6 +187,37 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_file_with_no_sizes_in_it_leaves_them_to_the_window()
+    {
+        // Unset rather than a figure in pixels, which can't be right at every display scale. The
+        // window works them out for the screen it opens on.
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "view": { "selectedKey": "Today" } }""");
+
+        var view = new SettingsStore(Config).Load().View;
+
+        Assert.Null(view.WindowWidth);
+        Assert.Null(view.WindowHeight);
+        Assert.Null(view.SidebarWidth);
+        Assert.Null(view.DescriptionHeight);
+        Assert.Empty(view.ColumnWidths);
+    }
+
+    [Fact]
+    public void A_column_width_that_isn_t_one_is_left_out()
+    {
+        // A column at nothing has no edge left to drag it back out by, and the list takes a
+        // negative width as an instruction to size the column itself.
+        File.WriteAllText(Config, """
+            { "schemaVersion": 1,
+              "view": { "columnWidths": { "Content": "wide", "Due": 0, "Labels": -2, "project": 150 } } }
+            """);
+
+        var widths = new SettingsStore(Config).Load().View.ColumnWidths;
+
+        Assert.Equal(new KeyValuePair<string, int>("project", 150), Assert.Single(widths));
+    }
+
+    [Fact]
     public void The_download_caps_come_back_as_they_were_set()
     {
         var saved = new AppSettings { AttachmentCacheMb = 64, AttachmentCacheDays = 3 };
@@ -524,6 +555,7 @@ public class SettingsStoreTests : IDisposable
                 WindowWidth = 1600,
                 WindowHeight = 900,
                 Maximized = true,
+                ColumnWidths = new Dictionary<string, int> { ["Content"] = 300, ["Labels"] = 175 },
             },
         };
 
@@ -741,6 +773,36 @@ public class AppSettingsTests
     [Fact]
     public void Automatic_mode_polls_at_the_clamped_interval()
         => Assert.Equal(TimeSpan.FromSeconds(300), new AppSettings { SyncIntervalSeconds = 100000 }.Cadence.Interval);
+
+    [Fact]
+    public void View_states_differing_only_in_a_column_s_width_are_different()
+    {
+        // The comparison is what the round trip through the file is checked with, so a field it
+        // left out would come back from the file unchecked.
+        var narrow = new ViewState { ColumnWidths = new Dictionary<string, int> { ["Content"] = 300 } };
+        var wide = new ViewState { ColumnWidths = new Dictionary<string, int> { ["Content"] = 360 } };
+        var same = new ViewState { ColumnWidths = new Dictionary<string, int> { ["Content"] = 300 } };
+
+        Assert.NotEqual(narrow, wide);
+        Assert.Equal(narrow, same);
+        Assert.Equal(narrow.GetHashCode(), same.GetHashCode());
+    }
+
+    [Fact]
+    public void Column_names_are_compared_however_they_re_cased_and_the_same_way_round_either_way()
+    {
+        // The file is read ignoring case and a state made in code isn't, so a comparison that went
+        // by either side's own rules answered differently depending on which side asked.
+        var made = new ViewState { ColumnWidths = new Dictionary<string, int> { ["Content"] = 300 } };
+        var read = new ViewState
+        {
+            ColumnWidths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["content"] = 300 },
+        };
+
+        Assert.True(made.Equals(read));
+        Assert.True(read.Equals(made));
+        Assert.Equal(made.GetHashCode(), read.GetHashCode());
+    }
 
     [Fact]
     public void A_hand_edited_hotkey_that_cannot_be_registered_falls_back_to_the_default()
