@@ -1142,10 +1142,13 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void SaveSelectedView()
     {
-        if (SignedOut || _sidebarKey == (_settings.View.SelectedKey ?? ViewSelection.Default.Key))
+        // The presenter's key rather than the tree's. This runs in the render that opening a view
+        // sets off, and the tray and Ctrl+↑/↓ only copy the key across to the tree once it's over.
+        var key = _presenter.SelectedKey;
+        if (SignedOut || key == (_settings.View.SelectedKey ?? ViewSelection.Default.Key))
             return;
 
-        _settings = _settings with { View = _settings.View with { SelectedKey = _sidebarKey } };
+        _settings = _settings with { View = _settings.View with { SelectedKey = key } };
         _shell.Store.Save(_settings);
     }
 
@@ -1263,8 +1266,6 @@ internal sealed class MainForm : Form
             return;
 
         RenderSidebar();
-
-        // After the sidebar, which is what moves the key on when the view it named has gone.
         SaveSelectedView();
         RenderCrumbs();
 

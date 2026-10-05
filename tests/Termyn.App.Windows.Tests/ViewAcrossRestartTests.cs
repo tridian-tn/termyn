@@ -67,6 +67,19 @@ public class ViewAcrossRestartTests : IDisposable
     }
 
     [WinFormsFact]
+    public void A_view_stepped_to_from_the_keyboard_is_written_down_as_soon_as_it_opens()
+    {
+        // Unlike a click, Ctrl+↓ only tells the tree which row it's on once the render that writes
+        // the view down is over. So does picking a view from the tray.
+        using var window = Shown(new FakeApi(), out var presenter);
+
+        window.Run(AppCommand.NextView);
+
+        Assert.Equal(SidebarKeys.For(SidebarKind.SmartView, "Upcoming"), presenter.SelectedKey);
+        Assert.Contains($"\"selectedKey\": \"{presenter.SelectedKey}\"", Saved());
+    }
+
+    [WinFormsFact]
     public void A_file_that_names_no_view_opens_on_Today()
     {
         File.WriteAllText(_config, """{"view":{"sidebarWidth":240}}""");
