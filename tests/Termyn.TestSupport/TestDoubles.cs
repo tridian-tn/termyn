@@ -64,6 +64,25 @@ public sealed class FakeApi : ITodoistApi
         set => Next = _ => value;
     }
 
+    /// <summary>
+    /// The server taking every write it's sent, and naming what each one made.
+    /// </summary>
+    /// <param name="ids">The id to give what each kind of command makes, by its type</param>
+    /// <param name="changes">What the server sends back, under the ids it gave</param>
+    /// <returns>A responder for <see cref="Next"/></returns>
+    public static Func<IReadOnlyList<Command>, SyncResponse> Naming(
+        IReadOnlyDictionary<string, string> ids,
+        params ResourceChange[] changes)
+        => commands => new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = changes,
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = commands
+                .Where(c => c.TempId is not null && ids.ContainsKey(c.Type))
+                .ToDictionary(c => c.TempId!, c => ids[c.Type]),
+        };
+
     /// <summary>What the server returns for a quick add; unset means it is unreachable.</summary>
     public Func<string, ResourceChange>? QuickAdd;
 

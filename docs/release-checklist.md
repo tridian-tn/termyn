@@ -45,6 +45,9 @@ A step that fails is an issue before the release, not a note after it.
 - [ ] Closing the window leaves Termyn in the tray. Its menu has **Open Termyn**, **Quick add…**,
       recent views, **Sync now**, **Settings…**, **Check for updates…** and **Exit**.
 - [ ] **Check for updates…** answers without an error.
+- [ ] Open a label, end Termyn from Task Manager, and start it again: it opens on that label. Exit,
+      delete the label in the web app, and start it again: it moves to Today once the first sync
+      lands.
 - [ ] Tick **Start Termyn when I sign in**, sign out of Windows and back in: Termyn starts in the
       tray without opening a window.
 
@@ -61,11 +64,13 @@ Disconnect the network.
       so rather than doing nothing: *… hasn't been downloaded, and Todoist can't be reached. It'll
       be there to try again when you're back online.*
 - [ ] Add a task to a project, then delete that project in the web app.
+- [ ] Add a project, open it, and quick-add a task while it's open. Leave it open.
 
 Reconnect.
 
 - [ ] The pending count goes to nothing, and the web app has the new task, the tick, the
       description and the comment's text as they were written.
+- [ ] The new project is still open with its task in it, and still lit in the sidebar.
 - [ ] The task added to the deleted project is taken back, with what was queued under it, and the
       status line says *1 failed*. Clicking it says why.
 
