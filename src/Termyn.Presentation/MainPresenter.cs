@@ -755,6 +755,12 @@ public sealed class MainPresenter
     private readonly List<string> _recent = [];
 
     /// <summary>
+    /// Held while <see cref="_recent"/> is read or changed: a view is opened on the window's thread,
+    /// and the list is renamed in a publish, which can be on the sync loop's.
+    /// </summary>
+    private readonly Lock _recentGate = new();
+
+    /// <summary>
     /// The views most recently opened, newest first, as a way back to them.
     /// </summary>
     /// <remarks>
@@ -775,7 +781,11 @@ public sealed class MainPresenter
         {
             var here = Sidebar.FirstOrDefault(n => n.Key == SelectedKey);
 
-            return _recent
+            List<string> recent;
+            lock (_recentGate)
+                recent = [.. _recent];
+
+            return recent
                 .Select(k => Sidebar.FirstOrDefault(n => n.Key == k))
                 .OfType<SidebarNode>()
                 .Where(n => here is null || !Identity(n).Equals(Identity(here)))
@@ -828,11 +838,32 @@ public sealed class MainPresenter
     /// <param name="key">The sidebar key of the view just opened</param>
     private void Remember(string key)
     {
-        _recent.Remove(key);
-        _recent.Insert(0, key);
+        lock (_recentGate)
+        {
+            _recent.Remove(key);
+            _recent.Insert(0, key);
 
-        if (_recent.Count > RecentKept)
-            _recent.RemoveRange(RecentKept, _recent.Count - RecentKept);
+            if (_recent.Count > RecentKept)
+                _recent.RemoveRange(RecentKept, _recent.Count - RecentKept);
+        }
+    }
+
+    /// <summary>
+    /// Puts each view in <see cref="_recent"/> under the id the server has given it.
+    /// </summary>
+    /// <remarks>
+    /// Done as the server's ids arrive rather than when the list is read. The engine only remembers
+    /// a rename for so long, and a view still held under its old key once it had forgotten would
+    /// drop out for good. It's also what lets opening the view again under its new key find it,
+    /// rather than hold it a second time and take two of the places kept.
+    /// </remarks>
+    private void FollowRenameInRecent()
+    {
+        lock (_recentGate)
+        {
+            for (var i = 0; i < _recent.Count; i++)
+                _recent[i] = RenamedKey(_recent[i]);
+        }
     }
 
     /// <summary>
@@ -918,13 +949,33 @@ public sealed class MainPresenter
         if (renamed == Selection)
             return;
 
-        // The Favourites copy of a project is a row of its own, and if that's the one it was opened
-        // from, that's the one to stay on.
-        var favourite = Selection.ProjectId is { } was && SelectedKey == SidebarKeys.Favourite(SidebarKind.Project, was);
-
+        // The key is renamed as it stands rather than worked out again from the selection, so a
+        // project opened from its copy under Favourites stays on that row.
         Selection = renamed;
-        SelectedKey = favourite ? SidebarKeys.Favourite(SidebarKind.Project, renamed.ProjectId!) : renamed.Key;
+        SelectedKey = RenamedKey(SelectedKey);
     }
+
+    /// <summary>The start of each sidebar key that carries an id the server can rename.</summary>
+    private static readonly string[] Renameable =
+    [
+        SidebarKeys.For(SidebarKind.Project, string.Empty),
+        SidebarKeys.Favourite(SidebarKind.Project, string.Empty),
+        SidebarKeys.For(SidebarKind.Section, string.Empty),
+    ];
+
+    /// <summary>
+    /// The key a sidebar row goes by now, given the one it was opened by.
+    /// </summary>
+    /// <remarks>
+    /// Only a project's rows and a section's carry an id the server can rename. Every other key
+    /// comes back as it was.
+    /// </remarks>
+    /// <param name="key">A sidebar key that's been held since the row was opened</param>
+    /// <returns>The key under the server's id, or the same key when nothing has renamed it</returns>
+    private string RenamedKey(string key)
+        => Renameable.FirstOrDefault(p => key.StartsWith(p, StringComparison.Ordinal)) is { } prefix
+            ? prefix + _engine.Resolve(key[prefix.Length..])
+            : key;
 
     /// <summary>
     /// Moves to the next or previous view, skipping the group labels and stopping at either end.
@@ -2029,6 +2080,7 @@ public sealed class MainPresenter
             // Ahead of everything that asks whether the view is still in the sidebar. One made here
             // is in it under the server's id by now, and under the old one it would read as gone.
             FollowRename();
+            FollowRenameInRecent();
 
             // After the sidebar, which is what it's checked against, and before the path and the
             // rows, which follow from wherever it leaves the selection.

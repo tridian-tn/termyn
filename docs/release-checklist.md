@@ -70,7 +70,8 @@ Reconnect.
 
 - [ ] The pending count goes to nothing, and the web app has the new task, the tick, the
       description and the comment's text as they were written.
-- [ ] The new project is still open with its task in it, and still lit in the sidebar.
+- [ ] The new project is still open with its task in it, and still lit in the sidebar. Open Today:
+      the tray's menu offers the new project among its recent views.
 - [ ] The task added to the deleted project is taken back, with what was queued under it, and the
       status line says *1 failed*. Clicking it says why.
 
