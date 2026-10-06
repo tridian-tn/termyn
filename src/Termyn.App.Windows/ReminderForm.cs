@@ -1,3 +1,4 @@
+using Termyn.Core.Capture;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
@@ -131,6 +132,33 @@ internal sealed class ReminderForm : Form
         return dialog._wrote;
     }
 
+    /// <summary>The dialog as it will be shown, built and not shown, for a test to look at.</summary>
+    /// <param name="presenter">The presenter the reminders are read from and written through</param>
+    /// <param name="itemId">The task the reminders are on</param>
+    /// <param name="task">What the task is called</param>
+    /// <returns>The dialog, which the caller disposes</returns>
+    internal static ReminderForm For(MainPresenter presenter, string itemId, string task) => new(presenter, itemId, task);
+
+    /// <summary>
+    /// Types a moment and presses its Add, for a test with no dialog to click.
+    /// </summary>
+    /// <remarks>
+    /// Raises the button's own Click rather than calling what it's wired to, so the wiring is part
+    /// of what's covered.
+    /// </remarks>
+    /// <param name="typed">The moment, as it would be typed</param>
+    internal void AddAt(string typed)
+    {
+        _absolute.Text = typed;
+        InvokeOnClick(_addAbsolute, EventArgs.Empty);
+    }
+
+    /// <summary>What the line under the controls says.</summary>
+    internal string Message => _message.Text;
+
+    /// <summary>What's left in the box for a moment, which is cleared once one is added.</summary>
+    internal string Typed => _absolute.Text;
+
     private void AddRelative()
     {
         if (_presenter.AddRelativeReminder(_itemId, Offsets[_offset.SelectedIndex].Minutes))
@@ -139,20 +167,27 @@ internal sealed class ReminderForm : Form
             _message.Text = Refusal();
     }
 
+    /// <summary>
+    /// Adds a reminder at the moment typed, read the way the date boxes read a day.
+    /// </summary>
+    /// <remarks>
+    /// Not the capture parser, which keeps whatever it doesn't read as a task's title and so never
+    /// refuses anything: "tomorrow please" was tomorrow at nine with "please" dropped.
+    /// </remarks>
     private void AddAbsolute()
     {
-        var text = _absolute.Text.Trim();
-        if (text.Length == 0)
+        var reading = _presenter.ReadDay(_absolute.Text);
+        if (reading.Kind is DayReadingKind.Blank)
             return;
 
-        var parse = _presenter.Preview(text).Parse;
-        if (parse.DueDate is not { } date)
+        var verdict = DayBoxText.ForReminder(reading);
+        if (!verdict.Accepted || reading.Day is not { } date)
         {
-            _message.Text = $"Couldn't read \"{text}\" as a date and time.";
+            _message.Text = verdict.Says;
             return;
         }
 
-        if (_presenter.AddAbsoluteReminder(_itemId, date, parse.DueTime ?? new TimeOnly(9, 0)))
+        if (_presenter.AddAbsoluteReminder(_itemId, date, reading.Time ?? DayBoxText.ReminderTime))
         {
             _absolute.Clear();
             Wrote();
