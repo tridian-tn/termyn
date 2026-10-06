@@ -122,6 +122,20 @@ public class DayBoxTests
     }
 
     [Fact]
+    public void Words_still_waiting_for_the_server_open_as_themselves()
+    {
+        // Set offline, "in three weeks" has no day until the server reads it. Opened empty, the box
+        // hid it, and with nothing to clear it couldn't be taken back before it synced.
+        var store = Store();
+        store.PutResource("items", "i2", """{"id":"i2","content":"Someday","project_id":"p1","child_order":3}""");
+        var presenter = NewPresenter(store);
+
+        presenter.SetDueFromText("i2", "in three weeks");
+
+        Assert.Equal("in three weeks", presenter.DueWritten("i2"));
+    }
+
+    [Fact]
     public void A_task_with_no_due_date_opens_on_an_empty_box()
     {
         var store = Store();

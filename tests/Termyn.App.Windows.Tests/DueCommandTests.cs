@@ -134,6 +134,27 @@ public class DueCommandTests
     }
 
     [WinFormsFact]
+    public void Words_waiting_for_the_server_can_be_cleared_before_they_reach_it()
+    {
+        // "in three weeks" set on a task with no due date has no day until it syncs. The dialog
+        // opened empty on it, so clearing answered with what it opened on and wrote nothing.
+        using var window = TestWindow.Build("due-pending.json", Account(), out _, out var presenter);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        presenter.SetDueFromText("a", "in three weeks");
+
+        string? opened = null;
+        window.AskForDue = (_, current) =>
+        {
+            opened = current;
+            return string.Empty;
+        };
+
+        Assert.True(window.RunOnTask(AppCommand.Due, "a"));
+        Assert.Equal("in three weeks", opened);
+        Assert.Equal(string.Empty, presenter.Rows.Single(r => r.Id == "a").Due);
+    }
+
+    [WinFormsFact]
     public void A_task_the_view_no_longer_holds_is_left_alone()
     {
         using var window = TestWindow.Build("due-gone.json", Account(), out _, out var presenter);

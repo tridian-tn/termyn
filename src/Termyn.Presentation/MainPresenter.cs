@@ -1400,8 +1400,11 @@ public sealed class MainPresenter
         if (item.IsRecurring && item.DueText is { Length: > 0 } words)
             return words;
 
+        // Words set here and still waiting for the server to say which day they mean — "in three
+        // weeks" typed offline — have no day yet. Opened empty, the box would hide them, and with
+        // nothing shown to clear there'd be no way to take them back before they synced.
         if (SmartViews.DueOn(item, snapshot.TimeZone) is not { } day)
-            return string.Empty;
+            return item.DueText ?? string.Empty;
 
         return QuickAddParser.Written(day, SmartViews.DueTimeOf(item, snapshot.TimeZone));
     }

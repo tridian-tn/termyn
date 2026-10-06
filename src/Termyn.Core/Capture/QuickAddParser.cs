@@ -179,7 +179,15 @@ public sealed partial class QuickAddParser
                     continue;
                 }
 
-                declined |= unread;
+                // A day passed over goes into the words whole, so no part of it is read as a day of
+                // its own: "Aug 27" out of "4 Aug 27", or this week's Friday out of "next friday".
+                if (unread)
+                {
+                    declined = true;
+                    content.AddRange(tokens[i..(i + used)]);
+                    i += used - 1;
+                    continue;
+                }
             }
 
             if (time is null && TimeAt(tokens, i, out var took) is { } at)
@@ -364,10 +372,11 @@ public sealed partial class QuickAddParser
     /// <param name="at">Where the day would start</param>
     /// <param name="today">Today in the account's timezone</param>
     /// <param name="settings">What the account says about reading a date</param>
-    /// <param name="used">How many words the day took, when there was one</param>
+    /// <param name="used">How many words the day took, or would have taken when it was passed over</param>
     /// <param name="declined">
     /// Whether a day starts there that Todoist would read and this won't — one that turns on a
-    /// setting the account hasn't given, or a weekend, which this doesn't read at all
+    /// setting the account hasn't given, a year in two figures, or a weekend, which this doesn't
+    /// read at all
     /// </param>
     /// <returns>The day, or null when no day starts there that can be read here</returns>
     private static DateOnly? DayAt(string[] tokens, int at, DateOnly today, DateSettings settings, out int used, out bool declined)
@@ -386,10 +395,8 @@ public sealed partial class QuickAddParser
                 return today.AddDays(1);
         }
 
-        // Not straight after "next", which only gets here when "next friday" couldn't be worked out.
-        // Read on its own it would be this week's Friday, which is the one day it can't mean.
         if (Array.IndexOf(WeekdayNames, first) is var named and >= 0)
-            return at > 0 && tokens[at - 1].Equals("next", StringComparison.OrdinalIgnoreCase) ? null : Coming((DayOfWeek)named, today);
+            return Coming((DayOfWeek)named, today);
 
         if (Figures(first, today, settings, out declined) is { } figures)
             return figures;
@@ -420,7 +427,7 @@ public sealed partial class QuickAddParser
         if (first == "end" && Word(1) == "of" && Word(2) == "month")
             return new DateOnly(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
 
-        return Named(Word(0)!, Word(1), Word(2), today, out used);
+        return Named(Word(0)!, Word(1), Word(2), today, out used, out declined);
     }
 
     /// <summary>A weekday by its name, in full or shortened.</summary>
@@ -588,16 +595,22 @@ public sealed partial class QuickAddParser
     /// <remarks>
     /// A comma after the day is only taken when a year follows it, as in a date written out in
     /// full. Anywhere else it's the sentence's punctuation, and the day isn't read.
+    ///
+    /// A year in two figures isn't read here, and Todoist may well read one, so a day with one
+    /// after it is passed over whole. Read without it, "4 Aug 27" was this year's 4 August with
+    /// "27" left in the words.
     /// </remarks>
     /// <param name="first">The first word, lower-cased</param>
     /// <param name="second">The word after it, or null</param>
     /// <param name="third">The word after that, or null</param>
     /// <param name="today">Today, which a day without a year is counted on from</param>
-    /// <param name="used">How many words the day took, when there was one</param>
-    /// <returns>The day, or null when the words don't name one</returns>
-    private static DateOnly? Named(string first, string? second, string? third, DateOnly today, out int used)
+    /// <param name="used">How many words the day took, or would have taken when it was passed over</param>
+    /// <param name="declined">Whether it was passed over for a year written in two figures</param>
+    /// <returns>The day, or null when the words don't name one that can be read here</returns>
+    private static DateOnly? Named(string first, string? second, string? third, DateOnly today, out int used, out bool declined)
     {
         used = 0;
+        declined = false;
         int day;
         int month;
 
@@ -611,13 +624,20 @@ public sealed partial class QuickAddParser
             if (DayNumber(withComma ? second[..^1] : second) is not { } after)
                 return null;
 
-            if (withComma && Year(third) is null)
+            if (withComma && Year(third) is null && !ShortYear(third))
                 return null;
 
             (day, month) = (after, named);
         }
         else
         {
+            return null;
+        }
+
+        if (ShortYear(third))
+        {
+            used = 3;
+            declined = true;
             return null;
         }
 
@@ -639,6 +659,11 @@ public sealed partial class QuickAddParser
            && int.Parse(match.Groups["d"].Value, CultureInfo.InvariantCulture) is var day and >= 1 and <= 31
             ? day
             : null;
+
+    /// <summary>Whether a word is a year in two figures, which this doesn't read: <c>27</c>.</summary>
+    /// <param name="word">The word, or null when there isn't one</param>
+    /// <returns>True when it's two figures and nothing else</returns>
+    private static bool ShortYear(string? word) => word is { Length: 2 } && char.IsAsciiDigit(word[0]) && char.IsAsciiDigit(word[1]);
 
     /// <summary>A year in four figures.</summary>
     /// <param name="word">The word, or null when there isn't one</param>

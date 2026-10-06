@@ -62,6 +62,29 @@ public class DayGrammarTests
     }
 
     [Theory]
+    [InlineData("Renew 4 Aug 27")]
+    [InlineData("Renew Aug 4 27")]
+    [InlineData("Renew Aug 4, 27")]
+    [InlineData("Renew 4 Aug 27 9am")]
+    public void A_day_with_a_year_in_two_figures_is_passed_over_whole(string text)
+    {
+        // A two-figure year isn't read here, and Todoist may read one. Read without it, "4 Aug 27"
+        // was this year's 4 August with "27" left in the title — and passing over the "4" alone let
+        // "Aug 27" be read as another day.
+        var parse = Parse(text, Told);
+
+        Assert.Equal(text, parse.Content);
+        Assert.Null(parse.DueDate);
+        Assert.Null(parse.DueTime);
+    }
+
+    [Fact]
+    public void A_box_doesnt_read_a_day_with_a_year_in_two_figures()
+    {
+        Assert.Equal(DayReading.Unread, Read("4 aug 27", Told));
+    }
+
+    [Theory]
     [InlineData("tod", 2026, 7, 31)]
     [InlineData("next month", 2026, 8, 31)]
     [InlineData("next year", 2027, 1, 1)]
