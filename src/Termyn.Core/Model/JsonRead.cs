@@ -22,6 +22,22 @@ internal static class JsonRead
     }
 
     /// <summary>
+    /// A whole number, or null when there isn't one — for a setting where nought means something
+    /// and a missing value can't be allowed to read as it.
+    /// </summary>
+    /// <param name="o">The resource to read from</param>
+    /// <param name="key">The field's name</param>
+    /// <returns>The number, or null when the field is missing or isn't one</returns>
+    public static int? IntOrNull(JsonObject o, string key)
+    {
+        if (!o.TryGetPropertyValue(key, out var n) || n is not JsonValue v)
+            return null;
+        if (v.TryGetValue(out int i))
+            return i;
+        return int.TryParse(v.ToString(), out var parsed) ? parsed : null;
+    }
+
+    /// <summary>
     /// A whole number that may not fit in an int — a file size, which Todoist has sent as both a
     /// JSON number and a string.
     /// </summary>

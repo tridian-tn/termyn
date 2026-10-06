@@ -148,6 +148,45 @@ public class ProjectionsTests
         => Assert.Null(Projections.ToNextWeek(null));
 
     [Theory]
+    [InlineData("""{"id":"u","date_format":0}""", true)]
+    [InlineData("""{"id":"u","date_format":1}""", false)]
+    [InlineData("""{"id":"u","date_format":"1"}""", false)]
+    [InlineData("""{"id":"u"}""", null)]
+    [InlineData("""{"id":"u","date_format":7}""", null)]
+    public void The_order_figures_are_read_in_is_only_what_the_account_said(string json, bool? dayFirst)
+    {
+        // Nought is day-first, so a missing setting can't be allowed to read as the nought it would
+        // default to: that's an account that never said so, read as one that did.
+        Assert.Equal(dayFirst, Projections.ToDateSettings(Obj(json)).DayFirst);
+    }
+
+    [Theory]
+    [InlineData(1, DayOfWeek.Monday)]
+    [InlineData(7, DayOfWeek.Sunday)]
+    [InlineData(0, null)]
+    public void The_week_starts_where_the_account_says(int stored, DayOfWeek? expected)
+        => Assert.Equal(expected, Projections.ToDateSettings(Obj($$"""{"id":"u","start_day":{{stored}}}""")).WeekStart);
+
+    [Fact]
+    public void The_date_settings_carry_the_accounts_timezone_and_next_week()
+    {
+        var settings = Projections.ToDateSettings(Obj("""{"id":"u","next_week":3,"tz_info":{"timezone":"Pacific/Auckland"}}"""));
+
+        Assert.Equal(DayOfWeek.Wednesday, settings.NextWeek);
+        Assert.Equal(TimeZoneInfo.FindSystemTimeZoneById("Pacific/Auckland"), settings.TimeZone);
+    }
+
+    [Fact]
+    public void With_no_user_synced_no_date_setting_is_known()
+    {
+        var settings = Projections.ToDateSettings(null);
+
+        Assert.Null(settings.DayFirst);
+        Assert.Null(settings.WeekStart);
+        Assert.Null(settings.NextWeek);
+    }
+
+    [Theory]
     [InlineData("""{"id":"i","priority":4}""", Priority.P1)]
     [InlineData("""{"id":"i","priority":1}""", Priority.P4)]
     [InlineData("""{"id":"i"}""", Priority.P4)]

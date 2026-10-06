@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Termyn.Core.Capture;
 
 namespace Termyn.Core.Model;
 
@@ -86,9 +87,42 @@ public static class Projections
         if (user is null)
             return null;
 
-        var day = JsonRead.Int(user, "next_week");
-        return day is >= 1 and <= 7 ? (DayOfWeek)(day % 7) : null;
+        return Weekday(JsonRead.Int(user, "next_week"));
     }
+
+    /// <summary>
+    /// Reads what the account says about reading a typed date.
+    /// </summary>
+    /// <remarks>
+    /// <c>date_format</c> is 0 for day-first and 1 for month-first, so a missing one mustn't read
+    /// as the nought it would default to: that would be a day-first account that never said so.
+    /// </remarks>
+    /// <param name="user">The user resource, or null when it hasn't been synced</param>
+    /// <returns>The settings, with null wherever the account hasn't given one</returns>
+    public static DateSettings ToDateSettings(JsonObject? user)
+    {
+        if (user is null)
+            return DateSettings.Unknown;
+
+        return new DateSettings(
+            ToTimeZone(user),
+            JsonRead.IntOrNull(user, "date_format") switch
+            {
+                0 => true,
+                1 => false,
+                _ => null,
+            },
+            Weekday(JsonRead.Int(user, "start_day")),
+            ToNextWeek(user));
+    }
+
+    /// <summary>
+    /// A day of the week as Todoist numbers it, from Monday as 1 to Sunday as 7 — one off
+    /// <see cref="DayOfWeek"/>'s own count from Sunday.
+    /// </summary>
+    /// <param name="day">The day as Todoist numbers it</param>
+    /// <returns>The day, or null when the number isn't one</returns>
+    private static DayOfWeek? Weekday(int day) => day is >= 1 and <= 7 ? (DayOfWeek)(day % 7) : null;
 
     /// <summary>
     /// Reads the account's timezone name. Todoist reports it under <c>tz_info</c>, and the client
