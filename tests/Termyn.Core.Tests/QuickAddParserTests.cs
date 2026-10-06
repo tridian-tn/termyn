@@ -78,12 +78,13 @@ public class QuickAddParserTests
     }
 
     [Fact]
-    public void A_bare_time_means_today()
+    public void A_bare_time_still_to_come_means_today()
     {
-        var parse = Parse("Standup 9:15");
+        // The test clock stands at midday; one already gone is tomorrow, in the grammar's own tests.
+        var parse = Parse("Standup 16:15");
 
         Assert.Equal(Today, parse.DueDate);
-        Assert.Equal(new TimeOnly(9, 15), parse.DueTime);
+        Assert.Equal(new TimeOnly(16, 15), parse.DueTime);
     }
 
     [Fact]
@@ -249,6 +250,7 @@ public class QuickAddParserTests
         Assert.Null(parse.DueDate);
     }
 
+    /// <summary>Parses in UTC, where the test clock's midday is midday on every machine.</summary>
     private static QuickAddParse Parse(string text)
-        => new QuickAddParser(new FixedClock(Today)).Parse(text);
+        => new QuickAddParser(new FixedClock(Today)).Parse(text, new DateSettings(TimeZoneInfo.Utc));
 }

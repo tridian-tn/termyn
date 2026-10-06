@@ -207,6 +207,22 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>
+    /// What the account says about reading a typed date.
+    /// </summary>
+    /// <remarks>
+    /// Its own reader for the same reason as <see cref="Today"/>: a date box reads what's typed on
+    /// every keystroke, and a snapshot per keystroke would parse every task in the account each time.
+    /// </remarks>
+    public DateSettings DateSettings
+    {
+        get
+        {
+            lock (_gate)
+                return Projections.ToDateSettings(Model.Get(ResourceType.User, ResourceType.User));
+        }
+    }
+
     /// <summary>The day it is in a given zone, by this engine's clock.</summary>
     /// <param name="zone">The timezone to read the day in</param>
     /// <returns>Today, as that zone has it</returns>

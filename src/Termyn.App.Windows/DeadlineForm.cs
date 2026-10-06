@@ -1,4 +1,5 @@
-using System.Globalization;
+using Termyn.Core.Capture;
+using Termyn.Presentation;
 
 using Label = System.Windows.Forms.Label;
 
@@ -8,51 +9,27 @@ namespace Termyn.App.Windows;
 /// The day a task has to be finished by.
 /// </summary>
 /// <remarks>
-/// A calendar where the due date has a text box. A due date can be anything Todoist's own parser
-/// will read — "every Monday" among them — and whatever this app can't read is sent as the words
-/// themselves for the server to settle. A deadline has no such field: the API takes a date and
-/// nothing else, so there's no server to fall back on, and a picker asks for exactly what can be
-/// sent rather than inviting a phrase that would have to be refused.
-///
-/// The two ways of naming a date are to be unified, so the day sits here as plain text beside a
-/// button that drops a calendar — not in a date control of its own, which is a shape the unified
-/// one won't keep.
+/// Asked for the same way as a due date, with the same box and the same grammar, and differs only
+/// in what it will take. The API takes a deadline as a date and nothing else, so there's no server
+/// to hand words to: what the grammar here can't read is refused rather than sent, and so is a time
+/// or a repeat, neither of which a deadline can hold.
 /// </remarks>
 internal sealed class DeadlineForm : Form
 {
-    /// <summary>How the chosen day is written out: long enough to name the weekday.</summary>
-    private const string Written = "dddd, d MMMM yyyy";
-
-    /// <summary>How big the calendar on the button is drawn, before the screen's scaling.</summary>
-    private const int GlyphSize = 16;
-
-    private readonly Label _shown;
-    private readonly Button _pick;
+    private readonly DayBox _box;
     private readonly Button _clear;
-    private readonly MonthCalendar _calendar;
-    private readonly ToolStripControlHost _host;
-    private readonly ToolStripDropDown _drop;
-    private readonly ToolTip _tips = new();
+    private readonly Button _ok;
 
-    private Bitmap? _glyph;
-    private DateOnly _day;
     private bool _cleared;
 
-    private DeadlineForm(string task, DateOnly? current, DateOnly today)
+    private DeadlineForm(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read)
     {
-        _calendar = new MonthCalendar { MaxSelectionCount = 1 };
-
-        // Held to what the calendar can show. A deadline is whatever the account's JSON said, and
-        // one before 1753 — an import, or another client's bug — makes the control throw on being
-        // given it, which would leave that task's deadline unreachable from here for good.
-        _day = Clamp(current ?? today);
-
         Text = "Deadline";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(420, 156);
+        ClientSize = new Size(420, 170);
 
         // The task first: what's being changed, before what's being asked about it.
         var heading = new Label
@@ -75,26 +52,10 @@ internal sealed class DeadlineForm : Form
             ForeColor = SystemColors.GrayText,
         };
 
-        _pick = new Button
+        _box = new DayBox(read, DayBoxText.ForDeadline, today, takesTime: false)
         {
             Location = new Point(14, 62),
-            Size = new Size(32, 28),
-            AccessibleName = "Pick a day",
-        };
-
-        _pick.Click += (_, _) => ShowCalendar();
-
-        // The button says nothing in words, and the day beside it is a label rather than something
-        // that looks pressable, so there has to be somewhere to find out what it does.
-        _tips.SetToolTip(_pick, "Pick a day");
-
-        DrawGlyph();
-
-        _shown = new Label
-        {
-            Location = new Point(52, 66),
-            Size = new Size(354, 20),
-            Text = _day.ToString(Written, CultureInfo.CurrentCulture),
+            Typed = current is { } day ? QuickAddParser.Written(day) : string.Empty,
         };
 
         // Shown disabled rather than hidden on a task without one: the button says what can be done
@@ -102,13 +63,13 @@ internal sealed class DeadlineForm : Form
         _clear = new Button
         {
             Text = "Clear",
-            Location = new Point(14, 108),
+            Location = new Point(14, 128),
             Size = new Size(88, 30),
             Enabled = current is not null,
         };
 
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(226, 108), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 108), Size = new Size(88, 30) };
+        _ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(226, 128), Size = new Size(88, 30) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 128), Size = new Size(88, 30) };
 
         _clear.Click += (_, _) =>
         {
@@ -116,37 +77,39 @@ internal sealed class DeadlineForm : Form
             DialogResult = DialogResult.OK;
         };
 
-        _calendar.SetDate(_day.ToDateTime(TimeOnly.MinValue));
+        // Greyed while the box holds something a deadline can't be, so Enter can't send it. The line
+        // under the box has already said why.
+        _box.ReadingChanged += (_, _) => _ok.Enabled = _box.Verdict.Accepted;
+        _ok.Enabled = _box.Verdict.Accepted;
 
-        // The drop is built before anything is wired to it, so the handlers below aren't closing
-        // over a field that isn't there yet.
-        _host = new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty };
-        _drop = new ToolStripDropDown { Padding = Padding.Empty, AutoClose = true };
-        _drop.Items.Add(_host);
-
-        _calendar.DateSelected += (_, e) => Picked(DateOnly.FromDateTime(e.Start));
-
-        // Arrow keys move the selection without picking anything, so the day on show follows them
-        // too: the calendar is closed with Enter or Escape, and what it was left on is the answer.
-        _calendar.DateChanged += (_, e) => Picked(DateOnly.FromDateTime(e.Start), keepOpen: true);
-        _calendar.KeyDown += (_, e) => CalendarKey(e);
-
-        AcceptButton = ok;
+        AcceptButton = _ok;
         CancelButton = cancel;
-        Controls.AddRange([heading, prompt, _pick, _shown, _clear, ok, cancel]);
+        Controls.AddRange([heading, prompt, _box, _clear, _ok, cancel]);
+
+        ActiveControl = _box.Entry;
+        Shown += (_, _) => _box.Entry.SelectAll();
     }
 
-    /// <summary>The day picked, or null when the deadline is to be cleared.</summary>
-    internal DateOnly? Chosen => _cleared ? null : _day;
+    /// <summary>The day settled on, or null when the deadline is to be cleared.</summary>
+    internal DateOnly? Chosen => _cleared ? null : _box.Reading.Day;
 
-    /// <summary>The day as the dialog writes it out.</summary>
-    internal string DayShown => _shown.Text;
+    /// <summary>The box the day is asked for in.</summary>
+    internal DayBox Box => _box;
+
+    /// <summary>Whether OK will close the dialog with what's in the box.</summary>
+    internal bool CanAccept => _ok.Enabled;
 
     /// <summary>Whether clearing is offered, which it isn't on a task with no deadline to clear.</summary>
     internal bool CanClear => _clear.Enabled;
 
     /// <summary>The dialog as it will be shown, built and not shown, for a test to look at.</summary>
-    internal static DeadlineForm For(string task, DateOnly? current, DateOnly today) => new(task, current, today);
+    /// <param name="task">What the task is called</param>
+    /// <param name="current">The deadline it has now, or null</param>
+    /// <param name="today">Today, which the calendar opens on when the box doesn't name a day</param>
+    /// <param name="read">Reads what's typed into the box</param>
+    /// <returns>The dialog, which the caller disposes</returns>
+    internal static DeadlineForm For(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read)
+        => new(task, current, today, read);
 
     /// <summary>
     /// Presses Clear, for a test with no dialog to click.
@@ -158,154 +121,25 @@ internal sealed class DeadlineForm : Form
     /// </remarks>
     internal void PressClear() => InvokeOnClick(_clear, EventArgs.Empty);
 
-    /// <summary>Takes a day off the calendar, as choosing one in it does.</summary>
-    /// <param name="day">The day chosen</param>
-    internal void PickFromCalendar(DateOnly day) => Picked(day);
-
-    /// <summary>Opens the calendar, as pressing the button does.</summary>
-    internal void PressPick() => InvokeOnClick(_pick, EventArgs.Empty);
-
-    /// <summary>Whether the calendar is up.</summary>
-    internal bool CalendarOpen => _drop.Visible;
-
-    /// <summary>Whether the calendar has the keys, which is what makes it usable without a mouse.</summary>
-    internal bool CalendarFocused => _calendar.Focused;
-
-    /// <summary>Whether what the dialog built has been let go of.</summary>
-    internal bool Released => _drop.IsDisposed;
-
-    /// <summary>What hovering the calendar button says.</summary>
-    internal string PickTip => _tips.GetToolTip(_pick) ?? string.Empty;
-
-    /// <summary>How big the calendar on the button came out, which follows the screen's scaling.</summary>
-    internal Size GlyphDrawn => _pick.Image?.Size ?? Size.Empty;
-
-    /// <summary>Presses a key in the calendar, for a test with no calendar to type into.</summary>
-    /// <param name="key">The key pressed</param>
-    /// <returns>The key as the handler left it, which says whether it was taken</returns>
-    internal KeyEventArgs PressInCalendar(Keys key)
-    {
-        var pressed = new KeyEventArgs(key);
-        CalendarKey(pressed);
-        return pressed;
-    }
-
-    /// <summary>
-    /// Closes the calendar on Enter or Escape, leaving it on whatever day it was showing.
-    /// </summary>
-    /// <remarks>
-    /// The key is swallowed rather than let go: the dialog answers Escape with Cancel and Enter
-    /// with OK, so a key that carried on past here would dismiss the calendar and the dialog behind
-    /// it in one press — throwing away the day the user had just settled on.
-    /// </remarks>
-    /// <param name="pressed">The key pressed in the calendar</param>
-    private void CalendarKey(KeyEventArgs pressed)
-    {
-        if (pressed.KeyCode is not (Keys.Enter or Keys.Escape))
-            return;
-
-        _drop.Close();
-        pressed.Handled = true;
-        pressed.SuppressKeyPress = true;
-    }
-
-    /// <summary>
-    /// Takes the day chosen and says so on the face of the dialog.
-    /// </summary>
-    /// <param name="day">The day now chosen</param>
-    /// <param name="keepOpen">Whether the calendar stays up, which it does while keys move it</param>
-    private void Picked(DateOnly day, bool keepOpen = false)
-    {
-        _day = day;
-        _shown.Text = day.ToString(Written, CultureInfo.CurrentCulture);
-
-        if (!keepOpen)
-            _drop.Close();
-    }
-
-    /// <summary>
-    /// Drops the calendar under the button that asks for it.
-    /// </summary>
-    /// <remarks>
-    /// The focus is put on the host rather than the calendar: a control inside a drop-down isn't
-    /// on the form's own focus chain, and asking the control itself does nothing — which would
-    /// leave the calendar open and deaf to every key.
-    /// </remarks>
-    private void ShowCalendar()
-    {
-        _calendar.SetDate(_day.ToDateTime(TimeOnly.MinValue));
-        _drop.Show(_pick, new Point(0, _pick.Height));
-        _host.Focus();
-    }
-
-    /// <summary>
-    /// Draws the button's calendar at the size this screen wants it.
-    /// </summary>
-    /// <remarks>
-    /// Redrawn rather than scaled: the glyph is a handful of rectangles, and stretching a sixteen
-    /// pixel bitmap to a two-hundred-per-cent screen gives a blurred one. Called again when the
-    /// window lands on a monitor with different scaling.
-    /// </remarks>
-    private void DrawGlyph()
-    {
-        var size = LogicalToDeviceUnits(GlyphSize);
-        var drawn = new Bitmap(size, size);
-
-        using (var into = Graphics.FromImage(drawn))
-            CalendarGlyph.Draw(into, new Rectangle(0, 0, size, size), SystemColors.ControlText);
-
-        _pick.Image = drawn;
-
-        // Assigned before the old one goes, so nothing is ever asked to draw an image that's been
-        // let go of.
-        _glyph?.Dispose();
-        _glyph = drawn;
-    }
-
-    /// <summary>The day, held to what the calendar is able to show.</summary>
-    /// <param name="day">The day asked for</param>
-    /// <returns>That day, or the nearest one the calendar can show</returns>
-    private DateOnly Clamp(DateOnly day)
-    {
-        var least = DateOnly.FromDateTime(_calendar.MinDate);
-        var most = DateOnly.FromDateTime(_calendar.MaxDate);
-
-        return day < least ? least : day > most ? most : day;
-    }
-
-    protected override void OnDpiChanged(DpiChangedEventArgs e)
-    {
-        base.OnDpiChanged(e);
-        DrawGlyph();
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        // Here rather than on FormClosed: neither of these is a child control, so the base disposal
-        // doesn't reach them, and a dialog built and dropped without ever being shown — which is
-        // every test of this window — would never raise a close to hang them off.
-        if (disposing)
-        {
-            _drop.Dispose();
-            _tips.Dispose();
-            _glyph?.Dispose();
-        }
-
-        base.Dispose(disposing);
-    }
-
     /// <summary>
     /// Asks for the day a task has to be finished by.
     /// </summary>
     /// <param name="owner">The window to centre on</param>
     /// <param name="task">What the task is called, shown above the question</param>
     /// <param name="current">The deadline the task has now, or null when it hasn't got one</param>
-    /// <param name="today">Today in the account's timezone, which a task with no deadline opens on</param>
-    /// <param name="chosen">The day picked, or null to clear the deadline</param>
-    /// <returns>True when a day was picked or cleared, false when the dialog was cancelled</returns>
-    internal static bool Ask(IWin32Window owner, string task, DateOnly? current, DateOnly today, out DateOnly? chosen)
+    /// <param name="today">Today in the account's timezone, which the calendar opens on</param>
+    /// <param name="read">Reads what's typed into the box, as quick add would</param>
+    /// <param name="chosen">The day settled on, or null to clear the deadline</param>
+    /// <returns>True when a day was settled on or cleared, false when the dialog was cancelled</returns>
+    internal static bool Ask(
+        IWin32Window owner,
+        string task,
+        DateOnly? current,
+        DateOnly today,
+        Func<string, DayReading> read,
+        out DateOnly? chosen)
     {
-        using var dialog = For(task, current, today);
+        using var dialog = For(task, current, today, read);
 
         if (dialog.ShowDialog(owner) != DialogResult.OK)
         {
