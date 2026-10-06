@@ -586,7 +586,7 @@ public sealed class MainPresenter
             return null;
 
         var under = Named(parentId);
-        var parse = Placed(_parser.Parse(text));
+        var parse = Placed(_parser.Parse(text, _engine.DateSettings));
         var id = _engine.AddItem(ItemFields.ForAdd(parse, parent.ProjectId, parent.SectionId, parentId));
 
         _collapsed.Remove(parentId);
@@ -1351,48 +1351,59 @@ public sealed class MainPresenter
     /// </remarks>
     public void SetDueFromText(string id, string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        var reading = ReadDay(text);
+
+        switch (reading.Kind)
         {
-            SetDue(id, null);
-            return;
+            case DayReadingKind.Blank:
+                SetDue(id, null);
+                return;
+
+            case DayReadingKind.Day:
+                SetDue(id, reading.Day, reading.Time);
+                return;
         }
 
-        var parse = _parser.Parse(text);
-
-        // Only resolve locally when the grammar accounted for every word. Anything left over is the
-        // tell that it didn't understand the phrase — "daily 9am" and "each monday" both yield a
-        // date while dropping the repeat on the floor, and "every day p1 9am" leaves a time behind
-        // that reads as this morning. Leftovers go to the server as words.
-        if (!parse.IsRecurrence && parse.Content.Length == 0 && parse.DueDate is { } date)
-        {
-            SetDue(id, date, parse.DueTime);
-            return;
-        }
-
+        // A repeat is marked as one before the server says so. Only a hint, and only worth having
+        // until it answers: without it a task set to "daily 9am" looks ordinary to the close that
+        // follows, and gets ticked off instead of advanced.
         var named = Named(id);
-        _engine.SetItemDueString(id, text, parse.IsRecurrence || StartsARepeat(text));
+        _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
 
         History.Note($"Set {named} due “{text.Trim()}”", $"due:{id}");
         Publish();
     }
 
-    /// <summary>The words a repeating schedule tends to open with, beyond the <c>every</c> the parser knows.</summary>
-    private static readonly string[] RepeatStarters = ["daily", "weekly", "monthly", "yearly", "annually", "each"];
+    /// <summary>
+    /// Reads what's been typed into a box asking for a day, the same way capture reads one.
+    /// </summary>
+    /// <param name="text">What was typed</param>
+    /// <returns>What it was read as</returns>
+    public DayReading ReadDay(string? text) => _parser.ReadDay(text, _engine.DateSettings);
 
     /// <summary>
-    /// Whether typed text looks like a repeat. Only a hint, and only worth having until the server
-    /// answers: without it a task set to "daily 9am" looks ordinary to the close that follows, and
-    /// gets ticked off instead of advanced.
+    /// A task's due date as the due-date box opens on it: the words of a repeat, or the day and
+    /// time written the way the box reads them back.
     /// </summary>
     /// <remarks>
-    /// Deliberately not in the parser, which also reads captured task text — "Write daily report"
-    /// is a title, not a schedule. Here the whole input is the schedule, so the first word can be
-    /// taken at face value.
+    /// Not the server's own wording for a one-off date. That's whatever was typed when it was set,
+    /// and "tomorrow" read back today would be a different day from the one the task has.
     /// </remarks>
-    private static bool StartsARepeat(string text)
+    /// <param name="id">The task</param>
+    /// <returns>The words, or empty when the task has no due date or isn't there</returns>
+    public string DueWritten(string id)
     {
-        var first = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        return first is not null && RepeatStarters.Contains(first, StringComparer.OrdinalIgnoreCase);
+        var snapshot = _engine.Snapshot();
+        if (snapshot.Items.FirstOrDefault(i => i.Id == id) is not { } item)
+            return string.Empty;
+
+        if (item.IsRecurring && item.DueText is { Length: > 0 } words)
+            return words;
+
+        if (SmartViews.DueOn(item, snapshot.TimeZone) is not { } day)
+            return string.Empty;
+
+        return QuickAddParser.Written(day, SmartViews.DueTimeOf(item, snapshot.TimeZone));
     }
 
     /// <summary>
@@ -2016,7 +2027,7 @@ public sealed class MainPresenter
 
     private (QuickAddParse Parse, string? ProjectId, string? SectionId) Resolve(string text)
     {
-        var parse = _parser.Parse(text);
+        var parse = _parser.Parse(text, _engine.DateSettings);
 
         // Every word was a token, so there is no task text left. Keep the raw input rather than
         // creating a blank task the server would reject and silently discard.

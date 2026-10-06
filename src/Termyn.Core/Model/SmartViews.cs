@@ -78,6 +78,35 @@ public static class SmartViews
     public static bool DueHasTime(TaskItem item) => item.DueDate is { } due && due.Contains('T');
 
     /// <summary>
+    /// The time of day a task falls due, in the account's timezone.
+    /// </summary>
+    /// <remarks>
+    /// Converted for the same reason the day is: a task with a fixed timezone arrives as a UTC
+    /// instant, and its time off the front of that is the time in London rather than here.
+    /// </remarks>
+    /// <param name="item">The task</param>
+    /// <param name="zone">The account's timezone</param>
+    /// <returns>The time, or null when the task is due on a whole day or not at all</returns>
+    public static TimeOnly? DueTimeOf(TaskItem item, TimeZoneInfo zone)
+    {
+        if (!DueHasTime(item))
+            return null;
+
+        var due = item.DueDate!;
+
+        if (due.EndsWith('Z'))
+        {
+            return DateTimeOffset.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
+                ? TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, zone).DateTime)
+                : null;
+        }
+
+        return DateTime.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
+            ? TimeOnly.FromDateTime(when)
+            : null;
+    }
+
+    /// <summary>
     /// The day a Todoist timestamp falls on in the account's timezone.
     /// </summary>
     /// <remarks>

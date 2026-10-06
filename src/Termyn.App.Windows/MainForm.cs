@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Termyn.Core;
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
+using Termyn.Core.Capture;
 using Termyn.Core.Logging;
 using Termyn.Core.Model;
 using Termyn.Core.Platform;
@@ -314,6 +315,7 @@ internal sealed class MainForm : Form
         _outline.BeforeLabelEdit += OnBeforeLabelEdit;
         _outline.AfterLabelEdit += OnAfterLabelEdit;
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
+        AskForDue = AskDueWithDialog;
         AskForDeadline = AskWithDialog;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.ToggleRequested += id => Guarded(() => TickOff(id));
@@ -3448,20 +3450,52 @@ internal sealed class MainForm : Form
         Guarded(() => _presenter.Rename(id, text));
     }
 
+    /// <summary>
+    /// Asks when a task is due. A property so a test can answer without a dialog to click; the
+    /// window sets it to the real one as it's built.
+    /// </summary>
+    /// <remarks>
+    /// Given the task and the due date as the box opens on it, and answers with the words to set it
+    /// to — empty to clear it — or null when the dialog was cancelled.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<TaskRow, string, string?> AskForDue { get; set; }
+
     /// <summary>Asks for a due date and applies it. Returns false when nothing was changed.</summary>
+    /// <remarks>
+    /// The row is found by the id the command names rather than read off the selection, for the
+    /// same reason the deadline's is.
+    /// </remarks>
     private bool PromptForDue(string id)
     {
-        var answer = InputDialog.Ask(
-            this,
-            "Due date",
-            "When is it due?  (today, friday, 2026-12-25, 4pm, every Monday — blank clears)");
-
-        if (answer is null)
+        if (_presenter.Rows.FirstOrDefault(r => r.Id == id) is not { } row)
             return false;
+
+        var opened = _presenter.DueWritten(id);
+
+        if (AskForDue(row, opened) is not { } answer)
+            return false;
+
+        // The dialog closed on what it opened with, or on other words for the same moment, is not a
+        // change. Writing anyway would queue a command to Todoist, note it in what you've done, and
+        // set a sync going, all for nothing.
+        if (answer.Trim() == opened.Trim()
+            || (_presenter.ReadDay(answer) is { Kind: DayReadingKind.Day } read && read == _presenter.ReadDay(opened)))
+        {
+            return false;
+        }
 
         _presenter.SetDueFromText(id, answer);
         return true;
     }
+
+    /// <summary>Puts the due-date dialog up, which is what <see cref="AskForDue"/> is by default.</summary>
+    /// <param name="row">The task being asked about</param>
+    /// <param name="opened">The due date as the box opens on it</param>
+    /// <returns>The words to set the due date to, empty to clear it, or null when cancelled</returns>
+    private string? AskDueWithDialog(TaskRow row, string opened)
+        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay);
 
     /// <summary>
     /// Asks for the day a task has to be finished by. A property so a test can answer without a
@@ -3524,7 +3558,7 @@ internal sealed class MainForm : Form
     /// <param name="row">The task being asked about</param>
     /// <returns>Whether a day was settled on, and which — null being a deadline cleared</returns>
     private (bool Answered, DateOnly? Day) AskWithDialog(TaskRow row)
-        => DeadlineForm.Ask(this, row.Content, row.DeadlineOn, _presenter.Today, out var day)
+        => DeadlineForm.Ask(this, row.Content, row.DeadlineOn, _presenter.Today, _presenter.ReadDay, out var day)
             ? (true, day)
             : (false, null);
 
