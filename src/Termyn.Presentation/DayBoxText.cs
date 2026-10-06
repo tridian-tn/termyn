@@ -11,7 +11,8 @@ namespace Termyn.Presentation;
 public sealed record DayVerdict(string Says, bool Accepted);
 
 /// <summary>
-/// How the due-date box and the deadline box describe what they've read.
+/// How the due-date box and the deadline box describe what they've read, and how the reminders
+/// dialog says why it won't take a moment.
 /// </summary>
 /// <remarks>
 /// The two read with the same grammar and differ only in what they'll take. A due date takes
@@ -49,6 +50,28 @@ public static class DayBoxText
         DayReadingKind.Repeat => new("A deadline can't repeat", false),
         _ => new("Not a day this can read — try “4 aug” or “in 3 days”", false),
     };
+
+    /// <summary>
+    /// What the reminders dialog says about the moment typed for a reminder, and whether it's added.
+    /// </summary>
+    /// <remarks>
+    /// Read as strictly as the date boxes read: a reminder is a moment, set once, and the API takes
+    /// a date and time and nothing else. So a repeat is refused by name, and words left over mean
+    /// the moment wasn't read — rather than taking the day and quietly dropping the rest, as reading
+    /// it like a captured task's title did. A day with no time on it is at nine.
+    /// </remarks>
+    /// <param name="reading">What was typed, read as a day</param>
+    /// <returns>Why it's refused, or the moment it's for when it isn't</returns>
+    public static DayVerdict ForReminder(DayReading reading) => reading.Kind switch
+    {
+        DayReadingKind.Day => new(Written(reading with { Time = reading.Time ?? ReminderTime }), true),
+        DayReadingKind.Repeat => new("A reminder can't repeat", false),
+        DayReadingKind.Unread => new("Not a day and time this can read — try “tomorrow 9am”", false),
+        _ => new(string.Empty, false),
+    };
+
+    /// <summary>When a reminder set for a day with no time on it goes off.</summary>
+    public static TimeOnly ReminderTime { get; } = new(9, 0);
 
     /// <summary>
     /// A day read from the box, written out in full so there's no mistaking which one it is.

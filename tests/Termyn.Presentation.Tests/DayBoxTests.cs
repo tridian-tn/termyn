@@ -195,6 +195,38 @@ public class DayBoxTests
     }
 
     [Fact]
+    public void A_reminder_takes_a_day_and_nothing_else()
+    {
+        // A reminder is a moment, set once: a repeat is refused by name, and words left over mean
+        // the moment wasn't read.
+        Assert.True(DayBoxText.ForReminder(DayReading.On(Today)).Accepted);
+        Assert.True(DayBoxText.ForReminder(DayReading.On(Today, new TimeOnly(16, 0))).Accepted);
+
+        Assert.False(DayBoxText.ForReminder(DayReading.Repeat).Accepted);
+        Assert.False(DayBoxText.ForReminder(DayReading.Unread).Accepted);
+        Assert.False(DayBoxText.ForReminder(DayReading.Blank).Accepted);
+
+        Assert.Equal("A reminder can't repeat", DayBoxText.ForReminder(DayReading.Repeat).Says);
+        Assert.NotEmpty(DayBoxText.ForReminder(DayReading.Unread).Says);
+    }
+
+    [Fact]
+    public void A_reminder_on_a_day_with_no_time_is_described_at_nine()
+    {
+        var was = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
+
+            Assert.Equal("Tuesday, 4 August 2026 at 09:00", DayBoxText.ForReminder(DayReading.On(new DateOnly(2026, 8, 4))).Says);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = was;
+        }
+    }
+
+    [Fact]
     public void Every_example_the_hint_gives_is_one_the_box_reads()
     {
         // The hint offered "fri", which isn't read on its own — so the deadline box refused its own
