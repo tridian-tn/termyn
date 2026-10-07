@@ -15,12 +15,14 @@ namespace Termyn.Core.Capture;
 /// <param name="WeekStart">The day the account's week starts on, or null when it isn't known</param>
 /// <param name="NextWeek">The day the account calls "next week", or null when it isn't known</param>
 /// <param name="Language">The language the account reads a typed date in, as Todoist names it — <c>en</c>, <c>de</c>, <c>pt_BR</c> — or null when it isn't known</param>
+/// <param name="InlineDatesOff">Whether the account has turned off reading a date out of a task's title, which the apps call smart date recognition; false when it isn't known</param>
 public sealed record DateSettings(
     TimeZoneInfo TimeZone,
     bool? DayFirst = null,
     DayOfWeek? WeekStart = null,
     DayOfWeek? NextWeek = null,
-    string? Language = null)
+    string? Language = null,
+    bool InlineDatesOff = false)
 {
     /// <summary>Nothing known about the account: the machine's own timezone, and none of its settings.</summary>
     public static DateSettings Unknown => new(TimeZoneInfo.Local);
@@ -43,4 +45,20 @@ public sealed record DateSettings(
            || Language.Equals("en", StringComparison.OrdinalIgnoreCase)
            || Language.StartsWith("en_", StringComparison.OrdinalIgnoreCase)
            || Language.StartsWith("en-", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a capture reads a day or a time out of what's typed, rather than leaving every word
+    /// of it in the task's title.
+    /// </summary>
+    /// <remarks>
+    /// Not for an account that reads another language, for the reasons <see cref="ReadsEnglish"/>
+    /// gives, and not for one that's turned smart date recognition off. Todoist then leaves a date
+    /// typed in a task's title where it is, so "Pay rent tomorrow" is a task called that, and read
+    /// here it would have a day offline that it wouldn't have had online.
+    ///
+    /// A box asking for a day is another matter. With recognition off, Todoist still reads one
+    /// typed into its scheduler, since that's the only way left to give a task a date, so the date
+    /// boxes go by <see cref="ReadsEnglish"/> alone.
+    /// </remarks>
+    public bool CaptureReadsDays => ReadsEnglish && !InlineDatesOff;
 }

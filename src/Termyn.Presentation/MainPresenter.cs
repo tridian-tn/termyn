@@ -1416,6 +1416,12 @@ public sealed class MainPresenter
     public bool DatesInEnglish => _engine.DateSettings.ReadsEnglish;
 
     /// <summary>
+    /// Whether a capture reads a day out of what's typed, which decides whether a capture box
+    /// suggests one.
+    /// </summary>
+    public bool CaptureReadsDays => _engine.DateSettings.CaptureReadsDays;
+
+    /// <summary>
     /// Today in the account's own timezone, for a window with a date to offer.
     /// </summary>
     /// <remarks>
