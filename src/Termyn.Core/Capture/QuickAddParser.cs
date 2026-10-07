@@ -258,7 +258,9 @@ public sealed partial class QuickAddParser
     ///
     /// A repeat is told by its opening word as well as by <c>every</c>. Not in a capture, where
     /// "Write daily report" is a title, but here the whole input is the schedule, so the first word
-    /// can be taken at its face value.
+    /// can be taken at its face value. Only in English, though: a task told it repeats is advanced
+    /// rather than ticked off when it's closed, and for an account that reads another language
+    /// whether "every monday" repeats is the server's to say.
     ///
     /// Whatever language the account reads, a box holding a word that isn't read isn't a day, so
     /// figures are as safe to read here as they are in English, where in a capture they aren't:
@@ -273,7 +275,7 @@ public sealed partial class QuickAddParser
         if (tokens.Length == 0)
             return DayReading.Blank;
 
-        if (RepeatStarters.Contains(tokens[0], StringComparer.OrdinalIgnoreCase) || tokens.Any(IsRepeatWord))
+        if (settings.ReadsEnglish && (RepeatStarters.Contains(tokens[0], StringComparer.OrdinalIgnoreCase) || tokens.Any(IsRepeatWord)))
             return DayReading.Repeat;
 
         var now = Now(settings);

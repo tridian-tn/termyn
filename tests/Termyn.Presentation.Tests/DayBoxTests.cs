@@ -300,6 +300,19 @@ public class DayBoxTests
     }
 
     [Fact]
+    public void A_schedule_in_English_words_isnt_taken_for_a_repeat_for_an_account_that_reads_another_language()
+    {
+        // The words go to the server as they are, but whether they repeat is its to say: marked
+        // here, the next close would advance the task rather than tick it off.
+        var presenter = NewPresenter(Account("de"));
+
+        presenter.SetDueFromText("i1", "every monday");
+
+        Assert.Equal("every monday", Row(presenter).Due);
+        Assert.False(Row(presenter).IsRecurring);
+    }
+
+    [Fact]
     public void A_due_date_in_figures_is_read_for_an_account_that_reads_another_language()
     {
         var presenter = NewPresenter(Account("de"));

@@ -505,6 +505,18 @@ public class DayGrammarTests
     }
 
     [Theory]
+    [InlineData("every monday")]
+    [InlineData("every! 3 days")]
+    [InlineData("daily 16:30")]
+    [InlineData("each monday")]
+    public void A_schedule_in_English_words_isnt_a_repeat_for_an_account_that_reads_another_language(string words)
+    {
+        // Read as one, the task was marked as repeating before the server had said whether German
+        // reads "every", and the next close advanced it instead of ticking it off.
+        Assert.Equal(DayReading.Unread, Read(words, German));
+    }
+
+    [Theory]
     [InlineData("4pm")]
     [InlineData("4:30pm")]
     [InlineData("at 16:30")]
