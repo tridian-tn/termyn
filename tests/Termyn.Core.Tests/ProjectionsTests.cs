@@ -184,6 +184,23 @@ public class ProjectionsTests
         Assert.Null(settings.DayFirst);
         Assert.Null(settings.WeekStart);
         Assert.Null(settings.NextWeek);
+        Assert.Null(settings.Language);
+    }
+
+    [Theory]
+    [InlineData("""{"id":"u","lang":"de"}""", "de")]
+    [InlineData("""{"id":"u","lang":"en","dateist_lang":"de"}""", "de")]
+    [InlineData("""{"id":"u","lang":"de","dateist_lang":null}""", "de")]
+    [InlineData("""{"id":"u","lang":"en","features":{"dateist_lang":"fr"}}""", "fr")]
+    [InlineData("""{"id":"u","lang":"en","features":{"dateist_lang":null}}""", "en")]
+    [InlineData("""{"id":"u","lang":"en","features":{"dateist_lang":true}}""", "en")]
+    [InlineData("""{"id":"u","lang":""}""", null)]
+    [InlineData("""{"id":"u"}""", null)]
+    public void Dates_are_read_in_the_language_the_account_set_for_them(string json, string? language)
+    {
+        // dateist_lang overrides lang when it's set. Todoist's reference puts it on the user and its
+        // example in features, so either is taken; anything other than a string isn't a language.
+        Assert.Equal(language, Projections.ToDateSettings(Obj(json)).Language);
     }
 
     [Theory]

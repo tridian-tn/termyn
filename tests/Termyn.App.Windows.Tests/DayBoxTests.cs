@@ -62,6 +62,29 @@ public class DayBoxTests
     }
 
     [WinFormsFact]
+    public void Picking_a_day_writes_it_in_figures_for_an_account_that_reads_another_language()
+    {
+        // "11 Aug 2026" isn't read for it, so in words the day picked would be one the box refused.
+        using var box = Box("de");
+        box.Typed = "25/12 09:00";
+
+        box.PickFromCalendar(new DateOnly(2026, 8, 11));
+
+        Assert.Equal("2026-08-11 09:00", box.Typed);
+        Assert.Equal(DayReading.On(new DateOnly(2026, 8, 11), new TimeOnly(9, 0)), box.Reading);
+    }
+
+    [WinFormsFact]
+    public void The_hint_offers_what_the_account_reads()
+    {
+        using var english = Box();
+        using var german = Box("de");
+
+        Assert.Equal(DayBoxText.Hint(english: true), ((HintTextBox)english.Entry).Hint);
+        Assert.Equal(DayBoxText.Hint(english: false), ((HintTextBox)german.Entry).Hint);
+    }
+
+    [WinFormsFact]
     public void Picking_a_day_over_a_repeat_replaces_it()
     {
         // The calendar is for one-off days, and a repeat has none of its own to keep.
@@ -189,13 +212,19 @@ public class DayBoxTests
     }
 
     /// <summary>A box judged as the due date's is, reading with the grammar quick add uses.</summary>
+    /// <param name="language">The language the account reads its dates in, or null when it isn't known</param>
     /// <returns>The box, which the caller disposes</returns>
-    private static DayBox Box()
-        => new(
-            text => new QuickAddParser(new FixedClock(Today)).ReadDay(text, new DateSettings(TimeZoneInfo.Utc)),
+    private static DayBox Box(string? language = null)
+    {
+        var settings = new DateSettings(TimeZoneInfo.Utc, Language: language);
+
+        return new(
+            text => new QuickAddParser(new FixedClock(Today)).ReadDay(text, settings),
             DayBoxText.ForDue,
             Today,
-            takesTime: true);
+            takesTime: true,
+            settings.ReadsEnglish);
+    }
 
     /// <summary>
     /// Puts a box on a window shown off-screen, since one nobody has displayed has no handle to

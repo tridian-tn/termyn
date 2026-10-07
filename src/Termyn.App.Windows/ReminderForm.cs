@@ -78,7 +78,7 @@ internal sealed class ReminderForm : Form
         _add.Click += (_, _) => AddRelative();
 
         var atPrompt = new Label { Text = "or on", Location = new Point(0, 41), Size = new Size(76, 20) };
-        _absolute = new TextBox { Location = new Point(78, 38), Size = new Size(180, 27), PlaceholderText = "2026-08-03 9am" };
+        _absolute = new TextBox { Location = new Point(78, 38), Size = new Size(180, 27), PlaceholderText = DayBoxText.ReminderHint(presenter.DatesInEnglish) };
 
         _addAbsolute = new Button { Text = "Add", Location = new Point(272, 37), Size = new Size(100, 29) };
         _addAbsolute.Click += (_, _) => AddAbsolute();
@@ -159,6 +159,9 @@ internal sealed class ReminderForm : Form
     /// <summary>What's left in the box for a moment, which is cleared once one is added.</summary>
     internal string Typed => _absolute.Text;
 
+    /// <summary>What the box for a moment suggests typing while it's empty.</summary>
+    internal string Hint => _absolute.PlaceholderText;
+
     private void AddRelative()
     {
         if (_presenter.AddRelativeReminder(_itemId, Offsets[_offset.SelectedIndex].Minutes))
@@ -180,7 +183,7 @@ internal sealed class ReminderForm : Form
         if (reading.Kind is DayReadingKind.Blank)
             return;
 
-        var verdict = DayBoxText.ForReminder(reading);
+        var verdict = DayBoxText.ForReminder(reading, _presenter.DatesInEnglish);
         if (!verdict.Accepted || reading.Day is not { } date)
         {
             _message.Text = verdict.Says;

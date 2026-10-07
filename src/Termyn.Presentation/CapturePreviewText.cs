@@ -15,8 +15,14 @@ public static class CapturePreviewText
     /// <remarks>
     /// One string for both boxes. They were separate literals that happened to match, which is a
     /// thing that stays true only until somebody edits one of them.
+    ///
+    /// No day for an account that reads its dates in another language. Todoist reads one in that
+    /// language, which there are no words for here, and a capture read offline reads none at all.
     /// </remarks>
-    public const string Hint = "Add a task…  #project /section @label p1 tomorrow 4pm";
+    /// <param name="english">Whether the account reads a typed date in English</param>
+    /// <returns>The hint</returns>
+    public static string Hint(bool english)
+        => english ? "Add a task…  #project /section @label p1 tomorrow 4pm" : "Add a task…  #project /section @label p1";
 
     /// <summary>Renders what the local parser made of some capture text, for the line under the box.</summary>
     public static string For(CapturePreview preview)

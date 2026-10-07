@@ -35,6 +35,12 @@ namespace Termyn.Core.Capture;
 /// turning them into a due date mangles the task text. After <c>this</c> or <c>next</c> it can't be
 /// anything else, so it's read there.
 /// </para>
+/// <para>
+/// The words are English, and Todoist reads a typed date in the account's own language. So for an
+/// account that reads another one, a box asking for a day reads only figures — <c>25/12</c>,
+/// <c>2026-12-25</c>, <c>16:30</c> — which mean the same in any language, and a capture reads no day
+/// at all, since the words beside its figures may be ones that change them.
+/// </para>
 /// </remarks>
 public sealed partial class QuickAddParser
 {
@@ -113,6 +119,12 @@ public sealed partial class QuickAddParser
         var timeStart = 0;
         var timeSlot = 0;
 
+        // For an account that reads its dates in another language, a capture reads no day or time
+        // at all. Figures mean the same in any language, but the words beside them needn't: "jedes
+        // Jahr am 25/12" repeats and "25/12 um 16 Uhr" has a time, and neither is read here, so the
+        // figures alone would give the task a day, or a day without its time, Todoist wouldn't.
+        var readsDays = settings.ReadsEnglish;
+
         var tokens = Tokens(text);
 
         for (var i = 0; i < tokens.Length; i++)
@@ -170,7 +182,7 @@ public sealed partial class QuickAddParser
                 continue;
             }
 
-            if (date is null)
+            if (readsDays && date is null)
             {
                 if (DayAt(tokens, i, DateOnly.FromDateTime(now), settings, out var used, out var unread) is { } day)
                 {
@@ -190,7 +202,7 @@ public sealed partial class QuickAddParser
                 }
             }
 
-            if (time is null && TimeAt(tokens, i, out var took) is { } at)
+            if (readsDays && time is null && TimeAt(tokens, i, settings, out var took) is { } at)
             {
                 time = at;
                 timeWords = tokens[i..(i + took)];
@@ -246,7 +258,13 @@ public sealed partial class QuickAddParser
     ///
     /// A repeat is told by its opening word as well as by <c>every</c>. Not in a capture, where
     /// "Write daily report" is a title, but here the whole input is the schedule, so the first word
-    /// can be taken at its face value.
+    /// can be taken at its face value. Only in English, though: a task told it repeats is advanced
+    /// rather than ticked off when it's closed, and for an account that reads another language
+    /// whether "every monday" repeats is the server's to say.
+    ///
+    /// Whatever language the account reads, a box holding a word that isn't read isn't a day, so
+    /// figures are as safe to read here as they are in English, where in a capture they aren't:
+    /// "jedes Jahr am 25/12" is left whole for the server, never taken as one Christmas Day.
     /// </remarks>
     /// <param name="text">What was typed</param>
     /// <param name="settings">What the account says about reading a date</param>
@@ -257,7 +275,7 @@ public sealed partial class QuickAddParser
         if (tokens.Length == 0)
             return DayReading.Blank;
 
-        if (RepeatStarters.Contains(tokens[0], StringComparer.OrdinalIgnoreCase) || tokens.Any(IsRepeatWord))
+        if (settings.ReadsEnglish && (RepeatStarters.Contains(tokens[0], StringComparer.OrdinalIgnoreCase) || tokens.Any(IsRepeatWord)))
             return DayReading.Repeat;
 
         var now = Now(settings);
@@ -273,7 +291,7 @@ public sealed partial class QuickAddParser
                 continue;
             }
 
-            if (time is null && TimeAt(tokens, i, out used) is { } at)
+            if (time is null && TimeAt(tokens, i, settings, out used) is { } at)
             {
                 time = at;
                 i += used - 1;
@@ -294,14 +312,16 @@ public sealed partial class QuickAddParser
     /// What a date box shows for a day picked off its calendar, or for the date a task already has.
     /// The year is always there, since a day without one is read as the next time it comes round,
     /// which for a day already gone is next year's. English whatever the machine's language, since
-    /// English is what's read.
+    /// English is what's read — and in figures for an account that reads another language, where
+    /// "4 Aug 2026" isn't read at all.
     /// </remarks>
     /// <param name="day">The day</param>
     /// <param name="time">The time of day on it, or null for the whole day</param>
+    /// <param name="english">Whether the account reads a typed date in English</param>
     /// <returns>The words</returns>
-    public static string Written(DateOnly day, TimeOnly? time = null)
+    public static string Written(DateOnly day, TimeOnly? time, bool english)
     {
-        var written = day.ToString("d MMM yyyy", CultureInfo.InvariantCulture);
+        var written = day.ToString(english ? "d MMM yyyy" : "yyyy-MM-dd", CultureInfo.InvariantCulture);
         return time is { } at ? $"{written} {at.ToString("HH:mm", CultureInfo.InvariantCulture)}" : written;
     }
 
@@ -385,7 +405,14 @@ public sealed partial class QuickAddParser
 
         var first = Word(0)!;
         used = 1;
-        declined = false;
+
+        if (Figures(first, today, settings, out declined) is { } figures)
+            return figures;
+
+        // Everything after figures is English words, which an account that reads another language
+        // reads as its own words or not at all.
+        if (declined || !settings.ReadsEnglish)
+            return null;
 
         switch (first)
         {
@@ -397,12 +424,6 @@ public sealed partial class QuickAddParser
 
         if (Array.IndexOf(WeekdayNames, first) is var named and >= 0)
             return Coming((DayOfWeek)named, today);
-
-        if (Figures(first, today, settings, out declined) is { } figures)
-            return figures;
-
-        if (declined)
-            return null;
 
         used = 2;
 
@@ -704,23 +725,32 @@ public sealed partial class QuickAddParser
     /// </summary>
     /// <param name="tokens">Every word typed</param>
     /// <param name="at">Where the time would start</param>
+    /// <param name="settings">What the account says about reading a date</param>
     /// <param name="used">How many words the time took, when there was one</param>
     /// <returns>The time, or null when no time starts there</returns>
-    private static TimeOnly? TimeAt(string[] tokens, int at, out int used)
+    private static TimeOnly? TimeAt(string[] tokens, int at, DateSettings settings, out int used)
     {
+        var english = settings.ReadsEnglish;
+
         used = 2;
-        if (tokens[at].Equals("at", StringComparison.OrdinalIgnoreCase)
+        if (english
+            && tokens[at].Equals("at", StringComparison.OrdinalIgnoreCase)
             && at + 1 < tokens.Length
-            && TryParseTime(tokens[at + 1], out var after))
+            && TryParseTime(tokens[at + 1], english, out var after))
         {
             return after;
         }
 
         used = 1;
-        return TryParseTime(tokens[at], out var time) ? time : null;
+        return TryParseTime(tokens[at], english, out var time) ? time : null;
     }
 
-    private static bool TryParseTime(string token, out TimeOnly time)
+    /// <summary>A time of day in one word: <c>16:30</c>, and <c>4pm</c> or <c>4:30pm</c> in English.</summary>
+    /// <param name="token">The word</param>
+    /// <param name="english">Whether the account reads a typed date in English, without which "am" and "pm" aren't read</param>
+    /// <param name="time">The time, when the word is one</param>
+    /// <returns>True when the word is a time</returns>
+    private static bool TryParseTime(string token, bool english, out TimeOnly time)
     {
         var match = TimePattern().Match(token);
         if (!match.Success)
@@ -735,7 +765,7 @@ public sealed partial class QuickAddParser
 
         if (meridiem.Length > 0)
         {
-            if (hour is < 1 or > 12)
+            if (!english || hour is < 1 or > 12)
             {
                 time = default;
                 return false;

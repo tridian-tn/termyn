@@ -15,7 +15,7 @@ public class HintTextBoxTests
 {
     private static HintTextBox Box()
     {
-        var box = new HintTextBox { Hint = CapturePreviewText.Hint };
+        var box = new HintTextBox { Hint = CapturePreviewText.Hint(english: true) };
         box.CreateControl();
         return box;
     }

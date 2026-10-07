@@ -1406,8 +1406,14 @@ public sealed class MainPresenter
         if (SmartViews.DueOn(item, snapshot.TimeZone) is not { } day)
             return item.DueText ?? string.Empty;
 
-        return QuickAddParser.Written(day, SmartViews.DueTimeOf(item, snapshot.TimeZone));
+        return QuickAddParser.Written(day, SmartViews.DueTimeOf(item, snapshot.TimeZone), DatesInEnglish);
     }
+
+    /// <summary>
+    /// Whether the account reads a typed date in English, which decides whether a box asking for a
+    /// day suggests and writes words or figures.
+    /// </summary>
+    public bool DatesInEnglish => _engine.DateSettings.ReadsEnglish;
 
     /// <summary>
     /// Today in the account's own timezone, for a window with a date to offer.
