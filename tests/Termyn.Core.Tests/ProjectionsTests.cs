@@ -185,6 +185,7 @@ public class ProjectionsTests
         Assert.Null(settings.WeekStart);
         Assert.Null(settings.NextWeek);
         Assert.Null(settings.Language);
+        Assert.False(settings.InlineDatesOff);
     }
 
     [Theory]
@@ -201,6 +202,20 @@ public class ProjectionsTests
         // dateist_lang overrides lang when it's set. Todoist's reference puts it on the user and its
         // example in features, so either is taken; anything other than a string isn't a language.
         Assert.Equal(language, Projections.ToDateSettings(Obj(json)).Language);
+    }
+
+    [Theory]
+    [InlineData("""{"id":"u","features":{"dateist_inline_disabled":true}}""", true)]
+    [InlineData("""{"id":"u","features":{"dateist_inline_disabled":1}}""", true)]
+    [InlineData("""{"id":"u","features":{"dateist_inline_disabled":false}}""", false)]
+    [InlineData("""{"id":"u","features":{"dateist_inline_disabled":null}}""", false)]
+    [InlineData("""{"id":"u","features":{}}""", false)]
+    [InlineData("""{"id":"u"}""", false)]
+    public void Smart_date_recognition_is_off_only_when_the_account_says_so(string json, bool off)
+    {
+        // Todoist reads dates in a title unless it's told not to, so a flag that isn't there is on.
+        // Its features carry flags as 0 and 1 as well as booleans, the way "beta" comes.
+        Assert.Equal(off, Projections.ToDateSettings(Obj(json)).InlineDatesOff);
     }
 
     [Theory]

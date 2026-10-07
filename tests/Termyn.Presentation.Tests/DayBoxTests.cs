@@ -263,18 +263,19 @@ public class DayBoxTests
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("en")]
-    [InlineData("de")]
-    public void Everything_the_capture_hint_offers_is_read_by_capture(string? language)
+    [InlineData(null, false)]
+    [InlineData("en", false)]
+    [InlineData("de", false)]
+    [InlineData("en", true)]
+    public void Everything_the_capture_hint_offers_is_read_by_capture(string? language, bool smartDatesOff)
     {
         // A day offered to an account that capture reads no day for would sit in the task's title.
-        var presenter = NewPresenter(Account(language));
+        var presenter = NewPresenter(Account(language, smartDatesOff));
 
-        var parse = presenter.Preview(CapturePreviewText.Hint(presenter.DatesInEnglish)).Parse;
+        var parse = presenter.Preview(CapturePreviewText.Hint(presenter.CaptureReadsDays)).Parse;
 
         Assert.Equal("Add a task…", parse.Content);
-        Assert.Equal(presenter.DatesInEnglish, parse.DueDate is not null);
+        Assert.Equal(presenter.CaptureReadsDays, parse.DueDate is not null);
     }
 
     // ---- An account that reads another language ----------------------------------------------------
@@ -362,6 +363,44 @@ public class DayBoxTests
         }
     }
 
+    // ---- An account with smart date recognition off ------------------------------------------------
+
+    [Fact]
+    public async Task An_offline_capture_reads_no_day_for_an_account_with_smart_dates_off()
+    {
+        // Todoist leaves the words in the title once recognition is off, so a day read here was one
+        // the task only had because the network was down. A sub-task is read the same way.
+        var presenter = NewPresenter(Account("en", smartDatesOff: true));
+
+        await presenter.CaptureAsync("Renew passport tomorrow");
+        presenter.AddSubtask("i1", "Book tickets next friday 4pm");
+
+        Assert.Null(presenter.Rows.Single(r => r.Content == "Renew passport tomorrow").DueOn);
+        Assert.Null(presenter.Rows.Single(r => r.Content == "Book tickets next friday 4pm").DueOn);
+    }
+
+    [Fact]
+    public void The_capture_preview_promises_no_repeat_for_an_account_with_smart_dates_off()
+    {
+        // "Needs a connection" said the server would make it repeat, and it wouldn't.
+        var presenter = NewPresenter(Account("en", smartDatesOff: true));
+
+        Assert.Equal("\"Water plants every monday\"", presenter.PreviewText("Water plants every monday"));
+    }
+
+    [Fact]
+    public void A_due_date_box_still_reads_words_for_an_account_with_smart_dates_off()
+    {
+        // Recognition is about a task's title. Todoist's scheduler still reads what's typed into it,
+        // so the boxes keep reading, offering and writing words.
+        var presenter = NewPresenter(Account("en", smartDatesOff: true));
+
+        presenter.SetDueFromText("i1", "tomorrow");
+
+        Assert.Equal(Today.AddDays(1), Row(presenter).DueOn);
+        Assert.True(presenter.DatesInEnglish);
+    }
+
     // ---- Helpers -----------------------------------------------------------------------------------
 
     private static DayReading[] Readings()
@@ -385,9 +424,12 @@ public class DayBoxTests
 
     /// <summary>An account reading its dates in a language, or one not synced yet when there's none.</summary>
     /// <param name="language">The account's language as Todoist names it, or null for no user at all</param>
+    /// <param name="smartDatesOff">Whether the account has turned smart date recognition off</param>
     /// <returns>The store</returns>
-    private static InMemorySnapshotStore Account(string? language)
-        => language is null ? Store() : WithUser($$$"""{"id":"u","lang":"{{{language}}}","tz_info":{"timezone":"UTC"}}""");
+    private static InMemorySnapshotStore Account(string? language, bool smartDatesOff = false)
+        => language is null
+            ? Store()
+            : WithUser($$$"""{"id":"u","lang":"{{{language}}}","features":{"dateist_inline_disabled":{{{(smartDatesOff ? "true" : "false")}}}},"tz_info":{"timezone":"UTC"}}""");
 
     /// <summary>The examples a line of wording offers, which are whatever it puts in quotes.</summary>
     /// <param name="says">The wording</param>

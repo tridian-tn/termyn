@@ -96,6 +96,10 @@ public static class Projections
     /// <remarks>
     /// <c>date_format</c> is 0 for day-first and 1 for month-first, so a missing one mustn't read
     /// as the nought it would default to: that would be a day-first account that never said so.
+    ///
+    /// Smart date recognition being off is <c>dateist_inline_disabled</c> in <c>features</c>, the
+    /// one place Todoist's reference puts it. It's off only when the account says so: Todoist reads
+    /// dates in a title unless it's told not to.
     /// </remarks>
     /// <param name="user">The user resource, or null when it hasn't been synced</param>
     /// <returns>The settings, with null wherever the account hasn't given one</returns>
@@ -114,7 +118,8 @@ public static class Projections
             },
             Weekday(JsonRead.Int(user, "start_day")),
             ToNextWeek(user),
-            ToDateLanguage(user));
+            ToDateLanguage(user),
+            user["features"] is JsonObject features && JsonRead.Bool(features, "dateist_inline_disabled"));
     }
 
     /// <summary>

@@ -27,6 +27,9 @@ public class DayGrammarTests
     /// <summary>The same account, reading its dates in German, so the language is all that differs.</summary>
     private static readonly DateSettings German = Told with { Language = "de" };
 
+    /// <summary>The same account, with smart date recognition turned off, so that's all that differs.</summary>
+    private static readonly DateSettings SmartDatesOff = Told with { InlineDatesOff = true };
+
     // ---- Days by name ------------------------------------------------------------------------------
 
     [Theory]
@@ -549,6 +552,72 @@ public class DayGrammarTests
         // first sync, when refusing every word would cost a first capture its day.
         Assert.Equal(english, new DateSettings(TimeZoneInfo.Utc, Language: language).ReadsEnglish);
     }
+
+    // ---- An account with smart date recognition off -----------------------------------------------
+
+    [Theory]
+    [InlineData("Pay rent tomorrow")]
+    [InlineData("Renew passport next friday")]
+    [InlineData("Dentist 4 aug 4pm")]
+    [InlineData("Call the bank 25/12")]
+    [InlineData("Submit forms 2026-12-25")]
+    [InlineData("Standup at 16:30")]
+    public void A_capture_reads_no_day_or_time_for_an_account_with_smart_dates_off(string text)
+    {
+        // Todoist leaves a date typed in a title where it is once recognition is off. Read here, the
+        // task had a day offline that it wouldn't have had online.
+        var parse = Parse(text, SmartDatesOff);
+
+        Assert.Equal(text, parse.Content);
+        Assert.Null(parse.DueDate);
+        Assert.Null(parse.DueTime);
+    }
+
+    [Theory]
+    [InlineData("Water plants every monday")]
+    [InlineData("Back up every! 3 days")]
+    public void A_schedule_in_a_capture_isnt_flagged_for_an_account_with_smart_dates_off(string text)
+    {
+        // Todoist reads no repeat in a title either, so a preview saying it needs a connection
+        // promised one the server was never going to set.
+        var parse = Parse(text, SmartDatesOff);
+
+        Assert.Equal(text, parse.Content);
+        Assert.False(parse.IsRecurrence);
+        Assert.Empty(parse.Unsupported);
+    }
+
+    [Fact]
+    public void A_capture_still_reads_the_place_labels_and_priority_with_smart_dates_off()
+    {
+        // Those are Todoist's own marks rather than dates, which is all that recognition is about.
+        var parse = Parse("Pay rent tomorrow #Home /Errands @phone p1", SmartDatesOff);
+
+        Assert.Equal("Pay rent tomorrow", parse.Content);
+        Assert.Equal("Home", parse.ProjectName);
+        Assert.Equal("Errands", parse.SectionName);
+        Assert.Equal(["phone"], parse.Labels);
+        Assert.Equal(Priority.P1, parse.Priority);
+    }
+
+    [Fact]
+    public void A_box_still_reads_words_for_an_account_with_smart_dates_off()
+    {
+        // Recognition is about a task's title. Todoist's scheduler still reads what's typed into it,
+        // since that's the only way left to give a task a date.
+        Assert.Equal(DayReading.On(Today.AddDays(1)), Read("tomorrow", SmartDatesOff));
+        Assert.Equal(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 0)), Read("4 aug 4pm", SmartDatesOff));
+        Assert.Equal(DayReading.Repeat, Read("every monday", SmartDatesOff));
+    }
+
+    [Theory]
+    [InlineData(null, false, true)]
+    [InlineData("en", false, true)]
+    [InlineData("en", true, false)]
+    [InlineData("de", false, false)]
+    [InlineData("de", true, false)]
+    public void A_capture_reads_a_day_only_in_English_with_smart_dates_on(string? language, bool off, bool reads)
+        => Assert.Equal(reads, new DateSettings(TimeZoneInfo.Utc, Language: language, InlineDatesOff: off).CaptureReadsDays);
 
     private static QuickAddParse Parse(string text, DateSettings settings)
         => new QuickAddParser(new FixedClock(Today)).Parse(text, settings);
