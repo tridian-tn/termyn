@@ -154,5 +154,6 @@ public class DueFormTests
             "Ship it",
             current,
             Today,
-            text => new QuickAddParser(new FixedClock(Today)).ReadDay(text, new DateSettings(TimeZoneInfo.Utc)));
+            text => new QuickAddParser(new FixedClock(Today)).ReadDay(text, new DateSettings(TimeZoneInfo.Utc)),
+            english: true);
 }

@@ -113,7 +113,36 @@ public static class Projections
                 _ => null,
             },
             Weekday(JsonRead.Int(user, "start_day")),
-            ToNextWeek(user));
+            ToNextWeek(user),
+            ToDateLanguage(user));
+    }
+
+    /// <summary>
+    /// Reads the language the account reads a typed date in.
+    /// </summary>
+    /// <remarks>
+    /// <c>dateist_lang</c> when the account has set one apart from its own language, and
+    /// <c>lang</c> when it hasn't. Todoist's reference lists <c>dateist_lang</c> on the user itself
+    /// while its example carries it in <c>features</c>, so it's looked for in both.
+    ///
+    /// Only a string counts. Anything else there is something other than a language, and taken for
+    /// one it would stop every English word being read for an account that reads English.
+    /// </remarks>
+    /// <param name="user">The user resource, or null when it hasn't been synced</param>
+    /// <returns>The language as Todoist names it, or null when there isn't one to give</returns>
+    public static string? ToDateLanguage(JsonObject? user)
+    {
+        if (user is null)
+            return null;
+
+        return Language(user, "dateist_lang")
+               ?? (user["features"] is JsonObject features ? Language(features, "dateist_lang") : null)
+               ?? Language(user, "lang");
+
+        static string? Language(JsonObject o, string key)
+            => o[key] is JsonValue value && value.TryGetValue(out string? name) && !string.IsNullOrWhiteSpace(name)
+                ? name
+                : null;
     }
 
     /// <summary>

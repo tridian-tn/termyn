@@ -51,7 +51,7 @@ public class ReminderFormTests
         dialog.AddAt("tomorrow please");
 
         Assert.Empty(presenter.RemindersFor("i1"));
-        Assert.Equal(DayBoxText.ForReminder(DayReading.Unread).Says, dialog.Message);
+        Assert.Equal(DayBoxText.ForReminder(DayReading.Unread, english: true).Says, dialog.Message);
         Assert.Equal("tomorrow please", dialog.Typed);
     }
 
@@ -69,6 +69,24 @@ public class ReminderFormTests
     }
 
     [WinFormsFact]
+    public void An_account_that_reads_another_language_is_offered_figures_and_takes_them()
+    {
+        var presenter = Pro("de");
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+
+        Assert.Equal(DayBoxText.ReminderHint(english: false), dialog.Hint);
+
+        dialog.AddAt("tomorrow 9am");
+
+        Assert.Empty(presenter.RemindersFor("i1"));
+        Assert.Equal(DayBoxText.ForReminder(DayReading.Unread, english: false).Says, dialog.Message);
+
+        dialog.AddAt("2026-08-04 16:00");
+
+        Assert.Equal("2026-08-04T16:00:00", Single(presenter).DueDate);
+    }
+
+    [WinFormsFact]
     public void Nothing_typed_does_nothing()
     {
         var presenter = Pro();
@@ -81,13 +99,17 @@ public class ReminderFormTests
     }
 
     /// <summary>A presenter on a Pro plan, which may set reminders, holding one task.</summary>
+    /// <param name="language">The language the account reads its dates in, or null for no user synced yet</param>
     /// <returns>The presenter</returns>
-    private static MainPresenter Pro()
+    private static MainPresenter Pro(string? language = null)
     {
         var store = new InMemorySnapshotStore();
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
         store.PutResource("items", "i1", """{"id":"i1","content":"Ship it","project_id":"p1","child_order":1}""");
         store.PutResource("user_plan_limits", "user_plan_limits", """{"current":{"plan_name":"pro","reminders":true}}""");
+
+        if (language is not null)
+            store.PutResource("user", "user", $$$"""{"id":"u","lang":"{{{language}}}","tz_info":{"timezone":"UTC"}}""");
 
         var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();

@@ -3495,7 +3495,7 @@ internal sealed class MainForm : Form
     /// <param name="opened">The due date as the box opens on it</param>
     /// <returns>The words to set the due date to, empty to clear it, or null when cancelled</returns>
     private string? AskDueWithDialog(TaskRow row, string opened)
-        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay);
+        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay, _presenter.DatesInEnglish);
 
     /// <summary>
     /// Asks for the day a task has to be finished by. A property so a test can answer without a
@@ -3558,7 +3558,7 @@ internal sealed class MainForm : Form
     /// <param name="row">The task being asked about</param>
     /// <returns>Whether a day was settled on, and which — null being a deadline cleared</returns>
     private (bool Answered, DateOnly? Day) AskWithDialog(TaskRow row)
-        => DeadlineForm.Ask(this, row.Content, row.DeadlineOn, _presenter.Today, _presenter.ReadDay, out var day)
+        => DeadlineForm.Ask(this, row.Content, row.DeadlineOn, _presenter.Today, _presenter.ReadDay, _presenter.DatesInEnglish, out var day)
             ? (true, day)
             : (false, null);
 

@@ -40,7 +40,7 @@ internal sealed class QuickAddForm : Form
         {
             Dock = DockStyle.Top,
             Height = 30,
-            Hint = CapturePreviewText.Hint,
+            Hint = CapturePreviewText.Hint(presenter.DatesInEnglish),
         };
         _capture.KeyDown += OnKeyDown;
         _capture.TextChanged += (_, _) => UpdatePreview();
@@ -86,6 +86,9 @@ internal sealed class QuickAddForm : Form
     /// <remarks>
     /// The pointer's screen rather than the active window's: the hotkey is most often pressed while
     /// working in another application, and the pointer is where the user is looking.
+    ///
+    /// The hint is set again each time, since the box is built at start-up and on a first run that's
+    /// before the account has said which language it reads dates in.
     /// </remarks>
     public void Summon()
     {
@@ -94,6 +97,7 @@ internal sealed class QuickAddForm : Form
             screen.X + ((screen.Width - Width) / 2),
             screen.Y + (screen.Height / 4));
 
+        _capture.Hint = CapturePreviewText.Hint(_presenter.DatesInEnglish);
         _capture.Clear();
         UpdatePreview();
 

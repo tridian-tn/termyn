@@ -43,7 +43,7 @@ internal sealed class DueForm : Form
     /// <summary>Whether the time field is being set to follow the box, rather than by a person.</summary>
     private bool _following;
 
-    private DueForm(string task, string current, DateOnly today, Func<string, DayReading> read)
+    private DueForm(string task, string current, DateOnly today, Func<string, DayReading> read, bool english)
     {
         Text = "Due date";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -73,7 +73,7 @@ internal sealed class DueForm : Form
             ForeColor = SystemColors.GrayText,
         };
 
-        _box = new DayBox(read, DayBoxText.ForDue, today, takesTime: true)
+        _box = new DayBox(read, DayBoxText.ForDue, today, takesTime: true, english)
         {
             Location = new Point(14, 62),
         };
@@ -154,9 +154,10 @@ internal sealed class DueForm : Form
     /// <param name="current">The due date as the box opens on it, or empty when there isn't one</param>
     /// <param name="today">Today, which the calendar opens on when the box doesn't name a day</param>
     /// <param name="read">Reads what's typed into the box</param>
+    /// <param name="english">Whether the account reads a typed date in English</param>
     /// <returns>The dialog, which the caller disposes</returns>
-    internal static DueForm For(string task, string current, DateOnly today, Func<string, DayReading> read)
-        => new(task, current, today, read);
+    internal static DueForm For(string task, string current, DateOnly today, Func<string, DayReading> read, bool english)
+        => new(task, current, today, read, english);
 
     /// <summary>
     /// Sets the time field as a person would, for a test with no field to click.
@@ -234,10 +235,11 @@ internal sealed class DueForm : Form
     /// <param name="current">The due date as the box opens on it, or empty when there isn't one</param>
     /// <param name="today">Today in the account's timezone, which the calendar opens on</param>
     /// <param name="read">Reads what's typed into the box, as quick add would</param>
+    /// <param name="english">Whether the account reads a typed date in English</param>
     /// <returns>What the due date is to be, empty to clear it, or null when the dialog was cancelled</returns>
-    internal static string? Ask(IWin32Window owner, string task, string current, DateOnly today, Func<string, DayReading> read)
+    internal static string? Ask(IWin32Window owner, string task, string current, DateOnly today, Func<string, DayReading> read, bool english)
     {
-        using var dialog = For(task, current, today, read);
+        using var dialog = For(task, current, today, read, english);
         return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.Answer : null;
     }
 }

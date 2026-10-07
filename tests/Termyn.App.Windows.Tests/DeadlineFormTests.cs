@@ -1,5 +1,6 @@
 using System.Globalization;
 using Termyn.Core.Capture;
+using Termyn.Presentation;
 using Termyn.TestSupport;
 
 namespace Termyn.App.Windows.Tests;
@@ -22,6 +23,28 @@ public class DeadlineFormTests
 
         Assert.Equal("4 Aug 2026", dialog.Box.Typed);
         Assert.Equal(new DateOnly(2026, 8, 4), dialog.Chosen);
+    }
+
+    [WinFormsFact]
+    public void It_opens_in_figures_for_an_account_that_reads_another_language()
+    {
+        // The box reads only figures for it, so "4 Aug 2026" would open on a deadline it refused.
+        using var dialog = Deadline(new DateOnly(2026, 8, 4), "de");
+
+        Assert.Equal("2026-08-04", dialog.Box.Typed);
+        Assert.Equal(new DateOnly(2026, 8, 4), dialog.Chosen);
+        Assert.True(dialog.CanAccept);
+    }
+
+    [WinFormsFact]
+    public void Words_are_refused_with_figures_offered_for_an_account_that_reads_another_language()
+    {
+        using var dialog = Deadline(null, "de");
+
+        dialog.Box.Typed = "4 aug";
+
+        Assert.False(dialog.CanAccept);
+        Assert.Equal(DayBoxText.ForDeadline(DayReading.Unread, english: false).Says, dialog.Box.Says);
     }
 
     [WinFormsFact]
@@ -155,7 +178,7 @@ public class DeadlineFormTests
     {
         // An ampersand in a task's name is a character, not the mark of an accelerator: left on,
         // "Books & Papers" reads "Books Papers" with the P underlined.
-        using var dialog = DeadlineForm.For("Books & Papers", null, Today, Read);
+        using var dialog = DeadlineForm.For("Books & Papers", null, Today, Read, english: true);
 
         var naming = dialog.Controls.OfType<Label>().Single(l => l.Text == "Books & Papers");
 
@@ -176,8 +199,19 @@ public class DeadlineFormTests
 
     /// <summary>The dialog for a task called "Ship it", read with the grammar quick add uses.</summary>
     /// <param name="current">The deadline it has now, or null</param>
+    /// <param name="language">The language the account reads its dates in, or null when it isn't known</param>
     /// <returns>The dialog, which the caller disposes</returns>
-    private static DeadlineForm Deadline(DateOnly? current) => DeadlineForm.For("Ship it", current, Today, Read);
+    private static DeadlineForm Deadline(DateOnly? current, string? language = null)
+    {
+        var settings = new DateSettings(TimeZoneInfo.Utc, Language: language);
+
+        return DeadlineForm.For(
+            "Ship it",
+            current,
+            Today,
+            text => new QuickAddParser(new FixedClock(Today)).ReadDay(text, settings),
+            settings.ReadsEnglish);
+    }
 
     /// <summary>Reads a box's text as the app does, on a day fixed for the test.</summary>
     private static DayReading Read(string text)

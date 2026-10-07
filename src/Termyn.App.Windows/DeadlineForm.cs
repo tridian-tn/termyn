@@ -22,7 +22,7 @@ internal sealed class DeadlineForm : Form
 
     private bool _cleared;
 
-    private DeadlineForm(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read)
+    private DeadlineForm(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read, bool english)
     {
         Text = "Deadline";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -52,10 +52,10 @@ internal sealed class DeadlineForm : Form
             ForeColor = SystemColors.GrayText,
         };
 
-        _box = new DayBox(read, DayBoxText.ForDeadline, today, takesTime: false)
+        _box = new DayBox(read, reading => DayBoxText.ForDeadline(reading, english), today, takesTime: false, english)
         {
             Location = new Point(14, 62),
-            Typed = current is { } day ? QuickAddParser.Written(day) : string.Empty,
+            Typed = current is { } day ? QuickAddParser.Written(day, null, english) : string.Empty,
         };
 
         // Shown disabled rather than hidden on a task without one: the button says what can be done
@@ -107,9 +107,10 @@ internal sealed class DeadlineForm : Form
     /// <param name="current">The deadline it has now, or null</param>
     /// <param name="today">Today, which the calendar opens on when the box doesn't name a day</param>
     /// <param name="read">Reads what's typed into the box</param>
+    /// <param name="english">Whether the account reads a typed date in English</param>
     /// <returns>The dialog, which the caller disposes</returns>
-    internal static DeadlineForm For(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read)
-        => new(task, current, today, read);
+    internal static DeadlineForm For(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read, bool english)
+        => new(task, current, today, read, english);
 
     /// <summary>
     /// Presses Clear, for a test with no dialog to click.
@@ -129,6 +130,7 @@ internal sealed class DeadlineForm : Form
     /// <param name="current">The deadline the task has now, or null when it hasn't got one</param>
     /// <param name="today">Today in the account's timezone, which the calendar opens on</param>
     /// <param name="read">Reads what's typed into the box, as quick add would</param>
+    /// <param name="english">Whether the account reads a typed date in English</param>
     /// <param name="chosen">The day settled on, or null to clear the deadline</param>
     /// <returns>True when a day was settled on or cleared, false when the dialog was cancelled</returns>
     internal static bool Ask(
@@ -137,9 +139,10 @@ internal sealed class DeadlineForm : Form
         DateOnly? current,
         DateOnly today,
         Func<string, DayReading> read,
+        bool english,
         out DateOnly? chosen)
     {
-        using var dialog = For(task, current, today, read);
+        using var dialog = For(task, current, today, read, english);
 
         if (dialog.ShowDialog(owner) != DialogResult.OK)
         {

@@ -1,4 +1,5 @@
 using Termyn.Core.Capture;
+using Termyn.Core.Model;
 using Termyn.TestSupport;
 
 namespace Termyn.Core.Tests;
@@ -22,6 +23,9 @@ public class DayGrammarTests
 
     /// <summary>An account that's said everything, with Todoist's defaults: day first, weeks from Monday.</summary>
     private static readonly DateSettings Told = new(TimeZoneInfo.Utc, DayFirst: true, WeekStart: DayOfWeek.Monday, NextWeek: DayOfWeek.Monday);
+
+    /// <summary>The same account, reading its dates in German, so the language is all that differs.</summary>
+    private static readonly DateSettings German = Told with { Language = "de" };
 
     // ---- Days by name ------------------------------------------------------------------------------
 
@@ -405,17 +409,133 @@ public class DayGrammarTests
         for (var day = new DateOnly(2027, 1, 1); day <= new DateOnly(2029, 12, 31); day = day.AddDays(1))
         {
             foreach (var time in times)
-                Assert.Equal(DayReading.On(day, time), Read(QuickAddParser.Written(day, time), Unknown));
+            {
+                Assert.Equal(DayReading.On(day, time), Read(QuickAddParser.Written(day, time, english: true), Unknown));
+                Assert.Equal(DayReading.On(day, time), Read(QuickAddParser.Written(day, time, english: false), German));
+            }
         }
 
-        Assert.Equal(DayReading.On(new DateOnly(2020, 2, 29)), Read(QuickAddParser.Written(new DateOnly(2020, 2, 29)), Unknown));
+        Assert.Equal(DayReading.On(new DateOnly(2020, 2, 29)), Read(QuickAddParser.Written(new DateOnly(2020, 2, 29), null, english: true), Unknown));
     }
 
     [Fact]
     public void A_day_is_written_with_its_year_and_an_English_month()
     {
-        Assert.Equal("4 Aug 2026", QuickAddParser.Written(new DateOnly(2026, 8, 4)));
-        Assert.Equal("4 Aug 2026 07:05", QuickAddParser.Written(new DateOnly(2026, 8, 4), new TimeOnly(7, 5)));
+        Assert.Equal("4 Aug 2026", QuickAddParser.Written(new DateOnly(2026, 8, 4), null, english: true));
+        Assert.Equal("4 Aug 2026 07:05", QuickAddParser.Written(new DateOnly(2026, 8, 4), new TimeOnly(7, 5), english: true));
+    }
+
+    [Fact]
+    public void A_day_is_written_in_figures_for_an_account_that_reads_another_language()
+    {
+        // "4 Aug 2026" isn't read for it, so a day picked off the calendar would be refused by the
+        // box it was picked into.
+        Assert.Equal("2026-08-04", QuickAddParser.Written(new DateOnly(2026, 8, 4), null, english: false));
+        Assert.Equal("2026-08-04 07:05", QuickAddParser.Written(new DateOnly(2026, 8, 4), new TimeOnly(7, 5), english: false));
+    }
+
+    // ---- An account that reads another language --------------------------------------------------
+
+    [Theory]
+    [InlineData("today")]
+    [InlineData("tom")]
+    [InlineData("friday")]
+    [InlineData("this sat")]
+    [InlineData("next fri")]
+    [InlineData("next week")]
+    [InlineData("next month")]
+    [InlineData("in 3 days")]
+    [InlineData("end of month")]
+    [InlineData("4 aug")]
+    [InlineData("aug 4th 2027")]
+    public void English_words_arent_a_day_for_an_account_that_reads_another_language(string words)
+    {
+        // Todoist reads a German account's dates in German, where "tomorrow" may well stay in the
+        // title. Read here, the task would have a day offline that it wouldn't have had online.
+        var parse = Parse($"Pay rent {words}", German);
+
+        Assert.Equal($"Pay rent {words}", parse.Content);
+        Assert.Null(parse.DueDate);
+        Assert.Equal(DayReading.Unread, Read(words, German));
+    }
+
+    [Theory]
+    [InlineData("25/12", 2026, 12, 25)]
+    [InlineData("5/6", 2027, 6, 5)]
+    [InlineData("25/12/2027", 2027, 12, 25)]
+    [InlineData("2026-12-25", 2026, 12, 25)]
+    [InlineData("2026/12/25", 2026, 12, 25)]
+    public void Figures_in_a_box_are_a_day_whatever_language_the_account_reads(string words, int year, int month, int day)
+    {
+        // Every word in a box has to be read, so there's nothing beside the figures to change them.
+        Assert.Equal(DayReading.On(new DateOnly(year, month, day)), Read(words, German));
+    }
+
+    [Theory]
+    [InlineData("Weihnachtskarten jedes Jahr am 25/12")]
+    [InlineData("Réunion 25/12 à 16h")]
+    [InlineData("Zahnarzt 25/12 um 16 Uhr")]
+    [InlineData("Zahnarzt morgen 16:30")]
+    [InlineData("Zahnarzt 25/12 16:30")]
+    [InlineData("Miete zahlen 2026-12-25")]
+    [InlineData("Standup 16:30")]
+    public void A_capture_reads_no_day_or_time_for_an_account_that_reads_another_language(string text)
+    {
+        // The words beside the figures can change them, and none is read here: "jedes Jahr am 25/12"
+        // repeats, "à 16h" is a time, and "morgen 16:30" is tomorrow's. Read alone, the figures made
+        // a one-off Christmas Day, a day that lost its time, and today's half past four.
+        var parse = Parse(text, German);
+
+        Assert.Equal(text, parse.Content);
+        Assert.Null(parse.DueDate);
+        Assert.Null(parse.DueTime);
+    }
+
+    [Fact]
+    public void A_capture_still_reads_the_place_labels_and_priority_whatever_the_language()
+    {
+        // Those are Todoist's own marks rather than words, and mean the same in any language.
+        var parse = Parse("Zahnarzt 25/12 #Home /Errands @phone p1", German);
+
+        Assert.Equal("Zahnarzt 25/12", parse.Content);
+        Assert.Equal("Home", parse.ProjectName);
+        Assert.Equal("Errands", parse.SectionName);
+        Assert.Equal(["phone"], parse.Labels);
+        Assert.Equal(Priority.P1, parse.Priority);
+    }
+
+    [Theory]
+    [InlineData("4pm")]
+    [InlineData("4:30pm")]
+    [InlineData("at 16:30")]
+    [InlineData("25/12 9am")]
+    public void Am_pm_and_at_are_English_words_too(string words)
+    {
+        Assert.Equal(DayReading.Unread, Read(words, German));
+    }
+
+    [Fact]
+    public void A_box_holding_nothing_but_a_time_reads_it_whatever_the_language()
+    {
+        // With every word in the box accounted for, nothing else can be the time's day.
+        Assert.Equal(DayReading.On(Today, new TimeOnly(16, 30)), Read("16:30", German));
+        Assert.Equal(DayReading.On(new DateOnly(2026, 12, 25), new TimeOnly(9, 0)), Read("25/12 09:00", German));
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("en", true)]
+    [InlineData("EN", true)]
+    [InlineData("en_GB", true)]
+    [InlineData("de", false)]
+    [InlineData("pt_BR", false)]
+    [InlineData("zh_TW", false)]
+    public void Only_an_English_language_reads_English(string? language, bool english)
+    {
+        // Not knowing is read as English: it's Todoist's own default, and only the case before the
+        // first sync, when refusing every word would cost a first capture its day.
+        Assert.Equal(english, new DateSettings(TimeZoneInfo.Utc, Language: language).ReadsEnglish);
     }
 
     private static QuickAddParse Parse(string text, DateSettings settings)

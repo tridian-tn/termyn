@@ -31,6 +31,7 @@ internal sealed class DayBox : UserControl
     private readonly Func<DayReading, DayVerdict> _judge;
     private readonly DateOnly _today;
     private readonly bool _takesTime;
+    private readonly bool _english;
 
     private readonly HintTextBox _text;
     private readonly Button _pick;
@@ -53,18 +54,20 @@ internal sealed class DayBox : UserControl
     /// <param name="judge">Says what the line under the box reads, and whether the dialog may take it</param>
     /// <param name="today">The day the calendar opens on when the box doesn't name one</param>
     /// <param name="takesTime">Whether a time typed with a day belongs to the answer, and stays when another day is picked</param>
-    internal DayBox(Func<string, DayReading> read, Func<DayReading, DayVerdict> judge, DateOnly today, bool takesTime)
+    /// <param name="english">Whether the account reads a typed date in English, which decides whether a day picked is written in words or figures</param>
+    internal DayBox(Func<string, DayReading> read, Func<DayReading, DayVerdict> judge, DateOnly today, bool takesTime, bool english)
     {
         _read = read;
         _judge = judge;
         _today = today;
         _takesTime = takesTime;
+        _english = english;
 
         Size = new Size(392, 56);
 
         _text = new HintTextBox
         {
-            Hint = DayBoxText.Hint,
+            Hint = DayBoxText.Hint(english),
             Location = new Point(0, 0),
             Size = new Size(354, 27),
             AccessibleName = "Day",
@@ -147,7 +150,7 @@ internal sealed class DayBox : UserControl
     internal void Pick(DateOnly day)
     {
         var time = _takesTime && Reading.Kind is DayReadingKind.Day ? Reading.Time : null;
-        _text.Text = QuickAddParser.Written(day, time);
+        _text.Text = QuickAddParser.Written(day, time, _english);
     }
 
     /// <summary>
@@ -162,7 +165,7 @@ internal sealed class DayBox : UserControl
     internal void SetTime(TimeOnly? time)
     {
         if (Reading is { Kind: DayReadingKind.Day, Day: { } day })
-            _text.Text = QuickAddParser.Written(day, time);
+            _text.Text = QuickAddParser.Written(day, time, _english);
     }
 
     /// <summary>Opens the calendar, as pressing the button does.</summary>

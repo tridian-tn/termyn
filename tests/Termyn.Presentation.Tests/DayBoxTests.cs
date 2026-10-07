@@ -158,12 +158,12 @@ public class DayBoxTests
     [Fact]
     public void A_deadline_takes_a_whole_day_or_nothing()
     {
-        Assert.True(DayBoxText.ForDeadline(DayReading.Blank).Accepted);
-        Assert.True(DayBoxText.ForDeadline(DayReading.On(Today)).Accepted);
+        Assert.True(DayBoxText.ForDeadline(DayReading.Blank, english: true).Accepted);
+        Assert.True(DayBoxText.ForDeadline(DayReading.On(Today), english: true).Accepted);
 
-        Assert.False(DayBoxText.ForDeadline(DayReading.On(Today, new TimeOnly(9, 0))).Accepted);
-        Assert.False(DayBoxText.ForDeadline(DayReading.Repeat).Accepted);
-        Assert.False(DayBoxText.ForDeadline(DayReading.Unread).Accepted);
+        Assert.False(DayBoxText.ForDeadline(DayReading.On(Today, new TimeOnly(9, 0)), english: true).Accepted);
+        Assert.False(DayBoxText.ForDeadline(DayReading.Repeat, english: true).Accepted);
+        Assert.False(DayBoxText.ForDeadline(DayReading.Unread, english: true).Accepted);
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public class DayBoxTests
         Assert.All(Readings(), reading =>
         {
             Assert.NotEmpty(DayBoxText.ForDue(reading).Says);
-            Assert.NotEmpty(DayBoxText.ForDeadline(reading).Says);
+            Assert.NotEmpty(DayBoxText.ForDeadline(reading, english: true).Says);
         });
     }
 
@@ -186,7 +186,7 @@ public class DayBoxTests
             System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
 
             Assert.Equal("Tuesday, 4 August 2026 at 16:30", DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
-            Assert.Equal("Tuesday, 4 August 2026", DayBoxText.ForDeadline(DayReading.On(new DateOnly(2026, 8, 4))).Says);
+            Assert.Equal("Tuesday, 4 August 2026", DayBoxText.ForDeadline(DayReading.On(new DateOnly(2026, 8, 4)), english: true).Says);
         }
         finally
         {
@@ -199,15 +199,15 @@ public class DayBoxTests
     {
         // A reminder is a moment, set once: a repeat is refused by name, and words left over mean
         // the moment wasn't read.
-        Assert.True(DayBoxText.ForReminder(DayReading.On(Today)).Accepted);
-        Assert.True(DayBoxText.ForReminder(DayReading.On(Today, new TimeOnly(16, 0))).Accepted);
+        Assert.True(DayBoxText.ForReminder(DayReading.On(Today), english: true).Accepted);
+        Assert.True(DayBoxText.ForReminder(DayReading.On(Today, new TimeOnly(16, 0)), english: true).Accepted);
 
-        Assert.False(DayBoxText.ForReminder(DayReading.Repeat).Accepted);
-        Assert.False(DayBoxText.ForReminder(DayReading.Unread).Accepted);
-        Assert.False(DayBoxText.ForReminder(DayReading.Blank).Accepted);
+        Assert.False(DayBoxText.ForReminder(DayReading.Repeat, english: true).Accepted);
+        Assert.False(DayBoxText.ForReminder(DayReading.Unread, english: true).Accepted);
+        Assert.False(DayBoxText.ForReminder(DayReading.Blank, english: true).Accepted);
 
-        Assert.Equal("A reminder can't repeat", DayBoxText.ForReminder(DayReading.Repeat).Says);
-        Assert.NotEmpty(DayBoxText.ForReminder(DayReading.Unread).Says);
+        Assert.Equal("A reminder can't repeat", DayBoxText.ForReminder(DayReading.Repeat, english: true).Says);
+        Assert.NotEmpty(DayBoxText.ForReminder(DayReading.Unread, english: true).Says);
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public class DayBoxTests
         {
             System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
 
-            Assert.Equal("Tuesday, 4 August 2026 at 09:00", DayBoxText.ForReminder(DayReading.On(new DateOnly(2026, 8, 4))).Says);
+            Assert.Equal("Tuesday, 4 August 2026 at 09:00", DayBoxText.ForReminder(DayReading.On(new DateOnly(2026, 8, 4)), english: true).Says);
         }
         finally
         {
@@ -226,15 +226,108 @@ public class DayBoxTests
         }
     }
 
-    [Fact]
-    public void Every_example_the_hint_gives_is_one_the_box_reads()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("en")]
+    [InlineData("de")]
+    public void Every_example_the_hint_gives_is_one_the_box_reads(string? language)
     {
         // The hint offered "fri", which isn't read on its own — so the deadline box refused its own
         // example, and a due date typed from it went without a date until the next sync.
-        var presenter = NewPresenter(Store());
+        var presenter = NewPresenter(Account(language));
 
-        foreach (var example in DayBoxText.Hint.Split(", "))
+        foreach (var example in DayBoxText.Hint(presenter.DatesInEnglish).Split(", "))
             Assert.Equal(DayReadingKind.Day, presenter.ReadDay(example).Kind);
+
+        Assert.Equal(DayReadingKind.Day, presenter.ReadDay(DayBoxText.ReminderHint(presenter.DatesInEnglish)).Kind);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("en")]
+    [InlineData("de")]
+    public void Every_example_a_refusal_offers_is_one_the_box_takes(string? language)
+    {
+        // A deadline box telling a German account to try "4 aug", and then refusing "4 aug", would
+        // be the box contradicting itself.
+        var presenter = NewPresenter(Account(language));
+        var english = presenter.DatesInEnglish;
+
+        var forDeadline = Quoted(DayBoxText.ForDeadline(DayReading.Unread, english).Says);
+        var forReminder = Quoted(DayBoxText.ForReminder(DayReading.Unread, english).Says);
+
+        Assert.NotEmpty(forDeadline);
+        Assert.NotEmpty(forReminder);
+        Assert.All(forDeadline, example => Assert.True(DayBoxText.ForDeadline(presenter.ReadDay(example), english).Accepted, example));
+        Assert.All(forReminder, example => Assert.True(DayBoxText.ForReminder(presenter.ReadDay(example), english).Accepted, example));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("en")]
+    [InlineData("de")]
+    public void Everything_the_capture_hint_offers_is_read_by_capture(string? language)
+    {
+        // A day offered to an account that capture reads no day for would sit in the task's title.
+        var presenter = NewPresenter(Account(language));
+
+        var parse = presenter.Preview(CapturePreviewText.Hint(presenter.DatesInEnglish)).Parse;
+
+        Assert.Equal("Add a task…", parse.Content);
+        Assert.Equal(presenter.DatesInEnglish, parse.DueDate is not null);
+    }
+
+    // ---- An account that reads another language ----------------------------------------------------
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("en", true)]
+    [InlineData("de", false)]
+    public void The_account_says_whether_its_dates_are_read_in_English(string? language, bool english)
+    {
+        Assert.Equal(english, NewPresenter(Account(language)).DatesInEnglish);
+    }
+
+    [Fact]
+    public void A_due_date_in_English_words_goes_to_Todoist_as_the_words_for_an_account_that_reads_another_language()
+    {
+        // Todoist reads it in German, which is for the server to make what it can of.
+        var presenter = NewPresenter(Account("de"));
+
+        presenter.SetDueFromText("i1", "tomorrow");
+
+        Assert.Equal("tomorrow", Row(presenter).Due);
+    }
+
+    [Fact]
+    public void A_due_date_in_figures_is_read_for_an_account_that_reads_another_language()
+    {
+        var presenter = NewPresenter(Account("de"));
+
+        presenter.SetDueFromText("i1", "2026-12-25");
+
+        Assert.Equal(new DateOnly(2026, 12, 25), Row(presenter).DueOn);
+    }
+
+    [Fact]
+    public async Task An_offline_capture_reads_no_day_for_an_account_that_reads_another_language()
+    {
+        var presenter = NewPresenter(Account("de"));
+
+        await presenter.CaptureAsync("Renew passport tomorrow");
+        await presenter.CaptureAsync("Christmas cards jedes Jahr am 25/12");
+
+        Assert.Null(presenter.Rows.Single(r => r.Content == "Renew passport tomorrow").DueOn);
+        Assert.Null(presenter.Rows.Single(r => r.Content == "Christmas cards jedes Jahr am 25/12").DueOn);
+    }
+
+    [Fact]
+    public void A_day_opens_in_figures_the_box_reads_back_for_an_account_that_reads_another_language()
+    {
+        var presenter = NewPresenter(Account("de"));
+
+        Assert.Equal("2026-07-31", presenter.DueWritten("i1"));
+        Assert.Equal(DayReading.On(Today), presenter.ReadDay(presenter.DueWritten("i1")));
     }
 
     [Fact]
@@ -247,7 +340,7 @@ public class DayBoxTests
         {
             System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ar-SA");
 
-            Assert.NotEmpty(DayBoxText.ForDeadline(DayReading.On(new DateOnly(1600, 5, 1))).Says);
+            Assert.NotEmpty(DayBoxText.ForDeadline(DayReading.On(new DateOnly(1600, 5, 1)), english: true).Says);
             Assert.NotEmpty(DayBoxText.ForDue(DayReading.On(new DateOnly(2100, 1, 1), new TimeOnly(9, 0))).Says);
         }
         finally
@@ -276,6 +369,18 @@ public class DayBoxTests
         store.PutResource("user", "user", json);
         return store;
     }
+
+    /// <summary>An account reading its dates in a language, or one not synced yet when there's none.</summary>
+    /// <param name="language">The account's language as Todoist names it, or null for no user at all</param>
+    /// <returns>The store</returns>
+    private static InMemorySnapshotStore Account(string? language)
+        => language is null ? Store() : WithUser($$$"""{"id":"u","lang":"{{{language}}}","tz_info":{"timezone":"UTC"}}""");
+
+    /// <summary>The examples a line of wording offers, which are whatever it puts in quotes.</summary>
+    /// <param name="says">The wording</param>
+    /// <returns>Each example, without its quotes</returns>
+    private static string[] Quoted(string says)
+        => System.Text.RegularExpressions.Regex.Matches(says, "“([^”]+)”").Select(m => m.Groups[1].Value).ToArray();
 
     private static MainPresenter NewPresenter(InMemorySnapshotStore store)
     {
