@@ -25,4 +25,243 @@
     <value>advancing…</value>
     <comment>In a recurring task's due column, in place of its date, from ticking it off until the server says when it's next due. Lower case: it sits after the repeat mark, where a date would.</comment>
   </data>
+
+  <!--
+    The menu headings. The only entries here that carry a mnemonic: the & marks the letter Alt
+    opens the menu with, so no two headings on the bar should share one.
+  -->
+  <data name="MenuFile" xml:space="preserve">
+    <value>&amp;File</value>
+  </data>
+  <data name="MenuEdit" xml:space="preserve">
+    <value>&amp;Edit</value>
+  </data>
+  <data name="MenuView" xml:space="preserve">
+    <value>&amp;View</value>
+  </data>
+  <data name="MenuTask" xml:space="preserve">
+    <value>&amp;Task</value>
+  </data>
+  <data name="MenuOrganise" xml:space="preserve">
+    <value>&amp;Organise</value>
+    <comment>The menu for the sidebar's rows: renaming, deleting, starring and moving projects, sections and labels.</comment>
+  </data>
+  <data name="MenuHelp" xml:space="preserve">
+    <value>&amp;Help</value>
+  </data>
+  <data name="MenuPriority" xml:space="preserve">
+    <value>&amp;Priority</value>
+    <comment>A submenu inside the Task menu and the right-click menu, holding the four priorities. Its letter only has to differ from the other entries in those two menus.</comment>
+  </data>
+
+  <!--
+    What each command is called. The menu bar, the right-click menu and the command palette all
+    show these, so none carries a mnemonic: the palette would show the & as it is. An ellipsis
+    means the command asks something before it acts.
+  -->
+  <data name="CommandComplete" xml:space="preserve">
+    <value>Complete</value>
+    <comment>Ticks off the selected task. Shown in place of "Reopen" while the task isn't done.</comment>
+  </data>
+  <data name="CommandReopen" xml:space="preserve">
+    <value>Reopen</value>
+    <comment>Puts a completed task back. Shown in place of "Complete" while the task is done.</comment>
+  </data>
+  <data name="CommandRename" xml:space="preserve">
+    <value>Rename</value>
+    <comment>Renames the selected task where it sits in the list, which is why there's no ellipsis.</comment>
+  </data>
+  <data name="CommandNewSubtask" xml:space="preserve">
+    <value>New sub-task…</value>
+  </data>
+  <data name="CommandDue" xml:space="preserve">
+    <value>Due date…</value>
+  </data>
+  <data name="CommandDeadline" xml:space="preserve">
+    <value>Deadline…</value>
+  </data>
+  <data name="CommandPriority1" xml:space="preserve">
+    <value>Priority 1 — urgent</value>
+    <comment>The number is Todoist's own, highest first, and should stay as it is.</comment>
+  </data>
+  <data name="CommandPriority2" xml:space="preserve">
+    <value>Priority 2 — high</value>
+  </data>
+  <data name="CommandPriority3" xml:space="preserve">
+    <value>Priority 3 — medium</value>
+  </data>
+  <data name="CommandPriority4" xml:space="preserve">
+    <value>Priority 4 — none</value>
+    <comment>The priority a task has when nobody's given it one.</comment>
+  </data>
+  <data name="CommandLabels" xml:space="preserve">
+    <value>Labels…</value>
+    <comment>Todoist's labels, the tags on a task — not the text of anything.</comment>
+  </data>
+  <data name="CommandReminders" xml:space="preserve">
+    <value>Reminders…</value>
+  </data>
+  <data name="CommandIndent" xml:space="preserve">
+    <value>Indent</value>
+    <comment>Makes the task a sub-task of the one above it.</comment>
+  </data>
+  <data name="CommandOutdent" xml:space="preserve">
+    <value>Outdent</value>
+    <comment>Lifts a sub-task out to sit beside its parent.</comment>
+  </data>
+  <data name="CommandMoveUp" xml:space="preserve">
+    <value>Move up</value>
+    <comment>Moves the task one place up among the tasks beside it.</comment>
+  </data>
+  <data name="CommandMoveDown" xml:space="preserve">
+    <value>Move down</value>
+  </data>
+  <data name="CommandMoveTo" xml:space="preserve">
+    <value>Move to…</value>
+    <comment>Sends the task to another project or section, picked in a dialog.</comment>
+  </data>
+  <data name="CommandShowInTodoist" xml:space="preserve">
+    <value>Show in Todoist</value>
+    <comment>Opens the task's page on Todoist's website.</comment>
+  </data>
+  <data name="CommandDelete" xml:space="preserve">
+    <value>Delete</value>
+    <comment>Deletes the selected task.</comment>
+  </data>
+
+  <!--
+    The sidebar's commands, one whole phrase for each kind of row rather than a verb with the noun
+    dropped in: plenty of languages change the noun's ending, or its article, with the verb.
+  -->
+  <data name="CommandRenameProject" xml:space="preserve">
+    <value>Rename project</value>
+    <comment>Also shown, greyed, over a sidebar row that can't be renamed — so it says what the entry is for.</comment>
+  </data>
+  <data name="CommandRenameSection" xml:space="preserve">
+    <value>Rename section</value>
+  </data>
+  <data name="CommandRenameLabel" xml:space="preserve">
+    <value>Rename label</value>
+  </data>
+  <data name="CommandDeleteProject" xml:space="preserve">
+    <value>Delete project</value>
+    <comment>Also shown, greyed, over a sidebar row that can't be deleted.</comment>
+  </data>
+  <data name="CommandDeleteSection" xml:space="preserve">
+    <value>Delete section</value>
+  </data>
+  <data name="CommandDeleteLabel" xml:space="preserve">
+    <value>Delete label</value>
+  </data>
+  <data name="CommandAddToFavourites" xml:space="preserve">
+    <value>Add to favourites</value>
+    <comment>Stars the selected project or label, putting it in the sidebar's Favourites.</comment>
+  </data>
+  <data name="CommandRemoveFromFavourites" xml:space="preserve">
+    <value>Remove from favourites</value>
+  </data>
+  <data name="CommandMoveProjectUp" xml:space="preserve">
+    <value>Move project up</value>
+    <comment>Also shown, greyed, over a sidebar row that has no order of its own to change.</comment>
+  </data>
+  <data name="CommandMoveProjectDown" xml:space="preserve">
+    <value>Move project down</value>
+  </data>
+  <data name="CommandMoveSectionUp" xml:space="preserve">
+    <value>Move section up</value>
+  </data>
+  <data name="CommandMoveSectionDown" xml:space="preserve">
+    <value>Move section down</value>
+  </data>
+
+  <!-- The commands that don't need anything selected. -->
+  <data name="CommandNewTask" xml:space="preserve">
+    <value>New task</value>
+  </data>
+  <data name="CommandNewProject" xml:space="preserve">
+    <value>New project</value>
+  </data>
+  <data name="CommandNewSection" xml:space="preserve">
+    <value>New section</value>
+  </data>
+  <data name="CommandQuickAdd" xml:space="preserve">
+    <value>Quick add…</value>
+    <comment>Opens the small window that adds a task from one typed line.</comment>
+  </data>
+  <data name="CommandSyncNow" xml:space="preserve">
+    <value>Sync now</value>
+  </data>
+  <data name="CommandHistory" xml:space="preserve">
+    <value>What you've done…</value>
+    <comment>Opens the list of changes made in the app, most recent first.</comment>
+  </data>
+  <data name="CommandCompletedTasks" xml:space="preserve">
+    <value>Completed tasks</value>
+    <comment>Ticked in the menu while completed tasks are shown in the list. Names the thing, not the action: it never changes to say show or hide.</comment>
+  </data>
+  <data name="CommandExpandAll" xml:space="preserve">
+    <value>Expand all</value>
+    <comment>Opens every task in the list to show its sub-tasks.</comment>
+  </data>
+  <data name="CommandCollapseAll" xml:space="preserve">
+    <value>Collapse all</value>
+  </data>
+  <data name="CommandDefaultOrder" xml:space="preserve">
+    <value>Default order</value>
+    <comment>Puts the list back in the account's own order after it's been sorted by a column.</comment>
+  </data>
+  <data name="CommandDetails" xml:space="preserve">
+    <value>Details</value>
+    <comment>Ticked while the panel under the list is open. The panel shows a task's description and its comments.</comment>
+  </data>
+  <data name="CommandViewDescription" xml:space="preserve">
+    <value>View description</value>
+  </data>
+  <data name="CommandViewComments" xml:space="preserve">
+    <value>View comments</value>
+  </data>
+  <data name="CommandZoomIn" xml:space="preserve">
+    <value>Zoom in</value>
+    <comment>Makes the description's text larger.</comment>
+  </data>
+  <data name="CommandZoomOut" xml:space="preserve">
+    <value>Zoom out</value>
+  </data>
+  <data name="CommandZoomReset" xml:space="preserve">
+    <value>Restore default zoom</value>
+  </data>
+  <data name="CommandUndo" xml:space="preserve">
+    <value>Undo</value>
+  </data>
+  <data name="CommandSearch" xml:space="preserve">
+    <value>Search…</value>
+  </data>
+  <data name="CommandPalette" xml:space="preserve">
+    <value>Command palette…</value>
+    <comment>Opens a box listing every command and view, filtered as you type.</comment>
+  </data>
+  <data name="CommandPreviousView" xml:space="preserve">
+    <value>Previous view</value>
+    <comment>Selects the sidebar row above the current one.</comment>
+  </data>
+  <data name="CommandNextView" xml:space="preserve">
+    <value>Next view</value>
+  </data>
+  <data name="CommandSettings" xml:space="preserve">
+    <value>Settings…</value>
+  </data>
+  <data name="CommandCheckForUpdates" xml:space="preserve">
+    <value>Check for updates…</value>
+  </data>
+  <data name="CommandAbout" xml:space="preserve">
+    <value>About Termyn</value>
+    <comment>Termyn is the app's name and isn't translated.</comment>
+  </data>
+  <data name="CommandSignOut" xml:space="preserve">
+    <value>Sign out…</value>
+    <comment>The ellipsis is for the question it asks first, about what signing out removes from this computer.</comment>
+  </data>
+  <data name="CommandExit" xml:space="preserve">
+    <value>Exit</value>
+  </data>
 </root>

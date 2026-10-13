@@ -7,8 +7,8 @@ namespace Termyn.Presentation;
 /// <param name="Command">What running it asks for, or None for a heading.</param>
 /// <param name="Heading">
 /// A heading's own text, which is the only wording a menu owns. Carries the mnemonic ampersand,
-/// which is why it doesn't come from the catalogue: the palette shows the same commands and has no
-/// use for one.
+/// which is why it's a catalogue entry of its own rather than a command's label: the palette shows
+/// the same commands and has no use for one.
 /// </param>
 /// <param name="SeparatorBefore">Opens a new group, so related entries read together.</param>
 /// <param name="Children">The entries beneath a heading.</param>
@@ -56,7 +56,7 @@ public static class Menus
         // sitting together rather than by their names.
         MenuEntry.Of(AppCommand.Deadline),
         MenuEntry.Group(
-            "&Priority",
+            Strings.MenuPriority,
             MenuEntry.Of(AppCommand.Priority1),
             MenuEntry.Of(AppCommand.Priority2),
             MenuEntry.Of(AppCommand.Priority3),
@@ -84,7 +84,7 @@ public static class Menus
     public static IReadOnlyList<MenuEntry> Bar { get; } =
     [
         MenuEntry.Group(
-            "&File",
+            Strings.MenuFile,
             MenuEntry.Of(AppCommand.NewTask),
             MenuEntry.Of(AppCommand.NewProject),
             MenuEntry.Of(AppCommand.NewSection),
@@ -97,13 +97,13 @@ public static class Menus
             MenuEntry.Of(AppCommand.Exit)),
 
         MenuEntry.Group(
-            "&Edit",
+            Strings.MenuEdit,
             MenuEntry.Of(AppCommand.Undo),
             MenuEntry.AfterRule(AppCommand.Search),
             MenuEntry.Of(AppCommand.Palette)),
 
         MenuEntry.Group(
-            "&View",
+            Strings.MenuView,
             MenuEntry.Of(AppCommand.PreviousView),
             MenuEntry.Of(AppCommand.NextView),
             MenuEntry.AfterRule(AppCommand.ToggleCompleted),
@@ -129,11 +129,11 @@ public static class Menus
 
         // The same entries the right-click menu shows, so neither can gain an action the other
         // hasn't got.
-        new MenuEntry(AppCommand.None, "&Task", Children: TaskEntries),
+        new MenuEntry(AppCommand.None, Strings.MenuTask, Children: TaskEntries),
 
         // Everything the sidebar's own keys do, which had no home outside the sidebar before.
         MenuEntry.Group(
-            "&Organise",
+            Strings.MenuOrganise,
             MenuEntry.Of(AppCommand.RenameSelection),
             MenuEntry.Of(AppCommand.DeleteSelection),
             MenuEntry.AfterRule(AppCommand.ToggleFavourite),
@@ -144,7 +144,7 @@ public static class Menus
             MenuEntry.Of(AppCommand.MoveSelectionDown)),
 
         MenuEntry.Group(
-            "&Help",
+            Strings.MenuHelp,
             MenuEntry.Of(AppCommand.CheckForUpdates),
             MenuEntry.Of(AppCommand.About)),
     ];
