@@ -45,6 +45,24 @@ public class CommandsTests
             c => Assert.DoesNotContain('&', State(c, new CommandContext(Row(), Selection: Node(SidebarKind.Project))).Label));
     }
 
+    [Fact]
+    public void No_two_commands_share_a_label()
+    {
+        // The palette lists commands by their label alone, so two that read the same can't be told
+        // apart there. It's also what a label wired to the wrong catalogue entry looks like: the
+        // same words under two commands, and one of them gone.
+        var context = new CommandContext(Row(), Selection: Node(SidebarKind.Project));
+
+        var shared = Enum.GetValues<AppCommand>()
+            .Where(c => c != AppCommand.None)
+            .GroupBy(c => State(c, context).Label)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"\"{g.Key}\": {string.Join(", ", g)}")
+            .ToList();
+
+        Assert.Empty(shared);
+    }
+
     // ---- Which commands act on what ------------------------------------------------------------
 
     [Fact]
@@ -202,6 +220,13 @@ public class CommandsTests
     [InlineData(SidebarKind.Label, "Rename label")]
     public void Renaming_is_named_for_what_it_would_rename(SidebarKind kind, string expected)
         => Assert.Equal(expected, State(AppCommand.RenameSelection, new CommandContext(Selection: Node(kind))).Label);
+
+    [Theory]
+    [InlineData(SidebarKind.Project, "Delete project")]
+    [InlineData(SidebarKind.Section, "Delete section")]
+    [InlineData(SidebarKind.Label, "Delete label")]
+    public void Deleting_is_named_for_what_it_would_delete(SidebarKind kind, string expected)
+        => Assert.Equal(expected, State(AppCommand.DeleteSelection, new CommandContext(Selection: Node(kind))).Label);
 
     [Fact]
     public void The_favourite_toggle_says_which_way_it_would_go()

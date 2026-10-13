@@ -162,9 +162,9 @@ public sealed record CommandState(string Label, bool Enabled, bool Checked = fal
 /// The one place that says what each command is called and whether it can be run.
 /// </summary>
 /// <remarks>
-/// Every surface reads from here: the menu bar, the task menu, and the palette. Labels are kept
-/// free of menu mnemonics so the palette can show them as they are — the menus put the ampersands
-/// on their own headings, which are theirs and not shared.
+/// Every surface reads from here: the menu bar, the task menu, and the palette. The wording itself
+/// is in the catalogue. Labels are kept free of menu mnemonics so the palette can show them as they
+/// are — the menus put the ampersands on their own headings, which are theirs and not shared.
 /// </remarks>
 public static class Commands
 {
@@ -206,85 +206,93 @@ public static class Commands
         {
             // Ticking off a task that is already done means putting it back, so the one action
             // wears the label the row has earned.
-            AppCommand.ToggleComplete => Task(task is { Completed: true } ? "Reopen" : "Complete"),
+            AppCommand.ToggleComplete => Task(task is { Completed: true } ? Strings.CommandReopen : Strings.CommandComplete),
 
             // No ellipsis: the editor opens on the row itself rather than in a dialog.
-            AppCommand.Rename => Task("Rename"),
+            AppCommand.Rename => Task(Strings.CommandRename),
 
-            AppCommand.Due => Task("Due date…"),
-            AppCommand.Deadline => Task("Deadline…"),
-            AppCommand.Labels => Task("Labels…"),
+            AppCommand.Due => Task(Strings.CommandDue),
+            AppCommand.Deadline => Task(Strings.CommandDeadline),
+            AppCommand.Labels => Task(Strings.CommandLabels),
 
             // Left offered on a plan without reminders: the dialog is where the user can see what
             // they'd be getting, and it refuses the save itself rather than being absent here.
-            AppCommand.Reminders => Task("Reminders…"),
+            AppCommand.Reminders => Task(Strings.CommandReminders),
 
             AppCommand.Priority1 or AppCommand.Priority2 or AppCommand.Priority3 or AppCommand.Priority4
                 => new CommandState(PriorityLabel(command), task is not null, task?.Priority == PriorityOf(command)),
 
-            AppCommand.Indent => new CommandState("Indent", can.CanIndent),
-            AppCommand.Outdent => new CommandState("Outdent", can.CanOutdent),
-            AppCommand.MoveUp => new CommandState("Move up", can.CanMoveUp),
-            AppCommand.MoveDown => new CommandState("Move down", can.CanMoveDown),
-            AppCommand.MoveTo => new CommandState("Move to…", can.CanMoveTo),
+            AppCommand.Indent => new CommandState(Strings.CommandIndent, can.CanIndent),
+            AppCommand.Outdent => new CommandState(Strings.CommandOutdent, can.CanOutdent),
+            AppCommand.MoveUp => new CommandState(Strings.CommandMoveUp, can.CanMoveUp),
+            AppCommand.MoveDown => new CommandState(Strings.CommandMoveDown, can.CanMoveDown),
+            AppCommand.MoveTo => new CommandState(Strings.CommandMoveTo, can.CanMoveTo),
 
             // No ellipsis: nothing opens here to ask anything, the browser just goes to the task.
-            AppCommand.ShowInTodoist => new CommandState("Show in Todoist", can.CanShowInTodoist),
+            AppCommand.ShowInTodoist => new CommandState(Strings.CommandShowInTodoist, can.CanShowInTodoist),
 
-            AppCommand.Delete => Task("Delete"),
+            AppCommand.Delete => Task(Strings.CommandDelete),
 
             // Not on a task that is finished with — a sub-task of one would be work filed under
             // something already ticked off, where nothing on screen would ever show it as due — and
             // not on one already as deep as Todoist will hold.
             AppCommand.NewSubtask => new CommandState(
-                "New sub-task…",
+                Strings.CommandNewSubtask,
                 context.Task is { Completed: false, Depth: < MaxSubtaskDepth }),
 
             // Named for what is selected, because "Rename" over a sidebar holding projects,
             // sections and labels doesn't say which of the three is about to change.
-            AppCommand.RenameSelection => Selection("Rename {0}"),
-            AppCommand.DeleteSelection => Selection("Delete {0}"),
+            AppCommand.RenameSelection => Selection(
+                Strings.CommandRenameProject,
+                Strings.CommandRenameSection,
+                Strings.CommandRenameLabel),
+
+            AppCommand.DeleteSelection => Selection(
+                Strings.CommandDeleteProject,
+                Strings.CommandDeleteSection,
+                Strings.CommandDeleteLabel),
+
             AppCommand.ToggleFavourite => Favourite(context.Selection),
 
             // Named for the thing rather than "Move up", which over a sidebar holding six kinds of
             // row doesn't say what is about to shift. Greyed at the ends of the list, and over
             // anything that isn't a project or a section, the same as the two above.
             AppCommand.MoveSelectionUp => new CommandState(
-                Structure("Move {0} up"),
+                Structure(Strings.CommandMoveProjectUp, Strings.CommandMoveSectionUp),
                 context.SelectionCan.CanMoveUp),
 
             AppCommand.MoveSelectionDown => new CommandState(
-                Structure("Move {0} down"),
+                Structure(Strings.CommandMoveProjectDown, Strings.CommandMoveSectionDown),
                 context.SelectionCan.CanMoveDown),
 
-            AppCommand.NewTask => Always("New task"),
-            AppCommand.NewProject => Always("New project"),
+            AppCommand.NewTask => Always(Strings.CommandNewTask),
+            AppCommand.NewProject => Always(Strings.CommandNewProject),
 
             // A section belongs to a project, so there has to be one under the sidebar to put it in.
             AppCommand.NewSection => new CommandState(
-                "New section",
+                Strings.CommandNewSection,
                 context.Selection?.Kind is SidebarKind.Project),
 
-            AppCommand.QuickAdd => Always("Quick add…"),
-            AppCommand.SyncNow => Always("Sync now"),
+            AppCommand.QuickAdd => Always(Strings.CommandQuickAdd),
+            AppCommand.SyncNow => Always(Strings.CommandSyncNow),
 
             // Always offered, empty or not: a window that says "nothing yet" answers the question,
             // and a greyed entry leaves the user wondering what would fill it.
-            AppCommand.History => Always("What you've done…"),
+            AppCommand.History => Always(Strings.CommandHistory),
             AppCommand.ToggleCompleted => new CommandState(
-                "Completed tasks",
+                Strings.CommandCompletedTasks,
                 true,
                 context.ShowingCompleted),
             // Folding the whole view at once, which the expander on a row does one task at a time.
             // Each is greyed when there is nothing left for it to do, which is also how the pair
             // says which way the outline currently stands.
-            AppCommand.ExpandAll => new CommandState("Expand all", context.CanExpandAll),
-            AppCommand.CollapseAll => new CommandState("Collapse all", context.CanCollapseAll),
+            AppCommand.ExpandAll => new CommandState(Strings.CommandExpandAll, context.CanExpandAll),
+            AppCommand.CollapseAll => new CommandState(Strings.CommandCollapseAll, context.CanCollapseAll),
 
             // The way back from a sorted outline. Greyed when it is already in the account's own
             // order, which is also how the entry says which of the two you are looking at.
             AppCommand.SortDefault => new CommandState(
-                "Default order",
+                Strings.CommandDefaultOrder,
                 !(context.Sort ?? TaskSort.Default).IsDefault),
 
             // One name, with the tick saying whether the panel is open. An entry that renames itself
@@ -293,7 +301,7 @@ public static class Commands
             // "Details" and not "Description": the panel carries the comments as well now, on a tab
             // of their own, and nothing narrower would still be true of it.
             AppCommand.ToggleDescription => new CommandState(
-                "Details",
+                Strings.CommandDetails,
                 true,
                 context.ShowingDescription),
 
@@ -304,36 +312,36 @@ public static class Commands
             // greyed by — running it now would do nothing. A shut panel greys neither, since from
             // there both have somewhere to take you.
             AppCommand.ViewDescription => new CommandState(
-                "View description",
+                Strings.CommandViewDescription,
                 !context.ShowingDescription || context.ShowingComments),
 
             AppCommand.ViewComments => new CommandState(
-                "View comments",
+                Strings.CommandViewComments,
                 !context.ShowingDescription || !context.ShowingComments),
 
             // The description panel already zooms to the wheel; these are the same thing said out
             // loud, for anybody who doesn't know the wheel does it. Offered on the same terms as
             // editing, because the comments the pane also shows aren't text it can scale.
-            AppCommand.ZoomIn => new CommandState("Zoom in", Scalable(context)),
-            AppCommand.ZoomOut => new CommandState("Zoom out", Scalable(context)),
+            AppCommand.ZoomIn => new CommandState(Strings.CommandZoomIn, Scalable(context)),
+            AppCommand.ZoomOut => new CommandState(Strings.CommandZoomOut, Scalable(context)),
 
             // The way back, greyed while there is nothing to come back from — which is also how the
             // entry says whether the panel is at its own size, the same as Default order above.
-            AppCommand.ZoomReset => new CommandState("Restore default zoom", Scalable(context) && context.Zoomed),
+            AppCommand.ZoomReset => new CommandState(Strings.CommandZoomReset, Scalable(context) && context.Zoomed),
 
-            AppCommand.Undo => new CommandState("Undo", context.CanUndo),
-            AppCommand.Search => Always("Search…"),
-            AppCommand.Palette => Always("Command palette…"),
-            AppCommand.PreviousView => Always("Previous view"),
-            AppCommand.NextView => Always("Next view"),
-            AppCommand.Settings => Always("Settings…"),
-            AppCommand.CheckForUpdates => Always("Check for updates…"),
-            AppCommand.About => Always("About Termyn"),
+            AppCommand.Undo => new CommandState(Strings.CommandUndo, context.CanUndo),
+            AppCommand.Search => Always(Strings.CommandSearch),
+            AppCommand.Palette => Always(Strings.CommandPalette),
+            AppCommand.PreviousView => Always(Strings.CommandPreviousView),
+            AppCommand.NextView => Always(Strings.CommandNextView),
+            AppCommand.Settings => Always(Strings.CommandSettings),
+            AppCommand.CheckForUpdates => Always(Strings.CommandCheckForUpdates),
+            AppCommand.About => Always(Strings.CommandAbout),
 
             // The ellipsis is for the question it asks first, about what signing out takes with it.
-            AppCommand.SignOut => Always("Sign out…"),
+            AppCommand.SignOut => Always(Strings.CommandSignOut),
 
-            AppCommand.Exit => Always("Exit"),
+            AppCommand.Exit => Always(Strings.CommandExit),
 
             _ => new CommandState(string.Empty, false),
         };
@@ -346,6 +354,11 @@ public static class Commands
         // comments it also shows are drawn rather than set in text, so there is nothing to scale.
         static bool Scalable(CommandContext at) => at.ShowingDescription && !at.ShowingComments;
 
+        // The two kinds that have an order of their own. A label is sorted by the account and a
+        // smart view is in a list nobody chose, so neither is something to move.
+        string Structure(string project, string section)
+            => context.Selection?.Kind is SidebarKind.Section ? section : project;
+
         // Only the three kinds the sidebar lets you rename or delete; a smart view or a saved
         // filter is not ours to change from here.
         //
@@ -353,30 +366,17 @@ public static class Commands
         // reader to work out which item, and over Today the answer was none — so the greyed entry
         // read as a thing that should have worked. Naming the commonest of the three says what the
         // entry is for at the same time as saying it can't be used on this.
-        // The two kinds that have an order of their own. A label is sorted by the account and a
-        // smart view is in a list nobody chose, so neither is something to move.
-        string Structure(string format)
-            => string.Format(
-                format,
-                context.Selection?.Kind is SidebarKind.Section ? "section" : "project");
-
-        CommandState Selection(string format)
+        //
+        // A whole phrase for each kind rather than one with the noun dropped in, since a language
+        // that changes the noun's ending or article with the verb couldn't translate the pattern.
+        CommandState Selection(string project, string section, string label) => context.Selection?.Kind switch
         {
-            var kind = NameOf(context.Selection?.Kind);
-            return new CommandState(
-                string.Format(format, kind ?? "project"),
-                kind is not null);
-        }
+            SidebarKind.Project => new(project, true),
+            SidebarKind.Section => new(section, true),
+            SidebarKind.Label => new(label, true),
+            _ => new(project, false),
+        };
     }
-
-    /// <summary>What a sidebar row is called in a sentence, or null when it can't be edited here.</summary>
-    private static string? NameOf(SidebarKind? kind) => kind switch
-    {
-        SidebarKind.Project => "project",
-        SidebarKind.Section => "section",
-        SidebarKind.Label => "label",
-        _ => null,
-    };
 
     /// <summary>
     /// The favourite toggle, which says which way it would go. Only projects and labels: a section
@@ -386,15 +386,15 @@ public static class Commands
     {
         var eligible = node?.Kind is SidebarKind.Project or SidebarKind.Label;
         return new CommandState(
-            node is { IsFavorite: true } ? "Remove from favourites" : "Add to favourites",
+            node is { IsFavorite: true } ? Strings.CommandRemoveFromFavourites : Strings.CommandAddToFavourites,
             eligible);
     }
 
     private static string PriorityLabel(AppCommand command) => command switch
     {
-        AppCommand.Priority1 => "Priority 1 — urgent",
-        AppCommand.Priority2 => "Priority 2 — high",
-        AppCommand.Priority3 => "Priority 3 — medium",
-        _ => "Priority 4 — none",
+        AppCommand.Priority1 => Strings.CommandPriority1,
+        AppCommand.Priority2 => Strings.CommandPriority2,
+        AppCommand.Priority3 => Strings.CommandPriority3,
+        _ => Strings.CommandPriority4,
     };
 }
