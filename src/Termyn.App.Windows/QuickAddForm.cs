@@ -20,6 +20,9 @@ internal sealed class QuickAddForm : Form
 
     private bool _shuttingDown;
 
+    /// <summary>What the box was summoned holding, so Enter with nothing added to it adds nothing.</summary>
+    private string? _start;
+
     public QuickAddForm(MainPresenter presenter, Theme theme)
     {
         _presenter = presenter;
@@ -83,14 +86,25 @@ internal sealed class QuickAddForm : Form
     /// <summary>
     /// Brings the box up on the monitor the user is working on, empty and focused.
     /// </summary>
+    public void Summon() => Summon(null);
+
+    /// <summary>
+    /// Brings the box up on the monitor the user is working on, focused, and holding whatever the
+    /// task starts with.
+    /// </summary>
     /// <remarks>
     /// The pointer's screen rather than the active window's: the hotkey is most often pressed while
     /// working in another application, and the pointer is where the user is looking.
     ///
     /// The hint is set again each time, since the box is built at start-up and on a first run that's
     /// before the account has said how it reads dates.
+    ///
+    /// A start goes after the caret, with a space before it, so what's typed comes first and reads
+    /// the way a task is written: "Buy milk #Errands" rather than "#Errands Buy milk". Todoist reads
+    /// the words in any order.
     /// </remarks>
-    public void Summon()
+    /// <param name="start">What the task begins with, or null to begin with nothing</param>
+    public void Summon(string? start)
     {
         var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
         Location = new Point(
@@ -98,8 +112,7 @@ internal sealed class QuickAddForm : Form
             screen.Y + (screen.Height / 4));
 
         _capture.Hint = CapturePreviewText.Hint(_presenter.CaptureReadsDays);
-        _capture.Clear();
-        UpdatePreview();
+        Fill(start);
 
         Show();
 
@@ -110,7 +123,44 @@ internal sealed class QuickAddForm : Form
         Activate();
         BringToFront();
         _capture.Focus();
+
+        // After the focus, which can select the whole box on its way in.
+        _capture.Select(0, 0);
     }
+
+    /// <summary>
+    /// Puts what the task starts with in the box, with the caret ahead of it.
+    /// </summary>
+    /// <remarks>
+    /// Internal so a test can see what the box would hold without putting it on screen, on top of
+    /// whatever else is running.
+    /// </remarks>
+    /// <param name="start">What the task begins with, or null to begin with nothing</param>
+    internal void Fill(string? start)
+    {
+        _start = string.IsNullOrWhiteSpace(start) ? null : " " + start.Trim();
+        _capture.Text = _start ?? string.Empty;
+        _capture.Select(0, 0);
+        UpdatePreview();
+    }
+
+    /// <summary>What's in the box.</summary>
+    internal string Typed => _capture.Text;
+
+    /// <summary>Where the caret is in it.</summary>
+    internal int Caret => _capture.SelectionStart;
+
+    /// <summary>
+    /// Whether Enter on some text adds a task.
+    /// </summary>
+    /// <remarks>
+    /// Not for nothing, and not for what the box was summoned holding with nothing added to it. A
+    /// project or a day alone isn't a task: sent as one, the server would make a task of the words
+    /// themselves, and the box would have added something nobody typed.
+    /// </remarks>
+    /// <param name="text">What's in the box</param>
+    /// <returns>True when there's a task in it</returns>
+    internal bool Adds(string text) => !string.IsNullOrWhiteSpace(text) && text.Trim() != _start?.Trim();
 
     /// <summary>Lets the box actually close when the application is shutting down.</summary>
     public void AllowClose() => _shuttingDown = true;
@@ -133,7 +183,7 @@ internal sealed class QuickAddForm : Form
         e.SuppressKeyPress = true;
 
         var text = _capture.Text;
-        if (string.IsNullOrWhiteSpace(text))
+        if (!Adds(text))
         {
             Hide();
             return;

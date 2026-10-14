@@ -321,6 +321,16 @@ public class CommandsTests
     }
 
     [Fact]
+    public void A_new_task_needs_a_view_with_something_to_start_it_from()
+    {
+        // Empty is something: the Inbox before the first sync, where a task naming nothing goes
+        // to the right place anyway.
+        Assert.False(State(AppCommand.NewTask).Enabled);
+        Assert.True(State(AppCommand.NewTask, new CommandContext(NewTaskText: "#Work")).Enabled);
+        Assert.True(State(AppCommand.NewTask, new CommandContext(NewTaskText: string.Empty)).Enabled);
+    }
+
+    [Fact]
     public void The_priority_the_task_is_on_is_the_one_ticked()
     {
         var context = new CommandContext(Row(Priority.P2));

@@ -618,10 +618,10 @@ public sealed class MainPresenter
         var words = new StringBuilder(parse.Content);
 
         if (parse.ProjectName is { } project)
-            words.Append(words.Length > 0 ? " #" : "#").Append(project);
+            words.Append(words.Length > 0 ? " #" : "#").Append(QuickAddParser.Escaped(project));
 
         if (parse.SectionName is { } section)
-            words.Append(words.Length > 0 ? " /" : "/").Append(section);
+            words.Append(words.Length > 0 ? " /" : "/").Append(QuickAddParser.Escaped(section));
 
         return parse with { Content = words.ToString(), ProjectName = null, SectionName = null };
     }
@@ -641,6 +641,58 @@ public sealed class MainPresenter
             parse,
             parse.ProjectName is null || projectId is not null,
             parse.SectionName is null || sectionId is not null);
+    }
+
+    /// <summary>
+    /// What a task started from a view begins with: the place the view is, or the day it's for.
+    /// </summary>
+    /// <remarks>
+    /// Written in the capture grammar and put in the box, rather than held to one side, so it can
+    /// be seen and taken back out, and so it reaches the server the way typing it would. A section
+    /// names its project as well, since a section's name is only unique inside one.
+    ///
+    /// Today gives its day: the word where the account reads English, and figures where it reads
+    /// another language. Nothing where smart date recognition is off, since Todoist would leave the
+    /// date in the title and the task wouldn't be today's.
+    ///
+    /// Nothing for a view that's neither a place nor a day. Upcoming covers a week, All covers
+    /// everything, and a saved filter is a question rather than somewhere a task can be put.
+    /// </remarks>
+    /// <param name="view">The view the task is started from</param>
+    /// <returns>The words, or null when the view has nothing to begin a task with</returns>
+    public string? NewTaskText(ViewSelection view)
+    {
+        var snapshot = _projectedFrom;
+
+        return view switch
+        {
+            { View: SmartView.Today } => _engine.DateSettings switch
+            {
+                { InlineDatesOff: true } => null,
+                { ReadsEnglish: true } => "today",
+                _ => QuickAddParser.Written(_engine.Today, null, english: false),
+            },
+
+            // Before the first sync there's no Inbox to name, and a task naming no project goes to
+            // it anyway.
+            { View: SmartView.Inbox }
+                => snapshot?.Projects.FirstOrDefault(p => p.IsInboxProject) is { } inbox ? ProjectWords(inbox) : string.Empty,
+
+            { ProjectId: { } id }
+                => snapshot?.Projects.FirstOrDefault(p => p.Id == id) is { } project ? ProjectWords(project) : null,
+
+            { SectionId: { } id }
+                => snapshot?.Sections.FirstOrDefault(s => s.Id == id) is { } section
+                   && snapshot.Projects.FirstOrDefault(p => p.Id == section.ProjectId) is { } owner
+                    ? $"{ProjectWords(owner)} /{QuickAddParser.Escaped(section.Name)}"
+                    : null,
+
+            { LabelName: { } label } => "@" + QuickAddParser.Escaped(label),
+
+            _ => null,
+        };
+
+        static string ProjectWords(Project project) => "#" + QuickAddParser.Escaped(project.Name);
     }
 
     // ---- Completed tasks -------------------------------------------------------------------------

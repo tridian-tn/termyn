@@ -176,7 +176,8 @@
 
   <!-- The commands that don't need anything selected. -->
   <data name="CommandNewTask" xml:space="preserve">
-    <value>New task</value>
+    <value>New task…</value>
+    <comment>Opens the quick-add window with the project, label or day being viewed already filled in.</comment>
   </data>
   <data name="CommandNewProject" xml:space="preserve">
     <value>New project</value>
