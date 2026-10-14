@@ -90,6 +90,23 @@ public class NewTaskTests
         Assert.True(box.Adds("#Work"));
     }
 
+    [WinFormsFact]
+    public async Task Enter_hands_the_start_on_so_an_offline_capture_can_read_its_day()
+    {
+        // An account reading German gets Today's day in figures, which a capture here doesn't read
+        // unless it's told they're the box's own.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("user", "user", """{"id":"u","lang":"de","tz_info":{"timezone":"UTC"}}""");
+        using var box = Box(store, out var engine, out var presenter);
+
+        box.Fill(presenter.NewTaskText(ViewSelection.Of(SmartView.Today)));
+        await box.Add("Buy milk" + box.Typed);
+
+        var item = engine.Snapshot().Items.Single();
+        Assert.Equal("Buy milk", item.Content);
+        Assert.Equal(engine.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), item.DueDate);
+    }
+
     private static SidebarNode Node(SidebarKind kind, string id)
         => new(kind, id, id, 0, SidebarKeys.For(kind, id));
 
@@ -104,12 +121,19 @@ public class NewTaskTests
         return TestWindow.Build("termyn-new-task-tests.json", store);
     }
 
-    private static QuickAddForm Box()
+    private static QuickAddForm Box() => Box(new InMemorySnapshotStore(), out _, out _);
+
+    /// <summary>A box over an account, which can't reach the server.</summary>
+    /// <param name="store">What the account holds</param>
+    /// <param name="engine">The engine, to read what a capture added</param>
+    /// <param name="presenter">The presenter, to ask what a view starts a task with</param>
+    /// <returns>The box, realised but not shown</returns>
+    private static QuickAddForm Box(InMemorySnapshotStore store, out SyncEngine engine, out MainPresenter presenter)
     {
-        var engine = new SyncEngine(new FakeApi(), new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
+        engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
         engine.Load();
         var clock = new SystemClock();
-        var presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
 
         var box = new QuickAddForm(presenter, Theme.From(ThemePalette.Light));
         box.CreateControl();

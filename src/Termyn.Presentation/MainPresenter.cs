@@ -526,7 +526,15 @@ public sealed class MainPresenter
     /// Captures a task from quick-add text. Online, the server parses it so the result matches the
     /// web app; offline, the bounded local grammar is used and the task syncs later.
     /// </summary>
-    public async Task CaptureAsync(string text, CancellationToken ct = default)
+    public Task CaptureAsync(string text, CancellationToken ct = default) => CaptureAsync(text, null, ct);
+
+    /// <summary>
+    /// Captures a task from quick-add text that New task started off.
+    /// </summary>
+    /// <param name="text">Everything in the box</param>
+    /// <param name="start">What New task put in the box, or null when it put nothing there</param>
+    /// <param name="ct">Cancels the online attempt</param>
+    public async Task CaptureAsync(string text, string? start, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
@@ -537,6 +545,7 @@ public sealed class MainPresenter
         if (!captured)
         {
             var (parse, projectId, sectionId) = Resolve(text);
+            parse = Dated(parse, start);
 
             // With nothing named at all, a capture belongs wherever the user is looking. Applied
             // together: a section from one view with a project named in the text is not a real place.
@@ -555,6 +564,36 @@ public sealed class MainPresenter
         History.Note($"Added “{text.Trim()}”", $"capture:{Guid.NewGuid():N}");
 
         Publish();
+    }
+
+    /// <summary>
+    /// Gives an offline capture the day New task put in its box, where the grammar didn't read one.
+    /// </summary>
+    /// <remarks>
+    /// Over Today, an account reading another language is given the day in figures, which the
+    /// server reads and a capture here doesn't: for one of those accounts a capture reads no day at
+    /// all, since the words around figures can change what they mean. These figures are Termyn's
+    /// own, though, so offline they're read as the day they name rather than left in the title.
+    /// Only while they're still there whole. Taken out, or typed by the user, they're left alone.
+    /// </remarks>
+    /// <param name="parse">What the grammar made of the box</param>
+    /// <param name="start">What New task put in the box, or null when it put nothing there</param>
+    /// <returns>The parse, with the day the start names and without its words, where it names one</returns>
+    private QuickAddParse Dated(QuickAddParse parse, string? start)
+    {
+        if (parse.DueDate is not null || string.IsNullOrWhiteSpace(start))
+            return parse;
+
+        if (_parser.ReadDay(start, _engine.DateSettings) is not { Kind: DayReadingKind.Day, Day: { } day } reading)
+            return parse;
+
+        var words = parse.Content.Split(' ').ToList();
+        var at = words.LastIndexOf(start.Trim());
+        if (at < 0)
+            return parse;
+
+        words.RemoveAt(at);
+        return parse with { Content = string.Join(' ', words), DueDate = day, DueTime = reading.Time };
     }
 
     /// <summary>

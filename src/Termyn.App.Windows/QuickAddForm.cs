@@ -182,7 +182,21 @@ internal sealed class QuickAddForm : Form
 
         e.SuppressKeyPress = true;
 
-        var text = _capture.Text;
+        await Add(_capture.Text);
+    }
+
+    /// <summary>
+    /// Adds what's in the box as a task, or just closes it when there's no task in it.
+    /// </summary>
+    /// <remarks>
+    /// Internal so a test can do what Enter does without a key to press. What New task put in the
+    /// box goes along with it, so a capture that falls back to the local grammar can still read the
+    /// day it named.
+    /// </remarks>
+    /// <param name="text">What's in the box</param>
+    /// <returns>Completes once the capture is made, or the box is back up after a failure</returns>
+    internal async Task Add(string text)
+    {
         if (!Adds(text))
         {
             Hide();
@@ -193,16 +207,19 @@ internal sealed class QuickAddForm : Form
         // happens is the difference between quick-add feeling instant and feeling like a dialog.
         Hide();
 
+        var start = _start?.Trim();
+
         try
         {
-            await _presenter.CaptureAsync(text);
+            await _presenter.CaptureAsync(text, start);
             Captured?.Invoke();
         }
         catch (Exception ex)
         {
-            // Nothing was created anywhere, so the typing comes back rather than being lost.
+            // Nothing was created anywhere, so the typing comes back rather than being lost, and
+            // with it whatever New task had started it with.
             Failed?.Invoke(ex);
-            Summon();
+            Summon(start);
             _capture.Text = text;
             _capture.SelectionStart = text.Length;
         }

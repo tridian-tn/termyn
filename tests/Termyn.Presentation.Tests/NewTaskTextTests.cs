@@ -165,6 +165,57 @@ public class NewTaskTextTests
     }
 
     [Fact]
+    public async Task A_task_started_on_today_in_another_language_is_due_today_offline()
+    {
+        // Online the server reads the figures. Offline a capture for this account reads no day at
+        // all, so the box has to say which words it put there for them to be read as one.
+        var presenter = Seeded(language: "de");
+
+        var item = await Captured(presenter, ViewSelection.Of(SmartView.Today));
+
+        Assert.Equal("2026-07-31", item.DueDate);
+        Assert.Equal("Buy milk", item.Content);
+    }
+
+    [Fact]
+    public async Task Figures_typed_by_hand_stay_in_the_title_offline_in_another_language()
+    {
+        // Unchanged: only the box's own start is read. The words around figures the user typed
+        // could change what they mean, and the grammar can't read those words.
+        var presenter = Seeded(language: "de");
+
+        await presenter.CaptureAsync("Buy milk 2026-07-31", TestContext.Current.CancellationToken);
+
+        var item = _engine.Snapshot().Items.Single();
+        Assert.Equal("Buy milk 2026-07-31", item.Content);
+        Assert.Null(item.DueDate);
+    }
+
+    [Fact]
+    public async Task A_day_typed_beside_the_start_is_the_one_kept_offline()
+    {
+        // The grammar takes the first day it meets and leaves a second in the words. The start
+        // mustn't then be read on top of it, giving the task a day other than the one typed.
+        var presenter = Seeded();
+
+        await presenter.CaptureAsync("Buy milk tomorrow today", "today", TestContext.Current.CancellationToken);
+
+        Assert.Equal("2026-08-01", _engine.Snapshot().Items.Single().DueDate);
+    }
+
+    [Fact]
+    public async Task A_start_taken_out_of_the_box_is_not_put_back()
+    {
+        var presenter = Seeded(language: "de");
+
+        await presenter.CaptureAsync("Buy milk", "2026-07-31", TestContext.Current.CancellationToken);
+
+        var item = _engine.Snapshot().Items.Single();
+        Assert.Equal("Buy milk", item.Content);
+        Assert.Null(item.DueDate);
+    }
+
+    [Fact]
     public void The_preview_finds_the_place_the_start_names()
     {
         // The box shows where the task is going before anything's typed, and an escaped name the
@@ -194,7 +245,7 @@ public class NewTaskTextTests
         var start = presenter.NewTaskText(view);
         Assert.NotNull(start);
 
-        await presenter.CaptureAsync("Buy milk " + start, TestContext.Current.CancellationToken);
+        await presenter.CaptureAsync("Buy milk " + start, start, TestContext.Current.CancellationToken);
 
         return _engine.Snapshot().Items.Single(i => i.Content == "Buy milk");
     }
