@@ -61,11 +61,14 @@ public sealed class AttachmentFetcherTests : IDisposable
     {
         // The one place in Termyn where the user deliberately waits on the network, so it has to be
         // able to say so.
-        var seen = new List<long>();
+        // A bag rather than a list, as the download's own test uses: progress is raised on the
+        // thread pool, so a report can still be landing while the assert below reads what's here,
+        // and a list read mid-add throws.
+        var seen = new System.Collections.Concurrent.ConcurrentBag<long>();
         await Fetcher().FetchAsync(File(), new Progress<long>(seen.Add));
 
-        // Progress is raised on the thread pool, so give it a moment to land before reading it.
-        for (var i = 0; i < 50 && seen.Count == 0; i++)
+        // Given a moment to land before reading it.
+        for (var i = 0; i < 50 && seen.IsEmpty; i++)
             await Task.Delay(10);
 
         Assert.NotEmpty(seen);
