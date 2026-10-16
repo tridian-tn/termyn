@@ -77,6 +77,7 @@ internal sealed class OutlineView : ListView
         LabelEdit = true;
         HeaderStyle = ColumnHeaderStyle.Clickable;
         DoubleBuffered = true;
+        AllowDrop = true;
 
         // Each header carries the column it stands for, so a click has something to name without a
         // second table of indices to keep in step with this one.
@@ -243,6 +244,11 @@ internal sealed class OutlineView : ListView
             // index left over from the last lot names a different task — which would send the next
             // step off a heading the wrong way.
             _lastOnTask = -1;
+
+            // The same goes for a drag under way: the mark and the last answer about it name rows
+            // by index, and the next move of the pointer works both out again from the new rows.
+            _mark = null;
+            _asked = null;
 
             // Bookkeeping, not a choice the user made. Clearing and re-adding an index raises the
             // selection event twice, and the moment in between has nothing selected — which anything
@@ -584,6 +590,288 @@ internal sealed class OutlineView : ListView
         return false;
     }
 
+    // ---- Dragging ------------------------------------------------------------------------------
+
+    /// <summary>What a drag out of the outline carries, under a name of its own.</summary>
+    private const string DragFormat = "Termyn.Task";
+
+    /// <summary>How thick the line showing where a drop would land is drawn.</summary>
+    private const int MarkThickness = 2;
+
+    /// <summary>
+    /// How long to wait between scrolling a row at a time while a drag is held near the top or the
+    /// bottom of the list.
+    /// </summary>
+    private const int ScrollEvery = 60;
+
+    /// <summary>
+    /// Asks whether rows can be dragged as the list is shown now. Null leaves dragging off.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Func<bool>? CanDrag { get; set; }
+
+    /// <summary>
+    /// Asks whether a dragged task could be put down where the pointer is. Null turns every drop away.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Func<string, DropTarget, bool>? CanDrop { get; set; }
+
+    /// <summary>Raised when a dragged task is let go somewhere it can go, with the task and where.</summary>
+    public event Action<string, DropTarget>? DropRequested;
+
+    /// <summary>The task being dragged, or null when no drag out of this list is under way.</summary>
+    private string? _dragging;
+
+    /// <summary>The task under the last press of the left button, which is the one a drag takes.</summary>
+    private string? _pressedTask;
+
+    /// <summary>Where the mark is drawn now, or null when there's none.</summary>
+    private DropTarget? _mark;
+
+    /// <summary>
+    /// The drop last asked about, for which task, and what the answer was, since the pointer sits
+    /// over the same one for many moves in a row and the question walks the account to answer.
+    /// </summary>
+    private DropTarget? _asked;
+
+    private string? _askedFor;
+
+    private bool _allowed;
+
+    /// <summary>Where the drag was let go, kept until the drag has finished to act on.</summary>
+    private DropTarget? _dropped;
+
+    /// <summary>When the list last scrolled for a drag, so holding still near an edge doesn't race.</summary>
+    private long _scrolled;
+
+    /// <summary>
+    /// Starts a drag from a task's row, where the list allows one.
+    /// </summary>
+    /// <remarks>
+    /// A finished task isn't dragged, since its place among the others stopped meaning anything
+    /// once it was done; nor is a day's heading, which isn't a task.
+    ///
+    /// The task is the one noted when the button went down, found again by name, rather than
+    /// whatever's at the index the list hands over: the rows can have been rebuilt in between, and
+    /// that index can name the task that's moved up into the pressed one's place.
+    ///
+    /// The drop is acted on once the drag is over rather than from inside it. A drop rebuilds the
+    /// rows, and doing that inside the drag's own loop would replace the list under the code that's
+    /// still busy finishing the drag with it.
+    /// </remarks>
+    protected override void OnItemDrag(ItemDragEventArgs e)
+    {
+        base.OnItemDrag(e);
+
+        if (e.Button != MouseButtons.Left || _pressedTask is not { } pressed || IndexOf(pressed) is not (>= 0 and var index))
+            return;
+
+        var row = _rows[index];
+        if (row.IsHeading || row.Completed || CanDrag?.Invoke() != true)
+            return;
+
+        _dragging = row.Id;
+        _dropped = null;
+
+        try
+        {
+            DoDragDrop(new DataObject(DragFormat, row.Id), DragDropEffects.Move);
+        }
+        finally
+        {
+            _dragging = null;
+            _asked = null;
+            Mark(null);
+        }
+
+        if (_dropped is { } target)
+        {
+            _dropped = null;
+            DropRequested?.Invoke(row.Id, target);
+        }
+    }
+
+    protected override void OnDragEnter(DragEventArgs drgevent)
+    {
+        base.OnDragEnter(drgevent);
+        Follow(drgevent);
+    }
+
+    protected override void OnDragOver(DragEventArgs drgevent)
+    {
+        base.OnDragOver(drgevent);
+        Follow(drgevent);
+    }
+
+    protected override void OnDragLeave(EventArgs e)
+    {
+        base.OnDragLeave(e);
+        Mark(null);
+    }
+
+    protected override void OnDragDrop(DragEventArgs drgevent)
+    {
+        base.OnDragDrop(drgevent);
+        _dropped = _dragging is { } id ? DropAt(id, PointToClient(new Point(drgevent.X, drgevent.Y))) : null;
+        Mark(null);
+    }
+
+    /// <summary>
+    /// Keeps up with the pointer during a drag: scrolls when it's held at an edge, marks where a
+    /// drop would land, and tells the pointer whether it can land there at all.
+    /// </summary>
+    /// <param name="e">The drag as it stands</param>
+    private void Follow(DragEventArgs e)
+    {
+        var client = PointToClient(new Point(e.X, e.Y));
+
+        // Only a drag that started in this list. Anything else dragged over it — a file from
+        // Explorer, a task from a second window — finds nowhere to land.
+        if (_dragging is not { } id)
+        {
+            e.Effect = DragDropEffects.None;
+            return;
+        }
+
+        // Scrolled first, so what's marked is whatever has just come under the pointer.
+        ScrollNear(client);
+
+        var target = DropAt(id, client);
+        e.Effect = target is null ? DragDropEffects.None : DragDropEffects.Move;
+        Mark(target);
+    }
+
+    /// <summary>
+    /// The drop a point asks for, or null when there's nothing it could do there.
+    /// </summary>
+    /// <param name="id">The task being dragged</param>
+    /// <param name="client">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The drop, or null when it'd be turned away</returns>
+    internal DropTarget? DropAt(string id, Point client)
+    {
+        if (_rows.Count == 0)
+            return null;
+
+        var index = RowAt(client.Y);
+        DropTarget? target;
+
+        if (index >= 0)
+        {
+            var bounds = GetItemRect(index, ItemBoundsPortion.Entire);
+            target = OutlineDrop.Over(_rows, index, OutlineDrop.ZoneAt(client.Y - bounds.Top, bounds.Height));
+        }
+        else
+        {
+            target = client.Y >= GetItemRect(_rows.Count - 1, ItemBoundsPortion.Entire).Bottom ? OutlineDrop.Below(_rows) : null;
+        }
+
+        if (target is null)
+            return null;
+
+        if (target != _asked || id != _askedFor)
+        {
+            _asked = target;
+            _askedFor = id;
+            _allowed = CanDrop?.Invoke(id, target) == true;
+        }
+
+        return _allowed ? target : null;
+    }
+
+    /// <summary>
+    /// The row at a height in the list, wherever across it the pointer is.
+    /// </summary>
+    /// <remarks>
+    /// Asked just inside the list's left edge, on the same line. A drop goes by which row it's over
+    /// and not by which column, and past the last column the list says there's no row there at all.
+    /// The list's edge rather than the first column's, since scrolled sideways that column starts
+    /// off to the left, and the list won't say what's under a point outside itself.
+    /// </remarks>
+    /// <param name="y">How far down the list, in its own coordinates</param>
+    /// <returns>The row's index, or -1 when there's none at that height</returns>
+    private int RowAt(int y)
+        => HitTest(new Point(1, y)).Item?.Index is { } index && index >= 0 && index < _rows.Count ? index : -1;
+
+    /// <summary>
+    /// Scrolls a row at a time while a drag is held within a row of the top or the bottom, so a
+    /// task can be taken further than the list shows at once.
+    /// </summary>
+    /// <param name="client">Where the pointer is, in the list's own coordinates</param>
+    private void ScrollNear(Point client)
+    {
+        if (_rows.Count == 0 || TopItem is not { } top)
+            return;
+
+        var first = GetItemRect(top.Index, ItemBoundsPortion.Entire);
+        var height = first.Height;
+        if (height <= 0)
+            return;
+
+        var shown = Math.Max(1, (ClientSize.Height - first.Top) / height);
+        var to = client.Y < first.Top + height ? top.Index - 1
+            : client.Y > ClientSize.Height - height ? top.Index + shown
+            : -1;
+
+        if (to < 0 || to >= _rows.Count || Environment.TickCount64 - _scrolled < ScrollEvery)
+            return;
+
+        _scrolled = Environment.TickCount64;
+        EnsureVisible(to);
+    }
+
+    /// <summary>Moves the mark to show where a drop would land, or takes it away.</summary>
+    /// <param name="target">Where to mark, or null for nowhere</param>
+    private void Mark(DropTarget? target)
+    {
+        if (target == _mark)
+            return;
+
+        Redraw(_mark);
+        _mark = target;
+        Redraw(_mark);
+
+        void Redraw(DropTarget? marked)
+        {
+            if (marked is { Row: var row } && row >= 0 && row < _rows.Count)
+                Invalidate(GetItemRect(row, ItemBoundsPortion.Entire));
+        }
+    }
+
+    /// <summary>
+    /// Draws a cell's share of the mark showing where a drop would land.
+    /// </summary>
+    /// <remarks>
+    /// A line along the row's top edge for before and its bottom edge for after, and a box round it
+    /// for onto. It starts at the indent of the level the task would land at, so a drop between a
+    /// sub-task and the next top-level task shows which of the two it would be alongside. The list
+    /// hands a row out a cell at a time, so each cell draws the part of the mark that's in it.
+    /// </remarks>
+    /// <param name="g">What to draw on</param>
+    /// <param name="cell">The cell being drawn</param>
+    /// <param name="index">The row it's in</param>
+    /// <param name="column">Which column it is</param>
+    private void DrawDropMark(Graphics g, Rectangle cell, int index, TaskColumn column)
+    {
+        if (_mark is not { } mark || mark.Row != index)
+            return;
+
+        var left = column == TaskColumn.Content ? Math.Min(cell.Right, cell.Left + (mark.Depth * IndentWidth)) : cell.Left;
+        var width = cell.Right - left;
+
+        using var brush = new SolidBrush(Theme.Accent);
+
+        if (mark.Zone != DropZone.After)
+            g.FillRectangle(brush, left, cell.Top, width, MarkThickness);
+
+        if (mark.Zone != DropZone.Before)
+            g.FillRectangle(brush, left, cell.Bottom - MarkThickness, width, MarkThickness);
+
+        if (mark.Zone == DropZone.Onto && column == TaskColumn.Content)
+            g.FillRectangle(brush, left, cell.Top, MarkThickness, cell.Height);
+    }
+
     /// <summary>
     /// Left and Right fold the selected task, the way they do in a tree.
     /// </summary>
@@ -809,6 +1097,12 @@ internal sealed class OutlineView : ListView
         if (m.Msg is WmLeftDown or WmLeftDouble && PressedBoxOrExpander(PointOf(m.LParam), second: m.Msg == WmLeftDouble))
             return;
 
+        // The task under a press, for a drag that starts from it. The list names the row by the
+        // index it had when the button went down, and the rows can be rebuilt before the pointer
+        // has moved far enough to count as a drag — a sync landing, or a ticked-off task leaving.
+        if (m.Msg == WmLeftDown)
+            _pressedTask = HitTest(PointOf(m.LParam)).Item?.Index is { } pressed && pressed >= 0 && pressed < _rows.Count ? _rows[pressed].Id : null;
+
         base.WndProc(ref m);
     }
 
@@ -945,6 +1239,8 @@ internal sealed class OutlineView : ListView
                 TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Inset(e.Bounds), muted, Flags);
                 break;
         }
+
+        DrawDropMark(e.Graphics, e.Bounds, e.ItemIndex, column);
     }
 
     /// <summary>The face a day's heading is set in, made on first use like the struck one.</summary>
