@@ -171,6 +171,28 @@ public class SidebarDraggingTests
         Assert.Equal("Moved “B” to “Work”", presenter.History.Recent()[0].Said);
     }
 
+    [Fact]
+    public async Task A_task_renamed_by_a_sync_mid_drag_is_named_when_it_lands()
+    {
+        // Captured offline, it goes by a name of ours until a sync learns the server's, and that can
+        // land with the drag under way. The drag still holds the old name.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
+        store.PutResource("projects", "q", """{"id":"q","name":"Home","child_order":2}""");
+        var api = new FakeApi();
+        var presenter = NewPresenter(store, api);
+
+        await presenter.CaptureAsync("Fresh");
+        var ours = presenter.Rows.Single(r => r.Content == "Fresh").Id;
+
+        api.Next = FakeApi.Naming(new Dictionary<string, string> { ["item_add"] = "fresh" });
+        await presenter.SyncAsync();
+        Assert.Contains(presenter.Rows, r => r.Id == "fresh");
+
+        Assert.True(presenter.DropTaskOn(ours, Row(presenter, "project:q")));
+        Assert.Equal("Moved “Fresh” to “Home”", presenter.History.Recent()[0].Said);
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
 
     private static SidebarNode Row(MainPresenter presenter, string key) => presenter.Sidebar.Single(n => n.Key == key);
@@ -195,9 +217,9 @@ public class SidebarDraggingTests
     }
 
     /// <summary>A presenter over the given account, with project "p" open.</summary>
-    private static MainPresenter NewPresenter(InMemorySnapshotStore store)
+    private static MainPresenter NewPresenter(InMemorySnapshotStore store, FakeApi? api = null)
     {
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();
         var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
         presenter.Select(ViewSelection.OfProject("p"));

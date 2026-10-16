@@ -2259,6 +2259,10 @@ public sealed class MainPresenter
     /// <returns>False when it was already there, or the task or the place has gone</returns>
     public bool DropTaskOn(string id, SidebarNode node)
     {
+        // By its name now. One added a moment ago can be renamed by a sync while it's being dragged,
+        // and under the old name nothing finds it to say what was moved.
+        id = _engine.Resolve(id);
+
         // The same path as Move to…, so the line it leaves names where the task went the same way.
         var destination = DestinationsFor(id).FirstOrDefault(d => d.Kind == node.Kind && d.Id == node.Id);
 
