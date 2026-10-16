@@ -1059,6 +1059,73 @@ public sealed class SyncEngine
     public bool CanMoveSection(string id, int offset) => MoveStructure(Reorder.Sections, id, offset, act: false);
 
     /// <summary>
+    /// Puts a project down immediately before or after another of the projects sharing its parent,
+    /// and queues a <c>project_reorder</c>.
+    /// </summary>
+    /// <remarks>
+    /// What a drop in the sidebar asks for. Only among the projects it's already with, the way the
+    /// keys move one: putting it under another project is a different command, which nothing
+    /// offers yet.
+    /// </remarks>
+    /// <param name="id">The project being put down</param>
+    /// <param name="besideId">The project it's put down next to</param>
+    /// <param name="after">Whether it goes after that project rather than before it</param>
+    /// <returns>False when it changes nothing, the two don't share a parent, or either isn't ours to move</returns>
+    public bool PlaceProject(string id, string besideId, bool after) => PlaceStructure(Reorder.Projects, id, besideId, after, act: true);
+
+    /// <summary>Whether <see cref="PlaceProject"/> would put it there.</summary>
+    public bool CanPlaceProject(string id, string besideId, bool after) => PlaceStructure(Reorder.Projects, id, besideId, after, act: false);
+
+    /// <summary>
+    /// Puts a section down immediately before or after another in its project, and queues a
+    /// <c>section_reorder</c>.
+    /// </summary>
+    /// <param name="id">The section being put down</param>
+    /// <param name="besideId">The section it's put down next to</param>
+    /// <param name="after">Whether it goes after that section rather than before it</param>
+    /// <returns>False when it changes nothing, the two are in different projects, or either isn't held</returns>
+    public bool PlaceSection(string id, string besideId, bool after) => PlaceStructure(Reorder.Sections, id, besideId, after, act: true);
+
+    /// <summary>Whether <see cref="PlaceSection"/> would put it there.</summary>
+    public bool CanPlaceSection(string id, string besideId, bool after) => PlaceStructure(Reorder.Sections, id, besideId, after, act: false);
+
+    /// <summary>
+    /// The placement and the question of whether there's one to make, which are the same walk.
+    /// </summary>
+    /// <param name="kind">Which of the two structures is being moved</param>
+    /// <param name="id">The project or section being put down</param>
+    /// <param name="besideId">The one it's put down next to</param>
+    /// <param name="after">Whether it goes after that one rather than before it</param>
+    /// <param name="act">Whether to queue the reorder, or only report that it could be made</param>
+    /// <returns>Whether the placement is one that can be made</returns>
+    private bool PlaceStructure(Reorder kind, string id, string besideId, bool after, bool act)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+            besideId = Promoted(besideId);
+
+            // The siblings of the one being moved, so the other has to be among them: the Inbox,
+            // something archived, or something under another parent isn't. There are none at all
+            // when the one being moved is any of those itself.
+            var siblings = kind == Reorder.Projects ? ProjectSiblings(id) : SectionSiblings(id);
+            if (id == besideId || !siblings.Contains(besideId))
+                return false;
+
+            var order = siblings.Where(s => s != id).ToList();
+            order.Insert(order.IndexOf(besideId) + (after ? 1 : 0), id);
+
+            if (order.SequenceEqual(siblings))
+                return false;
+
+            if (act)
+                ReorderLocked(kind, order);
+
+            return true;
+        }
+    }
+
+    /// <summary>
     /// The move and the question of whether there is one to make, which are the same walk.
     /// </summary>
     /// <param name="kind">Which of the two structures is being moved</param>
@@ -1537,6 +1604,28 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>Whether <see cref="MoveItemToProject"/> would move it, so a drag can show where it can't drop.</summary>
+    public bool CanMoveItemToProject(string id, string projectId)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+            projectId = Promoted(projectId);
+
+            return Model.Get(ResourceType.Projects, projectId) is not null
+                   && MoveTo(id, projectId: projectId, act: false);
+        }
+    }
+
+    /// <summary>Whether <see cref="MoveItemToSection"/> would move it, so a drag can show where it can't drop.</summary>
+    public bool CanMoveItemToSection(string id, string sectionId)
+    {
+        lock (_gate)
+        {
+            return MoveTo(id, sectionId: sectionId, act: false);
+        }
+    }
+
     /// <summary>
     /// Puts a task down immediately before or after another, among that task's siblings, and queues
     /// an <c>item_reorder</c> — with an <c>item_move</c> ahead of it when the two weren't siblings
@@ -1724,8 +1813,11 @@ public sealed class SyncEngine
     /// A move into the project or section a task is already top level in gets turned away rather
     /// than sent. The server would take it and file the task last, which is a reorder nobody asked
     /// for.
+    ///
+    /// Asked with <paramref name="act"/> false, it says whether the move would be made and changes
+    /// nothing, so a question asked ahead of the move is answered by the same checks.
     /// </remarks>
-    private bool MoveTo(string id, string? parentId = null, string? sectionId = null, string? projectId = null)
+    private bool MoveTo(string id, string? parentId = null, string? sectionId = null, string? projectId = null, bool act = true)
     {
         // Where it is going is as likely to have been renamed as the thing going there — indenting
         // under a task added a moment ago, or moving into a project made in the same session.
@@ -1787,6 +1879,9 @@ public sealed class SyncEngine
         {
             return false;
         }
+
+        if (!act)
+            return true;
 
         var landed = Projections.ToTaskItem(moved);
         moved["child_order"] = NextOrderAt(landed, id);

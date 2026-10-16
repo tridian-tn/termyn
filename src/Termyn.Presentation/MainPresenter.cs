@@ -2181,6 +2181,97 @@ public sealed class MainPresenter
         _ => TaskAbilities.None,
     };
 
+    /// <summary>
+    /// Whether a sidebar row can be dragged to reorder it.
+    /// </summary>
+    /// <remarks>
+    /// A project or a section, from its own place in the tree. The copy of a project under
+    /// Favourites isn't dragged: a drop there would have to mean reordering the Projects list
+    /// further down, which isn't where the pointer is. The Inbox isn't either, since Todoist keeps
+    /// it at the top whatever its order says.
+    /// </remarks>
+    /// <param name="node">The row the drag would start from</param>
+    /// <returns>True when it can be dragged</returns>
+    public bool CanDragInSidebar(SidebarNode node)
+        => node.Kind is SidebarKind.Project or SidebarKind.Section
+           && InTree(node)
+           && !(node.Kind == SidebarKind.Project && _engine.IsInboxProject(node.Id));
+
+    /// <summary>
+    /// Whether a dragged project or section can be put down beside another row.
+    /// </summary>
+    /// <param name="dragged">The row being dragged</param>
+    /// <param name="beside">The row it'd be put down next to</param>
+    /// <param name="after">Whether it'd go after that row rather than before it</param>
+    /// <returns>True when dropping it there would reorder it</returns>
+    public bool CanDropInSidebar(SidebarNode dragged, SidebarNode beside, bool after)
+        => Placeable(dragged, beside) && dragged.Kind switch
+        {
+            SidebarKind.Project => _engine.CanPlaceProject(dragged.Id, beside.Id, after),
+            SidebarKind.Section => _engine.CanPlaceSection(dragged.Id, beside.Id, after),
+            _ => false,
+        };
+
+    /// <summary>Puts a dragged project or section down beside another row.</summary>
+    /// <param name="dragged">The row being dragged</param>
+    /// <param name="beside">The row it's been let go next to</param>
+    /// <param name="after">Whether it goes after that row rather than before it</param>
+    /// <returns>False when it changed nothing, or either row has gone</returns>
+    public bool DropInSidebar(SidebarNode dragged, SidebarNode beside, bool after)
+    {
+        if (!Placeable(dragged, beside))
+            return false;
+
+        var placed = dragged.Kind == SidebarKind.Project
+            ? _engine.PlaceProject(dragged.Id, beside.Id, after)
+            : _engine.PlaceSection(dragged.Id, beside.Id, after);
+
+        if (!placed)
+            return false;
+
+        // A line each time, as a drop in the outline gets: each one is a whole move.
+        var kind = dragged.Kind == SidebarKind.Section ? "section" : "project";
+        History.Note($"Moved the {kind} “{dragged.Label}”", $"drop:{Guid.NewGuid():N}");
+        Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a task dragged out of the outline can be put down on a sidebar row.
+    /// </summary>
+    /// <remarks>
+    /// A project or a section takes it, the way Move to… would, and the copy of a project
+    /// under Favourites is the same project. Anywhere it's already top level turns it away.
+    /// </remarks>
+    /// <param name="id">The task being dragged</param>
+    /// <param name="node">The row it'd be put down on</param>
+    /// <returns>True when dropping it there would move it</returns>
+    public bool CanDropTaskOn(string id, SidebarNode node) => node.Kind switch
+    {
+        SidebarKind.Project => _engine.CanMoveItemToProject(id, node.Id),
+        SidebarKind.Section => _engine.CanMoveItemToSection(id, node.Id),
+        _ => false,
+    };
+
+    /// <summary>Moves a task dragged out of the outline to the project or section it was let go on.</summary>
+    /// <param name="id">The task being dragged</param>
+    /// <param name="node">The row it's been let go on</param>
+    /// <returns>False when it was already there, or the task or the place has gone</returns>
+    public bool DropTaskOn(string id, SidebarNode node)
+    {
+        // The same path as Move to…, so the line it leaves names where the task went the same way.
+        var destination = DestinationsFor(id).FirstOrDefault(d => d.Kind == node.Kind && d.Id == node.Id);
+
+        return destination is not null && MoveTo(id, destination);
+    }
+
+    /// <summary>Whether two sidebar rows are a project or section and one beside which it could go.</summary>
+    private bool Placeable(SidebarNode dragged, SidebarNode beside)
+        => CanDragInSidebar(dragged) && beside.Kind == dragged.Kind && InTree(beside);
+
+    /// <summary>Whether a row is in its own place in the tree, rather than the copy under Favourites.</summary>
+    private static bool InTree(SidebarNode node) => node.Key == SidebarKeys.For(node.Kind, node.Id);
+
     public void DeleteSection(string id)
     {
         var named = _engine.Snapshot().Sections.FirstOrDefault(x => x.Id == id)?.Name;
