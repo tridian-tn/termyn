@@ -447,6 +447,23 @@ internal sealed class OutlineView : ListView
 
     private bool IsSelected(int index) => _selectedIndex == index;
 
+    /// <summary>
+    /// The row a task is on, by the name it was noted under or the one it goes by now.
+    /// </summary>
+    /// <remarks>
+    /// A task added a moment ago is renamed when the sync learns what the server calls it, and the
+    /// rows are rebuilt under the new name. Something noted beforehand — the task under a press —
+    /// would otherwise find nothing, and the drag it starts would quietly not happen.
+    /// </remarks>
+    /// <param name="id">The task, by whatever name it was noted under</param>
+    /// <returns>Its row, or -1 when it's under neither name</returns>
+    internal int RowOf(string id)
+    {
+        var index = IndexOf(id);
+
+        return index < 0 && Renamed?.Invoke(id) is { } now && now != id ? IndexOf(now) : index;
+    }
+
     private int IndexOf(string id)
     {
         for (var i = 0; i < _rows.Count; i++)
@@ -665,7 +682,7 @@ internal sealed class OutlineView : ListView
     {
         base.OnItemDrag(e);
 
-        if (e.Button != MouseButtons.Left || _pressedTask is not { } pressed || IndexOf(pressed) is not (>= 0 and var index))
+        if (e.Button != MouseButtons.Left || _pressedTask is not { } pressed || RowOf(pressed) is not (>= 0 and var index))
             return;
 
         var row = _rows[index];

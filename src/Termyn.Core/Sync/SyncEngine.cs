@@ -3177,6 +3177,11 @@ public sealed class SyncEngine
 
     private void ProcessCommandResults(IReadOnlyDictionary<string, CommandResult> syncStatus, List<OutboxCommand> sent)
     {
+        // Task reorders that landed, and tasks whose moves were turned away and kept to try again,
+        // so a reorder that has lost its move can be sent again behind it.
+        var reordered = new List<OutboxCommand>();
+        var unmoved = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var cmd in sent)
         {
             if (!_outbox.Contains(cmd))
@@ -3198,6 +3203,9 @@ public sealed class SyncEngine
 
             if (result.Ok)
             {
+                if (Reorder.For(cmd.Type) == Reorder.Items)
+                    reordered.Add(cmd);
+
                 PassBack(cmd);
                 RemoveCommand(cmd);
                 continue;
@@ -3217,9 +3225,45 @@ public sealed class SyncEngine
             }
 
             if (cmd.Attempts >= _attemptCeiling)
+            {
                 Fail(cmd, cmd.LastError);
-            else
-                _store.UpdateCommand(cmd);
+                continue;
+            }
+
+            _store.UpdateCommand(cmd);
+
+            if (cmd.Type == "item_move" && ParseArgs(cmd)["id"] is JsonValue moving)
+                unmoved.Add(moving.ToString());
+        }
+
+        Resend(reordered, unmoved);
+    }
+
+    /// <summary>
+    /// Queues again each task reorder that landed while the move of one of its tasks was turned
+    /// away and kept to try again.
+    /// </summary>
+    /// <remarks>
+    /// A task put down at another level is a move and then a reorder, and the server answers the two
+    /// separately. With the move refused, the reorder that landed placed the task where the server
+    /// doesn't have it, and the move, when it lands, files it last. Sent again after the move, the
+    /// reorder puts it back where it was put down.
+    ///
+    /// Not for a move that's been given up: that task is going nowhere, and its priors have been put
+    /// back.
+    /// </remarks>
+    /// <param name="reordered">The task reorders that landed this round</param>
+    /// <param name="unmoved">The tasks whose moves were refused this round and will be tried again</param>
+    private void Resend(List<OutboxCommand> reordered, HashSet<string> unmoved)
+    {
+        if (unmoved.Count == 0)
+            return;
+
+        foreach (var reorder in reordered)
+        {
+            var args = ParseArgs(reorder);
+            if (NestedIds(args).Any(unmoved.Contains))
+                Persist(reorder.Type, args, null, reorder.PriorJson, [], []);
         }
     }
 

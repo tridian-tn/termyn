@@ -103,6 +103,20 @@ public class OutlineDragTests
     }
 
     [WinFormsFact]
+    public void A_task_renamed_since_it_was_pressed_is_found_under_its_new_name()
+    {
+        // A press notes the task under it, and a sync can rename a task added a moment ago before
+        // the pointer has moved far enough to start the drag.
+        using var form = Window();
+        using var outline = Outline(form, (_, _) => true);
+        outline.Renamed = id => id == "t-ours" ? "c" : id;
+
+        Assert.Equal(2, outline.RowOf("t-ours"));
+        Assert.Equal(0, outline.RowOf("a"));
+        Assert.Equal(-1, outline.RowOf("gone"));
+    }
+
+    [WinFormsFact]
     public void A_drop_the_presenter_turns_away_has_nowhere_to_land()
     {
         using var form = Window();

@@ -1805,13 +1805,22 @@ public sealed class MainPresenter
            && (Selection.ProjectId is not null || Selection.SectionId is not null || Selection.View == SmartView.Inbox);
 
     /// <summary>Whether a task can be put down where a drag is pointing, so the pointer can say so.</summary>
-    /// <param name="id">The task being dragged</param>
+    /// <remarks>
+    /// The task goes by the name it has now. One added a moment ago can be renamed by a sync while
+    /// it's being dragged, and the rows are then under its new name, so the old one would find no
+    /// row to compare and every drop beside it would look like a move.
+    /// </remarks>
+    /// <param name="id">The task being dragged, by whatever name the drag began with</param>
     /// <param name="target">Where it'd go, from <see cref="OutlineDrop"/></param>
     /// <returns>True when dropping it there would move it</returns>
     public bool CanDrop(string id, DropTarget target)
-        => CanDrag && OutlineDrop.Moves(Rows, id, target) && (target.Zone == DropZone.Onto
+    {
+        id = _engine.Resolve(id);
+
+        return CanDrag && OutlineDrop.Moves(Rows, id, target) && (target.Zone == DropZone.Onto
             ? _engine.CanNestItem(id, target.Id)
             : _engine.CanPlaceItem(id, target.Id, after: target.Zone == DropZone.After));
+    }
 
     /// <summary>
     /// Puts a dragged task down beside another, or under it.
@@ -1825,6 +1834,9 @@ public sealed class MainPresenter
     /// <returns>False when it changed nothing, or the task or the one it was dropped by has gone</returns>
     public bool Drop(string id, DropTarget target)
     {
+        // By its name now, as the question asked on the way over does.
+        id = _engine.Resolve(id);
+
         if (!CanDrag || !OutlineDrop.Moves(Rows, id, target))
             return false;
 

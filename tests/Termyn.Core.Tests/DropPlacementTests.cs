@@ -284,6 +284,54 @@ public class DropPlacementTests
         Assert.Equal("p", moved.ProjectId);
     }
 
+    // ---- When the server takes half of a drop --------------------------------------------------
+
+    [Fact]
+    public async Task A_drop_is_put_back_where_it_was_let_go_once_its_refused_move_lands()
+    {
+        // A drop at another level is a move and then a reorder, and the server answers the two
+        // apart. Taking the reorder and turning the move away, it later files the moved task last
+        // when the move is tried again, so the reorder has to follow the move once more.
+        var api = new FakeApi { Next = Answering(move: false) };
+        var engine = NewEngine(ParentWithChildAndSiblingStore(), api);
+        Assert.True(Placed(engine, "c", "b", after: false));
+
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(["item_move", "item_reorder"], engine.Outbox.Select(c => c.Type));
+
+        api.Next = Answering(move: true);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["item_move", "item_reorder"], api.LastCommands.Select(c => c.Type));
+        Assert.Empty(engine.Outbox);
+        Assert.Equal(["a", "c", "b"], Order(engine));
+    }
+
+    [Fact]
+    public async Task A_reorder_is_not_sent_again_for_a_move_that_has_been_given_up()
+    {
+        // That task isn't going anywhere, and its place has been put back.
+        var api = new FakeApi { Next = Answering(move: false) };
+        var engine = NewEngine(ParentWithChildAndSiblingStore(), api, attemptCeiling: 1);
+        Assert.True(Placed(engine, "c", "b", after: false));
+
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        var left = Assert.Single(engine.Outbox);
+        Assert.Equal("item_move", left.Type);
+        Assert.Equal(OutboxState.Failed, left.State);
+    }
+
+    /// <summary>The server taking every write it's sent except, unless told otherwise, a move.</summary>
+    private static Func<IReadOnlyList<Command>, SyncResponse> Answering(bool move)
+        => commands => new SyncResponse
+        {
+            SyncToken = "s1",
+            SyncStatus = commands.ToDictionary(
+                c => c.Uuid,
+                c => move || c.Type != "item_move" ? new CommandResult(true, null, null) : new CommandResult(false, "ERR", "busy")),
+        };
+
     // ---- Helpers -------------------------------------------------------------------------------
 
     /// <summary>Puts a task down beside another, having asked first whether it could be.</summary>
@@ -328,13 +376,15 @@ public class DropPlacementTests
     }
 
     /// <summary>"a" with "c" under it, and "b" alongside "a".</summary>
-    private static SyncEngine ParentWithChildAndSibling()
+    private static SyncEngine ParentWithChildAndSibling() => NewEngine(ParentWithChildAndSiblingStore());
+
+    private static InMemorySnapshotStore ParentWithChildAndSiblingStore()
     {
         var store = Projects();
         store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","parent_id":"a","child_order":1}""");
         store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
-        return NewEngine(store);
+        return store;
     }
 
     /// <summary>
@@ -364,9 +414,9 @@ public class DropPlacementTests
         return store;
     }
 
-    private static SyncEngine NewEngine(InMemorySnapshotStore store)
+    private static SyncEngine NewEngine(InMemorySnapshotStore store, FakeApi? api = null, int attemptCeiling = 5)
     {
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, attemptCeiling: attemptCeiling);
         engine.Load();
         return engine;
     }

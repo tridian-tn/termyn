@@ -170,6 +170,33 @@ public class DraggingTests
     }
 
     [Fact]
+    public async Task A_task_renamed_by_a_sync_mid_drag_is_still_known_where_it_already_is()
+    {
+        // Captured offline, it goes by a name of ours until a sync learns the server's, and that can
+        // land with the drag under way. In this section it sits just above "Second", but the project
+        // holds tasks from outside the section in between, so the engine would take a drop there:
+        // only the rows know it changes nothing, and only under the name the rows now use.
+        var store = Store();
+        store.PutResource("items", "sb", """{"id":"sb","content":"Second","project_id":"p","section_id":"s1","child_order":11}""");
+        var api = new FakeApi();
+        var presenter = NewPresenter(store, api);
+        presenter.Select(ViewSelection.OfSection("s1"));
+
+        await presenter.CaptureAsync("Fresh");
+        var ours = presenter.Rows.Single(r => r.Content == "Fresh").Id;
+
+        api.Next = FakeApi.Naming(new Dictionary<string, string> { ["item_add"] = "fresh" });
+        await presenter.SyncAsync();
+        Assert.Equal(["fresh", "sb"], presenter.Rows.Select(r => r.Id));
+
+        var aboveSecond = OutlineDrop.Over(presenter.Rows, 1, DropZone.Before)!;
+
+        Assert.False(presenter.CanDrop(ours, aboveSecond));
+        Assert.False(presenter.Drop(ours, aboveSecond));
+        Assert.DoesNotContain(presenter.History.Recent(), e => e.Said.StartsWith("Moved", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_drop_the_engine_refuses_is_not_offered_and_changes_nothing()
     {
         var presenter = InProject();
@@ -213,9 +240,9 @@ public class DraggingTests
         return store;
     }
 
-    private static MainPresenter NewPresenter(InMemorySnapshotStore store)
+    private static MainPresenter NewPresenter(InMemorySnapshotStore store, FakeApi? api = null)
     {
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();
         return new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
     }
