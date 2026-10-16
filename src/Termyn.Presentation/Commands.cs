@@ -107,6 +107,10 @@ public sealed record TaskAbilities(
 /// <param name="WritingDescription">Whether that panel is showing the markdown rather than the rendering.</param>
 /// <param name="ShowingComments">Whether that panel is showing the comments rather than the description.</param>
 /// <param name="Zoomed">Whether that panel is scaled away from the size it rests at.</param>
+/// <param name="NewTaskText">
+/// What a new task started from the open view would begin with, or null when the view has nothing
+/// to begin one with
+/// </param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -120,7 +124,8 @@ public sealed record CommandContext(
     bool Zoomed = false,
     bool CanExpandAll = false,
     bool CanCollapseAll = false,
-    TaskAbilities? SelectionAbilities = null)
+    TaskAbilities? SelectionAbilities = null,
+    string? NewTaskText = null)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -265,7 +270,9 @@ public static class Commands
                 Structure(Strings.CommandMoveProjectDown, Strings.CommandMoveSectionDown),
                 context.SelectionCan.CanMoveDown),
 
-            AppCommand.NewTask => Always(Strings.CommandNewTask),
+            // Greyed where the view has nothing to start a task with — Upcoming, All, a saved filter
+            // — which Quick add, starting from nothing, is still there for.
+            AppCommand.NewTask => new CommandState(Strings.CommandNewTask, context.NewTaskText is not null),
             AppCommand.NewProject => Always(Strings.CommandNewProject),
 
             // A section belongs to a project, so there has to be one under the sidebar to put it in.

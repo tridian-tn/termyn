@@ -526,7 +526,15 @@ public sealed class MainPresenter
     /// Captures a task from quick-add text. Online, the server parses it so the result matches the
     /// web app; offline, the bounded local grammar is used and the task syncs later.
     /// </summary>
-    public async Task CaptureAsync(string text, CancellationToken ct = default)
+    public Task CaptureAsync(string text, CancellationToken ct = default) => CaptureAsync(text, null, ct);
+
+    /// <summary>
+    /// Captures a task from quick-add text that New task started off.
+    /// </summary>
+    /// <param name="text">Everything in the box</param>
+    /// <param name="start">What New task put in the box, or null when it put nothing there</param>
+    /// <param name="ct">Cancels the online attempt</param>
+    public async Task CaptureAsync(string text, string? start, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
@@ -537,6 +545,7 @@ public sealed class MainPresenter
         if (!captured)
         {
             var (parse, projectId, sectionId) = Resolve(text);
+            parse = Dated(parse, start);
 
             // With nothing named at all, a capture belongs wherever the user is looking. Applied
             // together: a section from one view with a project named in the text is not a real place.
@@ -555,6 +564,36 @@ public sealed class MainPresenter
         History.Note($"Added “{text.Trim()}”", $"capture:{Guid.NewGuid():N}");
 
         Publish();
+    }
+
+    /// <summary>
+    /// Gives an offline capture the day New task put in its box, where the grammar didn't read one.
+    /// </summary>
+    /// <remarks>
+    /// Over Today, an account reading another language is given the day in figures, which the
+    /// server reads and a capture here doesn't: for one of those accounts a capture reads no day at
+    /// all, since the words around figures can change what they mean. These figures are Termyn's
+    /// own, though, so offline they're read as the day they name rather than left in the title.
+    /// Only while they're still there whole. Taken out, or typed by the user, they're left alone.
+    /// </remarks>
+    /// <param name="parse">What the grammar made of the box</param>
+    /// <param name="start">What New task put in the box, or null when it put nothing there</param>
+    /// <returns>The parse, with the day the start names and without its words, where it names one</returns>
+    private QuickAddParse Dated(QuickAddParse parse, string? start)
+    {
+        if (parse.DueDate is not null || string.IsNullOrWhiteSpace(start))
+            return parse;
+
+        if (_parser.ReadDay(start, _engine.DateSettings) is not { Kind: DayReadingKind.Day, Day: { } day } reading)
+            return parse;
+
+        var words = parse.Content.Split(' ').ToList();
+        var at = words.LastIndexOf(start.Trim());
+        if (at < 0)
+            return parse;
+
+        words.RemoveAt(at);
+        return parse with { Content = string.Join(' ', words), DueDate = day, DueTime = reading.Time };
     }
 
     /// <summary>
@@ -618,10 +657,10 @@ public sealed class MainPresenter
         var words = new StringBuilder(parse.Content);
 
         if (parse.ProjectName is { } project)
-            words.Append(words.Length > 0 ? " #" : "#").Append(project);
+            words.Append(words.Length > 0 ? " #" : "#").Append(QuickAddParser.Escaped(project));
 
         if (parse.SectionName is { } section)
-            words.Append(words.Length > 0 ? " /" : "/").Append(section);
+            words.Append(words.Length > 0 ? " /" : "/").Append(QuickAddParser.Escaped(section));
 
         return parse with { Content = words.ToString(), ProjectName = null, SectionName = null };
     }
@@ -641,6 +680,58 @@ public sealed class MainPresenter
             parse,
             parse.ProjectName is null || projectId is not null,
             parse.SectionName is null || sectionId is not null);
+    }
+
+    /// <summary>
+    /// What a task started from a view begins with: the place the view is, or the day it's for.
+    /// </summary>
+    /// <remarks>
+    /// Written in the capture grammar and put in the box, rather than held to one side, so it can
+    /// be seen and taken back out, and so it reaches the server the way typing it would. A section
+    /// names its project as well, since a section's name is only unique inside one.
+    ///
+    /// Today gives its day: the word where the account reads English, and figures where it reads
+    /// another language. Nothing where smart date recognition is off, since Todoist would leave the
+    /// date in the title and the task wouldn't be today's.
+    ///
+    /// Nothing for a view that's neither a place nor a day. Upcoming covers a week, All covers
+    /// everything, and a saved filter is a question rather than somewhere a task can be put.
+    /// </remarks>
+    /// <param name="view">The view the task is started from</param>
+    /// <returns>The words, or null when the view has nothing to begin a task with</returns>
+    public string? NewTaskText(ViewSelection view)
+    {
+        var snapshot = _projectedFrom;
+
+        return view switch
+        {
+            { View: SmartView.Today } => _engine.DateSettings switch
+            {
+                { InlineDatesOff: true } => null,
+                { ReadsEnglish: true } => "today",
+                _ => QuickAddParser.Written(_engine.Today, null, english: false),
+            },
+
+            // Before the first sync there's no Inbox to name, and a task naming no project goes to
+            // it anyway.
+            { View: SmartView.Inbox }
+                => snapshot?.Projects.FirstOrDefault(p => p.IsInboxProject) is { } inbox ? ProjectWords(inbox) : string.Empty,
+
+            { ProjectId: { } id }
+                => snapshot?.Projects.FirstOrDefault(p => p.Id == id) is { } project ? ProjectWords(project) : null,
+
+            { SectionId: { } id }
+                => snapshot?.Sections.FirstOrDefault(s => s.Id == id) is { } section
+                   && snapshot.Projects.FirstOrDefault(p => p.Id == section.ProjectId) is { } owner
+                    ? $"{ProjectWords(owner)} /{QuickAddParser.Escaped(section.Name)}"
+                    : null,
+
+            { LabelName: { } label } => "@" + QuickAddParser.Escaped(label),
+
+            _ => null,
+        };
+
+        static string ProjectWords(Project project) => "#" + QuickAddParser.Escaped(project.Name);
     }
 
     // ---- Completed tasks -------------------------------------------------------------------------

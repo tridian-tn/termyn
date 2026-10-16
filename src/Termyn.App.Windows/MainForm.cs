@@ -2694,7 +2694,14 @@ internal sealed class MainForm : Form
         Zoomed,
         _presenter.CanExpandAll,
         _presenter.CanCollapseAll,
-        _presenter.SelectionAbilitiesFor(selection));
+        _presenter.SelectionAbilitiesFor(selection),
+        NewTaskText(selection));
+
+    /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
+    /// <param name="selection">The row, or null for none</param>
+    /// <returns>The words to put in the quick-add box</returns>
+    private string? NewTaskText(SidebarNode? selection)
+        => selection is null ? null : _presenter.NewTaskText(MainPresenter.SelectionOf(selection));
 
     /// <summary>
     /// How a command's shortcut is written here. Quick-add is the odd one out: its keystroke is the
@@ -2956,9 +2963,17 @@ internal sealed class MainForm : Form
         switch (command)
         {
             case AppCommand.NewTask:
+                // Greyed in the menu, but Ctrl+N, Insert and the palette all reach this without it
+                // having been opened, so the reason still has to be said somewhere.
+                if (NewTaskText(_sidebar.SelectedNode?.Tag as SidebarNode) is not { } start)
+                {
+                    _status.Text = "This view doesn't say where a task goes — Quick add starts one from nothing.";
+                    return false;
+                }
+
                 // Guarded like the hotkey and the tray, which are the other two ways in: the popup
                 // is built the first time it is asked for, and Run has no guard of its own.
-                Guarded(QuickAdd.Summon);
+                Guarded(() => QuickAdd.Summon(start));
                 return false;
 
             case AppCommand.NewProject:

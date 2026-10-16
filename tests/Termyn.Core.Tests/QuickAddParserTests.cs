@@ -250,6 +250,61 @@ public class QuickAddParserTests
         Assert.Null(parse.DueDate);
     }
 
+    [Fact]
+    public void An_escaped_space_keeps_a_place_name_whole()
+    {
+        // Todoist's own way of naming a project with a space in it. Without it, "#My Project" is a
+        // project called "My" and a title with "Project" in it.
+        var parse = Parse(@"Buy milk #My\ Project /Next\ Week @on\ the\ way");
+
+        Assert.Equal("My Project", parse.ProjectName);
+        Assert.Equal("Next Week", parse.SectionName);
+        Assert.Equal(["on the way"], parse.Labels);
+        Assert.Equal("Buy milk", parse.Content);
+    }
+
+    [Fact]
+    public void An_unescaped_space_still_ends_a_place_name()
+    {
+        var parse = Parse("Buy milk #My Project");
+
+        Assert.Equal("My", parse.ProjectName);
+        Assert.Equal("Buy milk Project", parse.Content);
+    }
+
+    [Fact]
+    public void A_backslash_outside_a_place_name_joins_nothing()
+    {
+        // Joined on, "today" would be part of the word before it and the task would have no day.
+        var parse = Parse(@"Clean C:\ today");
+
+        Assert.Equal(@"Clean C:\", parse.Content);
+        Assert.Equal(Today, parse.DueDate);
+    }
+
+    [Fact]
+    public void A_second_escaped_project_stays_in_the_words_as_it_was_typed()
+    {
+        var parse = Parse(@"tidy #Home #Big\ Shed");
+
+        Assert.Equal("Home", parse.ProjectName);
+        Assert.Equal(@"tidy #Big\ Shed", parse.Content);
+    }
+
+    [Theory]
+    [InlineData("Work")]
+    [InlineData("My Project")]
+    [InlineData("Two  Spaces")]
+    public void An_escaped_name_reads_back_as_itself(string name)
+    {
+        var parse = Parse($"Buy milk #{QuickAddParser.Escaped(name)} /{QuickAddParser.Escaped(name)} @{QuickAddParser.Escaped(name)}");
+
+        Assert.Equal(name, parse.ProjectName);
+        Assert.Equal(name, parse.SectionName);
+        Assert.Equal([name], parse.Labels);
+        Assert.Equal("Buy milk", parse.Content);
+    }
+
     /// <summary>Parses in UTC, where the test clock's midday is midday on every machine.</summary>
     private static QuickAddParse Parse(string text)
         => new QuickAddParser(new FixedClock(Today)).Parse(text, new DateSettings(TimeZoneInfo.Utc));

@@ -22,7 +22,8 @@ namespace Termyn.Core.Capture;
 /// what it reads that this doesn't is left for the server rather than approximated.
 /// </para>
 /// <para>
-/// Recognised: <c>#project</c>, <c>/section</c>, <c>@label</c>, <c>p1</c>–<c>p4</c>. Days:
+/// Recognised: <c>#project</c>, <c>/section</c>, <c>@label</c> (with <c>\ </c> for a space in the
+/// name, as Todoist writes it), <c>p1</c>–<c>p4</c>. Days:
 /// <c>today</c>/<c>tod</c>, <c>tomorrow</c>/<c>tom</c>, a weekday's full name, <c>this</c> or
 /// <c>next</c> and a weekday, <c>next week</c>/<c>month</c>/<c>year</c>, <c>in 3 days</c> (or weeks,
 /// or months), <c>end of month</c>, a day and a month either way round with or without a year
@@ -131,7 +132,7 @@ public sealed partial class QuickAddParser
         // for one with smart date recognition off, where Todoist leaves every date in the title.
         var readsDays = settings.CaptureReadsDays;
 
-        var tokens = Tokens(text);
+        var tokens = CaptureTokens(text);
 
         for (var i = 0; i < tokens.Length; i++)
         {
@@ -143,19 +144,20 @@ public sealed partial class QuickAddParser
                 // task without being applied to it — the one thing here that lost what was typed.
                 case '#' when token.Length > 1:
                     if (project is null)
-                        project = token[1..];
+                        project = Unescaped(token[1..]);
                     else
                         content.Add(token);
                     continue;
                 case '/' when token.Length > 1:
                     if (section is null)
-                        section = token[1..];
+                        section = Unescaped(token[1..]);
                     else
                         content.Add(token);
                     continue;
                 case '@' when token.Length > 1:
-                    if (!labels.Contains(token[1..], StringComparer.OrdinalIgnoreCase))
-                        labels.Add(token[1..]);
+                    var label = Unescaped(token[1..]);
+                    if (!labels.Contains(label, StringComparer.OrdinalIgnoreCase))
+                        labels.Add(label);
                     continue;
                 case '+' when token.Length > 1:
                     // Assignees are out of scope; drop the token but tell the user it was ignored.
@@ -343,6 +345,52 @@ public sealed partial class QuickAddParser
     /// <returns>The words, which is none for blank text</returns>
     private static string[] Tokens(string? text)
         => (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    /// Splits capture text into its words, keeping a place's name whole where its spaces are escaped.
+    /// </summary>
+    /// <remarks>
+    /// Todoist names a project with a space in it by putting a backslash before the space —
+    /// <c>#My\ Project</c> — and a section or a label is read the same way here. Only in a word that
+    /// opens with <c>#</c>, <c>/</c> or <c>@</c>: anywhere else the backslash is part of the title,
+    /// and joining the next word on would stop a day in it being read.
+    /// </remarks>
+    /// <param name="text">What was typed</param>
+    /// <returns>The words, with each escaped place name as one of them, backslashes and all</returns>
+    private static string[] CaptureTokens(string text)
+    {
+        var words = Tokens(text);
+        var joined = new List<string>(words.Length);
+
+        for (var i = 0; i < words.Length; i++)
+        {
+            var word = words[i];
+
+            if (word.Length > 1 && word[0] is '#' or '/' or '@')
+                while (word.EndsWith('\\') && i + 1 < words.Length)
+                    word += " " + words[++i];
+
+            joined.Add(word);
+        }
+
+        return [.. joined];
+    }
+
+    /// <summary>
+    /// A project, section or label name written so the grammar reads it back whole.
+    /// </summary>
+    /// <remarks>
+    /// Todoist's escape: a backslash before each space. Without one, <c>#My Project</c> names a
+    /// project called "My" and leaves "Project" in the title, here and on the server alike.
+    /// </remarks>
+    /// <param name="name">The name as the account holds it</param>
+    /// <returns>The name ready to follow a <c>#</c>, <c>/</c> or <c>@</c></returns>
+    public static string Escaped(string name) => name.Replace(" ", "\\ ");
+
+    /// <summary>A place's name as it was meant, without the backslashes that kept it whole.</summary>
+    /// <param name="name">The name as it was typed</param>
+    /// <returns>The name as the account would hold it</returns>
+    private static string Unescaped(string name) => name.Replace("\\ ", " ");
 
     /// <summary>Whether a word starts a repeat wherever it comes: <c>every</c>, or Todoist's <c>every!</c>.</summary>
     /// <param name="token">The word</param>
