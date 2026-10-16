@@ -91,6 +91,20 @@ Reconnect.
 - [ ] Set **Downloads: keep up to (MB)** to 1 and open two files bigger than that. The older one
       goes from the attachments folder, and opening it again fetches it rather than failing.
 
+## Dragging
+
+Open `Home`, with a few tasks in it and one of them holding a sub-task.
+
+- [ ] Drag a task to the top edge of another: a line along that row's top shows where it'll land,
+      and letting go puts it there. After a sync, the web app has the same order.
+- [ ] Drag a task onto the middle of another: a box round the row, and it becomes that task's last
+      sub-task. Onto a folded task, the fold opens to show it.
+- [ ] Drag a sub-task out between two top-level tasks: it comes out from under its parent, there.
+- [ ] Hold a drag at the bottom edge of a list longer than the window: it scrolls.
+- [ ] Over the task's own sub-task, the pointer says it can't drop there. **Esc** ends the drag
+      and nothing moves.
+- [ ] In Today, and with a column sorted, a row doesn't drag at all.
+
 ## The rest of the acceptance criteria
 
 The remaining §16.2 criteria in the spec, in the words of the app.

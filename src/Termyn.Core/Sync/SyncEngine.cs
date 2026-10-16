@@ -1538,6 +1538,180 @@ public sealed class SyncEngine
     }
 
     /// <summary>
+    /// Puts a task down immediately before or after another, among that task's siblings, and queues
+    /// an <c>item_reorder</c> — with an <c>item_move</c> ahead of it when the two weren't siblings
+    /// to start with.
+    /// </summary>
+    /// <remarks>
+    /// What a drop between two rows of the outline asks for. Unlike <see cref="MoveItem"/> it can
+    /// land at another level, so a sub-task dragged out between two top-level tasks comes out from
+    /// under its parent in the same go. The move files it last where it lands and the reorder then
+    /// puts it where it was dropped, and both are sent, in that order.
+    ///
+    /// A drop that leaves the order on screen as it was is turned away rather than sent. A completed
+    /// sibling isn't drawn in its place, so which side of one a task sits is nothing anyone can see.
+    /// </remarks>
+    /// <param name="id">The task being put down</param>
+    /// <param name="besideId">The task it's put down next to</param>
+    /// <param name="after">Whether it goes after that task rather than before it</param>
+    /// <returns>False when it changes nothing, or it'd go under itself, too deep, or beside a completed task</returns>
+    public bool PlaceItem(string id, string besideId, bool after) => Place(id, besideId, after, act: true);
+
+    /// <summary>Whether <see cref="PlaceItem"/> would put it there, so a drag can show where it can't drop.</summary>
+    public bool CanPlaceItem(string id, string besideId, bool after) => Place(id, besideId, after, act: false);
+
+    /// <summary>
+    /// The placement and the question of whether there's one to make, which are the same walk.
+    /// </summary>
+    /// <param name="id">The task being put down</param>
+    /// <param name="besideId">The task it's put down next to</param>
+    /// <param name="after">Whether it goes after that task rather than before it</param>
+    /// <param name="act">Whether to queue the change, or only report that it could be made</param>
+    /// <returns>Whether the placement is one that can be made</returns>
+    private bool Place(string id, string besideId, bool after, bool act)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+            besideId = Promoted(besideId);
+
+            if (id == besideId || Placement(id) is not { } moving || Placement(besideId) is not { } beside)
+                return false;
+
+            // A completed task isn't drawn among its siblings, so it has no place to be put down
+            // beside, and none of its own worth moving.
+            if (moving.Item.Completed || beside.Item.Completed)
+                return false;
+
+            // Siblings the way the ordering counts them, which doesn't look at sections. Neither
+            // does the project outline, which sets a project's tasks out in that one order.
+            var stays = moving.Item.ProjectId == beside.Item.ProjectId && moving.Item.ParentId == beside.Item.ParentId;
+            var level = stays ? default : LevelBeside(moving.Item, beside.Item);
+
+            if (!stays && level is null)
+                return false;
+
+            var order = beside.Siblings.Select(i => i.Id).Where(s => s != id).ToList();
+            order.Insert(order.IndexOf(besideId) + (after ? 1 : 0), id);
+
+            if (stays && ShownAlike(moving.Siblings, order))
+                return false;
+
+            if (!act)
+                return true;
+
+            if (level is { } to && !MoveTo(id, to.ParentId, to.SectionId, to.ProjectId))
+                return false;
+
+            ReorderLocked(Reorder.Items, order);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Where a task has to be moved to sit among another's siblings, or null when it can't go there.
+    /// </summary>
+    /// <remarks>
+    /// Asked before anything is queued, so the question a drag asks on the way over and the drop
+    /// itself can't disagree.
+    /// </remarks>
+    /// <param name="moving">The task that would move</param>
+    /// <param name="beside">The task it would end up beside</param>
+    /// <returns>The parent, section or project to move it to, with only one of them set, or null</returns>
+    private (string? ParentId, string? SectionId, string? ProjectId)? LevelBeside(TaskItem moving, TaskItem beside)
+    {
+        // Beside one of its own sub-tasks would be under itself.
+        if (DescendantsOf(moving.Id).Contains(beside.Id))
+            return null;
+
+        if (beside.ParentId is { } parentId)
+        {
+            return Model.Get(ResourceType.Items, parentId) is { } json && Fits(moving.Id, Projections.ToTaskItem(json))
+                ? (parentId, null, null)
+                : null;
+        }
+
+        // Into the section the other one's in, so the task is still in that section's view after
+        // the drop. One the model hasn't seen can't be moved into, so the project is where it lands
+        // instead, the way an outdent does.
+        if (beside.SectionId is { } sectionId && Model.Sections().Any(s => s.Id == sectionId))
+            return (null, sectionId, null);
+
+        var inbox = Model.Projects().FirstOrDefault(p => p.IsInboxProject)?.Id;
+        var projectId = beside.ProjectId ?? inbox;
+
+        // A task captured before the Inbox was known has no project yet and is in the Inbox all the
+        // same, so a move there is turned away as already being there.
+        var already = moving.ParentId is null && moving.SectionId is null && (moving.ProjectId ?? inbox) == projectId;
+
+        return projectId is null || already ? null : (null, null, projectId);
+    }
+
+    /// <summary>
+    /// Whether two orders of the same siblings look the same on screen, where completed ones aren't
+    /// drawn in their places.
+    /// </summary>
+    /// <param name="siblings">The siblings in the order they're held now</param>
+    /// <param name="order">Their ids in the order a placement would leave them</param>
+    /// <returns>True when the tasks still to do come out in the same order either way</returns>
+    private static bool ShownAlike(List<TaskItem> siblings, List<string> order)
+    {
+        var done = siblings.Where(i => i.Completed).Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
+
+        return siblings.Where(i => !i.Completed).Select(i => i.Id).SequenceEqual(order.Where(id => !done.Contains(id)));
+    }
+
+    /// <summary>
+    /// Makes a task the last sub-task of another, and queues an <c>item_move</c>.
+    /// </summary>
+    /// <remarks>
+    /// What dropping one row onto another asks for. <see cref="IndentItem"/> only ever goes under
+    /// the sibling above; this goes under whichever task it's dropped on.
+    ///
+    /// A task already under that parent is turned away rather than sent: the server would take it
+    /// and file the task last, which is a reorder nobody asked for.
+    /// </remarks>
+    /// <param name="id">The task being put down</param>
+    /// <param name="parentId">The task it's put down on</param>
+    /// <returns>False when it's already there, or it'd go under itself, too deep, or under a completed task</returns>
+    public bool NestItem(string id, string parentId) => Nest(id, parentId, act: true);
+
+    /// <summary>Whether <see cref="NestItem"/> would put it there, so a drag can show where it can't drop.</summary>
+    public bool CanNestItem(string id, string parentId) => Nest(id, parentId, act: false);
+
+    /// <summary>
+    /// The nesting and the question of whether there's one to make, which are the same walk.
+    /// </summary>
+    /// <param name="id">The task being put down</param>
+    /// <param name="parentId">The task it's put down on</param>
+    /// <param name="act">Whether to queue the move, or only report that it could be made</param>
+    /// <returns>Whether the nesting is one that can be made</returns>
+    private bool Nest(string id, string parentId, bool act)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+            parentId = Promoted(parentId);
+
+            if (id == parentId
+                || Model.Get(ResourceType.Items, id) is not { } json
+                || Model.Get(ResourceType.Items, parentId) is not { } parentJson)
+                return false;
+
+            var item = Projections.ToTaskItem(json);
+            var parent = Projections.ToTaskItem(parentJson);
+
+            if (item.Completed || parent.Completed || item.ParentId == parentId)
+                return false;
+
+            if (DescendantsOf(id).Contains(parentId) || !Fits(id, parent))
+                return false;
+
+            return !act || MoveTo(id, parentId: parentId);
+        }
+    }
+
+    /// <summary>
     /// Re-homes a task and queues an <c>item_move</c>. Todoist takes exactly one destination, and
     /// in each case puts the task last where it lands — the local copy is updated to match, so the
     /// row doesn't sit somewhere it won't stay.
@@ -3003,6 +3177,11 @@ public sealed class SyncEngine
 
     private void ProcessCommandResults(IReadOnlyDictionary<string, CommandResult> syncStatus, List<OutboxCommand> sent)
     {
+        // Task reorders that landed, and tasks whose moves were turned away and kept to try again,
+        // so a reorder that has lost its move can be sent again behind it.
+        var reordered = new List<OutboxCommand>();
+        var unmoved = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var cmd in sent)
         {
             if (!_outbox.Contains(cmd))
@@ -3024,6 +3203,9 @@ public sealed class SyncEngine
 
             if (result.Ok)
             {
+                if (Reorder.For(cmd.Type) == Reorder.Items)
+                    reordered.Add(cmd);
+
                 PassBack(cmd);
                 RemoveCommand(cmd);
                 continue;
@@ -3043,9 +3225,45 @@ public sealed class SyncEngine
             }
 
             if (cmd.Attempts >= _attemptCeiling)
+            {
                 Fail(cmd, cmd.LastError);
-            else
-                _store.UpdateCommand(cmd);
+                continue;
+            }
+
+            _store.UpdateCommand(cmd);
+
+            if (cmd.Type == "item_move" && ParseArgs(cmd)["id"] is JsonValue moving)
+                unmoved.Add(moving.ToString());
+        }
+
+        Resend(reordered, unmoved);
+    }
+
+    /// <summary>
+    /// Queues again each task reorder that landed while the move of one of its tasks was turned
+    /// away and kept to try again.
+    /// </summary>
+    /// <remarks>
+    /// A task put down at another level is a move and then a reorder, and the server answers the two
+    /// separately. With the move refused, the reorder that landed placed the task where the server
+    /// doesn't have it, and the move, when it lands, files it last. Sent again after the move, the
+    /// reorder puts it back where it was put down.
+    ///
+    /// Not for a move that's been given up: that task is going nowhere, and its priors have been put
+    /// back.
+    /// </remarks>
+    /// <param name="reordered">The task reorders that landed this round</param>
+    /// <param name="unmoved">The tasks whose moves were refused this round and will be tried again</param>
+    private void Resend(List<OutboxCommand> reordered, HashSet<string> unmoved)
+    {
+        if (unmoved.Count == 0)
+            return;
+
+        foreach (var reorder in reordered)
+        {
+            var args = ParseArgs(reorder);
+            if (NestedIds(args).Any(unmoved.Contains))
+                Persist(reorder.Type, args, null, reorder.PriorJson, [], []);
         }
     }
 

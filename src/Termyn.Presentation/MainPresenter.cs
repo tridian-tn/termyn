@@ -1789,6 +1789,76 @@ public sealed class MainPresenter
         return true;
     }
 
+    /// <summary>
+    /// Whether tasks can be dragged about the outline as it's shown now.
+    /// </summary>
+    /// <remarks>
+    /// Only where a row's place on screen is its place in the account: one project, or one section
+    /// of one, in the account's own order. Sorted by a column or searched, the row above a task
+    /// isn't the one before it. A view across projects — Today, a label, a filter — sets tasks from
+    /// different projects side by side, so a drop between two of them would quietly move a task to
+    /// another project when all anyone meant was to shuffle their day.
+    /// </remarks>
+    public bool CanDrag
+        => Sort.IsDefault
+           && !Searching
+           && (Selection.ProjectId is not null || Selection.SectionId is not null || Selection.View == SmartView.Inbox);
+
+    /// <summary>Whether a task can be put down where a drag is pointing, so the pointer can say so.</summary>
+    /// <remarks>
+    /// The task goes by the name it has now. One added a moment ago can be renamed by a sync while
+    /// it's being dragged, and the rows are then under its new name, so the old one would find no
+    /// row to compare and every drop beside it would look like a move.
+    /// </remarks>
+    /// <param name="id">The task being dragged, by whatever name the drag began with</param>
+    /// <param name="target">Where it'd go, from <see cref="OutlineDrop"/></param>
+    /// <returns>True when dropping it there would move it</returns>
+    public bool CanDrop(string id, DropTarget target)
+    {
+        id = _engine.Resolve(id);
+
+        return CanDrag && OutlineDrop.Moves(Rows, id, target) && (target.Zone == DropZone.Onto
+            ? _engine.CanNestItem(id, target.Id)
+            : _engine.CanPlaceItem(id, target.Id, after: target.Zone == DropZone.After));
+    }
+
+    /// <summary>
+    /// Puts a dragged task down beside another, or under it.
+    /// </summary>
+    /// <remarks>
+    /// A task put under another that's folded unfolds it, the way adding a sub-task does. Left
+    /// folded, the task would vanish as it landed, which looks like the drop lost it.
+    /// </remarks>
+    /// <param name="id">The task being dragged</param>
+    /// <param name="target">Where it's been let go, from <see cref="OutlineDrop"/></param>
+    /// <returns>False when it changed nothing, or the task or the one it was dropped by has gone</returns>
+    public bool Drop(string id, DropTarget target)
+    {
+        // By its name now, as the question asked on the way over does.
+        id = _engine.Resolve(id);
+
+        if (!CanDrag || !OutlineDrop.Moves(Rows, id, target))
+            return false;
+
+        var named = Named(id);
+        var onto = target.Zone == DropZone.Onto;
+        var dropped = onto
+            ? _engine.NestItem(id, target.Id)
+            : _engine.PlaceItem(id, target.Id, after: target.Zone == DropZone.After);
+
+        if (!dropped)
+            return false;
+
+        if (onto)
+            _collapsed.Remove(target.Id);
+
+        // A line of its own each time. Nudges by key run together because three presses are one
+        // move, but each drop is a whole move made with one gesture.
+        History.Note(onto ? $"Moved {named} under {Named(target.Id)}" : $"Moved {named}", $"drop:{Guid.NewGuid():N}");
+        Publish();
+        return true;
+    }
+
     // ---- Reminder intents ----------------------------------------------------------------------
 
     /// <summary>

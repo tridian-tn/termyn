@@ -319,6 +319,9 @@ internal sealed class MainForm : Form
         AskForDeadline = AskWithDialog;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.ToggleRequested += id => Guarded(() => TickOff(id));
+        _outline.CanDrag = () => _presenter.CanDrag;
+        _outline.CanDrop = _presenter.CanDrop;
+        _outline.DropRequested += (id, target) => Guarded(() => Dropped(id, target));
         _outline.SelectedIndexChanged += (_, _) => FollowSelection();
 
         // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
@@ -3539,6 +3542,24 @@ internal sealed class MainForm : Form
             _presenter.Reopen(id);
         else
             _presenter.Complete(id);
+    }
+
+    /// <summary>
+    /// Puts a task down where it was dragged to.
+    /// </summary>
+    /// <remarks>
+    /// The pointer only offered the drop because the presenter said it could be made, so a refusal
+    /// here means something changed in between, such as a sync taking away the task it was dropped
+    /// by. Said, because otherwise the drop looks like it was ignored.
+    /// </remarks>
+    /// <param name="id">The task that was dragged</param>
+    /// <param name="target">Where it was let go</param>
+    private void Dropped(string id, DropTarget target)
+    {
+        Noticed();
+
+        if (!_presenter.Drop(id, target))
+            _status.Text = "Couldn't move the task there. Something changed while it was being dragged.";
     }
 
     /// <summary>
