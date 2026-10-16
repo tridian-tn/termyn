@@ -103,7 +103,14 @@ Open `Home`, with a few tasks in it and one of them holding a sub-task.
 - [ ] Hold a drag at the bottom edge of a list longer than the window: it scrolls.
 - [ ] Over the task's own sub-task, the pointer says it can't drop there. **Esc** ends the drag
       and nothing moves.
-- [ ] In Today, and with a column sorted, a row doesn't drag at all.
+- [ ] In Today, and with a column sorted, a task can't be put down anywhere in the list.
+- [ ] From Today, drag a task onto `Home` in the sidebar: a box round the row, and the task moves
+      there. Over a project it's already at the top level of, the pointer says it can't drop.
+- [ ] Drag a project to the top or bottom half of another: a line shows where it'll land, and
+      after an open project the line is under the last row beneath it. After a sync, the web app
+      has the same order. Do the same with a section among its project's others.
+- [ ] A project's copy under Favourites doesn't drag, and a project can't be put down among
+      sections.
 
 ## The rest of the acceptance criteria
 

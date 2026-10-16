@@ -622,13 +622,6 @@ internal sealed class OutlineView : ListView
     private const int ScrollEvery = 60;
 
     /// <summary>
-    /// Asks whether rows can be dragged as the list is shown now. Null leaves dragging off.
-    /// </summary>
-    [Browsable(false)]
-    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public Func<bool>? CanDrag { get; set; }
-
-    /// <summary>
     /// Asks whether a dragged task could be put down where the pointer is. Null turns every drop away.
     /// </summary>
     [Browsable(false)]
@@ -640,6 +633,12 @@ internal sealed class OutlineView : ListView
 
     /// <summary>The task being dragged, or null when no drag out of this list is under way.</summary>
     private string? _dragging;
+
+    /// <summary>
+    /// The task being dragged out of the list, for somewhere else in the window to take, or null
+    /// when there's no drag under way.
+    /// </summary>
+    public string? Dragging => _dragging;
 
     /// <summary>The task under the last press of the left button, which is the one a drag takes.</summary>
     private string? _pressedTask;
@@ -664,9 +663,13 @@ internal sealed class OutlineView : ListView
     private long _scrolled;
 
     /// <summary>
-    /// Starts a drag from a task's row, where the list allows one.
+    /// Starts a drag from a task's row.
     /// </summary>
     /// <remarks>
+    /// From any view, since the sidebar takes a task wherever it was dragged from. Where in this
+    /// list it can be put down is the presenter's to say, drop by drop, and in some views that's
+    /// nowhere at all.
+    ///
     /// A finished task isn't dragged, since its place among the others stopped meaning anything
     /// once it was done; nor is a day's heading, which isn't a task.
     ///
@@ -686,7 +689,7 @@ internal sealed class OutlineView : ListView
             return;
 
         var row = _rows[index];
-        if (row.IsHeading || row.Completed || CanDrag?.Invoke() != true)
+        if (row.IsHeading || row.Completed)
             return;
 
         _dragging = row.Id;

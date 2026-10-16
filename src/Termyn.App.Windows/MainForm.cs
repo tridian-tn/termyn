@@ -56,7 +56,7 @@ internal sealed class MainForm : Form
     private readonly CancellationTokenSource _cts = new();
 
     private readonly SearchBox _search;
-    private readonly TreeView _sidebar;
+    private readonly SidebarTree _sidebar;
     private readonly LinkLabel _crumbs;
 
     /// <summary>The description and the comments, as the two tabs of one panel.</summary>
@@ -264,7 +264,7 @@ internal sealed class MainForm : Form
             Guarded(() => _presenter.Search(_search.Text));
         };
 
-        _sidebar = new BufferedTreeView
+        _sidebar = new SidebarTree
         {
             Dock = DockStyle.Fill,
 
@@ -319,9 +319,14 @@ internal sealed class MainForm : Form
         AskForDeadline = AskWithDialog;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.ToggleRequested += id => Guarded(() => TickOff(id));
-        _outline.CanDrag = () => _presenter.CanDrag;
         _outline.CanDrop = _presenter.CanDrop;
         _outline.DropRequested += (id, target) => Guarded(() => Dropped(id, target));
+        _sidebar.CanDrag = _presenter.CanDragInSidebar;
+        _sidebar.CanDropRow = _presenter.CanDropInSidebar;
+        _sidebar.DraggedTask = () => _outline.Dragging;
+        _sidebar.CanDropTask = _presenter.CanDropTaskOn;
+        _sidebar.RowDropRequested += (dragged, beside, after) => Guarded(() => DroppedInSidebar(dragged, beside, after));
+        _sidebar.TaskDropRequested += (id, node) => Guarded(() => DroppedOnSidebar(id, node));
         _outline.SelectedIndexChanged += (_, _) => FollowSelection();
 
         // Empty until it opens, when it is filled for the row it opened over. Assigning it here is
@@ -1045,6 +1050,7 @@ internal sealed class MainForm : Form
         _crumbs.VisitedLinkColor = _theme.Muted;
 
         _sidebar.BackColor = _theme.Background;
+        _sidebar.MarkColour = _theme.Accent;
         _outline.BackColor = _theme.Panel;
 
         // The mark is a theme colour, so it has to be laid down again in the new one.
@@ -3559,6 +3565,30 @@ internal sealed class MainForm : Form
         Noticed();
 
         if (!_presenter.Drop(id, target))
+            _status.Text = "Couldn't move the task there. Something changed while it was being dragged.";
+    }
+
+    /// <summary>Puts a project or section down where it was dragged to in the sidebar.</summary>
+    /// <remarks>Refused only when something changed during the drag, as with a task dropped in the outline.</remarks>
+    /// <param name="dragged">The row that was dragged</param>
+    /// <param name="beside">The row it was let go next to</param>
+    /// <param name="after">Whether it goes after that row rather than before it</param>
+    private void DroppedInSidebar(SidebarNode dragged, SidebarNode beside, bool after)
+    {
+        Noticed();
+
+        if (!_presenter.DropInSidebar(dragged, beside, after))
+            _status.Text = "Couldn't move it there. Something changed while it was being dragged.";
+    }
+
+    /// <summary>Moves a task dragged out of the outline to the project or section it was let go on.</summary>
+    /// <param name="id">The task that was dragged</param>
+    /// <param name="node">The row it was let go on</param>
+    private void DroppedOnSidebar(string id, SidebarNode node)
+    {
+        Noticed();
+
+        if (!_presenter.DropTaskOn(id, node))
             _status.Text = "Couldn't move the task there. Something changed while it was being dragged.";
     }
 

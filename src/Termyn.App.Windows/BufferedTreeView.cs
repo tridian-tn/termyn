@@ -15,7 +15,7 @@ namespace Termyn.App.Windows;
 /// So the switch is thrown directly, on the handle, and again on any handle after the first, since a
 /// style belongs to the window it was set on.
 /// </remarks>
-internal sealed class BufferedTreeView : TreeView
+internal class BufferedTreeView : TreeView
 {
     /// <summary>TVM_SETEXTENDEDSTYLE, which sets the bits named in wParam to the values in lParam.</summary>
     private const int TvmSetExtendedStyle = 0x1100 + 44;
