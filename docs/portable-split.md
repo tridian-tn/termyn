@@ -164,9 +164,11 @@ Three things hold the direction a build can see:
 - **CA1416, as an error.** Both projects build with `TreatWarningsAsErrors`, so calling an API
   marked Windows-only fails the build, unless the call is behind `OperatingSystem.IsWindows()`.
 - **`PortableSplitTests`**, for what the other two let through: `System.Drawing`, which is in every
-  runtime; the registry behind an `IsWindows()` check; a P/Invoke, `NativeLibrary` or a COM import;
-  a `[SupportedOSPlatform]` that tells CA1416 to stop asking; and a reference to a Termyn project
-  above them, such as a Platform project for another OS.
+  runtime; any `OperatingSystem.Is…()` check, since one round a call is all CA1416 wants; a
+  `[SupportedOSPlatform]` or a platform guard attribute, which tell it the same; a P/Invoke,
+  `NativeLibrary` or COM interop; a reference to anything beyond the framework that isn't listed as
+  known to run everywhere, Termyn's own projects included; and CA1416 being quietened, by a pragma,
+  `NoWarn`, an `.editorconfig` or warnings no longer being errors.
 
 None of them catches what this read-through found, because portable logic written in
 `App.Windows` references nothing it shouldn't. So the read-through is repeated before every release

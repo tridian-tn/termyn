@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using Termyn.Core;
 
 namespace Termyn.Presentation.Tests;
@@ -12,8 +14,8 @@ namespace Termyn.Presentation.Tests;
 /// Targeting <c>net10.0</c> rather than <c>net10.0-windows</c> does most of this already: Windows
 /// Forms can't be referenced at all, and CA1416 fails the build on an API marked as Windows-only.
 /// These check what that lets through. <c>System.Drawing.Color</c> is in every runtime, so it
-/// compiles here; so does a P/Invoke into user32; and <c>[SupportedOSPlatform("windows")]</c> on a
-/// type tells CA1416 that everything in it is fine.
+/// compiles here; so does a P/Invoke into user32; and an <c>OperatingSystem.IsWindows()</c> check
+/// round a call, or <c>[SupportedOSPlatform("windows")]</c> on a type, tells CA1416 that it's fine.
 ///
 /// What none of them catches is portable logic written in App.Windows, because it references
 /// nothing it shouldn't. That's what the read-through in docs/portable-split.md is for.
@@ -22,46 +24,71 @@ public class PortableSplitTests
 {
     public static TheoryData<string> Projects => ["Termyn.Core", "Termyn.Presentation"];
 
+    // net10.0-windows stamps the assembly with the first two. Written by hand on a type or a member,
+    // any of them says that code is for some OSes and not others, and the guards tell CA1416 so.
+    private static readonly HashSet<string> OSMarkers =
+    [
+        "System.Runtime.Versioning.TargetPlatformAttribute",
+        "System.Runtime.Versioning.SupportedOSPlatformAttribute",
+        "System.Runtime.Versioning.UnsupportedOSPlatformAttribute",
+        "System.Runtime.Versioning.ObsoletedOSPlatformAttribute",
+        "System.Runtime.Versioning.SupportedOSPlatformGuardAttribute",
+        "System.Runtime.Versioning.UnsupportedOSPlatformGuardAttribute",
+    ];
+
+    // Each a way out to native code without a P/Invoke of the assembly's own: loading a library by
+    // hand, and the source-generated COM interop, whose types aren't marked as COM imports.
+    private static readonly HashSet<string> Interop =
+    [
+        "System.Runtime.InteropServices.NativeLibrary",
+        "System.Runtime.InteropServices.ComWrappers",
+        "System.Runtime.InteropServices.Marshalling.StrategyBasedComWrappers",
+        "System.Runtime.InteropServices.Marshalling.GeneratedComInterfaceAttribute",
+        "System.Runtime.InteropServices.Marshalling.GeneratedComClassAttribute",
+    ];
+
     [Theory]
     [MemberData(nameof(Projects))]
     public void It_is_built_for_every_operating_system(string project)
     {
-        // net10.0-windows stamps the assembly with both of these. Written by hand on a type or a
-        // member, either says that code runs on one OS only, which also stops CA1416 asking.
         var marked = Read(AssemblyOf(project), reader => reader.CustomAttributes
             .Select(reader.GetCustomAttribute)
-            .Where(a => AttributeName(reader, a) is "System.Runtime.Versioning.SupportedOSPlatformAttribute"
-                                                 or "System.Runtime.Versioning.TargetPlatformAttribute")
+            .Where(a => OSMarkers.Contains(AttributeName(reader, a)))
             .Select(a => $"{OwnerOf(reader, a.Parent)} ({PlatformOf(reader, a)})")
             .Distinct()
             .ToList());
 
         Assert.True(
             marked.Count == 0,
-            $"{project} is meant to run on any OS, but these are marked for one: " + string.Join(", ", marked));
+            $"{project} is meant to run on any OS, but these are marked for some: " + string.Join(", ", marked));
     }
 
     [Theory]
     [MemberData(nameof(Projects))]
-    public void It_builds_only_on_the_projects_below_it(string project)
+    public void It_builds_only_on_what_every_OS_has(string project)
     {
-        // Today the framework target keeps the Windows projects out, and Core can't take Presentation
-        // without a cycle. A project for another OS would target net10.0 too, though, and nothing but
-        // this would stop either of these reaching into it.
-        string[] below = project == "Termyn.Presentation" ? ["Termyn.Core"] : [];
+        // The framework is the same everywhere. Past it, a package has to be known to run on every
+        // OS before it's listed here, so adding one is a decision rather than a side effect: a
+        // wrapper round user32 reaches native code without a P/Invoke in this assembly at all.
+        //
+        // Termyn's own projects are listed the same way. Today the framework target keeps the
+        // Windows ones out, and Core can't take Presentation without a cycle, but a Platform project
+        // for another OS would target net10.0 too.
+        string[] beyond = project == "Termyn.Presentation" ? ["Termyn.Core", "Markdig"] : ["Microsoft.Data.Sqlite"];
 
-        var above = AssemblyOf(project)
+        var unknown = AssemblyOf(project)
             .GetReferencedAssemblies()
             .Select(a => a.Name!)
-            .Where(n => n.StartsWith("Termyn.", StringComparison.Ordinal))
-            .Except(below)
+            .Where(n => !n.StartsWith("System.", StringComparison.Ordinal) && n != "netstandard")
+            .Except(beyond)
             .Order(StringComparer.Ordinal)
             .ToList();
 
         Assert.True(
-            above.Count == 0,
-            $"{project} builds on {string.Join(", ", above)}. Core builds on nothing of Termyn's and "
-            + "Presentation only on Core, so that another client can take them without the rest");
+            unknown.Count == 0,
+            $"{project} builds on {string.Join(", ", unknown)}. Core builds on nothing of Termyn's and "
+            + "Presentation only on Core, and a package goes on the list here once it's known to run "
+            + "on every OS");
     }
 
     [Theory]
@@ -85,6 +112,27 @@ public class PortableSplitTests
 
     [Theory]
     [MemberData(nameof(Projects))]
+    public void It_never_asks_which_OS_it_is_on(string project)
+    {
+        // A check like this round a call is all CA1416 wants, so whatever's behind it, the build
+        // is happy. Code that needs to know is code for one OS, and belongs in a Platform project.
+        var asked = Read(AssemblyOf(project), reader => reader.MemberReferences
+            .Select(reader.GetMemberReference)
+            .Select(m => (Type: TypeRefName(reader, m.Parent), Name: reader.GetString(m.Name)))
+            .Where(m => (m.Type == "System.OperatingSystem" && m.Name.StartsWith("Is", StringComparison.Ordinal))
+                     || (m.Type == "System.Runtime.InteropServices.RuntimeInformation" && m.Name == "IsOSPlatform"))
+            .Select(m => $"{m.Type}.{m.Name}")
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToList());
+
+        Assert.True(
+            asked.Count == 0,
+            $"{project} asks {string.Join(", ", asked)}, which a portable project has no need to");
+    }
+
+    [Theory]
+    [MemberData(nameof(Projects))]
     public void It_calls_no_native_code(string project)
     {
         // A P/Invoke compiles under any target, and fails only when it runs somewhere its library
@@ -98,17 +146,15 @@ public class PortableSplitTests
                 .Select(m => $"{MemberName(reader, m)} "
                            + $"({reader.GetString(reader.GetModuleReference(m.GetImport().Module).Name)})");
 
-            var loaded = reader.TypeReferences
-                .Select(reader.GetTypeReference)
-                .Where(t => reader.GetString(t.Namespace) == "System.Runtime.InteropServices"
-                         && reader.GetString(t.Name) == "NativeLibrary")
-                .Select(_ => "NativeLibrary");
+            var interop = reader.TypeReferences
+                .Select(h => TypeRefName(reader, h))
+                .Where(Interop.Contains);
 
             var imported = reader.TypeDefinitions
                 .Where(h => reader.GetTypeDefinition(h).Attributes.HasFlag(TypeAttributes.Import))
                 .Select(h => $"{TypeName(reader, h)} (COM)");
 
-            return invoked.Concat(loaded).Concat(imported).ToList();
+            return invoked.Concat(interop).Concat(imported).ToList();
         });
 
         Assert.True(
@@ -116,20 +162,79 @@ public class PortableSplitTests
             $"{project} reaches native code through {string.Join(", ", native)}");
     }
 
-    private static Assembly AssemblyOf(string project) => project switch
+    [Theory]
+    [MemberData(nameof(Projects))]
+    public void CA1416_still_fails_the_build(string project)
     {
-        "Termyn.Core" => typeof(Links).Assembly,
-        "Termyn.Presentation" => typeof(SyncStatus).Assembly,
-        _ => throw new ArgumentOutOfRangeException(nameof(project), project, null),
-    };
+        // Every check above leans on CA1416 for whatever Windows-only API they don't list, and none
+        // of the ways to quieten it leaves anything in the assembly to find: a pragma, NoWarn, an
+        // .editorconfig severity, or analysers or warnings-as-errors turned off.
+        var root = RepoRoot();
+        var directory = Path.Combine(root, "src", project);
+
+        var silencing = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(f => !Regex.IsMatch(Path.GetRelativePath(directory, f), @"^(bin|obj)[\\/]"))
+            .Where(f => Path.GetExtension(f) is ".cs" or ".csproj" or ".props" or ".targets" or ".editorconfig" or ".globalconfig")
+            .Concat(new[] { "Directory.Build.props", "Directory.Build.targets", ".editorconfig", ".globalconfig" }
+                .Select(f => Path.Combine(root, f))
+                .Where(File.Exists))
+            .Where(f => Regex.IsMatch(File.ReadAllText(f), @"CA1416|<(EnableNETAnalyzers|RunAnalyzers|RunAnalyzersDuringBuild)>\s*false"))
+            .Select(f => Path.GetRelativePath(root, f))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var projectFile = File.ReadAllText(Path.Combine(directory, $"{project}.csproj"));
+
+        Assert.True(
+            silencing.Count == 0,
+            $"CA1416 is quietened for {project} in {string.Join(", ", silencing)}");
+        Assert.True(
+            Regex.IsMatch(projectFile,@"<TreatWarningsAsErrors>\s*true\s*</TreatWarningsAsErrors>"),
+            $"{project} no longer treats warnings as errors, so CA1416 only warns");
+    }
+
+    private static Assembly AssemblyOf(string project)
+    {
+        var assembly = project switch
+        {
+            "Termyn.Core" => typeof(Links).Assembly,
+            "Termyn.Presentation" => typeof(SyncStatus).Assembly,
+            _ => throw new ArgumentOutOfRangeException(nameof(project), project, null),
+        };
+
+        // The type standing in for each is only a way to reach its assembly. Moved to the other
+        // project, it'd have one checked twice and this one never.
+        Assert.Equal(project, assembly.GetName().Name);
+        return assembly;
+    }
+
+    /// <summary>
+    /// The folder holding the solution.
+    /// </summary>
+    /// <remarks>
+    /// Found from this file as it was compiled, so the tests can run from a build put anywhere, and
+    /// from the test binary if the compiler was told to hide where the sources were.
+    /// </remarks>
+    /// <param name="source">This file's path, filled in by the compiler</param>
+    /// <returns>The folder with <c>Termyn.slnx</c> in it</returns>
+    private static string RepoRoot([CallerFilePath] string source = "")
+    {
+        foreach (var start in new[] { Path.GetDirectoryName(source), AppContext.BaseDirectory })
+        {
+            for (var directory = start is null ? null : new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+                if (File.Exists(Path.Combine(directory.FullName, "Termyn.slnx"))) return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("couldn't find Termyn.slnx above the tests or their sources");
+    }
 
     /// <summary>
     /// Reads an assembly's metadata as the compiler wrote it.
     /// </summary>
     /// <remarks>
-    /// The metadata lists every type the assembly names from another one, wherever it's named: a
-    /// signature, a local, a call. Reflection only sees signatures, which is how a type used inside
-    /// a method body would get past it.
+    /// The metadata lists every type and member the assembly names from another one, wherever it's
+    /// named: a signature, a local, a call. Reflection only sees signatures, which is how a type
+    /// used inside a method body would get past it.
     /// </remarks>
     /// <param name="assembly">The assembly whose file to read</param>
     /// <param name="read">What to take from it, finished before the file is closed</param>
@@ -169,27 +274,35 @@ public class PortableSplitTests
     }
 
     /// <summary>
+    /// The full name of a type named from another assembly.
+    /// </summary>
+    /// <param name="reader">The metadata the name is in</param>
+    /// <param name="handle">What names the type, such as a member reference's parent</param>
+    /// <returns>The type's namespace and name, or nothing when the handle isn't a type reference</returns>
+    private static string TypeRefName(MetadataReader reader, EntityHandle handle)
+    {
+        if (handle.Kind != HandleKind.TypeReference) return "";
+
+        var type = reader.GetTypeReference((TypeReferenceHandle)handle);
+        return $"{reader.GetString(type.Namespace)}.{reader.GetString(type.Name)}";
+    }
+
+    /// <summary>
     /// The full name of an attribute's type, when it comes from another assembly.
     /// </summary>
     /// <param name="reader">The metadata the attribute is in</param>
     /// <param name="attribute">The attribute as applied</param>
     /// <returns>The type's namespace and name, or nothing for one declared in the same assembly</returns>
     private static string AttributeName(MetadataReader reader, CustomAttribute attribute)
-    {
-        if (attribute.Constructor.Kind != HandleKind.MemberReference) return "";
-
-        var parent = reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent;
-        if (parent.Kind != HandleKind.TypeReference) return "";
-
-        var type = reader.GetTypeReference((TypeReferenceHandle)parent);
-        return $"{reader.GetString(type.Namespace)}.{reader.GetString(type.Name)}";
-    }
+        => attribute.Constructor.Kind == HandleKind.MemberReference
+            ? TypeRefName(reader, reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent)
+            : "";
 
     /// <summary>
-    /// The platform an OS attribute names, which both of them take as their only argument.
+    /// The platform an OS attribute names, which each of them takes as its first argument.
     /// </summary>
     /// <param name="reader">The metadata the attribute is in</param>
-    /// <param name="attribute">A SupportedOSPlatform or TargetPlatform attribute</param>
+    /// <param name="attribute">One of the attributes in <see cref="OSMarkers"/></param>
     /// <returns>The platform, such as <c>windows</c> or <c>Windows7.0</c></returns>
     private static string PlatformOf(MetadataReader reader, CustomAttribute attribute)
     {
