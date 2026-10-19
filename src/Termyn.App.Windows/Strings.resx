@@ -73,4 +73,706 @@
     <value>That folder isn't there yet.</value>
     <comment>Status bar message when a folder linked from the about box's diagnostics doesn't exist, usually because nothing has been written to it yet.</comment>
   </data>
+  <data name="ButtonOK" xml:space="preserve">
+    <value>OK</value>
+    <comment>Button that accepts a dialog.</comment>
+  </data>
+  <data name="ButtonCancel" xml:space="preserve">
+    <value>Cancel</value>
+    <comment>Button that closes a dialog without keeping what was changed in it.</comment>
+  </data>
+  <data name="ButtonClose" xml:space="preserve">
+    <value>Close</value>
+    <comment>Button that closes a dialog that has nothing to save.</comment>
+  </data>
+  <data name="ButtonSave" xml:space="preserve">
+    <value>Save</value>
+    <comment>Button that saves the settings and closes the settings dialog.</comment>
+  </data>
+  <data name="PaletteTitle" xml:space="preserve">
+    <value>Termyn — commands</value>
+    <comment>Title bar of the command palette, which lists views to go to and commands to run.</comment>
+  </data>
+  <data name="PalettePlaceholder" xml:space="preserve">
+    <value>Go to, or do…</value>
+    <comment>Greyed prompt in the command palette's empty search box.</comment>
+  </data>
+  <data name="QuickAddTitle" xml:space="preserve">
+    <value>Termyn — quick add</value>
+    <comment>Title bar of the small window the global hotkey opens for adding a task.</comment>
+  </data>
+  <data name="SettingsTitle" xml:space="preserve">
+    <value>Termyn — settings</value>
+    <comment>Title bar of the settings dialog.</comment>
+  </data>
+  <data name="SettingsHotkey" xml:space="preserve">
+    <value>Global quick-add hotkey</value>
+    <comment>Check box in settings that turns the system-wide quick-add shortcut on or off.</comment>
+  </data>
+  <data name="SettingsKeyCtrl" xml:space="preserve">
+    <value>Ctrl</value>
+    <comment>The Ctrl key, as a check box in the hotkey settings. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="SettingsKeyAlt" xml:space="preserve">
+    <value>Alt</value>
+    <comment>The Alt key, as a check box in the hotkey settings. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="SettingsKeyShift" xml:space="preserve">
+    <value>Shift</value>
+    <comment>The Shift key, as a check box in the hotkey settings. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="SettingsKeyWin" xml:space="preserve">
+    <value>Win</value>
+    <comment>The Windows key, as a check box in the hotkey settings.</comment>
+  </data>
+  <data name="SettingsLaunchAtLogin" xml:space="preserve">
+    <value>Start Termyn when I sign in</value>
+    <comment>Check box in settings: start the app when the user signs in to Windows.</comment>
+  </data>
+  <data name="SettingsCloseToTray" xml:space="preserve">
+    <value>Closing the window leaves Termyn in the tray</value>
+    <comment>Check box in settings: closing the main window keeps the app running in the notification area.</comment>
+  </data>
+  <data name="SettingsClearDownloads" xml:space="preserve">
+    <value>Clear downloaded files</value>
+    <comment>Button in settings that deletes the comment attachments kept on disk.</comment>
+  </data>
+  <data name="SettingsFileRemoved" xml:space="preserve">
+    <value>1 file removed</value>
+    <comment>Replaces the clear-downloads button's text after it has deleted exactly one file.</comment>
+  </data>
+  <data name="SettingsFilesRemoved" xml:space="preserve">
+    <value>{0} files removed</value>
+    <comment>Replaces the clear-downloads button's text after it has deleted files. {0} is how many, never one.</comment>
+  </data>
+  <data name="SettingsTheme" xml:space="preserve">
+    <value>Theme</value>
+    <comment>Caption beside the colour theme choice in settings.</comment>
+  </data>
+  <data name="SettingsBackgroundSync" xml:space="preserve">
+    <value>Background sync</value>
+    <comment>Caption beside the choice of automatic or manual syncing in settings.</comment>
+  </data>
+  <data name="SettingsSyncInterval" xml:space="preserve">
+    <value>Every (seconds)</value>
+    <comment>Caption beside the number of seconds between automatic syncs.</comment>
+  </data>
+  <data name="SettingsDownloadsSize" xml:space="preserve">
+    <value>Downloads: keep up to (MB)</value>
+    <comment>Caption beside the most megabytes of attachments kept on disk.</comment>
+  </data>
+  <data name="SettingsDownloadsAge" xml:space="preserve">
+    <value>and for at most (days)</value>
+    <comment>Caption below the downloads size, continuing it: the most days an attachment is kept.</comment>
+  </data>
+  <data name="SettingsHotkeyInvalid" xml:space="preserve">
+    <value>Needs Ctrl, Alt or Win — otherwise {0} is used.</value>
+    <comment>Warning under the hotkey settings when the chosen keys have no modifier. {0} is the default hotkey, such as Ctrl+Alt+Space.</comment>
+  </data>
+  <data name="ThemeSystem" xml:space="preserve">
+    <value>System</value>
+    <comment>Theme choice in settings: follow Windows' light or dark setting.</comment>
+  </data>
+  <data name="ThemeLight" xml:space="preserve">
+    <value>Light</value>
+    <comment>Theme choice in settings.</comment>
+  </data>
+  <data name="ThemeDark" xml:space="preserve">
+    <value>Dark</value>
+    <comment>Theme choice in settings.</comment>
+  </data>
+  <data name="SyncAutomatic" xml:space="preserve">
+    <value>Automatic</value>
+    <comment>Background sync choice in settings: sync every so many seconds.</comment>
+  </data>
+  <data name="SyncManual" xml:space="preserve">
+    <value>Manual</value>
+    <comment>Background sync choice in settings: sync only when asked.</comment>
+  </data>
+  <data name="RemindersTitle" xml:space="preserve">
+    <value>Reminders</value>
+    <comment>Title bar of the dialog for a task's reminders.</comment>
+  </data>
+  <data name="RemindersUpgrade" xml:space="preserve">
+    <value>Todoist Pro required</value>
+    <comment>Shown in the reminders dialog when the account's Todoist plan has no reminders. Todoist Pro is a product name.</comment>
+  </data>
+  <data name="RemindersAtTime" xml:space="preserve">
+    <value>At the time it's due</value>
+    <comment>Reminder choice: remind at the task's due time.</comment>
+  </data>
+  <data name="RemindersMinutesBefore" xml:space="preserve">
+    <value>{0} minutes before</value>
+    <comment>Reminder choice. {0} is 10 or 30.</comment>
+  </data>
+  <data name="RemindersHourBefore" xml:space="preserve">
+    <value>1 hour before</value>
+    <comment>Reminder choice.</comment>
+  </data>
+  <data name="RemindersDayBefore" xml:space="preserve">
+    <value>1 day before</value>
+    <comment>Reminder choice.</comment>
+  </data>
+  <data name="RemindersRemindMe" xml:space="preserve">
+    <value>Remind me</value>
+    <comment>Label before the list of reminder choices, reading on into the choice: "Remind me 10 minutes before".</comment>
+  </data>
+  <data name="RemindersAdd" xml:space="preserve">
+    <value>Add</value>
+    <comment>Button in the reminders dialog that adds the chosen reminder.</comment>
+  </data>
+  <data name="RemindersOrOn" xml:space="preserve">
+    <value>or on</value>
+    <comment>Label before the date and time picker for a reminder at a set moment, reading on from "Remind me".</comment>
+  </data>
+  <data name="RemindersRemove" xml:space="preserve">
+    <value>Remove</value>
+    <comment>Button in the reminders dialog that deletes the selected reminder.</comment>
+  </data>
+  <data name="RemindersPlanNotSynced" xml:space="preserve">
+    <value>Your plan hasn't synced yet.</value>
+    <comment>Reminders dialog: the app doesn't know yet whether the account's plan allows reminders.</comment>
+  </data>
+  <data name="RemindersAtLimit" xml:space="preserve">
+    <value>This plan is at its limit for reminders.</value>
+    <comment>Reminders dialog: Todoist refused a new reminder because the plan allows no more.</comment>
+  </data>
+  <data name="RemindersTaskGone" xml:space="preserve">
+    <value>That task is no longer here.</value>
+    <comment>Reminders dialog: the task was deleted or moved away while the dialog was open.</comment>
+  </data>
+  <data name="RemindersNone" xml:space="preserve">
+    <value>No reminders on this task.</value>
+    <comment>Shown in the reminders list when the task has none.</comment>
+  </data>
+  <data name="TokenTitleConnect" xml:space="preserve">
+    <value>Connect Termyn to Todoist</value>
+    <comment>Title bar of the dialog asking for a Todoist API token on first use.</comment>
+  </data>
+  <data name="TokenTitleReconnect" xml:space="preserve">
+    <value>Reconnect Termyn to Todoist</value>
+    <comment>Title bar of the same dialog when Todoist has refused the token it had.</comment>
+  </data>
+  <data name="TokenPrompt" xml:space="preserve">
+    <value>Paste your Todoist API token (Settings → Integrations → Developer → API token).</value>
+    <comment>Instruction in the token dialog. The part in brackets is the path through Todoist's own settings, so use the names Todoist shows in your language.</comment>
+  </data>
+  <data name="TokenPromptReconnect" xml:space="preserve">
+    <value>Todoist turned the last token away. Paste the current one (Settings → Integrations → Developer → API token).</value>
+    <comment>Instruction in the token dialog when the old token was refused. The part in brackets is the path through Todoist's own settings, so use the names Todoist shows in your language.</comment>
+  </data>
+  <data name="TokenOpenSettings" xml:space="preserve">
+    <value>Open Todoist integration settings</value>
+    <comment>Link in the token dialog that opens the Todoist page where the token is shown.</comment>
+  </data>
+  <data name="TokenConnect" xml:space="preserve">
+    <value>Connect</value>
+    <comment>Button in the token dialog that checks and saves the pasted token.</comment>
+  </data>
+  <data name="TokenRejected" xml:space="preserve">
+    <value>That token was rejected. Check it and try again.</value>
+    <comment>Token dialog: Todoist said the token isn't valid.</comment>
+  </data>
+  <data name="TokenUnreachable" xml:space="preserve">
+    <value>Couldn't reach Todoist (it may be offline or busy). Check your connection and retry.</value>
+    <comment>Token dialog: the token couldn't be checked because Todoist didn't answer.</comment>
+  </data>
+  <data name="TokenSaveFailed" xml:space="preserve">
+    <value>Something went wrong saving the token. Please try again.</value>
+    <comment>Token dialog: the token was accepted but couldn't be stored on this computer.</comment>
+  </data>
+  <data name="TokenBrowserFailed" xml:space="preserve">
+    <value>Couldn't open the browser. Copy this link manually: {0}</value>
+    <comment>Token dialog. {0} is the address of the Todoist settings page.</comment>
+  </data>
+  <data name="ColumnTask" xml:space="preserve">
+    <value>Task</value>
+    <comment>Column heading in the task list: the task's name.</comment>
+  </data>
+  <data name="ColumnProject" xml:space="preserve">
+    <value>Project</value>
+    <comment>Column heading in the task list.</comment>
+  </data>
+  <data name="ColumnDue" xml:space="preserve">
+    <value>Due</value>
+    <comment>Column heading in the task list: the due date.</comment>
+  </data>
+  <data name="ColumnDeadline" xml:space="preserve">
+    <value>Deadline</value>
+    <comment>Column heading in the task list.</comment>
+  </data>
+  <data name="ColumnLabels" xml:space="preserve">
+    <value>Labels</value>
+    <comment>Column heading in the task list.</comment>
+  </data>
+  <data name="DueTitle" xml:space="preserve">
+    <value>Due date</value>
+    <comment>Title bar of the dialog for setting a task's due date.</comment>
+  </data>
+  <data name="DuePrompt" xml:space="preserve">
+    <value>When is it due?</value>
+    <comment>Heading in the due date dialog.</comment>
+  </data>
+  <data name="DueTime" xml:space="preserve">
+    <value>Time:</value>
+    <comment>Label before the time box in the due date dialog.</comment>
+  </data>
+  <data name="DueTimeAccessible" xml:space="preserve">
+    <value>Time</value>
+    <comment>The time box's name as read by a screen reader.</comment>
+  </data>
+  <data name="DueClear" xml:space="preserve">
+    <value>Clear</value>
+    <comment>Button in the due date dialog that removes the due date.</comment>
+  </data>
+  <data name="CommentsAttach" xml:space="preserve">
+    <value>Attach a file…</value>
+    <comment>Button under the comment box that picks a file to attach.</comment>
+  </data>
+  <data name="CommentsOpenAttachment" xml:space="preserve">
+    <value>Open attachment</value>
+    <comment>Right-click menu item on a comment with a file.</comment>
+  </data>
+  <data name="CommentsRemoveAttachment" xml:space="preserve">
+    <value>Remove attachment</value>
+    <comment>Right-click menu item on a comment with a file.</comment>
+  </data>
+  <data name="CommentsEdit" xml:space="preserve">
+    <value>Edit</value>
+    <comment>Right-click menu item on a comment.</comment>
+  </data>
+  <data name="CommentsDelete" xml:space="preserve">
+    <value>Delete comment</value>
+    <comment>Right-click menu item on a comment.</comment>
+  </data>
+  <data name="CommentsPostHint" xml:space="preserve">
+    <value>Ctrl+Enter to post</value>
+    <comment>Hint beside the comment box while writing a new comment.</comment>
+  </data>
+  <data name="CommentsEditHint" xml:space="preserve">
+    <value>Editing — Ctrl+Enter to save, Esc to cancel</value>
+    <comment>Hint beside the comment box while changing an existing comment.</comment>
+  </data>
+  <data name="LabelsTitle" xml:space="preserve">
+    <value>Labels</value>
+    <comment>Title bar of the dialog for choosing a task's labels.</comment>
+  </data>
+  <data name="LabelsNew" xml:space="preserve">
+    <value>New label:</value>
+    <comment>Label before the box for typing a new label's name.</comment>
+  </data>
+  <data name="LabelsNamePlaceholder" xml:space="preserve">
+    <value>name</value>
+    <comment>Greyed prompt in the empty new-label box.</comment>
+  </data>
+  <data name="LabelsAdd" xml:space="preserve">
+    <value>Add</value>
+    <comment>Button that creates the typed label and ticks it.</comment>
+  </data>
+  <data name="HistoryTitle" xml:space="preserve">
+    <value>What you've done</value>
+    <comment>Title bar of the window listing the changes made in this session.</comment>
+  </data>
+  <data name="HistoryIntro" xml:space="preserve">
+    <value>Changes made in Termyn since it started.</value>
+    <comment>Line at the top of the history window.</comment>
+  </data>
+  <data name="HistoryEmpty" xml:space="preserve">
+    <value>Nothing yet.</value>
+    <comment>Shown in the history window when no changes have been made.</comment>
+  </data>
+  <data name="HistoryClear" xml:space="preserve">
+    <value>Clear</value>
+    <comment>Button that empties the history list.</comment>
+  </data>
+  <data name="MoveTitle" xml:space="preserve">
+    <value>Move to</value>
+    <comment>Title bar of the dialog for moving a task to another project or section.</comment>
+  </data>
+  <data name="MoveButton" xml:space="preserve">
+    <value>Move</value>
+    <comment>Button that moves the task to the chosen place.</comment>
+  </data>
+  <data name="MovePlaceholder" xml:space="preserve">
+    <value>Project or section…</value>
+    <comment>Greyed prompt in the move dialog's empty search box.</comment>
+  </data>
+  <data name="MoveKindProject" xml:space="preserve">
+    <value>project</value>
+    <comment>Small tag on a row of the move dialog, saying the row is a project.</comment>
+  </data>
+  <data name="MoveKindSection" xml:space="preserve">
+    <value>section</value>
+    <comment>Small tag on a row of the move dialog, saying the row is a section of a project.</comment>
+  </data>
+  <data name="DeadlineTitle" xml:space="preserve">
+    <value>Deadline</value>
+    <comment>Title bar of the dialog for setting a task's deadline.</comment>
+  </data>
+  <data name="DeadlinePrompt" xml:space="preserve">
+    <value>Finish it by:</value>
+    <comment>Label before the date picker in the deadline dialog.</comment>
+  </data>
+  <data name="DeadlineClear" xml:space="preserve">
+    <value>Clear</value>
+    <comment>Button in the deadline dialog that removes the deadline.</comment>
+  </data>
+  <data name="SubtaskTitle" xml:space="preserve">
+    <value>New sub-task</value>
+    <comment>Title bar of the dialog for adding a sub-task.</comment>
+  </data>
+  <data name="SubtaskPrompt" xml:space="preserve">
+    <value>Sub-task:</value>
+    <comment>Label before the box for the sub-task's name.</comment>
+  </data>
+  <data name="SubtaskUnder" xml:space="preserve">
+    <value>Under: {0}</value>
+    <comment>Line in the sub-task dialog. {0} is the name of the task it's being added under.</comment>
+  </data>
+  <data name="RenameTitle" xml:space="preserve">
+    <value>Rename</value>
+    <comment>Title bar of the dialog for renaming a project, section or label.</comment>
+  </data>
+  <data name="RenamePrompt" xml:space="preserve">
+    <value>New name:</value>
+    <comment>Label before the box for the new name.</comment>
+  </data>
+  <data name="NewProjectTitle" xml:space="preserve">
+    <value>New project</value>
+    <comment>Title bar of the dialog for adding a project.</comment>
+  </data>
+  <data name="NewProjectPrompt" xml:space="preserve">
+    <value>Project name:</value>
+    <comment>Label before the box for the new project's name.</comment>
+  </data>
+  <data name="NewSectionTitle" xml:space="preserve">
+    <value>New section</value>
+    <comment>Title bar of the dialog for adding a section.</comment>
+  </data>
+  <data name="NewSectionPrompt" xml:space="preserve">
+    <value>Section name:</value>
+    <comment>Label before the box for the new section's name.</comment>
+  </data>
+  <data name="FailedTitle" xml:space="preserve">
+    <value>Changes that didn't happen</value>
+    <comment>Title bar of the window listing changes Todoist refused or never confirmed.</comment>
+  </data>
+  <data name="FailedIntro" xml:space="preserve">
+    <value>Termyn couldn't complete these changes.</value>
+    <comment>Line at the top of that window.</comment>
+  </data>
+  <data name="FailedDismiss" xml:space="preserve">
+    <value>Dismiss</value>
+    <comment>Button that removes the selected failed change from the list.</comment>
+  </data>
+  <data name="DayBoxAccessible" xml:space="preserve">
+    <value>Day</value>
+    <comment>A date box's name as read by a screen reader.</comment>
+  </data>
+  <data name="DayBoxPick" xml:space="preserve">
+    <value>Pick a day</value>
+    <comment>Tooltip and screen reader name of the button that opens a calendar beside a date box.</comment>
+  </data>
+  <data name="SearchClearAccessible" xml:space="preserve">
+    <value>Clear search</value>
+    <comment>Screen reader name of the cross that empties the search box.</comment>
+  </data>
+  <data name="DownloadsLeftBehind" xml:space="preserve">
+    <value>Some downloaded files couldn't be removed, probably because they're open in another program. Close them and delete what's left in:
+
+{0}</value>
+    <comment>Message after switching account or signing out. {0} is a folder path.</comment>
+  </data>
+  <data name="SwitchAccountFailed" xml:space="preserve">
+    <value>Termyn couldn't remove the last account's data, so it hasn't signed in to the new one.
+
+{0}</value>
+    <comment>Message when switching account fails. {0} is the error's own text.</comment>
+  </data>
+  <data name="SignOutFailed" xml:space="preserve">
+    <value>Termyn couldn't finish signing out, so you're still signed in.
+
+{0}</value>
+    <comment>Message when signing out fails. {0} is the error's own text.</comment>
+  </data>
+  <data name="MainReconnect" xml:space="preserve">
+    <value>Todoist turned your token away. Click here to reconnect; until then nothing can be changed.</value>
+    <comment>Status bar when Todoist refuses the stored token. Clicking the status bar opens the token dialog.</comment>
+  </data>
+  <data name="MainDescriptionPlaceholder" xml:space="preserve">
+    <value>Description…  **bold**  *italic*  - a list</value>
+    <comment>Greyed prompt in the empty description box. Keep the markdown marks (** * -) as they are: they show how to write bold, italic and lists.</comment>
+  </data>
+  <data name="MainDescriptionTab" xml:space="preserve">
+    <value>Description</value>
+    <comment>Tab above the task's description.</comment>
+  </data>
+  <data name="MainCommentsTab" xml:space="preserve">
+    <value>Comments</value>
+    <comment>Tab above the task's comments, when it has none.</comment>
+  </data>
+  <data name="MainCommentsTabCount" xml:space="preserve">
+    <value>Comments ({0})</value>
+    <comment>Tab above the task's comments. {0} is how many there are.</comment>
+  </data>
+  <data name="MainLoading" xml:space="preserve">
+    <value>Loading…</value>
+    <comment>Status bar while the app first loads the account.</comment>
+  </data>
+  <data name="MainCacheRebuilt" xml:space="preserve">
+    <value>The local cache could not be read and has been rebuilt. Anything not yet synced was lost; the old file is kept beside it.</value>
+    <comment>Status bar after the local copy of the account was found damaged and started again.</comment>
+  </data>
+  <data name="TrayOpen" xml:space="preserve">
+    <value>Open Termyn</value>
+    <comment>Notification area menu item that shows the main window.</comment>
+  </data>
+  <data name="TrayQuickAdd" xml:space="preserve">
+    <value>Quick add…</value>
+    <comment>Notification area menu item that opens the quick-add window.</comment>
+  </data>
+  <data name="TraySyncNow" xml:space="preserve">
+    <value>Sync now</value>
+    <comment>Notification area menu item.</comment>
+  </data>
+  <data name="TraySettings" xml:space="preserve">
+    <value>Settings…</value>
+    <comment>Notification area menu item.</comment>
+  </data>
+  <data name="TrayUpdates" xml:space="preserve">
+    <value>Check for updates…</value>
+    <comment>Notification area menu item.</comment>
+  </data>
+  <data name="TrayExit" xml:space="preserve">
+    <value>Exit</value>
+    <comment>Notification area menu item that closes the app.</comment>
+  </data>
+  <data name="TrayNothingDue" xml:space="preserve">
+    <value>Termyn — nothing due today</value>
+    <comment>Tooltip on the notification area icon when no tasks are due today.</comment>
+  </data>
+  <data name="TrayOneDue" xml:space="preserve">
+    <value>Termyn — 1 task due today</value>
+    <comment>Tooltip on the notification area icon when exactly one task is due today.</comment>
+  </data>
+  <data name="TrayManyDue" xml:space="preserve">
+    <value>Termyn — {0} tasks due today</value>
+    <comment>Tooltip on the notification area icon. {0} is how many tasks are due today, never one.</comment>
+  </data>
+  <data name="TransferBeforeReconnect" xml:space="preserve">
+    <value>A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then reconnect.</value>
+    <comment>Message when reconnecting is asked for during an upload or download.</comment>
+  </data>
+  <data name="TransferBeforeSignOut" xml:space="preserve">
+    <value>A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then sign out.</value>
+    <comment>Message when signing out is asked for during an upload or download.</comment>
+  </data>
+  <data name="HotkeyNone" xml:space="preserve">
+    <value>Quick-add has no hotkey.</value>
+    <comment>Status bar after settings are saved with the quick-add hotkey off.</comment>
+  </data>
+  <data name="HotkeyIs" xml:space="preserve">
+    <value>Quick-add hotkey is {0}.</value>
+    <comment>Status bar after settings are saved. {0} is the key combination, such as Ctrl+Alt+Space.</comment>
+  </data>
+  <data name="HotkeyTaken" xml:space="preserve">
+    <value>Another application already owns {0} — quick-add has no hotkey.</value>
+    <comment>Status bar when another program has the chosen hotkey. {0} is the key combination.</comment>
+  </data>
+  <data name="UpdatesChecking" xml:space="preserve">
+    <value>Checking for updates…</value>
+    <comment>Status bar while asking GitHub for a newer release.</comment>
+  </data>
+  <data name="UpdatesOpenPrompt" xml:space="preserve">
+    <value>{0}
+
+Open the release page?</value>
+    <comment>Message when a newer release exists. {0} says which version is out.</comment>
+  </data>
+  <data name="UpdatesOpenFailed" xml:space="preserve">
+    <value>Couldn't open the release page.</value>
+    <comment>Status bar when the browser couldn't be started for the release page.</comment>
+  </data>
+  <data name="NoticeLaunchAtLogin" xml:space="preserve">
+    <value>Windows would not change the launch-at-login setting.</value>
+    <comment>Status bar after saving settings, when Windows refused to change whether the app starts at sign-in.</comment>
+  </data>
+  <data name="NoticeFrameTheme" xml:space="preserve">
+    <value>Restart Termyn for the window frame to follow the theme.</value>
+    <comment>Status bar after changing the theme: the title bar only changes after a restart.</comment>
+  </data>
+  <data name="NoticeSyncCadence" xml:space="preserve">
+    <value>The sync cadence takes effect when Termyn next starts.</value>
+    <comment>Status bar after changing how often to sync.</comment>
+  </data>
+  <data name="NoticeSettingsNotSaved" xml:space="preserve">
+    <value>Settings could not be written to disk.</value>
+    <comment>Status bar when the settings file couldn't be saved.</comment>
+  </data>
+  <data name="UnreadableFilter" xml:space="preserve">
+    <value>Termyn can't read this filter: {0}</value>
+    <comment>Notice above the task list for a saved Todoist filter the app can't run. {0} is the filter's query, which stays as Todoist wrote it.</comment>
+  </data>
+  <data name="UnreadableFilterLink" xml:space="preserve">
+    <value>Open in Todoist</value>
+    <comment>Link under that notice, which opens the filter in Todoist.</comment>
+  </data>
+  <data name="StatusSyncFailed" xml:space="preserve">
+    <value>Background sync failed: {0}</value>
+    <comment>Status bar when an automatic sync fails. {0} is the error's own text.</comment>
+  </data>
+  <data name="StatusSomethingWrong" xml:space="preserve">
+    <value>Something went wrong: {0}</value>
+    <comment>Status bar when an action fails. {0} is the error's own text.</comment>
+  </data>
+  <data name="DeleteLabelConfirm" xml:space="preserve">
+    <value>Are you sure you want to permanently delete the label "{0}" and remove it from every task?</value>
+    <comment>Confirmation before deleting a label. {0} is the label's name.</comment>
+  </data>
+  <data name="DeleteProjectConfirm" xml:space="preserve">
+    <value>Are you sure you want to permanently delete the project "{0}" and everything in it?</value>
+    <comment>Confirmation before deleting a project. {0} is the project's name.</comment>
+  </data>
+  <data name="DeleteSectionConfirm" xml:space="preserve">
+    <value>Are you sure you want to permanently delete the section "{0}" and everything in it?</value>
+    <comment>Confirmation before deleting a section. {0} is the section's name.</comment>
+  </data>
+  <data name="DescriptionReadOnly" xml:space="preserve">
+    <value>This description can't be edited here.</value>
+    <comment>Shown in place of the description editor when the description is read-only.</comment>
+  </data>
+  <data name="DescriptionNotKept" xml:space="preserve">
+    <value>Todoist keeps no description on the Inbox.</value>
+    <comment>Shown in place of the description editor when the Inbox is selected.</comment>
+  </data>
+  <data name="DescriptionNothingSelected" xml:space="preserve">
+    <value>Select a task or a project to see its description.</value>
+    <comment>Shown in place of the description editor when nothing is selected.</comment>
+  </data>
+  <data name="CommentsNothingSelected" xml:space="preserve">
+    <value>Select a task or a project to see its comments.</value>
+    <comment>Shown in place of the comments when nothing is selected.</comment>
+  </data>
+  <data name="CommentsNone" xml:space="preserve">
+    <value>No comments yet.</value>
+    <comment>Shown in place of the comments when there are none.</comment>
+  </data>
+  <data name="CommentsReadOnly" xml:space="preserve">
+    <value>This task's comments can't be added to here.</value>
+    <comment>Shown in place of the comment box when comments are read-only.</comment>
+  </data>
+  <data name="DeleteCommentConfirm" xml:space="preserve">
+    <value>Are you sure you want to permanently delete this comment?
+
+It can't be brought back — Todoist has no undelete.</value>
+    <comment>Confirmation before deleting a comment.</comment>
+  </data>
+  <data name="DownloadStarting" xml:space="preserve">
+    <value>Downloading {0}…  Esc to stop</value>
+    <comment>Progress under the comments. {0} is the file's name.</comment>
+  </data>
+  <data name="DownloadPercent" xml:space="preserve">
+    <value>Downloading {0}… {1}%  Esc to stop</value>
+    <comment>Progress under the comments. {0} is the file's name and {1} how far through it is, as a percentage.</comment>
+  </data>
+  <data name="DownloadKilobytes" xml:space="preserve">
+    <value>Downloading {0}… {1} KB  Esc to stop</value>
+    <comment>Progress under the comments when the file's size isn't known. {0} is the file's name and {1} how many kilobytes have arrived.</comment>
+  </data>
+  <data name="FileOpenFailed" xml:space="preserve">
+    <value>The file couldn't be opened.</value>
+    <comment>Message when a downloaded attachment couldn't be opened.</comment>
+  </data>
+  <data name="AttachPickerTitle" xml:space="preserve">
+    <value>Attach a file to this comment</value>
+    <comment>Title bar of the file picker for attaching a file.</comment>
+  </data>
+  <data name="AttachTooBig" xml:space="preserve">
+    <value>{0} is {1} MB, and this Todoist plan takes files up to {2} MB.</value>
+    <comment>Message when the picked file is too big to attach. {0} is the file's name, {1} its size and {2} the plan's limit.</comment>
+  </data>
+  <data name="Uploading" xml:space="preserve">
+    <value>Uploading {0}…  Esc to stop</value>
+    <comment>Progress under the comments. {0} is the file's name.</comment>
+  </data>
+  <data name="UploadFailed" xml:space="preserve">
+    <value>{0} couldn't be uploaded, so nothing was posted. What you typed is still in the box.
+
+{1}</value>
+    <comment>Message when an attachment upload fails. {0} is the file's name and {1} the error's own text.</comment>
+  </data>
+  <data name="RemoveAttachmentConfirm" xml:space="preserve">
+    <value>Are you sure you want to remove {0} from this comment?
+
+The file is deleted from Todoist as well, and that can't be undone.</value>
+    <comment>Confirmation before removing an attachment. {0} is the file's name.</comment>
+  </data>
+  <data name="NewTaskNowhere" xml:space="preserve">
+    <value>This view doesn't say where a task goes — Quick add starts one from nothing.</value>
+    <comment>Status bar when New task is asked for in a view that has no project to put it in.</comment>
+  </data>
+  <data name="NothingToUndo" xml:space="preserve">
+    <value>Nothing to undo.</value>
+    <comment>Status bar when Undo is asked for with nothing to undo.</comment>
+  </data>
+  <data name="IndentTopLevel" xml:space="preserve">
+    <value>Already at the top level.</value>
+    <comment>Status bar when outdenting a task that has no parent.</comment>
+  </data>
+  <data name="IndentTooDeep" xml:space="preserve">
+    <value>Todoist holds four levels of sub-task, and this is as deep as it goes.</value>
+    <comment>Status bar when indenting a task that's already as deep as Todoist allows.</comment>
+  </data>
+  <data name="IndentNothingAbove" xml:space="preserve">
+    <value>Nothing above it to indent under.</value>
+    <comment>Status bar when indenting the first task in a list.</comment>
+  </data>
+  <data name="MoveAtEnd" xml:space="preserve">
+    <value>Already at the end of its list.</value>
+    <comment>Status bar when moving a task past the end of its list.</comment>
+  </data>
+  <data name="ShowInTodoistNotYet" xml:space="preserve">
+    <value>Todoist hasn't got this task yet. It will once it has synced.</value>
+    <comment>Status bar when opening a task in Todoist that hasn't been sent there yet.</comment>
+  </data>
+  <data name="ShowInTodoistFailed" xml:space="preserve">
+    <value>Couldn't open the task in Todoist.</value>
+    <comment>Status bar when the browser couldn't be started for a task.</comment>
+  </data>
+  <data name="CompletedFetching" xml:space="preserve">
+    <value>Fetching completed tasks…</value>
+    <comment>Status bar while loading the completed tasks list.</comment>
+  </data>
+  <data name="CompletedOffline" xml:space="preserve">
+    <value>Completed tasks need a connection.</value>
+    <comment>Status bar when the completed tasks list is asked for offline.</comment>
+  </data>
+  <data name="AddedNotShown" xml:space="preserve">
+    <value>Added, but this view doesn't show it.</value>
+    <comment>Status bar after adding something the current view filters out.</comment>
+  </data>
+  <data name="NewSectionNeedsProject" xml:space="preserve">
+    <value>Pick a project first — a section belongs to one.</value>
+    <comment>Status bar when New section is asked for without a project selected.</comment>
+  </data>
+  <data name="DragTaskFailed" xml:space="preserve">
+    <value>Couldn't move the task there. Something changed while it was being dragged.</value>
+    <comment>Status bar when a dragged task can't be dropped where it was dropped.</comment>
+  </data>
+  <data name="DragFailed" xml:space="preserve">
+    <value>Couldn't move it there. Something changed while it was being dragged.</value>
+    <comment>Status bar when a dragged project or section can't be dropped where it was dropped.</comment>
+  </data>
+  <data name="MoveCompletedRefused" xml:space="preserve">
+    <value>Tasks from the completed history can't be moved.</value>
+    <comment>Status bar when moving a task in the completed tasks list.</comment>
+  </data>
+  <data name="MoveTargetGone" xml:space="preserve">
+    <value>Not moved — the task or where it was going is no longer there.</value>
+    <comment>Status bar when a move fails because the task or its destination was deleted.</comment>
+  </data>
+  <data name="MovedNotShown" xml:space="preserve">
+    <value>Moved to {0}, which this view doesn't show.</value>
+    <comment>Status bar after a move. {0} is where the task went, as a project and section path.</comment>
+  </data>
 </root>

@@ -87,7 +87,7 @@ internal sealed class CommentsView : UserControl
 
         _attach = new LinkLabel
         {
-            Text = "Attach a file…",
+            Text = Strings.CommentsAttach,
             AutoSize = false,
             Width = 110,
             Height = 18,
@@ -98,10 +98,10 @@ internal sealed class CommentsView : UserControl
         _hint.Controls.Add(_attach);
 
         _rowMenu = new ContextMenuStrip();
-        _openItem = new ToolStripMenuItem("Open attachment", null, (_, _) => RaiseForSelected(OpenRequested));
-        _detachItem = new ToolStripMenuItem("Remove attachment", null, (_, _) => RaiseForSelected(DetachRequested));
-        _editItem = new ToolStripMenuItem("Edit", null, (_, _) => BeginEdit());
-        _deleteItem = new ToolStripMenuItem("Delete comment", null, (_, _) => RaiseForSelected(Deleted));
+        _openItem = new ToolStripMenuItem(Strings.CommentsOpenAttachment, null, (_, _) => RaiseForSelected(OpenRequested));
+        _detachItem = new ToolStripMenuItem(Strings.CommentsRemoveAttachment, null, (_, _) => RaiseForSelected(DetachRequested));
+        _editItem = new ToolStripMenuItem(Strings.CommentsEdit, null, (_, _) => BeginEdit());
+        _deleteItem = new ToolStripMenuItem(Strings.CommentsDelete, null, (_, _) => RaiseForSelected(Deleted));
         _rowMenu.Items.AddRange([_openItem, _detachItem, new ToolStripSeparator(), _editItem, _deleteItem]);
         _rowMenu.Opening += OnRowMenuOpening;
         _list.ContextMenuStrip = _rowMenu;
@@ -361,8 +361,8 @@ internal sealed class CommentsView : UserControl
         }
 
         _hint.Text = _editing is null
-            ? "Ctrl+Enter to post"
-            : "Editing — Ctrl+Enter to save, Esc to cancel";
+            ? Strings.CommentsPostHint
+            : Strings.CommentsEditHint;
     }
 
     /// <summary>

@@ -44,18 +44,14 @@ public sealed record HotkeyBinding(HotkeyModifiers Modifiers, string Key)
     public static readonly HotkeyBinding Default = new(HotkeyModifiers.Control | HotkeyModifiers.Alt, "A");
 
     /// <summary>Whether this combination is one the platform can be asked to register.</summary>
+    /// <remarks>
+    /// The settings dialog says this rule in words — <c>SettingsHotkeyInvalid</c> in the app's
+    /// catalogue, "Needs Ctrl, Alt or Win" — so the two change together. Only the modifiers are
+    /// said: whatever offers a choice of key offers <see cref="AllowedKeys"/>, so a missing
+    /// modifier is the only way to fall short of it.
+    /// </remarks>
     public bool IsValid
         => Allowed.Contains(Key) && (Modifiers & (HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Meta)) != 0;
-
-    /// <summary>
-    /// What <see cref="IsValid"/> asks of a combination, in the words someone choosing one reads.
-    /// </summary>
-    /// <remarks>
-    /// Kept beside the rule so the two change together. Only the modifiers are said: whatever offers
-    /// a choice of key offers <see cref="AllowedKeys"/>, so a missing modifier is the only way to
-    /// fall short of it.
-    /// </remarks>
-    public const string Requirement = "Needs Ctrl, Alt or Win";
 
     /// <summary>
     /// Reads a binding written as <c>Ctrl+Alt+A</c>. Returns false for anything unreadable or not

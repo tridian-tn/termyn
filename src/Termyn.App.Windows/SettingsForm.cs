@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Settings;
 
 // Both namespaces have a Label, and in a form file the control is what it should mean.
@@ -33,7 +34,7 @@ internal sealed class SettingsForm : Form
     /// <summary>Internal rather than private so a test can lay one out without a screen to show it on.</summary>
     internal SettingsForm(AppSettings settings, Theme theme)
     {
-        Text = "Termyn — settings";
+        Text = Strings.SettingsTitle;
         Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
@@ -43,11 +44,11 @@ internal sealed class SettingsForm : Form
 
         var binding = settings.HotkeyBinding;
 
-        _hotkeyEnabled = Check("Global quick-add hotkey", settings.HotkeyEnabled, 16);
-        _ctrl = Modifier("Ctrl", binding.Modifiers.HasFlag(HotkeyModifiers.Control));
-        _alt = Modifier("Alt", binding.Modifiers.HasFlag(HotkeyModifiers.Alt));
-        _shift = Modifier("Shift", binding.Modifiers.HasFlag(HotkeyModifiers.Shift));
-        _win = Modifier("Win", binding.Modifiers.HasFlag(HotkeyModifiers.Meta));
+        _hotkeyEnabled = Check(Strings.SettingsHotkey, settings.HotkeyEnabled, 16);
+        _ctrl = Modifier(Strings.SettingsKeyCtrl, binding.Modifiers.HasFlag(HotkeyModifiers.Control));
+        _alt = Modifier(Strings.SettingsKeyAlt, binding.Modifiers.HasFlag(HotkeyModifiers.Alt));
+        _shift = Modifier(Strings.SettingsKeyShift, binding.Modifiers.HasFlag(HotkeyModifiers.Shift));
+        _win = Modifier(Strings.SettingsKeyWin, binding.Modifiers.HasFlag(HotkeyModifiers.Meta));
 
         _key = new ComboBox
         {
@@ -94,9 +95,9 @@ internal sealed class SettingsForm : Form
             Value = settings.ClampedInterval,
         };
 
-        _launchAtLogin = Check("Start Termyn when I sign in", settings.LaunchAtLogin, 268);
+        _launchAtLogin = Check(Strings.SettingsLaunchAtLogin, settings.LaunchAtLogin, 268);
 
-        _closeToTray = Check("Closing the window leaves Termyn in the tray", settings.CloseToTray, 300);
+        _closeToTray = Check(Strings.SettingsCloseToTray, settings.CloseToTray, 300);
 
         _cacheMb = new NumericUpDown
         {
@@ -120,19 +121,21 @@ internal sealed class SettingsForm : Form
         // action, and nothing in the cache is authoritative so there is nothing to confirm.
         _clearDownloads = new Button
         {
-            Text = "Clear downloaded files",
+            Text = Strings.SettingsClearDownloads,
             Location = new Point(CaptionWidth + 24, 400),
             Size = new Size(200, 30),
         };
         _clearDownloads.Click += (_, _) =>
         {
             var removed = ClearDownloads?.Invoke() ?? 0;
-            _clearDownloads.Text = removed == 1 ? "1 file removed" : $"{removed} files removed";
+            _clearDownloads.Text = removed == 1
+                ? Strings.SettingsFileRemoved
+                : string.Format(CultureInfo.CurrentCulture, Strings.SettingsFilesRemoved, removed);
             _clearDownloads.Enabled = false;
         };
 
-        var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 448), Size = new Size(96, 32) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 448), Size = new Size(96, 32) };
+        var ok = new Button { Text = Strings.ButtonSave, DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 448), Size = new Size(96, 32) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 448), Size = new Size(96, 32) };
 
         AcceptButton = ok;
         CancelButton = cancel;
@@ -140,12 +143,12 @@ internal sealed class SettingsForm : Form
         Controls.AddRange(
         [
             _hotkeyEnabled, modifiers, _warning,
-            Caption("Theme", 138), _theme,
-            Caption("Background sync", 182), _syncMode,
-            Caption("Every (seconds)", 226), _interval,
+            Caption(Strings.SettingsTheme, 138), _theme,
+            Caption(Strings.SettingsBackgroundSync, 182), _syncMode,
+            Caption(Strings.SettingsSyncInterval, 226), _interval,
             _launchAtLogin, _closeToTray,
-            Caption("Downloads: keep up to (MB)", 336), _cacheMb,
-            Caption("and for at most (days)", 370), _cacheDays,
+            Caption(Strings.SettingsDownloadsSize, 336), _cacheMb,
+            Caption(Strings.SettingsDownloadsAge, 370), _cacheDays,
             _clearDownloads,
             ok, cancel,
         ]);
@@ -239,7 +242,7 @@ internal sealed class SettingsForm : Form
         // does on Save. Shown whether the hotkey is on or not: Save swaps the combination for the
         // default either way, and switching the hotkey off shouldn't hide that it's about to.
         _warning.Text = !Chosen().IsValid
-            ? $"{HotkeyBinding.Requirement} — otherwise {HotkeyBinding.Default} is used."
+            ? string.Format(CultureInfo.CurrentCulture, Strings.SettingsHotkeyInvalid, HotkeyBinding.Default)
             : string.Empty;
     }
 
@@ -272,7 +275,27 @@ internal sealed class SettingsForm : Form
         };
         foreach (var value in Enum.GetValues(enumType))
             combo.Items.Add(value);
+
+        // The items stay the enum values, so what's picked is read back as one; only what's shown
+        // for each is the catalogue's. Format is only raised with formatting switched on.
+        combo.FormattingEnabled = true;
+        combo.Format += (_, e) => e.Value = e.ListItem is Enum value ? ChoiceName(value) : e.Value;
         combo.SelectedItem = selected;
         return combo;
     }
+
+    /// <summary>
+    /// What a choice in one of the drop-downs is called on screen.
+    /// </summary>
+    /// <param name="value">A theme or a sync mode</param>
+    /// <returns>Its name in the user's language</returns>
+    internal static string ChoiceName(Enum value) => value switch
+    {
+        ThemePreference.System => Strings.ThemeSystem,
+        ThemePreference.Light => Strings.ThemeLight,
+        ThemePreference.Dark => Strings.ThemeDark,
+        SyncMode.Automatic => Strings.SyncAutomatic,
+        SyncMode.Manual => Strings.SyncManual,
+        _ => value.ToString(),
+    };
 }

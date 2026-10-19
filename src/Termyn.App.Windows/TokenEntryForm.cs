@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
@@ -27,7 +28,7 @@ internal sealed class TokenEntryForm : Form
         _auth = auth;
         _reconnecting = reconnecting;
 
-        Text = reconnecting ? "Reconnect Termyn to Todoist" : "Connect Termyn to Todoist";
+        Text = reconnecting ? Strings.TokenTitleReconnect : Strings.TokenTitleConnect;
         Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
@@ -38,15 +39,15 @@ internal sealed class TokenEntryForm : Form
         var intro = new Label
         {
             Text = reconnecting
-                ? "Todoist turned the last token away. Paste the current one (Settings → Integrations → Developer → API token)."
-                : "Paste your Todoist API token (Settings → Integrations → Developer → API token).",
+                ? Strings.TokenPromptReconnect
+                : Strings.TokenPrompt,
             Location = new Point(16, 16),
             Size = new Size(436, 40),
         };
 
         var link = new LinkLabel
         {
-            Text = "Open Todoist integration settings",
+            Text = Strings.TokenOpenSettings,
             AutoSize = true,
             Location = new Point(16, 58),
         };
@@ -68,7 +69,7 @@ internal sealed class TokenEntryForm : Form
 
         _connect = new Button
         {
-            Text = "Connect",
+            Text = Strings.TokenConnect,
             Location = new Point(352, 164),
             Size = new Size(100, 32),
             DialogResult = DialogResult.None,
@@ -77,7 +78,7 @@ internal sealed class TokenEntryForm : Form
 
         var cancel = new Button
         {
-            Text = "Cancel",
+            Text = Strings.ButtonCancel,
             Location = new Point(244, 164),
             Size = new Size(100, 32),
             DialogResult = DialogResult.Cancel,
@@ -105,16 +106,16 @@ internal sealed class TokenEntryForm : Form
                     DialogResult = DialogResult.OK;
                     break;
                 case TokenValidationResult.Rejected:
-                    _status.Text = "That token was rejected. Check it and try again.";
+                    _status.Text = Strings.TokenRejected;
                     break;
                 case TokenValidationResult.NetworkError:
-                    _status.Text = "Couldn't reach Todoist (it may be offline or busy). Check your connection and retry.";
+                    _status.Text = Strings.TokenUnreachable;
                     break;
             }
         }
         catch (Exception)
         {
-            _status.Text = "Something went wrong saving the token. Please try again.";
+            _status.Text = Strings.TokenSaveFailed;
         }
         finally
         {
@@ -145,7 +146,7 @@ internal sealed class TokenEntryForm : Form
         }
         catch (Exception)
         {
-            _status.Text = "Couldn't open the browser. Copy this link manually: " + url;
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.TokenBrowserFailed, url);
         }
     }
 }

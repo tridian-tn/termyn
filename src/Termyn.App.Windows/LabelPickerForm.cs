@@ -11,7 +11,7 @@ internal sealed class LabelPickerForm : Form
 
     private LabelPickerForm(string task, IReadOnlyList<string> known, IReadOnlyList<string> applied)
     {
-        Text = "Labels";
+        Text = Strings.LabelsTitle;
         Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
@@ -44,14 +44,14 @@ internal sealed class LabelPickerForm : Form
         foreach (var orphan in applied.Where(a => !known.Contains(a, StringComparer.OrdinalIgnoreCase)))
             _list.Items.Add(orphan, true);
 
-        var prompt = new Label { Text = "New label:", Location = new Point(14, 298), Size = new Size(80, 20) };
-        _fresh = new TextBox { Location = new Point(94, 295), Size = new Size(160, 27), PlaceholderText = "name" };
+        var prompt = new Label { Text = Strings.LabelsNew, Location = new Point(14, 298), Size = new Size(80, 20) };
+        _fresh = new TextBox { Location = new Point(94, 295), Size = new Size(160, 27), PlaceholderText = Strings.LabelsNamePlaceholder };
 
-        var add = new Button { Text = "Add", Location = new Point(260, 294), Size = new Size(86, 29) };
+        var add = new Button { Text = Strings.LabelsAdd, Location = new Point(260, 294), Size = new Size(86, 29) };
         add.Click += (_, _) => AddFresh();
 
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(166, 352), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(258, 352), Size = new Size(88, 30) };
+        var ok = new Button { Text = Strings.ButtonOK, DialogResult = DialogResult.OK, Location = new Point(166, 352), Size = new Size(88, 30) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(258, 352), Size = new Size(88, 30) };
 
         // A name still sitting in the box is one the user meant to apply. Click runs before the
         // dialog closes, so taking it here is the difference between adding the label and losing it.

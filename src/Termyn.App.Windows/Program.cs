@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
@@ -220,8 +221,7 @@ internal static class Program
             if (attachments.Size() > 0)
             {
                 MessageBox.Show(
-                    "Some downloaded files couldn't be removed, probably because they're open in another "
-                    + $"program. Close them and delete what's left in:\r\n\r\n{paths.AttachmentDirectory}",
+                    string.Format(CultureInfo.CurrentCulture, Strings.DownloadsLeftBehind, paths.AttachmentDirectory),
                     "Termyn",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -234,7 +234,7 @@ internal static class Program
             // The new token is stored only once the cache is empty, so the next session opens on
             // the last account, still waiting for a token of its own.
             MessageBox.Show(
-                $"Termyn couldn't remove the last account's data, so it hasn't signed in to the new one.\r\n\r\n{ex.Message}",
+                string.Format(CultureInfo.CurrentCulture, Strings.SwitchAccountFailed, ex.Message),
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -247,7 +247,7 @@ internal static class Program
             // leaves the account signed in over data it can still sync, and the next session opens
             // straight onto it.
             MessageBox.Show(
-                $"Termyn couldn't finish signing out, so you're still signed in.\r\n\r\n{ex.Message}",
+                string.Format(CultureInfo.CurrentCulture, Strings.SignOutFailed, ex.Message),
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);

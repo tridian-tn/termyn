@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Termyn.App.Windows;
 
 /// <summary>A one-line prompt, used for the small text inputs the keyboard map needs.</summary>
@@ -49,8 +51,8 @@ internal sealed class InputDialog : Form
 
         _input = new TextBox { Text = initial, Location = new Point(14, 40 + extra), Size = new Size(392, 27) };
 
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(226, 84 + extra), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 84 + extra), Size = new Size(88, 30) };
+        var ok = new Button { Text = Strings.ButtonOK, DialogResult = DialogResult.OK, Location = new Point(226, 84 + extra), Size = new Size(88, 30) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(318, 84 + extra), Size = new Size(88, 30) };
 
         AcceptButton = ok;
         CancelButton = cancel;
@@ -86,7 +88,7 @@ internal sealed class InputDialog : Form
     /// <param name="parent">What the parent task is called, or null when it isn't in the view</param>
     /// <returns>The dialog, which the caller disposes</returns>
     internal static InputDialog Subtask(string? parent)
-        => new("New sub-task", "Sub-task:", context: Under(parent));
+        => new(Strings.SubtaskTitle, Strings.SubtaskPrompt, context: Under(parent));
 
     /// <summary>
     /// How the prompt names the task a sub-task is going under.
@@ -94,7 +96,7 @@ internal sealed class InputDialog : Form
     /// <param name="parent">What the parent is called, or null when it isn't known</param>
     /// <returns>The line to show, or null when there is nothing to name</returns>
     internal static string? Under(string? parent)
-        => string.IsNullOrWhiteSpace(parent) ? null : $"Under: {parent}";
+        => string.IsNullOrWhiteSpace(parent) ? null : string.Format(CultureInfo.CurrentCulture, Strings.SubtaskUnder, parent);
 
     /// <summary>
     /// Shows the prompt and returns the entered text, or <c>null</c> if cancelled.
