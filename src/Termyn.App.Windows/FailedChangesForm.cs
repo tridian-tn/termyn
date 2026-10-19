@@ -29,7 +29,8 @@ internal sealed class FailedChangesForm : Form
         _read = read;
         _dismissed = dismissed;
 
-        Text = "Changes that didn't happen";
+        Text = Strings.FailedTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -42,7 +43,7 @@ internal sealed class FailedChangesForm : Form
         {
             // Not "these are not in your account", which is only true of the ones the server
             // refused. The ones it never answered about may well have landed, and each says so.
-            Text = "Termyn couldn't complete these changes.",
+            Text = Strings.FailedIntro,
             Location = new Point(14, 12),
             Size = new Size(492, 20),
             ForeColor = theme.Muted,
@@ -65,10 +66,10 @@ internal sealed class FailedChangesForm : Form
             ForeColor = theme.Muted,
         };
 
-        _dismiss = new Button { Text = "Dismiss", Location = new Point(14, 316), Size = new Size(110, 30) };
+        _dismiss = new Button { Text = Strings.FailedDismiss, Location = new Point(14, 316), Size = new Size(110, 30) };
         _dismiss.Click += (_, _) => Dismiss();
 
-        var close = new Button { Text = "Close", DialogResult = DialogResult.OK, Location = new Point(418, 316), Size = new Size(88, 30) };
+        var close = new Button { Text = Strings.ButtonClose, DialogResult = DialogResult.OK, Location = new Point(418, 316), Size = new Size(88, 30) };
 
         AcceptButton = close;
         CancelButton = close;

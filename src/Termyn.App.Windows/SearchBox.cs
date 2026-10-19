@@ -65,7 +65,7 @@ internal sealed class SearchBox : TextBox
 
             // A cross says nothing read aloud. This is the only thing here that can be clicked,
             // and it is the one thing a reader would have no other way of finding.
-            AccessibleName = "Clear search",
+            AccessibleName = Strings.SearchClearAccessible,
             AccessibleRole = AccessibleRole.PushButton,
         };
 

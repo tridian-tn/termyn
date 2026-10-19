@@ -36,7 +36,8 @@ internal sealed class MoveTaskForm : Form
         _all = destinations;
         _theme = theme;
 
-        Text = "Move to";
+        Text = Strings.MoveTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -55,14 +56,14 @@ internal sealed class MoveTaskForm : Form
             UseMnemonic = false,
         };
 
-        _move = new Button { Text = "Move", DialogResult = DialogResult.OK, Location = new Point(226, 356), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 356), Size = new Size(88, 30) };
+        _move = new Button { Text = Strings.MoveButton, DialogResult = DialogResult.OK, Location = new Point(226, 356), Size = new Size(88, 30) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(318, 356), Size = new Size(88, 30) };
 
         _query = new TextBox
         {
             Location = new Point(14, 38),
             Size = new Size(392, 27),
-            PlaceholderText = "Project or section…",
+            PlaceholderText = Strings.MovePlaceholder,
         };
         _query.TextChanged += (_, _) => ShowMatches();
 
@@ -184,7 +185,7 @@ internal sealed class MoveTaskForm : Form
 
         // A child project and a section look alike once they're indented under the same parent, so
         // each row says which it is.
-        var kind = destination.Kind == SidebarKind.Section ? "section" : "project";
+        var kind = destination.Kind == SidebarKind.Section ? Strings.MoveKindSection : Strings.MoveKindProject;
         var kindWidth = TextRenderer.MeasureText(kind, Font).Width + 12;
 
         var mark = e.Bounds with { X = e.Bounds.X + 6, Width = Gutter };

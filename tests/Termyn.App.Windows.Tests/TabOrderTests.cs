@@ -30,10 +30,13 @@ public class TabOrderTests
 
         // By what each one is rather than by the name of its class, which said TextBox until the
         // search box became one of its own and broke this for a reason that had nothing to do with
-        // the order.
+        // the order. For the same reason the first is whatever holds the search box, which is a
+        // padded panel now so the box sits in from the window's edges.
+        var search = TestWindow.Find<SearchBox>(window);
+
         Assert.Collection(
             Order(window).Where(c => c.Parent == window).Take(2),
-            first => Assert.True(first is TextBox, $"the search box should come first, not {first.GetType().Name}"),
+            first => Assert.True(first == search || first.Contains(search), $"the search box should come first, not {first.GetType().Name}"),
             then => Assert.True(then is SplitContainer, $"the tree and list should come next, not {then.GetType().Name}"));
     }
 

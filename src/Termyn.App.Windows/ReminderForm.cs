@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Capture;
 using Termyn.Presentation;
 
@@ -10,17 +11,27 @@ namespace Termyn.App.Windows;
 /// </summary>
 internal sealed class ReminderForm : Form
 {
-    private const string UpgradeMessage = "Todoist Pro required";
+    private static string UpgradeMessage => Strings.RemindersUpgrade;
 
-    /// <summary>The offsets offered, in minutes before the task is due.</summary>
-    private static readonly (string Label, int Minutes)[] Offsets =
+    /// <summary>
+    /// The offsets offered, in minutes before the task is due.
+    /// </summary>
+    /// <remarks>
+    /// Built when asked for rather than once, so the labels are read in the language in force
+    /// when the dialog opens rather than whichever one the type happened to load under.
+    /// </remarks>
+    private static (string Label, int Minutes)[] Offsets =>
     [
-        ("At the time it's due", 0),
-        ("10 minutes before", 10),
-        ("30 minutes before", 30),
-        ("1 hour before", 60),
-        ("1 day before", 1440),
+        (Strings.RemindersAtTime, 0),
+        (Before(10), 10),
+        (Before(30), 30),
+        (Strings.RemindersHourBefore, 60),
+        (Strings.RemindersDayBefore, 1440),
     ];
+
+    /// <summary>An offset of so many minutes, as the list says it.</summary>
+    private static string Before(int minutes)
+        => string.Format(CultureInfo.CurrentCulture, Strings.RemindersMinutesBefore, minutes);
 
     private readonly MainPresenter _presenter;
     private readonly string _itemId;
@@ -40,7 +51,8 @@ internal sealed class ReminderForm : Form
         _presenter = presenter;
         _itemId = itemId;
 
-        Text = "Reminders";
+        Text = Strings.RemindersTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -63,7 +75,7 @@ internal sealed class ReminderForm : Form
         // receives the mouse: a disabled control gets no messages, so a tooltip on it never shows.
         var writes = new Panel { Location = new Point(14, 196), Size = new Size(372, 74) };
 
-        var beforePrompt = new Label { Text = "Remind me", Location = new Point(0, 4), Size = new Size(76, 20) };
+        var beforePrompt = new Label { Text = Strings.RemindersRemindMe, Location = new Point(0, 4), Size = new Size(76, 20) };
         _offset = new ComboBox
         {
             Location = new Point(78, 1),
@@ -74,18 +86,18 @@ internal sealed class ReminderForm : Form
             _offset.Items.Add(choice.Label);
         _offset.SelectedIndex = 0;
 
-        _add = new Button { Text = "Add", Location = new Point(272, 0), Size = new Size(100, 29) };
+        _add = new Button { Text = Strings.RemindersAdd, Location = new Point(272, 0), Size = new Size(100, 29) };
         _add.Click += (_, _) => AddRelative();
 
-        var atPrompt = new Label { Text = "or on", Location = new Point(0, 41), Size = new Size(76, 20) };
+        var atPrompt = new Label { Text = Strings.RemindersOrOn, Location = new Point(0, 41), Size = new Size(76, 20) };
         _absolute = new TextBox { Location = new Point(78, 38), Size = new Size(180, 27), PlaceholderText = DayBoxText.ReminderHint(presenter.DatesInEnglish) };
 
-        _addAbsolute = new Button { Text = "Add", Location = new Point(272, 37), Size = new Size(100, 29) };
+        _addAbsolute = new Button { Text = Strings.RemindersAdd, Location = new Point(272, 37), Size = new Size(100, 29) };
         _addAbsolute.Click += (_, _) => AddAbsolute();
 
         writes.Controls.AddRange([beforePrompt, _offset, _add, atPrompt, _absolute, _addAbsolute]);
 
-        _remove = new Button { Text = "Remove", Location = new Point(286, 278), Size = new Size(100, 29), Enabled = false };
+        _remove = new Button { Text = Strings.RemindersRemove, Location = new Point(286, 278), Size = new Size(100, 29), Enabled = false };
         _remove.Click += (_, _) => Remove();
 
         _message = new Label
@@ -95,7 +107,7 @@ internal sealed class ReminderForm : Form
             ForeColor = SystemColors.GrayText,
         };
 
-        var close = new Button { Text = "Close", DialogResult = DialogResult.OK, Location = new Point(298, 358), Size = new Size(88, 30) };
+        var close = new Button { Text = Strings.ButtonClose, DialogResult = DialogResult.OK, Location = new Point(298, 358), Size = new Size(88, 30) };
         CancelButton = close;
         AcceptButton = close;
 
@@ -112,7 +124,7 @@ internal sealed class ReminderForm : Form
             // "Not allowed" and "not asked yet" both come through as unavailable, and telling a
             // paying user to buy what they already have is worse than saying we don't know yet.
             var reason = presenter.PlanName.Length == 0
-                ? "Your plan hasn't synced yet."
+                ? Strings.RemindersPlanNotSynced
                 : UpgradeMessage;
 
             _message.Text = reason;
@@ -217,13 +229,13 @@ internal sealed class ReminderForm : Form
     private string Refusal()
     {
         if (!_presenter.RemindersAvailable)
-            return _presenter.PlanName.Length == 0 ? "Your plan hasn't synced yet." : UpgradeMessage;
+            return _presenter.PlanName.Length == 0 ? Strings.RemindersPlanNotSynced : UpgradeMessage;
 
         // Asked of the account rather than the rows on screen: the outline only shows the current
         // view, so a task that is merely filtered out is still very much there.
         return _presenter.HasTask(_itemId)
-            ? "This plan is at its limit for reminders."
-            : "That task is no longer here.";
+            ? Strings.RemindersAtLimit
+            : Strings.RemindersTaskGone;
     }
 
     private void Wrote()
@@ -240,7 +252,7 @@ internal sealed class ReminderForm : Form
             _existing.Items.Add(new ReminderRow(reminder));
 
         if (_existing.Items.Count == 0)
-            _existing.Items.Add("No reminders on this task.");
+            _existing.Items.Add(Strings.RemindersNone);
 
         UpdateRemoveState();
     }

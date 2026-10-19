@@ -81,12 +81,12 @@ internal sealed class OutlineView : ListView
 
         // Each header carries the column it stands for, so a click has something to name without a
         // second table of indices to keep in step with this one.
-        Column("Task", TaskColumn.Content);
+        Column(Strings.ColumnTask, TaskColumn.Content);
         Column("!", TaskColumn.Priority, HorizontalAlignment.Center);
-        Column("Project", TaskColumn.Project);
-        Column("Due", TaskColumn.Due);
-        Column("Deadline", TaskColumn.Deadline);
-        Column("Labels", TaskColumn.Labels);
+        Column(Strings.ColumnProject, TaskColumn.Project);
+        Column(Strings.ColumnDue, TaskColumn.Due);
+        Column(Strings.ColumnDeadline, TaskColumn.Deadline);
+        Column(Strings.ColumnLabels, TaskColumn.Labels);
 
         void Column(string heading, TaskColumn column, HorizontalAlignment align = HorizontalAlignment.Left)
             => Columns.Add(heading, StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi), align).Tag = column;

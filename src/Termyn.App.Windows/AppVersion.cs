@@ -62,6 +62,20 @@ internal static class AppVersion
     }
 
     /// <summary>
+    /// Opens one of the app's own folders in Explorer, for the about box's diagnostics.
+    /// </summary>
+    /// <param name="path">A folder the app named itself, never one off the network</param>
+    /// <returns>False when there's no such folder, so the caller can say so</returns>
+    public static bool OpenFolder(string path)
+    {
+        if (!Directory.Exists(path))
+            return false;
+
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        return true;
+    }
+
+    /// <summary>
     /// Hands a downloaded attachment to whatever the desktop opens that kind of file with.
     /// </summary>
     /// <remarks>

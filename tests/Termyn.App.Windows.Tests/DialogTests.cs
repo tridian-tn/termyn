@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Settings;
 using Termyn.Presentation;
 
@@ -275,6 +276,28 @@ public class DialogTests
     }
 
     [WinFormsFact]
+    public void The_settings_choices_are_shown_in_the_catalogue_s_words()
+    {
+        // Read off the combo as it would draw each item, which is the only place the Format event
+        // shows up — and it isn't raised at all unless formatting is switched on.
+        using var form = NewSettings();
+        var combos = Every(form).OfType<ComboBox>().ToList();
+        var theme = combos.Single(c => c.Items.Contains(ThemePreference.Dark));
+        var sync = combos.Single(c => c.Items.Contains(SyncMode.Manual));
+
+        // Asked outright as well, since the English names happen to match the enum's, so the item
+        // text alone would read the same with formatting off — and wrong in any other language.
+        Assert.True(theme.FormattingEnabled && sync.FormattingEnabled);
+        Assert.Equal(
+            [Strings.ThemeSystem, Strings.ThemeLight, Strings.ThemeDark],
+            theme.Items.Cast<object>().Select(theme.GetItemText));
+        Assert.Equal(
+            [Strings.SyncAutomatic, Strings.SyncManual],
+            sync.Items.Cast<object>().Select(sync.GetItemText));
+        Assert.Equal(ThemePreference.Light, Assert.IsType<ThemePreference>(theme.Items[1]));
+    }
+
+    [WinFormsFact]
     public void The_dialog_leaves_room_for_the_longest_thing_it_says()
     {
         // The line that appears when the chosen combination won't register is the widest text in
@@ -283,7 +306,7 @@ public class DialogTests
 
         var warning = Every(form).OfType<Label>().Single(l => l.Text.Length == 0);
         var longest = TextRenderer.MeasureText(
-            $"{HotkeyBinding.Requirement} — otherwise {HotkeyBinding.Default} is used.",
+            string.Format(CultureInfo.CurrentCulture, Strings.SettingsHotkeyInvalid, HotkeyBinding.Default),
             form.Font);
 
         Assert.True(warning.Width >= longest.Width, $"the warning has {warning.Width} and needs {longest.Width}");

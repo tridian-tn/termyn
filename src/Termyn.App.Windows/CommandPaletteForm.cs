@@ -24,7 +24,8 @@ internal sealed class CommandPaletteForm : Form
         _search = search;
         _theme = theme;
 
-        Text = "Termyn — commands";
+        Text = Strings.PaletteTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -33,7 +34,7 @@ internal sealed class CommandPaletteForm : Form
         ClientSize = new Size(520, 360);
         KeyPreview = true;
 
-        _query = new TextBox { Dock = DockStyle.Top, Height = 28, PlaceholderText = "Go to, or do…" };
+        _query = new TextBox { Dock = DockStyle.Top, Height = 28, PlaceholderText = Strings.PalettePlaceholder };
         _query.TextChanged += (_, _) => Refresh(_query.Text);
 
         _results = new ListBox

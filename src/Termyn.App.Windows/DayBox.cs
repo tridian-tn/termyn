@@ -70,18 +70,18 @@ internal sealed class DayBox : UserControl
             Hint = DayBoxText.Hint(english),
             Location = new Point(0, 0),
             Size = new Size(354, 27),
-            AccessibleName = "Day",
+            AccessibleName = Strings.DayBoxAccessible,
         };
 
         _pick = new Button
         {
             Location = new Point(360, 0),
             Size = new Size(32, 27),
-            AccessibleName = "Pick a day",
+            AccessibleName = Strings.DayBoxPick,
         };
 
         // The button says nothing in words, so there has to be somewhere to find out what it does.
-        _tips.SetToolTip(_pick, "Pick a day");
+        _tips.SetToolTip(_pick, Strings.DayBoxPick);
 
         _says = new Label
         {

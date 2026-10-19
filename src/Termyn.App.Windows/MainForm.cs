@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using Termyn.Core;
 using Termyn.Core.Api;
 using Termyn.Core.Attachments;
@@ -54,7 +55,25 @@ internal sealed record Shell(
 /// <summary>Main window: sidebar, search box, task outline, and the keyboard map.</summary>
 internal sealed class MainForm : Form
 {
-    private const string ReconnectMessage = "Todoist turned your token away. Click here to reconnect; until then nothing can be changed.";
+    private static string ReconnectMessage => Strings.MainReconnect;
+
+    /// <summary>
+    /// The space around the search box at 100%, so it sits in from the window's edges rather than
+    /// running into them. The sides line its border up with where the sidebar's text starts below
+    /// it, which is <see cref="DotLead"/> scaled the same way.
+    /// </summary>
+    internal static readonly Padding SearchPadding = new(4, 6, 4, 6);
+
+    /// <summary>
+    /// The space around the search box at a display's scale.
+    /// </summary>
+    /// <param name="dpi">The display's dots per inch, which is 96 at 100%</param>
+    /// <returns>The padding in the display's pixels</returns>
+    internal static Padding SearchPaddingAt(int dpi) => new(
+        StartupLayout.Scaled(SearchPadding.Left, dpi),
+        StartupLayout.Scaled(SearchPadding.Top, dpi),
+        StartupLayout.Scaled(SearchPadding.Right, dpi),
+        StartupLayout.Scaled(SearchPadding.Bottom, dpi));
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
@@ -62,6 +81,7 @@ internal sealed class MainForm : Form
     private readonly CancellationTokenSource _cts = new();
 
     private readonly SearchBox _search;
+    private readonly Panel _searchHolder;
     private readonly SidebarTree _sidebar;
     private readonly LinkLabel _crumbs;
 
@@ -267,6 +287,7 @@ internal sealed class MainForm : Form
         _theme = Theme.Resolve(_settings.Theme);
 
         Text = "Termyn";
+        Icon = AppIcon.Window;
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
 
@@ -372,7 +393,7 @@ internal sealed class MainForm : Form
         _description = new MarkdownEditor
         {
             Dock = DockStyle.Fill,
-            Placeholder = "Description…  **bold**  *italic*  - a list",
+            Placeholder = Strings.MainDescriptionPlaceholder,
 
             // Until a task is selected there is nowhere for anything typed here to go. Set on the
             // way in because the selection has never changed at this point, so nothing else does.
@@ -440,11 +461,11 @@ internal sealed class MainForm : Form
         // The description keeps its own pair inside its tab — the markdown and the rendering, one
         // visible at a time — because that is a mode rather than a place, and reading and writing
         // the same text are not two tabs' worth of different.
-        _descriptionTab = new TabPage("Description");
+        _descriptionTab = new TabPage(Strings.MainDescriptionTab);
         _descriptionTab.Controls.Add(_description);
         _descriptionTab.Controls.Add(_rendered);
 
-        _commentsTab = new TabPage("Comments");
+        _commentsTab = new TabPage(Strings.MainCommentsTab);
         _commentsTab.Controls.Add(_comments);
 
         // Out of the tab order as well, so Tab goes straight to what the tab shows. The strip's
@@ -530,7 +551,7 @@ internal sealed class MainForm : Form
             Height = 24,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 0, 0, 0),
-            Text = "Loading…",
+            Text = Strings.MainLoading,
         };
 
         // The failed count and a rejected token are the only parts of the status there is anything
@@ -547,9 +568,20 @@ internal sealed class MainForm : Form
         };
         _status.Cursor = Cursors.Default;
 
+        // A box docked to the window runs edge to edge, and docking ignores a control's margin, so
+        // the space around it comes from a holder's padding. Sized to the box, so it grows with it.
+        _searchHolder = new Panel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+        _searchHolder.Controls.Add(_search);
+        PadSearch();
+
         Controls.Add(_split);
         Controls.Add(_status);
-        Controls.Add(_search);
+        Controls.Add(_searchHolder);
 
         // Last, so it docks outermost and sits above the search box where a menu bar belongs.
         // Built after the outline and the sidebar exist: filling it asks both what is selected.
@@ -561,7 +593,7 @@ internal sealed class MainForm : Form
         // it otherwise — and that order is about docking, so Tab began at the split and reached the
         // search box third. It goes down the window now: the search, then the tree and the list and
         // the panel, which follow from how those are nested inside the split.
-        _search.TabIndex = 0;
+        _searchHolder.TabIndex = 0;
         _split.TabIndex = 1;
         _status.TabIndex = 2;
         bar.TabIndex = 3;
@@ -589,8 +621,7 @@ internal sealed class MainForm : Form
 
         if (shell.CacheRebuilt)
         {
-            _cacheNotice = "The local cache could not be read and has been rebuilt. "
-                + "Anything not yet synced was lost; the old file is kept beside it.";
+            _cacheNotice = Strings.MainCacheRebuilt;
         }
 
         Load += async (_, _) => await LoadAsync();
@@ -808,8 +839,8 @@ internal sealed class MainForm : Form
     {
         var commands = new List<NotifierCommand>
         {
-            new("Open Termyn", open),
-            new("Quick add…", quickAdd),
+            new(Strings.TrayOpen, open),
+            new(Strings.TrayQuickAdd, quickAdd),
         };
 
         if (recent.Count > 0)
@@ -824,10 +855,10 @@ internal sealed class MainForm : Form
         }
 
         commands.Add(NotifierCommand.Rule);
-        commands.Add(new NotifierCommand("Sync now", sync));
-        commands.Add(new NotifierCommand("Settings…", settings));
-        commands.Add(new NotifierCommand("Check for updates…", updates));
-        commands.Add(new NotifierCommand("Exit", exit));
+        commands.Add(new NotifierCommand(Strings.TraySyncNow, sync));
+        commands.Add(new NotifierCommand(Strings.TraySettings, settings));
+        commands.Add(new NotifierCommand(Strings.TrayUpdates, updates));
+        commands.Add(new NotifierCommand(Strings.TrayExit, exit));
 
         return commands;
     }
@@ -903,7 +934,7 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                "A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then reconnect.",
+                Strings.TransferBeforeReconnect,
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -935,7 +966,7 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                "A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then sign out.",
+                Strings.TransferBeforeSignOut,
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -961,16 +992,16 @@ internal sealed class MainForm : Form
         if (!_settings.HotkeyEnabled)
         {
             _shell.Hotkey.Unregister();
-            return announce ? "Quick-add has no hotkey." : null;
+            return announce ? Strings.HotkeyNone : null;
         }
 
         var binding = _settings.HotkeyBinding;
         if (_shell.Hotkey.Register(binding))
-            return announce ? $"Quick-add hotkey is {binding}." : null;
+            return announce ? string.Format(CultureInfo.CurrentCulture, Strings.HotkeyIs, binding) : null;
 
         // Silence here would leave the user pressing a key that does nothing, with no way to tell
         // that something else on the machine already owns it. Said whether or not this was a change.
-        return $"Another application already owns {binding} — quick-add has no hotkey.";
+        return string.Format(CultureInfo.CurrentCulture, Strings.HotkeyTaken, binding);
     }
 
     /// <summary>
@@ -982,7 +1013,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private async Task CheckForUpdatesAsync()
     {
-        _status.Text = "Checking for updates…";
+        _status.Text = Strings.UpdatesChecking;
 
         await GuardedAsync(async () =>
         {
@@ -1007,35 +1038,18 @@ internal sealed class MainForm : Form
 
             var answer = MessageBox.Show(
                 Visible ? this : null,
-                advice.Message + "\r\n\r\nOpen the release page?",
+                string.Format(CultureInfo.CurrentCulture, Strings.UpdatesOpenPrompt, advice.Message),
                 "Termyn",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Information);
 
             if (answer == DialogResult.OK && !AppVersion.OpenLink(url))
-                _status.Text = "Couldn't open the release page.";
+                _status.Text = Strings.UpdatesOpenFailed;
         });
     }
 
     private void ShowAbout()
-        => MessageBox.Show(
-            this,
-            $"Termyn {AppVersion.Tag}\r\n\r\nA keyboard-driven Todoist client for Windows.\r\n\r\n"
-            + $"Installed in:\r\n{AppVersion.Location}\r\n\r\n"
-            + $"Settings and token:\r\n{_shell.Paths.ConfigDirectory}\r\n\r\n"
-            + $"Cache:\r\n{_shell.Paths.CacheDirectory}\r\n\r\n"
-
-            // Named on its own now there's something in it: it's the first thing to ask for when
-            // somebody reports a problem.
-            + $"Log:\r\n{_shell.Paths.LogDirectory}\r\n\r\n"
-
-            // Named rather than shown: the notices run to three hundred lines, most of them the
-            // Apache licence, which is no size for a message box.
-            + "The licences of the open-source components Termyn includes are in "
-            + "THIRD-PARTY-NOTICES.txt, in the folder it's installed in.",
-            "About Termyn",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        => AboutBox.Show(this, _shell.Paths, message => _status.Text = message);
 
     private void OpenSettings()
     {
@@ -1057,7 +1071,7 @@ internal sealed class MainForm : Form
         {
             // Left where it was rather than saved as a wish the OS didn't grant.
             amended = amended with { LaunchAtLogin = _settings.LaunchAtLogin };
-            notices.Add("Windows would not change the launch-at-login setting.");
+            notices.Add(Strings.NoticeLaunchAtLogin);
         }
 
         _settings = amended;
@@ -1069,7 +1083,7 @@ internal sealed class MainForm : Form
             _quickAdd?.ApplyTheme(_theme);
 
             // The framework's own chrome — scrollbars, menus, title bars — is set once at startup.
-            notices.Add("Restart Termyn for the window frame to follow the theme.");
+            notices.Add(Strings.NoticeFrameTheme);
         }
 
         if (hotkeyChanged)
@@ -1081,7 +1095,7 @@ internal sealed class MainForm : Form
         }
 
         if (cadenceChanged)
-            notices.Add("The sync cadence takes effect when Termyn next starts.");
+            notices.Add(Strings.NoticeSyncCadence);
 
         // Straight away rather than at the next start: tightening the caps and then finding the
         // cache still over them until tomorrow is not what the setting appears to promise.
@@ -1090,7 +1104,7 @@ internal sealed class MainForm : Form
 
         // Saved last, so the theme and hotkey are applied even when the file can't be written.
         if (!SaveViewState())
-            notices.Add("Settings could not be written to disk.");
+            notices.Add(Strings.NoticeSettingsNotSaved);
 
         if (notices.Count > 0)
             _status.Text = string.Join("  ·  ", notices);
@@ -1204,6 +1218,29 @@ internal sealed class MainForm : Form
     /// <param name="logical">The size at 100%</param>
     /// <returns>The size in the display's pixels</returns>
     private int AtScale(int logical) => StartupLayout.Scaled(logical, DeviceDpi);
+
+    /// <summary>Sets the space round the search box for the screen the window's on.</summary>
+    private void PadSearch() => _searchHolder.Padding = SearchPaddingAt(DeviceDpi);
+
+    /// <summary>
+    /// Pads the search box again once the window knows which screen it's on.
+    /// </summary>
+    /// <remarks>
+    /// Before its handle exists a window reports the scale of the screen the app started on, so the
+    /// padding set while it's built can be for the wrong one.
+    /// </remarks>
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        PadSearch();
+    }
+
+    /// <summary>Pads the search box again for a screen of another scale.</summary>
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        PadSearch();
+    }
 
     private ViewState CurrentViewState()
     {
@@ -1425,9 +1462,9 @@ internal sealed class MainForm : Form
 
         var tooltip = today switch
         {
-            0 => "Termyn — nothing due today",
-            1 => "Termyn — 1 task due today",
-            _ => $"Termyn — {today} tasks due today",
+            0 => Strings.TrayNothingDue,
+            1 => Strings.TrayOneDue,
+            _ => string.Format(CultureInfo.CurrentCulture, Strings.TrayManyDue, today),
         };
 
         _shell.Notifier.SetStatus(tooltip, today);
@@ -1444,8 +1481,8 @@ internal sealed class MainForm : Form
         // A bare newline, and the offset found rather than counted back from the end: a link label
         // measures its link into text with the carriage returns already gone, so a \r\n separator
         // put the start one character late and left the O of Open outside the link.
-        const string link = "Open in Todoist";
-        var text = $"Termyn can't read this filter: {unreadable.Query}\n{link}";
+        var link = Strings.UnreadableFilterLink;
+        var text = string.Format(CultureInfo.CurrentCulture, Strings.UnreadableFilter, unreadable.Query) + "\n" + link;
 
         _unsupported.Text = text;
         _unsupported.LinkArea = new LinkArea(text.LastIndexOf(link, StringComparison.Ordinal), link.Length);
@@ -1634,7 +1671,7 @@ internal sealed class MainForm : Form
     /// A background sync threw. Routed through the same reporting as everything else, so a
     /// cancellation raised inside a sync is swallowed here too rather than painted as a failure.
     /// </summary>
-    private void OnSyncFailed(Exception ex) => OnUi(() => Report(ex, "Background sync failed: "));
+    private void OnSyncFailed(Exception ex) => OnUi(() => Report(ex, background: true));
 
     // ---- Navigation ----------------------------------------------------------------------------
 
@@ -1883,7 +1920,7 @@ internal sealed class MainForm : Form
     /// <returns>True when the rename went ahead</returns>
     private bool RenameStructure(SidebarNode node)
     {
-        var name = InputDialog.Ask(this, "Rename", "New name:", node.Label);
+        var name = InputDialog.Ask(this, Strings.RenameTitle, Strings.RenamePrompt, node.Label);
         if (string.IsNullOrWhiteSpace(name))
             return false;
 
@@ -1936,8 +1973,8 @@ internal sealed class MainForm : Form
         // three end in an undo barrier — Todoist has no undelete for any of them — so all three say
         // "permanently", which is the word for that.
         var question = node.Kind == SidebarKind.Label
-            ? $"Are you sure you want to permanently delete the label \"{node.Label}\" and remove it from every task?"
-            : $"Are you sure you want to permanently delete the {(node.Kind == SidebarKind.Project ? "project" : "section")} \"{node.Label}\" and everything in it?";
+            ? string.Format(CultureInfo.CurrentCulture, Strings.DeleteLabelConfirm, node.Label)
+            : string.Format(CultureInfo.CurrentCulture, node.Kind == SidebarKind.Project ? Strings.DeleteProjectConfirm : Strings.DeleteSectionConfirm, node.Label);
 
         if (!Confirm(question))
             return false;
@@ -2143,9 +2180,9 @@ internal sealed class MainForm : Form
         _rendered.Placeholder = access switch
         {
             DescriptionAccess.Writable => string.Empty,
-            DescriptionAccess.ReadOnly => "This description can't be edited here.",
-            DescriptionAccess.NotKept => "Todoist keeps no description on the Inbox.",
-            _ => "Select a task or a project to see its description.",
+            DescriptionAccess.ReadOnly => Strings.DescriptionReadOnly,
+            DescriptionAccess.NotKept => Strings.DescriptionNotKept,
+            _ => Strings.DescriptionNothingSelected,
         };
     }
 
@@ -2289,7 +2326,7 @@ internal sealed class MainForm : Form
     private void RenderCommentsTab()
     {
         var count = _presenter.CommentCountOn(CommentsOwner);
-        var caption = count > 0 ? $"Comments ({count})" : "Comments";
+        var caption = count > 0 ? string.Format(CultureInfo.CurrentCulture, Strings.MainCommentsTabCount, count) : Strings.MainCommentsTab;
 
         if (_commentsTab.Text != caption)
             _commentsTab.Text = caption;
@@ -2309,10 +2346,10 @@ internal sealed class MainForm : Form
         // pulled out of the archive — and a comment on one of those would be declined, not queued.
         _comments.CanComment = owner is not null && _presenter.CanCommentOn(owner);
         _comments.Placeholder = owner is null
-            ? "Select a task or a project to see its comments."
+            ? Strings.CommentsNothingSelected
             : _comments.CanComment
-                ? "No comments yet."
-                : "This task's comments can't be added to here.";
+                ? Strings.CommentsNone
+                : Strings.CommentsReadOnly;
 
         _comments.Invalidate();
     }
@@ -2339,7 +2376,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void OnCommentDeleted(string id)
     {
-        if (!Confirm("Are you sure you want to permanently delete this comment?\r\n\r\nIt can't be brought back — Todoist has no undelete."))
+        if (!Confirm(Strings.DeleteCommentConfirm))
             return;
 
         Guarded(() =>
@@ -2372,14 +2409,14 @@ internal sealed class MainForm : Form
 
         using var transfer = new CancellationTokenSource();
         _transfer = transfer;
-        _comments.Progress = $"Downloading {file.FileName}…  Esc to stop";
+        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.DownloadStarting, file.FileName);
 
         try
         {
             var progress = new Progress<long>(read => _comments.Progress =
                 file.FileSize > 0
-                    ? $"Downloading {file.FileName}… {read * 100 / file.FileSize}%  Esc to stop"
-                    : $"Downloading {file.FileName}… {read / 1024} KB  Esc to stop");
+                    ? string.Format(CultureInfo.CurrentCulture, Strings.DownloadPercent, file.FileName, read * 100 / file.FileSize)
+                    : string.Format(CultureInfo.CurrentCulture, Strings.DownloadKilobytes, file.FileName, read / 1024));
 
             var result = await _presenter.FetchAttachmentAsync(file, progress, transfer.Token);
 
@@ -2393,7 +2430,7 @@ internal sealed class MainForm : Form
                     break;
 
                 default:
-                    MessageBox.Show(this, result.Message ?? "The file couldn't be opened.", "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(this, result.Message ?? Strings.FileOpenFailed, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     break;
             }
         }
@@ -2416,7 +2453,7 @@ internal sealed class MainForm : Form
         if (_transfer is not null || CommentsOwner is null)
             return;
 
-        using var picker = new OpenFileDialog { Title = "Attach a file to this comment", CheckFileExists = true };
+        using var picker = new OpenFileDialog { Title = Strings.AttachPickerTitle, CheckFileExists = true };
         if (picker.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -2426,7 +2463,7 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                $"{file.Name} is {file.Length / (1024 * 1024)} MB, and this Todoist plan takes files up to {_presenter.UploadLimitMb} MB.",
+                string.Format(CultureInfo.CurrentCulture, Strings.AttachTooBig, file.Name, file.Length / (1024 * 1024), _presenter.UploadLimitMb),
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -2435,7 +2472,7 @@ internal sealed class MainForm : Form
 
         using var transfer = new CancellationTokenSource();
         _transfer = transfer;
-        _comments.Progress = $"Uploading {file.Name}…  Esc to stop";
+        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.Uploading, file.Name);
 
         try
         {
@@ -2455,7 +2492,7 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                $"{file.Name} couldn't be uploaded, so nothing was posted. What you typed is still in the box.\r\n\r\n{ex.Message}",
+                string.Format(CultureInfo.CurrentCulture, Strings.UploadFailed, file.Name, ex.Message),
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -2482,7 +2519,7 @@ internal sealed class MainForm : Form
         if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
             return;
 
-        if (!Confirm($"Are you sure you want to remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
+        if (!Confirm(string.Format(CultureInfo.CurrentCulture, Strings.RemoveAttachmentConfirm, file.FileName)))
             return;
 
         // Guarded, since nothing above an async void handler would catch it: taking the file off is
@@ -3069,7 +3106,7 @@ internal sealed class MainForm : Form
                 // having been opened, so the reason still has to be said somewhere.
                 if (NewTaskText(_sidebar.SelectedNode?.Tag as SidebarNode) is not { } start)
                 {
-                    _status.Text = "This view doesn't say where a task goes — Quick add starts one from nothing.";
+                    _status.Text = Strings.NewTaskNowhere;
                     return false;
                 }
 
@@ -3142,7 +3179,7 @@ internal sealed class MainForm : Form
                 {
                     undone = _presenter.Undo();
                     if (!undone)
-                        _status.Text = "Nothing to undo.";
+                        _status.Text = Strings.NothingToUndo;
                 });
                 return undone;
 
@@ -3322,10 +3359,10 @@ internal sealed class MainForm : Form
                     // looking for a task above that is sitting right there.
                     if (!wrote)
                         _status.Text = outdent
-                            ? "Already at the top level."
+                            ? Strings.IndentTopLevel
                             : _presenter.IndentTooDeep(id)
-                                ? "Todoist holds four levels of sub-task, and this is as deep as it goes."
-                                : "Nothing above it to indent under.";
+                                ? Strings.IndentTooDeep
+                                : Strings.IndentNothingAbove;
                 });
                 return wrote;
 
@@ -3335,7 +3372,7 @@ internal sealed class MainForm : Form
                 {
                     wrote = _presenter.Move(id, command == AppCommand.MoveUp ? -1 : 1);
                     if (!wrote)
-                        _status.Text = "Already at the end of its list.";
+                        _status.Text = Strings.MoveAtEnd;
                 });
                 return wrote;
 
@@ -3349,9 +3386,9 @@ internal sealed class MainForm : Form
                     // Still said, though the menus grey it: Ctrl+O reaches it without a menu having
                     // opened to grey anything.
                     if (_presenter.TodoistLinkFor(id) is not { } link)
-                        _status.Text = "Todoist hasn't got this task yet. It will once it has synced.";
+                        _status.Text = Strings.ShowInTodoistNotYet;
                     else if (!AppVersion.OpenLink(link))
-                        _status.Text = "Couldn't open the task in Todoist.";
+                        _status.Text = Strings.ShowInTodoistFailed;
                 });
                 return false;
 
@@ -3423,12 +3460,12 @@ internal sealed class MainForm : Form
         // The fetch is a round trip over up to three months of history, so it is worth saying that
         // something is happening rather than leaving the list unchanged for a moment.
         if (!_presenter.ShowingCompleted)
-            _status.Text = "Fetching completed tasks…";
+            _status.Text = Strings.CompletedFetching;
 
         await GuardedAsync(async () =>
         {
             if (!await _presenter.ToggleCompletedAsync(_cts.Token))
-                _status.Text = "Completed tasks need a connection.";
+                _status.Text = Strings.CompletedOffline;
         });
     }
 
@@ -3462,7 +3499,7 @@ internal sealed class MainForm : Form
     /// <returns>True when a project was created</returns>
     private bool AddProject()
     {
-        var name = InputDialog.Ask(this, "New project", "Project name:");
+        var name = InputDialog.Ask(this, Strings.NewProjectTitle, Strings.NewProjectPrompt);
         if (string.IsNullOrWhiteSpace(name))
             return false;
 
@@ -3505,7 +3542,7 @@ internal sealed class MainForm : Form
         if (_outline.Rows.Any(r => r.Id == id))
             _outline.SelectId(id);
         else
-            _status.Text = "Added, but this view doesn't show it.";
+            _status.Text = Strings.AddedNotShown;
 
         return true;
     }
@@ -3518,11 +3555,11 @@ internal sealed class MainForm : Form
         // opened, so the reason still has to be said out loud somewhere.
         if (SelectedProject() is not { } project)
         {
-            _status.Text = "Pick a project first — a section belongs to one.";
+            _status.Text = Strings.NewSectionNeedsProject;
             return false;
         }
 
-        var name = InputDialog.Ask(this, "New section", "Section name:");
+        var name = InputDialog.Ask(this, Strings.NewSectionTitle, Strings.NewSectionPrompt);
         if (string.IsNullOrWhiteSpace(name))
             return false;
 
@@ -3670,7 +3707,7 @@ internal sealed class MainForm : Form
         Noticed();
 
         if (!_presenter.Drop(id, target))
-            _status.Text = "Couldn't move the task there. Something changed while it was being dragged.";
+            _status.Text = Strings.DragTaskFailed;
     }
 
     /// <summary>Puts a project or section down where it was dragged to in the sidebar.</summary>
@@ -3683,7 +3720,7 @@ internal sealed class MainForm : Form
         Noticed();
 
         if (!_presenter.DropInSidebar(dragged, beside, after))
-            _status.Text = "Couldn't move it there. Something changed while it was being dragged.";
+            _status.Text = Strings.DragFailed;
     }
 
     /// <summary>Moves a task dragged out of the outline to the project or section it was let go on.</summary>
@@ -3694,7 +3731,7 @@ internal sealed class MainForm : Form
         Noticed();
 
         if (!_presenter.DropTaskOn(id, node))
-            _status.Text = "Couldn't move the task there. Something changed while it was being dragged.";
+            _status.Text = Strings.DragTaskFailed;
     }
 
     /// <summary>
@@ -3764,7 +3801,7 @@ internal sealed class MainForm : Form
         // the picker rather than after it, so nobody chooses somewhere only to be told it was no use.
         if (!_presenter.HasTask(id))
         {
-            _status.Text = "Tasks from the completed history can't be moved.";
+            _status.Text = Strings.MoveCompletedRefused;
             return false;
         }
 
@@ -3775,14 +3812,14 @@ internal sealed class MainForm : Form
         // the task already sits, so what's gone is the task or where it was going.
         if (!_presenter.MoveTo(id, destination))
         {
-            _status.Text = "Not moved — the task or where it was going is no longer there.";
+            _status.Text = Strings.MoveTargetGone;
             return false;
         }
 
         if (_outline.Rows.Any(r => r.Id == id))
             _outline.SelectId(id);
         else
-            _status.Text = $"Moved to {destination.Path}, which this view doesn't show.";
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.MovedNotShown, destination.Path);
 
         return true;
     }
@@ -3864,7 +3901,12 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void Report(Exception ex, string prefix = "Something went wrong: ")
+    /// <summary>
+    /// Says on the status bar that something failed, and writes it to the log.
+    /// </summary>
+    /// <param name="ex">What went wrong</param>
+    /// <param name="background">Whether it was a background sync rather than something the user asked for</param>
+    private void Report(Exception ex, bool background = false)
     {
         if (IsDisposed)
             return;
@@ -3878,15 +3920,19 @@ internal sealed class MainForm : Form
             return;
         }
 
-        // The prefix is what the caller was doing — a background sync, or whatever the user asked
-        // for — and it's the difference between two identical-looking lines in the log.
+        // What the caller was doing — a background sync, or whatever the user asked for — is the
+        // difference between two identical-looking lines in the log. The log stays in English
+        // whatever the window says, since it's what gets read when somebody reports a problem.
         if (ex is not OperationCanceledException)
-            _shell.Log.Error(prefix.TrimEnd().TrimEnd(':'), ex);
+            _shell.Log.Error(background ? "Background sync failed" : "Something went wrong", ex);
 
         _status.Text = ex switch
         {
             OperationCanceledException => _status.Text, // window closed mid-flight
-            _ => prefix + ex.Message,
+            _ => string.Format(
+                CultureInfo.CurrentCulture,
+                background ? Strings.StatusSyncFailed : Strings.StatusSomethingWrong,
+                ex.Message),
         };
     }
 }

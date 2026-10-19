@@ -45,7 +45,8 @@ internal sealed class DueForm : Form
 
     private DueForm(string task, string current, DateOnly today, Func<string, DayReading> read, bool english)
     {
-        Text = "Due date";
+        Text = Strings.DueTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -67,7 +68,7 @@ internal sealed class DueForm : Form
 
         var prompt = new Label
         {
-            Text = "When is it due?",
+            Text = Strings.DuePrompt,
             Location = new Point(14, 38),
             Size = new Size(392, 20),
             ForeColor = SystemColors.GrayText,
@@ -80,7 +81,7 @@ internal sealed class DueForm : Form
 
         var at = new Label
         {
-            Text = "Time:",
+            Text = Strings.DueTime,
             Location = new Point(14, 128),
             Size = new Size(44, 20),
         };
@@ -93,7 +94,7 @@ internal sealed class DueForm : Form
             ShowCheckBox = true,
             Location = new Point(62, 124),
             Size = new Size(120, 27),
-            AccessibleName = "Time",
+            AccessibleName = Strings.DueTimeAccessible,
             Value = AnyDay + Morning.ToTimeSpan(),
             Checked = false,
         };
@@ -102,14 +103,14 @@ internal sealed class DueForm : Form
         // to a due date, and a row of buttons that changes shape is one nobody can learn.
         _clear = new Button
         {
-            Text = "Clear",
+            Text = Strings.DueClear,
             Location = new Point(14, 164),
             Size = new Size(88, 30),
             Enabled = current.Length > 0,
         };
 
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(226, 164), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 164), Size = new Size(88, 30) };
+        var ok = new Button { Text = Strings.ButtonOK, DialogResult = DialogResult.OK, Location = new Point(226, 164), Size = new Size(88, 30) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(318, 164), Size = new Size(88, 30) };
 
         _clear.Click += (_, _) =>
         {

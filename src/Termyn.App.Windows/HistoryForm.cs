@@ -25,7 +25,8 @@ internal sealed class HistoryForm : Form
         _read = read;
         _cleared = cleared;
 
-        Text = "What you've done";
+        Text = Strings.HistoryTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -38,7 +39,7 @@ internal sealed class HistoryForm : Form
         {
             // Says the two things somebody would otherwise have to find out by being surprised:
             // this session only, and it is not the account's own activity log.
-            Text = "Changes made in Termyn since it started.",
+            Text = Strings.HistoryIntro,
             Location = new Point(14, 12),
             Size = new Size(492, 20),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
@@ -59,7 +60,7 @@ internal sealed class HistoryForm : Form
         // feature is broken; this says there is nothing to say yet.
         _empty = new Label
         {
-            Text = "Nothing yet.",
+            Text = Strings.HistoryEmpty,
             Location = _list.Location,
             Size = _list.Size,
             Anchor = _list.Anchor,
@@ -70,7 +71,7 @@ internal sealed class HistoryForm : Form
 
         var clear = new Button
         {
-            Text = "Clear",
+            Text = Strings.HistoryClear,
             Location = new Point(14, 338),
             Size = new Size(90, 28),
             Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
@@ -83,7 +84,7 @@ internal sealed class HistoryForm : Form
 
         var close = new Button
         {
-            Text = "Close",
+            Text = Strings.ButtonClose,
             DialogResult = DialogResult.Cancel,
             Location = new Point(416, 338),
             Size = new Size(90, 28),

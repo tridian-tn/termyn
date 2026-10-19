@@ -24,7 +24,8 @@ internal sealed class DeadlineForm : Form
 
     private DeadlineForm(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read, bool english)
     {
-        Text = "Deadline";
+        Text = Strings.DeadlineTitle;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -46,7 +47,7 @@ internal sealed class DeadlineForm : Form
 
         var prompt = new Label
         {
-            Text = "Finish it by:",
+            Text = Strings.DeadlinePrompt,
             Location = new Point(14, 38),
             Size = new Size(392, 20),
             ForeColor = SystemColors.GrayText,
@@ -62,14 +63,14 @@ internal sealed class DeadlineForm : Form
         // to a deadline, and a row of buttons that changes shape is one nobody can learn.
         _clear = new Button
         {
-            Text = "Clear",
+            Text = Strings.DeadlineClear,
             Location = new Point(14, 128),
             Size = new Size(88, 30),
             Enabled = current is not null,
         };
 
-        _ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(226, 128), Size = new Size(88, 30) };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(318, 128), Size = new Size(88, 30) };
+        _ok = new Button { Text = Strings.ButtonOK, DialogResult = DialogResult.OK, Location = new Point(226, 128), Size = new Size(88, 30) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(318, 128), Size = new Size(88, 30) };
 
         _clear.Click += (_, _) =>
         {
