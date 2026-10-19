@@ -6,6 +6,15 @@ pieces (the hotkey, the tray, launch at login), and a real account going offline
 
 A step that fails is an issue before the release, not a note after it.
 
+## Before the tag
+
+The one step against the source rather than the build.
+
+- [ ] Read what's changed in `src/Termyn.App.Windows` since the commit
+      [What belongs below the UI](portable-split.md#keeping-it) was last read through at, for logic
+      that doesn't need a control, a `Graphics` or a window handle to be what it is. Raise an issue
+      for each piece, then move that commit on to the one being tagged.
+
 ## Before you start
 
 - [ ] The build is the one attached to the draft release for the tag. The version in both file

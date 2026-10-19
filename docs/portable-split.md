@@ -111,9 +111,10 @@ it. That is a better argument for doing this than tidiness is.
 
 ## What isn't a move
 
-**Nothing enforces the boundary.** No test, no analyzer, no build rule. The split is held by the
-framework targets, which guard one direction, and by everyone remembering, which guards the other.
-A guard is worth having regardless of how much of the above gets moved.
+**Nothing enforced the boundary** beyond the framework targets and CA1416, which guard one
+direction, and everyone remembering, which guards the other. A guard was worth having regardless of
+how much of the above got moved. There's one now, under [Keeping it](#keeping-it), but it only
+covers the direction a build can see.
 
 **`SettingsForm.Sync` restates half of `HotkeyBinding.IsValid`.** `needsModifier` recomputes the
 Ctrl-Alt-Win half of a rule Core already owns and can already answer. A duplication rather than a
@@ -153,3 +154,33 @@ is only the second-client one.
 **Descriptions, or the outline, growing a second renderer.** The rendered view and the editor
 already agree about the source because `MarkdownHighlight` is shared. Anything that has to agree
 with them about the *rendering* would make the walk's current home untenable.
+
+## Keeping it
+
+Three things hold the direction a build can see:
+
+- **The framework targets.** `net10.0` keeps Windows Forms out of `Core` and `Presentation`
+  altogether.
+- **CA1416, as an error.** Both projects build with `TreatWarningsAsErrors`, so calling an API
+  marked Windows-only fails the build, unless the call is behind `OperatingSystem.IsWindows()`.
+- **`PortableSplitTests`**, for what the other two let through: `System.Drawing`, which is in every
+  runtime; any `OperatingSystem.Is…()` check, since one round a call is all CA1416 wants; a
+  `[SupportedOSPlatform]` or a platform guard attribute, which tell it the same; a P/Invoke,
+  `NativeLibrary` or COM interop; a reference to anything beyond the framework that isn't listed as
+  known to run everywhere, Termyn's own projects included; and CA1416 being quietened anywhere from
+  the project up to the repo, by a pragma, `NoWarn`, an `.editorconfig` severity for it or its
+  category, an analysis mode of `None`, or warnings no longer being errors.
+
+None of them catches what this read-through found, because portable logic written in
+`App.Windows` references nothing it shouldn't. So the read-through is repeated before every release
+is tagged, as the first step of the [release checklist](release-checklist.md), over what's changed
+since the last one rather than the whole project:
+
+```
+git diff <the commit below> -- src/Termyn.App.Windows
+```
+
+What it finds is raised as issues, the way the table above was, and the commit below moves on to
+the one being tagged.
+
+**Last read through at:** `6e91958` (21 Sep 2026), the commit that wrote this up.
