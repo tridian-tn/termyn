@@ -58,9 +58,9 @@ internal sealed class MainForm : Form
 
     /// <summary>
     /// The space around the search box, so it sits in from the window's edges rather than running
-    /// into them. The sides match the status line's inset at the bottom of the window.
+    /// into them. The sides line its border up with where the sidebar's text starts below it.
     /// </summary>
-    internal static readonly Padding SearchPadding = new(8, 6, 8, 6);
+    internal static readonly Padding SearchPadding = new(4, 6, 4, 6);
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
