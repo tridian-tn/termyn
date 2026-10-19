@@ -1036,24 +1036,12 @@ internal sealed class MainForm : Form
     }
 
     private void ShowAbout()
-        => MessageBox.Show(
-            this,
-            $"Termyn {AppVersion.Tag}\r\n\r\nA keyboard-driven Todoist client for Windows.\r\n\r\n"
-            + $"Installed in:\r\n{AppVersion.Location}\r\n\r\n"
-            + $"Settings and token:\r\n{_shell.Paths.ConfigDirectory}\r\n\r\n"
-            + $"Cache:\r\n{_shell.Paths.CacheDirectory}\r\n\r\n"
-
-            // Named on its own now there's something in it: it's the first thing to ask for when
-            // somebody reports a problem.
-            + $"Log:\r\n{_shell.Paths.LogDirectory}\r\n\r\n"
-
-            // Named rather than shown: the notices run to three hundred lines, most of them the
-            // Apache licence, which is no size for a message box.
-            + "The licences of the open-source components Termyn includes are in "
-            + "THIRD-PARTY-NOTICES.txt, in the folder it's installed in.",
-            "About Termyn",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        => AboutBox.Show(this, _shell.Paths, key => _status.Text = key switch
+        {
+            "home" => "Couldn't open the project page.",
+            "notices" => "Couldn't find the licences file.",
+            _ => "That folder isn't there yet.",
+        });
 
     private void OpenSettings()
     {
