@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* ThemePalette.Dark, and the priority colours from ThemePalette.ForPriority. */
+  :root {
+    --bg: #16181D; --panel: #1E2128; --row: #262A33; --border: #333844;
+    --text: #E8EAED; --muted: #9AA0AB; --accent: #F2A03C;
+    --unfocused: #463624; /* Accent blended 78% toward Background, as UnfocusedFor does */
+    --p1: #E4483A; --p2: #F5A623; --p3: #3B82F6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font-family: "Segoe UI", sans-serif; position: relative; }
+
+  /* ---- The words, inside GitHub's 80px safe area ---- */
+  .words { position: absolute; left: 80px; top: 80px; bottom: 80px; width: 470px;
+           display: flex; flex-direction: column; justify-content: center; }
+  .brand { display: flex; align-items: center; gap: 22px; }
+  .brand svg { width: 92px; height: 92px; flex: none; }
+  .name { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+          font-size: 84px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; }
+  .tagline { margin-top: 30px; font-size: 29px; line-height: 1.32; }
+
+  /* ---- The window, cropped. Laid out in the app's own 96-dpi pixels and scaled up. ---- */
+  .crop { position: absolute; left: 600px; top: 96px; right: 0; bottom: 0; overflow: hidden;
+          border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+  .win { zoom: 1.35; width: 640px; font-size: 12px; line-height: 1; background: var(--bg); }
+
+  .search { height: 25px; padding: 2px; }
+  .search div { height: 21px; border: 1px solid var(--border); background: var(--panel);
+                color: var(--muted); padding: 3px 4px; }
+
+  .split { display: flex; height: 400px; }
+  .side { width: 130px; flex: none; background: var(--panel); padding-top: 2px; border-right: 4px solid var(--border); }
+  .node { height: 18px; display: flex; align-items: center; padding-left: 4px; white-space: nowrap; }
+  .node.lvl1 { padding-left: 18px; }
+  .node.head { font-weight: 700; margin-top: 4px; }
+  .node.sel { background: var(--unfocused); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 4px; display: inline-block; }
+
+  .main { flex: 1; background: var(--panel); display: flex; flex-direction: column; min-width: 0; }
+  .crumbs { height: 24px; padding: 5px 6px 2px; color: var(--muted); background: var(--bg); }
+
+  table { border-collapse: collapse; table-layout: fixed; background: var(--panel); width: 480px; }
+  col.task { width: 210px; } col.pri { width: 40px; } col.proj { width: 120px; } col.due { width: 110px; }
+  th { height: 24px; font-weight: 400; color: var(--muted); text-align: left; padding: 0 6px;
+       background: var(--row); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  th.c { text-align: center; }
+  td { height: 17px; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  td.task { color: var(--text); padding: 0; }
+  td.c { text-align: center; }
+  tr.sel td { background: var(--accent); color: var(--bg); }
+  tr.done td { color: var(--muted); text-decoration: line-through; }
+
+  /* The task cell: indent (18 a level), expander room (14), check room (20), then 6 of inset. */
+  .cell { display: flex; align-items: center; height: 17px; }
+  .guide { width: 18px; height: 17px; flex: none; position: relative; }
+  .guide::after { content: ""; position: absolute; left: 9px; top: 0; bottom: 0; border-left: 1px solid var(--border); }
+  .exp { width: 14px; flex: none; display: flex; justify-content: center; }
+  .exp i { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+           border-top: 8px solid var(--muted); }
+  .chk { width: 20px; flex: none; }
+  .chk i { display: block; width: 13px; height: 13px; border: 1px solid var(--muted); position: relative; }
+  .done .chk i::after { content: ""; position: absolute; left: 3px; top: 0px; width: 4px; height: 8px;
+                        border: solid var(--muted); border-width: 0 1px 1px 0; transform: rotate(40deg); }
+  tr.sel .chk i { border-color: var(--bg); }
+  .txt { padding-left: 6px; overflow: hidden; text-overflow: ellipsis; }
+  td .dot { margin-right: 3px; vertical-align: -0.5px; }
+  .pd { width: 9px; height: 9px; }
+</style>
+</head>
+<body>
+  <div class="words">
+    <div class="brand">
+      <!-- BrandIcon's geometry at 256px: tile radius size/5, inset size/8, outline size/18, tick size/10. -->
+      <svg viewBox="0 0 256 256" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="252" height="252" rx="51" fill="#16181D" stroke="#333844" stroke-width="3"/>
+        <rect x="32" y="32" width="191" height="191" rx="32" fill="none" stroke="#F2A03C" stroke-width="14.2"/>
+        <polyline points="74.0,137.05 117.95,180.98 226.82,54.92" fill="none" stroke="#F2A03C"
+                  stroke-width="25.6" stroke-linecap="round" stroke-linejoin="miter"/>
+      </svg>
+      <div class="name">Termyn</div>
+    </div>
+    <p class="tagline">A fast, low-footprint Windows desktop client for Todoist.</p>  </div>
+
+  <div class="crop" aria-hidden="true">
+    <div class="win">
+      <div class="search"><div>Search…</div></div>
+      <div class="split">
+        <div class="side">
+          <div class="node sel">Today&nbsp;&nbsp;(8)</div>
+          <div class="node">Upcoming&nbsp;&nbsp;(14)</div>
+          <div class="node">Inbox&nbsp;&nbsp;(2)</div>
+          <div class="node head">Projects</div>
+          <div class="node lvl1"><span class="dot" style="background:#4073FF"></span>Work&nbsp;&nbsp;(6)</div>
+          <div class="node lvl1"><span class="dot" style="background:#299438"></span>Garden&nbsp;&nbsp;(4)</div>
+          <div class="node lvl1"><span class="dot" style="background:#AF38EB"></span>Home&nbsp;&nbsp;(5)</div>
+          <div class="node head">Labels</div>
+          <div class="node lvl1"><span class="dot" style="background:#FF9933"></span>errands&nbsp;&nbsp;(3)</div>
+          <div class="node lvl1"><span class="dot" style="background:#14AAF5"></span>calls&nbsp;&nbsp;(1)</div>
+        </div>
+        <div class="main">
+          <div class="crumbs">Today</div>
+          <table>
+            <colgroup><col class="task"><col class="pri"><col class="proj"><col class="due"></colgroup>
+            <tr><th>Task</th><th class="c">!</th><th>Project</th><th>Due</th></tr>
+            <tr class="sel">
+              <td class="task"><div class="cell"><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Draft the release notes</span></div></td>
+              <td class="c"><span class="dot pd" style="background:var(--p1)"></span></td>
+              <td><span class="dot" style="background:#4073FF"></span>Work</td><td>Oct 21</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Renew the car insurance</span></div></td>
+              <td class="c"><span class="dot pd" style="background:var(--p2)"></span></td>
+              <td><span class="dot" style="background:#AF38EB"></span>Home</td><td>Oct 21</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="exp"><i></i></span><span class="chk"><i></i></span><span class="txt">Plan the vegetable beds</span></div></td>
+              <td></td>
+              <td><span class="dot" style="background:#299438"></span>Garden</td><td>Oct 21</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="guide"></span><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Order seed potatoes</span></div></td>
+              <td class="c"><span class="dot pd" style="background:var(--p3)"></span></td>
+              <td><span class="dot" style="background:#299438"></span>Garden</td><td>Oct 21</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="guide"></span><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Mend the cold frame</span></div></td>
+              <td></td>
+              <td><span class="dot" style="background:#299438"></span>Garden</td><td>Oct 21</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Water the plants</span></div></td>
+              <td></td>
+              <td><span class="dot" style="background:#AF38EB"></span>Home</td><td>↻ every day</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Call the bank back</span></div></td>
+              <td></td>
+              <td><span class="dot" style="background:#4073FF"></span>Work</td><td>Oct 21</td>
+            </tr>
+            <tr class="done">
+              <td class="task"><div class="cell"><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Reply to the plumber</span></div></td>
+              <td></td>
+              <td><span class="dot" style="background:#AF38EB"></span>Home</td><td>Oct 21</td>
+            </tr>
+            <tr>
+              <td class="task"><div class="cell"><span class="exp"></span><span class="chk"><i></i></span><span class="txt">Book a haircut</span></div></td>
+              <td></td>
+              <td>Inbox</td><td>Oct 21</td>
+            </tr>
+            <tr><td class="task" style="height:200px"></td><td></td><td></td><td></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
