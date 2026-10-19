@@ -56,6 +56,12 @@ internal sealed class MainForm : Form
 {
     private const string ReconnectMessage = "Todoist turned your token away. Click here to reconnect; until then nothing can be changed.";
 
+    /// <summary>
+    /// The space around the search box, so it sits in from the window's edges rather than running
+    /// into them. The sides match the status line's inset at the bottom of the window.
+    /// </summary>
+    internal static readonly Padding SearchPadding = new(8, 6, 8, 6);
+
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
     private readonly Shell _shell;
@@ -548,9 +554,20 @@ internal sealed class MainForm : Form
         };
         _status.Cursor = Cursors.Default;
 
+        // A box docked to the window runs edge to edge, and docking ignores a control's margin, so
+        // the space around it comes from a holder's padding. Sized to the box, so it grows with it.
+        var searchHolder = new Panel
+        {
+            Dock = DockStyle.Top,
+            Padding = SearchPadding,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+        searchHolder.Controls.Add(_search);
+
         Controls.Add(_split);
         Controls.Add(_status);
-        Controls.Add(_search);
+        Controls.Add(searchHolder);
 
         // Last, so it docks outermost and sits above the search box where a menu bar belongs.
         // Built after the outline and the sidebar exist: filling it asks both what is selected.
@@ -562,7 +579,7 @@ internal sealed class MainForm : Form
         // it otherwise — and that order is about docking, so Tab began at the split and reached the
         // search box third. It goes down the window now: the search, then the tree and the list and
         // the panel, which follow from how those are nested inside the split.
-        _search.TabIndex = 0;
+        searchHolder.TabIndex = 0;
         _split.TabIndex = 1;
         _status.TabIndex = 2;
         bar.TabIndex = 3;
