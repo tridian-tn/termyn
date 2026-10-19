@@ -167,8 +167,9 @@ Three things hold the direction a build can see:
   runtime; any `OperatingSystem.Is…()` check, since one round a call is all CA1416 wants; a
   `[SupportedOSPlatform]` or a platform guard attribute, which tell it the same; a P/Invoke,
   `NativeLibrary` or COM interop; a reference to anything beyond the framework that isn't listed as
-  known to run everywhere, Termyn's own projects included; and CA1416 being quietened, by a pragma,
-  `NoWarn`, an `.editorconfig` or warnings no longer being errors.
+  known to run everywhere, Termyn's own projects included; and CA1416 being quietened anywhere from
+  the project up to the repo, by a pragma, `NoWarn`, an `.editorconfig` severity for it or its
+  category, an analysis mode of `None`, or warnings no longer being errors.
 
 None of them catches what this read-through found, because portable logic written in
 `App.Windows` references nothing it shouldn't. So the read-through is repeated before every release

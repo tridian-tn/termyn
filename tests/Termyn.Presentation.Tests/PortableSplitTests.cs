@@ -47,6 +47,23 @@ public class PortableSplitTests
         "System.Runtime.InteropServices.Marshalling.GeneratedComClassAttribute",
     ];
 
+    // Anything in a project or build file that would let a Windows-only call through CA1416. A
+    // category or global severity of warning or error is fine; anything lower lets it pass.
+    private static readonly Regex Quietens = new(
+        @"CA1416"
+        + @"|<(EnableNETAnalyzers|RunAnalyzers|RunAnalyzersDuringBuild|TreatWarningsAsErrors|CodeAnalysisTreatWarningsAsErrors)>\s*false"
+        + @"|<(AnalysisMode|AnalysisModeInteroperability)>\s*None"
+        + @"|<(AnalysisLevel|AnalysisLevelInteroperability)>\s*none"
+        + @"|dotnet_analyzer_diagnostic\.(category-Interoperability\.)?severity\s*=\s*(none|silent|suggestion)",
+        RegexOptions.IgnoreCase);
+
+    // The assemblies every runtime has. A reference assembly's name, such as System.Runtime, is
+    // the name of one of these, so what's here is the framework whatever it's called.
+    private static readonly HashSet<string> Framework = Directory
+        .EnumerateFiles(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "*.dll")
+        .Select(f => Path.GetFileNameWithoutExtension(f))
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     [Theory]
     [MemberData(nameof(Projects))]
     public void It_is_built_for_every_operating_system(string project)
@@ -79,7 +96,7 @@ public class PortableSplitTests
         var unknown = AssemblyOf(project)
             .GetReferencedAssemblies()
             .Select(a => a.Name!)
-            .Where(n => !n.StartsWith("System.", StringComparison.Ordinal) && n != "netstandard")
+            .Where(n => !Framework.Contains(n))
             .Except(beyond)
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -168,17 +185,23 @@ public class PortableSplitTests
     {
         // Every check above leans on CA1416 for whatever Windows-only API they don't list, and none
         // of the ways to quieten it leaves anything in the assembly to find: a pragma, NoWarn, an
-        // .editorconfig severity, or analysers or warnings-as-errors turned off.
+        // .editorconfig severity for it or for its whole category, an analysis mode of None, or
+        // analysers or warnings-as-errors turned off. Those last can be set in any folder from the
+        // project up to the repo, and a Directory.Build.targets there has the last word.
         var root = RepoRoot();
         var directory = Path.Combine(root, "src", project);
 
-        var silencing = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+        var inProject = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(f => !Regex.IsMatch(Path.GetRelativePath(directory, f), @"^(bin|obj)[\\/]"))
-            .Where(f => Path.GetExtension(f) is ".cs" or ".csproj" or ".props" or ".targets" or ".editorconfig" or ".globalconfig")
-            .Concat(new[] { "Directory.Build.props", "Directory.Build.targets", ".editorconfig", ".globalconfig" }
-                .Select(f => Path.Combine(root, f))
-                .Where(File.Exists))
-            .Where(f => Regex.IsMatch(File.ReadAllText(f), @"CA1416|<(EnableNETAnalyzers|RunAnalyzers|RunAnalyzersDuringBuild)>\s*false"))
+            .Where(f => Path.GetExtension(f) is ".cs" or ".csproj" or ".props" or ".targets" or ".editorconfig" or ".globalconfig");
+
+        var above = Ancestors(Path.GetDirectoryName(directory)!, root)
+            .SelectMany(d => new[] { "Directory.Build.props", "Directory.Build.targets", ".editorconfig", ".globalconfig" }
+                .Select(f => Path.Combine(d, f)))
+            .Where(File.Exists);
+
+        var silencing = inProject.Concat(above)
+            .Where(f => Quietens.IsMatch(File.ReadAllText(f)))
             .Select(f => Path.GetRelativePath(root, f))
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -189,10 +212,15 @@ public class PortableSplitTests
             silencing.Count == 0,
             $"CA1416 is quietened for {project} in {string.Join(", ", silencing)}");
         Assert.True(
-            Regex.IsMatch(projectFile,@"<TreatWarningsAsErrors>\s*true\s*</TreatWarningsAsErrors>"),
+            Regex.IsMatch(projectFile, @"<TreatWarningsAsErrors>\s*true\s*</TreatWarningsAsErrors>"),
             $"{project} no longer treats warnings as errors, so CA1416 only warns");
     }
 
+    /// <summary>
+    /// The assembly a portable project builds into, as loaded for these tests.
+    /// </summary>
+    /// <param name="project">The project's name, which is its assembly's too</param>
+    /// <returns>The assembly, checked to be the one named</returns>
     private static Assembly AssemblyOf(string project)
     {
         var assembly = project switch
@@ -229,6 +257,21 @@ public class PortableSplitTests
     }
 
     /// <summary>
+    /// A folder and each one above it, up to and including the repo's.
+    /// </summary>
+    /// <param name="from">The folder to start at, inside the repo</param>
+    /// <param name="root">The repo's folder, where it stops</param>
+    /// <returns>The folders, nearest first</returns>
+    private static IEnumerable<string> Ancestors(string from, string root)
+    {
+        for (var directory = new DirectoryInfo(from); directory is not null; directory = directory.Parent)
+        {
+            yield return directory.FullName;
+            if (Path.GetRelativePath(root, directory.FullName) == ".") yield break;
+        }
+    }
+
+    /// <summary>
     /// Reads an assembly's metadata as the compiler wrote it.
     /// </summary>
     /// <remarks>
@@ -258,9 +301,21 @@ public class PortableSplitTests
     private static bool IsWindowsSide(string ns)
         => Within(ns, "System.Windows.Forms") || Within(ns, "System.Drawing") || ns == "Microsoft.Win32";
 
+    /// <summary>
+    /// Whether a namespace is another or one of those under it.
+    /// </summary>
+    /// <param name="ns">The namespace to test</param>
+    /// <param name="root">The namespace it might be in</param>
+    /// <returns>True for <paramref name="root"/> itself or anything under it</returns>
     private static bool Within(string ns, string root)
         => ns == root || ns.StartsWith(root + ".", StringComparison.Ordinal);
 
+    /// <summary>
+    /// The full name of a type the assembly declares, with any it's nested in.
+    /// </summary>
+    /// <param name="reader">The metadata the type is in</param>
+    /// <param name="handle">The type</param>
+    /// <returns>The name, nested types after a <c>+</c></returns>
     private static string TypeName(MetadataReader reader, TypeDefinitionHandle handle)
     {
         var type = reader.GetTypeDefinition(handle);
@@ -312,6 +367,12 @@ public class PortableSplitTests
         return value.ReadSerializedString() ?? "";
     }
 
+    /// <summary>
+    /// What an attribute is applied to, in words for a failure message.
+    /// </summary>
+    /// <param name="reader">The metadata the attribute is in</param>
+    /// <param name="owner">The attribute's parent</param>
+    /// <returns>The assembly, or the type or member's name</returns>
     private static string OwnerOf(MetadataReader reader, EntityHandle owner) => owner.Kind switch
     {
         HandleKind.AssemblyDefinition => "the assembly",
@@ -321,6 +382,12 @@ public class PortableSplitTests
         _ => $"a {owner.Kind}",
     };
 
+    /// <summary>
+    /// A method's name, after the type that declares it.
+    /// </summary>
+    /// <param name="reader">The metadata the method is in</param>
+    /// <param name="method">The method</param>
+    /// <returns>The type's full name and the method's</returns>
     private static string MemberName(MetadataReader reader, MethodDefinition method)
         => $"{TypeName(reader, method.GetDeclaringType())}.{reader.GetString(method.Name)}";
 }
