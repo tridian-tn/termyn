@@ -30,7 +30,7 @@
     <comment>Large heading at the top of the about box. {0} is the version, written as a release tag such as v1.2.3.</comment>
   </data>
   <data name="AboutTagline" xml:space="preserve">
-    <value>A keyboard-driven Todoist client for Windows.</value>
+    <value>A fast, low-footprint Windows desktop client for Todoist</value>
     <comment>One-line description under the about box's heading.</comment>
   </data>
   <data name="AboutLicences" xml:space="preserve">
