@@ -4,11 +4,10 @@
 
 [![CI](https://github.com/tridian-tn/termyn/actions/workflows/ci.yml/badge.svg)](https://github.com/tridian-tn/termyn/actions/workflows/ci.yml)
 
-A fast, low-footprint Windows desktop client for [Todoist](https://todoist.com) — WinForms on
-.NET 10, offline-first, keyboard-driven.
+WinForms on .NET 10, offline-first, keyboard-driven.
 
-Unofficial, and not affiliated with Doist. It talks to the public Todoist API with a token you
-supply.
+Unofficial, and not affiliated with Doist. It talks to the public [Todoist](https://todoist.com) API
+with a token you supply.
 
 ## Build & test
 
