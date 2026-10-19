@@ -1036,12 +1036,7 @@ internal sealed class MainForm : Form
     }
 
     private void ShowAbout()
-        => AboutBox.Show(this, _shell.Paths, key => _status.Text = key switch
-        {
-            "home" => "Couldn't open the project page.",
-            "notices" => "Couldn't find the licences file.",
-            _ => "That folder isn't there yet.",
-        });
+        => AboutBox.Show(this, _shell.Paths, message => _status.Text = message);
 
     private void OpenSettings()
     {

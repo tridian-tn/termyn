@@ -21,4 +21,56 @@
     <value>Search…</value>
     <comment>Greyed prompt in the empty search box above the task list.</comment>
   </data>
+  <data name="AboutCaption" xml:space="preserve">
+    <value>About Termyn</value>
+    <comment>Title bar of the about box, opened from Help.</comment>
+  </data>
+  <data name="AboutHeading" xml:space="preserve">
+    <value>Termyn {0}</value>
+    <comment>Large heading at the top of the about box. {0} is the version, written as a release tag such as v1.2.3.</comment>
+  </data>
+  <data name="AboutTagline" xml:space="preserve">
+    <value>A keyboard-driven Todoist client for Windows.</value>
+    <comment>One-line description under the about box's heading.</comment>
+  </data>
+  <data name="AboutLicences" xml:space="preserve">
+    <value>Licences of included open-source components: {0}</value>
+    <comment>Line in the about box. {0} is a link whose text is the file name THIRD-PARTY-NOTICES.txt, which isn't translated.</comment>
+  </data>
+  <data name="AboutShowDiagnostics" xml:space="preserve">
+    <value>Show diagnostics</value>
+    <comment>Button in the about box that reveals the folders Termyn uses. Paired with AboutHideDiagnostics.</comment>
+  </data>
+  <data name="AboutHideDiagnostics" xml:space="preserve">
+    <value>Hide diagnostics</value>
+    <comment>The same button once the folders are showing, which collapses them again.</comment>
+  </data>
+  <data name="AboutFolderInstalled" xml:space="preserve">
+    <value>Installed in:</value>
+    <comment>Label in the about box's diagnostics, above a link to the folder Termyn runs from.</comment>
+  </data>
+  <data name="AboutFolderSettings" xml:space="preserve">
+    <value>Settings and token:</value>
+    <comment>Label in the about box's diagnostics, above a link to the folder holding the settings file and the encrypted Todoist token.</comment>
+  </data>
+  <data name="AboutFolderCache" xml:space="preserve">
+    <value>Cache:</value>
+    <comment>Label in the about box's diagnostics, above a link to the folder holding the local copy of the account.</comment>
+  </data>
+  <data name="AboutFolderLog" xml:space="preserve">
+    <value>Log:</value>
+    <comment>Label in the about box's diagnostics, above a link to the folder of log files.</comment>
+  </data>
+  <data name="AboutHomepageFailed" xml:space="preserve">
+    <value>Couldn't open the project page.</value>
+    <comment>Status bar message when clicking the GitHub link in the about box fails.</comment>
+  </data>
+  <data name="AboutNoticesMissing" xml:space="preserve">
+    <value>Couldn't find the licences file.</value>
+    <comment>Status bar message when the THIRD-PARTY-NOTICES.txt link in the about box finds no file.</comment>
+  </data>
+  <data name="AboutFolderMissing" xml:space="preserve">
+    <value>That folder isn't there yet.</value>
+    <comment>Status bar message when a folder linked from the about box's diagnostics doesn't exist, usually because nothing has been written to it yet.</comment>
+  </data>
 </root>

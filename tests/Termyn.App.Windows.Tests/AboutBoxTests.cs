@@ -24,6 +24,31 @@ public class AboutBoxTests
     }
 
     [WinFormsFact]
+    public void Its_words_come_from_the_catalogue()
+    {
+        using var page = AboutBox.Page(Places, 32);
+        var diagnostics = page.Page.Expander!;
+
+        Assert.Equal("About Termyn", Strings.AboutCaption);
+        Assert.Equal(Strings.AboutCaption, page.Page.Caption);
+        Assert.StartsWith(Strings.AboutTagline, page.Page.Text);
+        Assert.Contains("Licences of included open-source components: <a href=\"notices\">", page.Page.Text);
+        Assert.Equal(Strings.AboutShowDiagnostics, diagnostics.CollapsedButtonText);
+        Assert.Equal(Strings.AboutHideDiagnostics, diagnostics.ExpandedButtonText);
+
+        foreach (var label in new[] { Strings.AboutFolderInstalled, Strings.AboutFolderSettings, Strings.AboutFolderCache, Strings.AboutFolderLog })
+            Assert.Contains($"{label}\n<a href=", diagnostics.Text);
+    }
+
+    [WinFormsFact]
+    public void A_link_that_fails_is_reported_in_the_catalogue_s_words()
+    {
+        Assert.Equal(Strings.AboutHomepageFailed, AboutBox.Failure("home"));
+        Assert.Equal(Strings.AboutNoticesMissing, AboutBox.Failure("notices"));
+        Assert.Equal(Strings.AboutFolderMissing, AboutBox.Failure("log"));
+    }
+
+    [WinFormsFact]
     public void It_shows_the_app_icon_rather_than_a_stock_one()
     {
         using var page = AboutBox.Page(Places, 32);

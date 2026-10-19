@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Platform;
 using Termyn.Core.Update;
 
@@ -34,7 +35,7 @@ internal static class AboutBox
     /// </summary>
     /// <param name="owner">The window it belongs to</param>
     /// <param name="paths">Where the app keeps its files</param>
-    /// <param name="failed">Told what couldn't be opened, so the window can say so</param>
+    /// <param name="failed">Told what to say when a link couldn't be opened</param>
     internal static void Show(Control owner, IAppPaths paths, Action<string> failed)
     {
         using var about = Page(paths, owner.LogicalToDeviceUnits(IconSize));
@@ -42,7 +43,7 @@ internal static class AboutBox
         about.Page.LinkClicked += (_, e) =>
         {
             if (!Open(e.LinkHref, paths))
-                failed(e.LinkHref);
+                failed(Failure(e.LinkHref));
         };
 
         TaskDialog.ShowDialog(owner, about.Page, TaskDialogStartupLocation.CenterOwner);
@@ -64,27 +65,27 @@ internal static class AboutBox
         // the dialog more than it has to.
         var diagnostics = string.Join(
             "\n",
-            Folders(paths).Select(folder => $"{folder.Label}:\n<a href=\"{folder.Key}\">{folder.Path}</a>"));
+            Folders(paths).Select(folder => $"{folder.Label}\n<a href=\"{folder.Key}\">{folder.Path}</a>"));
 
         var page = new TaskDialogPage
         {
-            Caption = "About Termyn",
-            Heading = $"Termyn {AppVersion.Tag}",
+            Caption = Strings.AboutCaption,
+            Heading = string.Format(CultureInfo.CurrentCulture, Strings.AboutHeading, AppVersion.Tag),
             Icon = new TaskDialogIcon(icon),
-            Text = "A keyboard-driven Todoist client for Windows.\n\n"
+            Text = Strings.AboutTagline + "\n\n"
                 + $"<a href=\"home\">{Homepage.TrimEnd('/')}</a>\n\n"
 
                 // Linked rather than shown: the notices run to three hundred lines, most of them
                 // the Apache licence, which is no size for a dialog.
-                + $"Licences of included open-source components: <a href=\"notices\">{NoticesFile}</a>",
+                + string.Format(CultureInfo.CurrentCulture, Strings.AboutLicences, $"<a href=\"notices\">{NoticesFile}</a>"),
             EnableLinks = true,
             AllowCancel = true,
             Buttons = { TaskDialogButton.OK },
             Expander = new TaskDialogExpander
             {
                 Text = diagnostics,
-                CollapsedButtonText = "Show diagnostics",
-                ExpandedButtonText = "Hide diagnostics",
+                CollapsedButtonText = Strings.AboutShowDiagnostics,
+                ExpandedButtonText = Strings.AboutHideDiagnostics,
                 Expanded = false,
             },
         };
@@ -106,15 +107,27 @@ internal static class AboutBox
             && AppVersion.OpenFolder(path),
     };
 
+    /// <summary>
+    /// What to say when a link couldn't be opened.
+    /// </summary>
+    /// <param name="key">The link's key, as the box wrote it</param>
+    /// <returns>A line for the status bar</returns>
+    internal static string Failure(string key) => key switch
+    {
+        "home" => Strings.AboutHomepageFailed,
+        "notices" => Strings.AboutNoticesMissing,
+        _ => Strings.AboutFolderMissing,
+    };
+
     /// <summary>The folders the diagnostics section offers, in the order it lists them.</summary>
     private static IEnumerable<(string Key, string Label, string Path)> Folders(IAppPaths paths) =>
     [
-        ("installed", "Installed in", AppVersion.Location),
-        ("settings", "Settings and token", paths.ConfigDirectory),
-        ("cache", "Cache", paths.CacheDirectory),
+        ("installed", Strings.AboutFolderInstalled, AppVersion.Location),
+        ("settings", Strings.AboutFolderSettings, paths.ConfigDirectory),
+        ("cache", Strings.AboutFolderCache, paths.CacheDirectory),
 
         // The first thing to ask for when somebody reports a problem.
-        ("log", "Log", paths.LogDirectory),
+        ("log", Strings.AboutFolderLog, paths.LogDirectory),
     ];
 }
 
