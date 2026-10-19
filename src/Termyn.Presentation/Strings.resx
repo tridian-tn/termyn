@@ -258,6 +258,10 @@
     <value>About Termyn</value>
     <comment>Termyn is the app's name and isn't translated.</comment>
   </data>
+  <data name="CommandReconnect" xml:space="preserve">
+    <value>Reconnect…</value>
+    <comment>Offered once Todoist has turned the token away. The ellipsis is for the token dialog it opens.</comment>
+  </data>
   <data name="CommandSignOut" xml:space="preserve">
     <value>Sign out…</value>
     <comment>The ellipsis is for the question it asks first, about what signing out removes from this computer.</comment>

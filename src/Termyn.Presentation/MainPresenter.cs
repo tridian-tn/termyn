@@ -185,7 +185,6 @@ public sealed class MainPresenter
     private int _rateLimitStreak;
 
     private bool _syncing;
-    private bool _reconnectNeeded;
 
     /// <param name="fetcher">
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
@@ -208,7 +207,7 @@ public sealed class MainPresenter
         History = new ActionHistory(history, _clock);
 
         // The history quotes the account's tasks by name, so it goes whenever the account's cache
-        // does: on signing out, and when the server turns the token away.
+        // does: on signing out, and when a different account's token takes this one's place.
         engine.Purged += ForgetHistory;
 
         Publish(); // reflect whatever the engine already has loaded
@@ -264,6 +263,12 @@ public sealed class MainPresenter
     public bool CompletedTruncated { get; private set; }
 
     public bool CanUndo => _engine.CanUndo;
+
+    /// <summary>
+    /// True while Todoist has turned the token away and the account is held, read-only, for the
+    /// next one.
+    /// </summary>
+    public bool ReconnectNeeded => _engine.AwaitingToken;
 
     /// <summary>
     /// The writes the server has finished refusing, in the words of whoever made them.
@@ -388,18 +393,12 @@ public sealed class MainPresenter
         {
             NoteReachable(false, ex);
         }
-        catch (TodoistAuthException)
-        {
-            _reconnectNeeded = true;
-            throw;
-        }
         finally
         {
             _syncing = false;
 
-            // A rejected token empties the cache and then propagates, so this has to publish on the
-            // way out too: otherwise the view keeps the last account's tasks, and its plan keeps
-            // saying reminders are allowed.
+            // A rejected token propagates, so this has to publish on the way out too: otherwise the
+            // status goes on saying it's syncing rather than asking for a token.
             Publish();
         }
 
@@ -445,12 +444,60 @@ public sealed class MainPresenter
         Publish();
     }
 
+    /// <summary>Whether a new token carries on with the account held here, or replaces it.</summary>
+    /// <param name="userId">The account the token belongs to, from the probe</param>
+    public bool IsSameAccount(string? userId) => _engine.IsHeldFor(userId);
+
+    /// <summary>
+    /// Takes a new token Todoist has accepted. The same account's goes on with the cache and sends
+    /// what's been held; another account's wipes it first.
+    /// </summary>
+    /// <remarks>
+    /// The same account's can be taken with the window open: nothing changes but the token. Ask
+    /// before handing it another account's (<see cref="SwitchAccountQuestion"/>), and stop the
+    /// sync loop first, since that's a sign-out followed by a sign-in.
+    /// </remarks>
+    /// <param name="token">The token, already accepted by the probe</param>
+    /// <param name="userId">The account the probe said it belongs to</param>
+    public void Reconnect(string token, string? userId)
+    {
+        _engine.AcceptToken(token, userId);
+        Publish();
+    }
+
+    /// <summary>What to ask before a token for a different account replaces this one's.</summary>
+    /// <param name="userId">
+    /// The account the token belongs to, or null when Todoist didn't say, which is asked about
+    /// differently: it may well be this account's
+    /// </param>
+    /// <returns>The question, with a warning added when there are changes still to send</returns>
+    public string SwitchAccountQuestion(string? userId)
+    {
+        var question =
+            (userId is null
+                ? "Todoist didn't say which account that token is for, so Termyn can't tell whether it's this one.\n\n"
+                : "That token is for a different Todoist account.\n\n")
+            + "Using it removes this account's tasks, comments, downloaded files and the list of "
+            + "what you've done from this computer, and then signs in to the other one. Nothing is "
+            + "removed from Todoist itself.";
+
+        return _engine.PendingCount switch
+        {
+            0 => question,
+            1 => question + "\n\n1 change hasn't reached Todoist yet, and switching now loses it. "
+                          + "Paste a token for the account it belongs to and it will be sent.",
+            var n => question + $"\n\n{n} changes haven't reached Todoist yet, and switching now loses them. "
+                              + "Paste a token for the account they belong to and they will be sent.",
+        };
+    }
+
     /// <summary>Empties the history when the engine wipes the account.</summary>
     /// <remarks>
-    /// Raised from inside the engine's purge, which on a rejected token is on its way to rethrowing
-    /// the rejection. A history file that can't be emptied mustn't replace that with a failure of its
-    /// own: the rejection is what tells the window to ask for a token. What's held in memory has gone
-    /// either way, and a history that can't be written to has never been a reason to stop working.
+    /// Raised from inside the engine's purge, which on a switch of account is on its way to storing
+    /// the new token. A history file that can't be emptied mustn't stop that with a failure of its
+    /// own: the cache would be gone with no token stored, and the window left asking for the one it
+    /// had just been given. What's held in memory has gone either way, and a history that can't be
+    /// written to has never been a reason to stop working.
     /// </remarks>
     private void ForgetHistory()
     {
@@ -774,15 +821,9 @@ public sealed class MainPresenter
             NoteReachable(false);
             return false;
         }
-        catch (TodoistAuthException)
-        {
-            // The engine cleared the token and purged the cache before rethrowing, so the rows on
-            // screen belong to an account we no longer hold. Publishing is what takes them off.
-            _reconnectNeeded = true;
-            throw;
-        }
         finally
         {
+            // A rejected token propagates from here too, and the status has to say so.
             Publish();
         }
 
@@ -1180,7 +1221,15 @@ public sealed class MainPresenter
     /// <param name="kind">Which of the two the id names</param>
     /// <param name="id">The task or project the panel is on, or null for neither</param>
     /// <returns>What the panel may do with this description</returns>
-    public DescriptionAccess AccessToDescriptionOf(SubjectKind kind, string? id) => (kind, id) switch
+    public DescriptionAccess AccessToDescriptionOf(SubjectKind kind, string? id)
+    {
+        var access = Access(kind, id);
+
+        // Shown but not written to while the token's been turned away: nothing typed could be kept.
+        return access is DescriptionAccess.Writable && ReconnectNeeded ? DescriptionAccess.ReadOnly : access;
+    }
+
+    private DescriptionAccess Access(SubjectKind kind, string? id) => (kind, id) switch
     {
         // Out of the live model: a completed task fetched from the archive. Shown, not written to,
         // because an edit would be declined rather than queued.
@@ -1238,8 +1287,11 @@ public sealed class MainPresenter
         return TimeZoneInfo.ConvertTime(when, zone).ToString("d MMM yyyy, HH:mm");
     }
 
-    /// <summary>Whether a comment can be added to this task or project at all.</summary>
-    public bool CanCommentOn(string? ownerId) => _engine.CanComment(ownerId);
+    /// <summary>
+    /// Whether a comment can be added to this task or project at all. Never while the token's been
+    /// turned away: the box empties as it sends, so a refused comment would take the typing with it.
+    /// </summary>
+    public bool CanCommentOn(string? ownerId) => !ReconnectNeeded && _engine.CanComment(ownerId);
 
     /// <summary>Adds a comment to a task or a project.</summary>
     /// <param name="ownerId">The task or project to comment on</param>
@@ -1797,10 +1849,12 @@ public sealed class MainPresenter
     /// of one, in the account's own order. Sorted by a column or searched, the row above a task
     /// isn't the one before it. A view across projects — Today, a label, a filter — sets tasks from
     /// different projects side by side, so a drop between two of them would quietly move a task to
-    /// another project when all anyone meant was to shuffle their day.
+    /// another project when all anyone meant was to shuffle their day. Nowhere while the token's been
+    /// turned away, since the drop would only be refused.
     /// </remarks>
     public bool CanDrag
-        => Sort.IsDefault
+        => !ReconnectNeeded
+           && Sort.IsDefault
            && !Searching
            && (Selection.ProjectId is not null || Selection.SectionId is not null || Selection.View == SmartView.Inbox);
 
@@ -2193,7 +2247,8 @@ public sealed class MainPresenter
     /// <param name="node">The row the drag would start from</param>
     /// <returns>True when it can be dragged</returns>
     public bool CanDragInSidebar(SidebarNode node)
-        => node.Kind is SidebarKind.Project or SidebarKind.Section
+        => !ReconnectNeeded
+           && node.Kind is SidebarKind.Project or SidebarKind.Section
            && InTree(node)
            && !(node.Kind == SidebarKind.Project && _engine.IsInboxProject(node.Id));
 
@@ -3323,7 +3378,7 @@ public sealed class MainPresenter
         // The states are mutually exclusive and ordered by what the user can do about them: a
         // rejected token needs attention whatever else is true, and a sync in flight is the most
         // recent thing that happened.
-        if (_reconnectNeeded)
+        if (ReconnectNeeded)
             return new SyncStatus(SyncState.ReconnectNeeded, null, null, pending, failed);
 
         if (_syncing)
@@ -3376,6 +3431,7 @@ public sealed class MainPresenter
         AppCommand.Settings,
         AppCommand.CheckForUpdates,
         AppCommand.About,
+        AppCommand.Reconnect,
         AppCommand.SignOut,
     ];
 
@@ -3384,7 +3440,7 @@ public sealed class MainPresenter
         // Only what the presenter itself knows. The palette lists an action whether or not it can
         // be run right now — typing "undo" and finding nothing there reads as a missing feature,
         // where running it and being told there is nothing to undo does not.
-        var context = new CommandContext(ShowingCompleted: ShowingCompleted, CanUndo: CanUndo);
+        var context = new CommandContext(ShowingCompleted: ShowingCompleted, CanUndo: CanUndo, ReconnectNeeded: ReconnectNeeded);
 
         foreach (var command in PaletteActions)
         {

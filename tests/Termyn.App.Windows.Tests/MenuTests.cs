@@ -209,17 +209,30 @@ public class MenuTests
     [WinFormsFact]
     public void Signing_out_sits_with_exit_at_the_bottom_of_the_File_menu()
     {
-        // The two ways out, together and ruled off from everything else, with Exit last where a
-        // File menu always keeps it.
+        // The two ways out, together and ruled off from everything else with the way back in above
+        // them, and Exit last where a File menu always keeps it.
         var file = Menus.Bar.Single(e => e.Heading == "&File");
         using var built = Build(file.Children ?? [], CommandContext.Empty);
         var items = built.Menu.Items.Cast<ToolStripItem>().ToList();
         var signOut = items.IndexOf(Find(built, "Sign out…"));
 
-        Assert.IsType<ToolStripSeparator>(items[signOut - 1]);
+        Assert.Equal("Reconnect…", items[signOut - 1].Text);
+        Assert.IsType<ToolStripSeparator>(items[signOut - 2]);
         Assert.Equal("Exit", items[signOut + 1].Text);
         Assert.Equal(items.Count - 1, signOut + 1);
         Assert.True(items[signOut].Enabled);
+    }
+
+    [WinFormsFact]
+    public void Reconnecting_is_offered_only_once_the_token_has_been_turned_away()
+    {
+        var file = Menus.Bar.Single(e => e.Heading == "&File");
+
+        using var signedIn = Build(file.Children ?? [], CommandContext.Empty);
+        using var turnedAway = Build(file.Children ?? [], new CommandContext(ReconnectNeeded: true));
+
+        Assert.False(Find(signedIn, "Reconnect…").Enabled);
+        Assert.True(Find(turnedAway, "Reconnect…").Enabled);
     }
 
     [WinFormsFact]

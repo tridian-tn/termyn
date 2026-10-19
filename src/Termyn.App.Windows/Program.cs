@@ -93,18 +93,15 @@ internal static class Program
     /// <param name="settings">The settings to start this session with</param>
     /// <param name="tray">Start with no window on screen</param>
     /// <param name="quickAdd">Open the quick-add box straight away</param>
-    /// <returns>True when the window closed because the user signed out, so there's another session to run</returns>
+    /// <returns>
+    /// True when the window closed because the user signed out or switched account, so there's
+    /// another session to run
+    /// </returns>
     private static bool RunSession(Launch launch, AppSettings settings, bool tray, bool quickAdd)
     {
         var (paths, settingsStore, api, secrets, instance, updates, log) = launch;
 
         var auth = new AuthPresenter(api, secrets);
-        if (!auth.HasStoredToken)
-        {
-            using var tokenForm = new TokenEntryForm(auth);
-            if (tokenForm.ShowDialog() != DialogResult.OK)
-                return false;
-        }
 
         using var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
 
@@ -114,20 +111,50 @@ internal static class Program
         var engine = new SyncEngine(api, store, secrets, log: log);
         engine.Load();
 
+        // Loaded first, because the cache decides what having no token means. With nothing held
+        // it's a first start, or one after signing out. Over an account it's a token Todoist turned
+        // away, and the window opens on that account read-only and asks for a new one there, where
+        // it can be checked against the account it would carry on with.
+        var firstRun = !auth.HasStoredToken && !engine.AwaitingToken;
+        if (firstRun)
+        {
+            using var tokenForm = new TokenEntryForm(auth);
+            if (tokenForm.ShowDialog() != DialogResult.OK)
+                return false;
+        }
+
         // Swept on the way up rather than only after a download: an app left closed for a month
         // should not open holding a month-old cache it never got the chance to tidy.
         var attachments = new AttachmentCache(paths.AttachmentDirectory, settings.AttachmentCache);
         attachments.Sweep();
 
-        // Signing out or a rejected token wipes the account's tasks; its downloaded files go the
-        // same way, so a machine that has switched accounts isn't still holding the previous one's
-        // documents.
+        // Signing out, or a different account's token, wipes the account's tasks; its downloaded
+        // files go the same way, so a machine that has switched accounts isn't still holding the
+        // previous one's documents.
         engine.Purged += () => attachments.Clear();
 
         // Its own file beside the cache rather than a table in it: the cache is thrown away and
         // rebuilt whenever it can't be read, and a record of what the user did has no business
         // going with it. It does go with the account, which the presenter sees to.
         using var history = new SqliteHistoryStore(Path.Combine(paths.CacheDirectory, "history.db"));
+
+        // A first run should find both empty. They aren't if a rejected token kept them for an
+        // account whose cache has since gone, unreadable or deleted, and the token just given could
+        // be anybody's.
+        if (firstRun)
+        {
+            attachments.Clear();
+
+            // Not a reason to stop starting, any more than a history that can't be written to is.
+            try
+            {
+                history.Clear();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                log.Warn("The history left from before couldn't be cleared.", ex);
+            }
+        }
 
         var presenter = new MainPresenter(
             engine,
@@ -151,14 +178,16 @@ internal static class Program
         // the path to the first paint.
         using var notifier = new TrayNotifier();
 
-        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, log, tray, quickAdd, store.Rebuilt);
+        var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, log, tray, quickAdd, store.Rebuilt, auth);
 
         bool signedOut;
+        TokenCheck? switchTo;
         try
         {
             using var form = new MainForm(presenter, scheduler, shell);
             Application.Run(form);
             signedOut = form.SignedOut;
+            switchTo = form.SwitchTo;
         }
         finally
         {
@@ -173,8 +202,18 @@ internal static class Program
         // lands, rejection included, so it can't reach the next account's token.
         try
         {
-            presenter.SignOut();
-            log.Info("Signed out. The token, the cache, the queue, the downloaded files and the history are gone.");
+            // Switching is the same wipe with the new token stored after it, which the engine only
+            // does once the wipe has worked.
+            if (switchTo is { } next)
+            {
+                presenter.Reconnect(next.Token, next.UserId);
+                log.Info("Switched to another account. The last one's cache, queue, downloaded files and history are gone.");
+            }
+            else
+            {
+                presenter.SignOut();
+                log.Info("Signed out. The token, the cache, the queue, the downloaded files and the history are gone.");
+            }
 
             // Emptying the cache skips a file another program has open, rather than failing over it.
             // Signing out still goes ahead, but not quietly: the file is the last account's.
@@ -187,6 +226,18 @@ internal static class Program
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && switchTo is not null)
+        {
+            log.Error("Switching account couldn't finish, so the last account is still held.", ex);
+
+            // The new token is stored only once the cache is empty, so the next session opens on
+            // the last account, still waiting for a token of its own.
+            MessageBox.Show(
+                $"Termyn couldn't remove the last account's data, so it hasn't signed in to the new one.\r\n\r\n{ex.Message}",
+                "Termyn",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

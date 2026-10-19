@@ -64,6 +64,7 @@ public enum AppCommand
     Settings,
     CheckForUpdates,
     About,
+    Reconnect,
     SignOut,
     Exit,
 }
@@ -111,6 +112,9 @@ public sealed record TaskAbilities(
 /// What a new task started from the open view would begin with, or null when the view has nothing
 /// to begin one with
 /// </param>
+/// <param name="ReconnectNeeded">
+/// Whether Todoist has turned the token away, which greys everything that would change the account
+/// </param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -125,7 +129,8 @@ public sealed record CommandContext(
     bool CanExpandAll = false,
     bool CanCollapseAll = false,
     TaskAbilities? SelectionAbilities = null,
-    string? NewTaskText = null)
+    string? NewTaskText = null,
+    bool ReconnectNeeded = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -201,8 +206,28 @@ public static class Commands
         _ => null,
     };
 
+    /// <summary>
+    /// The commands that change the account, which are greyed while Todoist has turned the token
+    /// away and the account is held read-only.
+    /// </summary>
+    /// <remarks>
+    /// Show in Todoist only opens a page, and Undo is greyed by its own rule, since the engine says
+    /// there's nothing to undo while it's waiting.
+    /// </remarks>
+    public static bool IsWrite(AppCommand command)
+        => (IsTaskCommand(command) && command is not AppCommand.ShowInTodoist)
+           || IsSelectionCommand(command)
+           || command is AppCommand.NewTask or AppCommand.NewProject or AppCommand.NewSection or AppCommand.QuickAdd;
+
     /// <summary>How a command should be shown, given what is currently selected.</summary>
     public static CommandState StateOf(AppCommand command, CommandContext context)
+    {
+        var state = Unguarded(command, context);
+        return context.ReconnectNeeded && IsWrite(command) ? state with { Enabled = false } : state;
+    }
+
+    /// <summary>How a command would be shown if the account could be written to.</summary>
+    private static CommandState Unguarded(AppCommand command, CommandContext context)
     {
         var task = context.Task;
         var can = context.Can;
@@ -344,6 +369,9 @@ public static class Commands
             AppCommand.Settings => Always(Strings.CommandSettings),
             AppCommand.CheckForUpdates => Always(Strings.CommandCheckForUpdates),
             AppCommand.About => Always(Strings.CommandAbout),
+
+            // Only while there's a token to replace. The ellipsis is for the dialog it opens.
+            AppCommand.Reconnect => new CommandState(Strings.CommandReconnect, context.ReconnectNeeded),
 
             // The ellipsis is for the question it asks first, about what signing out takes with it.
             AppCommand.SignOut => Always(Strings.CommandSignOut),

@@ -219,8 +219,12 @@ public class SyncEngineTests
         var api = new FakeApi();
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets { Stored = null });
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
         Assert.Empty(api.LastCommands);
+
+        // Not held as if Todoist had turned it away: the store answers null for a token file it
+        // can't read just now, too, and the next sync should simply try again.
+        Assert.False(engine.AwaitingToken);
     }
 
     // ---- Reorder -------------------------------------------------------------------------------
@@ -1082,16 +1086,17 @@ public class SyncEngineTests
             },
         };
         var store = new InMemorySnapshotStore();
+        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
         var secrets = new FakeSecrets { Stored = "tok" };
         var engine = new SyncEngine(api, store, secrets);
+        engine.Load();
 
         var inFlight = Task.Run(() => engine.SyncAsync());
         await entered.Task;
 
-        // The token is rejected while that response is still coming back, wiping the cache.
-        api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
-        api.Throw = null;
+        // Another account's token is taken while that response is still coming back, wiping the
+        // cache.
+        Assert.True(engine.AcceptToken("other", "u2"));
 
         release.SetResult();
         await inFlight;
@@ -1116,14 +1121,14 @@ public class SyncEngineTests
             },
         };
         var store = new InMemorySnapshotStore();
+        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
 
         var inFlight = Task.Run(() => engine.QuickAddOnlineAsync("Private"));
         await entered.Task;
 
-        api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
-        api.Throw = null;
+        Assert.True(engine.AcceptToken("other", "u2"));
 
         release.SetResult();
         Assert.True(await inFlight); // it was created server-side
@@ -1188,20 +1193,259 @@ public class SyncEngineTests
         Assert.Equal(new[] { "A", "B" }, engine.Snapshot().Items.OrderBy(i => i.ChildOrder).Select(i => i.Content).ToArray());
     }
 
-    [Fact]
-    public async Task Auth_rejection_clears_the_token_and_purges_the_cache()
-    {
-        var secrets = new FakeSecrets { Stored = "tok" };
-        var store = new InMemorySnapshotStore();
-        store.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
-        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, store, secrets);
-        engine.Load();
+    // ---- A rejected token ----------------------------------------------------------------------
 
+    [Fact]
+    public async Task A_rejected_token_is_cleared_and_the_account_held_with_what_it_was_sending()
+    {
+        var api = new FakeApi();
+        var (engine, store, secrets) = HeldAccount(api);
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited offline" });
+
+        api.Throw = new TodoistAuthException("no");
         await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
 
         Assert.Null(secrets.Stored);
+        Assert.True(engine.AwaitingToken);
+
+        // The tasks, and the edit that was on its way, wait for the next token.
+        Assert.Equal("Edited offline", engine.Snapshot().Items.Single().Content);
+        Assert.NotEmpty(store.Load().Resources);
+        Assert.Equal(1, engine.PendingCount);
+        Assert.Single(store.Load().Outbox);
+        Assert.False(engine.Outbox.Single().InFlight);
+    }
+
+    [Fact]
+    public async Task Writes_are_refused_while_waiting_for_a_token_and_leave_no_trace()
+    {
+        var api = new FakeApi();
+        var (engine, store, _) = HeldAccount(api);
+
+        api.Throw = new TodoistAuthException("no");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+
+        Assert.Throws<TodoistAuthException>(() => engine.UpdateItem("i1", new JsonObject { ["content"] = "Not kept" }));
+        Assert.Throws<TodoistAuthException>(() => engine.AddItem(new JsonObject { ["content"] = "Not kept" }));
+        Assert.Throws<TodoistAuthException>(() => engine.DeleteItem("i1"));
+
+        Assert.Equal("Private", engine.Snapshot().Items.Single().Content);
+        Assert.Equal(0, engine.PendingCount);
+        Assert.Empty(store.Load().Outbox);
+    }
+
+    [Fact]
+    public async Task Reopening_a_queued_close_is_refused_while_waiting_and_keeps_the_close()
+    {
+        // Taking back a close that hasn't been sent drops it from the queue without a write, so the
+        // guard on writes doesn't see it.
+        var api = new FakeApi();
+        var (engine, store, _) = HeldAccount(api);
+        engine.CompleteItem("i1");
+
+        api.Throw = new TodoistAuthException("no");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+
+        Assert.Throws<TodoistAuthException>(() => engine.ReopenItem("i1"));
+
+        Assert.Equal("item_close", engine.Outbox.Single().Type);
+        Assert.Single(store.Load().Outbox);
+    }
+
+    [Fact]
+    public async Task Deleting_an_upload_turned_away_holds_the_account_the_way_a_sync_does()
+    {
+        var api = new FakeApi { TransferThrow = new TodoistAuthException("no") };
+        var (engine, _, secrets) = HeldAccount(api);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.DeleteUploadAsync("https://files.todoist.test/notes.txt"));
+
+        Assert.Null(secrets.Stored);
+        Assert.True(engine.AwaitingToken);
+    }
+
+    [Fact]
+    public async Task Undo_is_held_while_waiting_for_a_token()
+    {
+        // Undoing a change that hasn't been sent drops it from the queue, which is being held as
+        // it is.
+        var api = new FakeApi();
+        var (engine, _, _) = HeldAccount(api);
+        engine.DeleteItem("i1");
+        Assert.True(engine.CanUndo);
+
+        api.Throw = new TodoistAuthException("no");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+
+        Assert.False(engine.CanUndo);
+        Assert.False(engine.Undo());
         Assert.Empty(engine.Snapshot().Items);
+        Assert.Equal(1, engine.PendingCount);
+    }
+
+    [Fact]
+    public void Starting_over_an_account_with_no_token_finds_it_waiting()
+    {
+        var held = new InMemorySnapshotStore();
+        held.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var waiting = new SyncEngine(new FakeApi(), held, new FakeSecrets { Stored = null });
+        waiting.Load();
+
+        var firstRun = new SyncEngine(new FakeApi(), new InMemorySnapshotStore(), new FakeSecrets { Stored = null });
+        firstRun.Load();
+
+        var signedIn = new SyncEngine(new FakeApi(), held, new FakeSecrets { Stored = "tok" });
+        signedIn.Load();
+
+        Assert.True(waiting.AwaitingToken);
+        Assert.False(firstRun.AwaitingToken);
+        Assert.False(signedIn.AwaitingToken);
+    }
+
+    [Fact]
+    public async Task The_same_accounts_token_goes_on_with_the_cache_and_sends_what_was_held()
+    {
+        var api = new FakeApi();
+        var (engine, _, secrets) = HeldAccount(api);
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited offline" });
+        api.Throw = new TodoistAuthException("no");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        api.Throw = null;
+
+        var purged = 0;
+        engine.Purged += () => purged++;
+
+        Assert.True(engine.IsHeldFor("u1"));
+        Assert.False(engine.AcceptToken("new", "u1"));
+
+        Assert.Equal("new", secrets.Stored);
+        Assert.False(engine.AwaitingToken);
+        Assert.Equal(0, purged);
+        Assert.Equal("Edited offline", engine.Snapshot().Items.Single().Content);
+
+        await engine.SyncAsync();
+        Assert.Equal("item_update", api.LastCommands.Single().Type);
+    }
+
+    [Fact]
+    public async Task Another_accounts_token_wipes_the_cache_before_it_is_stored()
+    {
+        var api = new FakeApi();
+        var (engine, store, secrets) = HeldAccount(api);
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited offline" });
+        api.Throw = new TodoistAuthException("no");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+
+        var purged = 0;
+        engine.Purged += () => purged++;
+
+        Assert.False(engine.IsHeldFor("u2"));
+        Assert.True(engine.AcceptToken("other", "u2"));
+
+        Assert.Equal("other", secrets.Stored);
+        Assert.False(engine.AwaitingToken);
+        Assert.Empty(engine.Snapshot().Items);
+        Assert.Equal(0, engine.PendingCount);
         Assert.Empty(store.Load().Resources);
+        Assert.Empty(store.Load().Outbox);
+        Assert.Equal(1, purged);
+    }
+
+    [Fact]
+    public void A_cache_that_cannot_say_whose_it_is_is_not_carried_on_with()
+    {
+        // Tasks with no user resource could be anybody's, and a probe that couldn't say whose the
+        // token is can't vouch for them either. Wiped is the safe way round.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var anonymous = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = null });
+        anonymous.Load();
+
+        var (named, _, _) = HeldAccount(new FakeApi());
+
+        Assert.False(anonymous.IsHeldFor("u1"));
+        Assert.False(named.IsHeldFor(null));
+
+        // Nothing held is nobody's, so any account can have it.
+        Assert.True(new SyncEngine(new FakeApi(), new InMemorySnapshotStore(), new FakeSecrets()).IsHeldFor("u9"));
+    }
+
+    [Fact]
+    public async Task A_switch_that_cannot_empty_the_cache_stores_no_token()
+    {
+        var store = new UnpurgeableStore();
+        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
+        store.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var api = new FakeApi { Throw = new TodoistAuthException("no") };
+        var engine = new SyncEngine(api, store, secrets);
+        engine.Load();
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+
+        Assert.Throws<IOException>(() => engine.AcceptToken("other", "u2"));
+
+        // Still waiting over its own account, rather than signed in to another over it.
+        Assert.Null(secrets.Stored);
+        Assert.True(engine.AwaitingToken);
+    }
+
+    [Fact]
+    public async Task A_rejection_that_lands_after_a_new_token_leaves_the_new_one_alone()
+    {
+        // A slow quick-add carrying the old token is turned away after the new one has been
+        // pasted. Its rejection is about the old token.
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var api = new FakeApi
+        {
+            QuickAdd = _ =>
+            {
+                entered.TrySetResult();
+                release.Task.Wait();
+                throw new TodoistAuthException("rejected");
+            },
+        };
+        var (engine, _, secrets) = HeldAccount(api);
+
+        var inFlight = Task.Run(() => engine.QuickAddOnlineAsync("Buy milk"));
+        await entered.Task;
+
+        api.Throw = new TodoistAuthException("no");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        api.Throw = null;
+        engine.AcceptToken("new", "u1");
+
+        release.SetResult();
+        await Assert.ThrowsAsync<TodoistAuthException>(() => inFlight);
+
+        Assert.Equal("new", secrets.Stored);
+        Assert.False(engine.AwaitingToken);
+    }
+
+    [Fact]
+    public async Task An_upload_turned_away_holds_the_account_the_way_a_sync_does()
+    {
+        var api = new FakeApi { TransferThrow = new TodoistAuthException("no") };
+        var (engine, _, secrets) = HeldAccount(api);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(
+            () => engine.AddCommentWithFileAsync("i1", "See attached", new MemoryStream([1, 2, 3]), "notes.txt"));
+
+        Assert.Null(secrets.Stored);
+        Assert.True(engine.AwaitingToken);
+        Assert.Single(engine.Snapshot().Items);
+    }
+
+    /// <summary>An engine signed in over account u1's cache, holding one task.</summary>
+    private static (SyncEngine Engine, InMemorySnapshotStore Store, FakeSecrets Secrets) HeldAccount(FakeApi api)
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
+        store.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var engine = new SyncEngine(api, store, secrets);
+        engine.Load();
+        return (engine, store, secrets);
     }
 
     // ---- Signing out ---------------------------------------------------------------------------

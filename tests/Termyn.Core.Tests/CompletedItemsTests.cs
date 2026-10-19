@@ -177,22 +177,29 @@ public class CompletedItemsTests
     }
 
     [Fact]
-    public async Task A_rejected_token_takes_the_completed_list_with_the_rest()
+    public async Task The_completed_list_waits_out_a_rejected_token_and_goes_with_a_different_account()
     {
         var api = Returning([Done("c1", "Book dentist")]);
         var secrets = new FakeSecrets { Stored = "tok" };
-        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets, new FixedClock(Today));
+        var store = new InMemorySnapshotStore();
+        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
+        var engine = new SyncEngine(api, store, secrets, new FixedClock(Today));
+        engine.Load();
         await engine.FetchCompletedAsync();
 
         api.Throw = new TodoistAuthException("rejected");
         await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
 
-        Assert.Empty(engine.Snapshot().CompletedItems);
         Assert.Null(secrets.Stored);
+        Assert.Single(engine.Snapshot().CompletedItems);
+
+        engine.AcceptToken("other", "u2");
+
+        Assert.Empty(engine.Snapshot().CompletedItems);
     }
 
     [Fact]
-    public async Task A_token_rejected_by_the_fetch_itself_clears_the_account_too()
+    public async Task A_token_rejected_by_the_fetch_itself_holds_the_account_too()
     {
         var secrets = new FakeSecrets { Stored = "tok" };
         var api = new FakeApi { CompletedThrow = new TodoistAuthException("rejected") };
@@ -204,7 +211,8 @@ public class CompletedItemsTests
         await Assert.ThrowsAsync<TodoistAuthException>(() => engine.FetchCompletedAsync());
 
         Assert.Null(secrets.Stored);
-        Assert.Empty(engine.Snapshot().Items);
+        Assert.True(engine.AwaitingToken);
+        Assert.Single(engine.Snapshot().Items);
     }
 
     [Fact]
@@ -268,20 +276,15 @@ public class CompletedItemsTests
         // only thing that can discard the result.
         var secrets = new FakeSecrets { Stored = "tok" };
         var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
-        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets, new FixedClock(Today));
+        var store = new InMemorySnapshotStore();
+        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
+        var engine = new SyncEngine(api, store, secrets, new FixedClock(Today));
+        engine.Load();
 
         api.Completed = _ =>
         {
-            api.Throw = new TodoistAuthException("rejected");
-            try
-            {
-                engine.SyncAsync().GetAwaiter().GetResult();
-            }
-            catch (TodoistAuthException)
-            {
-                // Expected: it is what wipes the cache.
-            }
-            api.Throw = null;
+            // Another account's token is taken while the fetch is out, which wipes the cache.
+            engine.AcceptToken("other", "u2");
             return new CompletedPage([Done("c1", "From the old account")], null);
         };
 

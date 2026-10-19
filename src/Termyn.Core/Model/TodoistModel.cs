@@ -117,6 +117,9 @@ public sealed class TodoistModel
         _projectedItems.Clear();
     }
 
+    /// <summary>True when nothing of any type is held.</summary>
+    public bool IsEmpty => _byType.Values.All(m => m.Count == 0);
+
     public IEnumerable<JsonObject> All(string type)
         => _byType.TryGetValue(type, out var m) ? m.Values : [];
 

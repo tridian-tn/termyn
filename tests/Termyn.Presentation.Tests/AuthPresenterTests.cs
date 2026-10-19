@@ -19,6 +19,20 @@ public class AuthPresenterTests
     }
 
     [Fact]
+    public async Task Checking_a_token_says_whose_it_is_and_stores_nothing()
+    {
+        // A reconnect decides what to do with the token from whose it is, so it mustn't be stored
+        // before then.
+        var secrets = new FakeSecrets { Stored = null };
+        var presenter = new AuthPresenter(new FakeApi { TokenUserId = "u7" }, secrets);
+
+        var check = await presenter.ValidateAsync("  tok  ");
+
+        Assert.Equal(new TokenCheck(TokenValidationResult.Valid, "tok", "u7"), check);
+        Assert.Null(secrets.Stored);
+    }
+
+    [Fact]
     public async Task Rejected_token_is_not_stored()
     {
         var secrets = new FakeSecrets { Stored = null };

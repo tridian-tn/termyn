@@ -53,6 +53,24 @@ internal static class TestWindow
             out presenter);
 
     /// <summary>
+    /// A window opened over an account with no token, the way Termyn starts once Todoist has turned
+    /// the last one away.
+    /// </summary>
+    /// <param name="settingsName">A file name of its own, so two suites can't share one</param>
+    /// <param name="store">What the account holds</param>
+    /// <param name="presenter">The presenter, for a test that needs to drive it</param>
+    /// <returns>The window, which the caller disposes</returns>
+    internal static MainForm Waiting(string settingsName, InMemorySnapshotStore store, out MainPresenter presenter)
+        => Build(
+            new SettingsStore(Path.Combine(Path.GetTempPath(), settingsName)),
+            new AppSettings(),
+            store,
+            new FakeApi(),
+            out _,
+            out presenter,
+            new FakeSecrets { Stored = null });
+
+    /// <summary>
     /// A window that starts the way the app does, from the settings the last one wrote.
     /// </summary>
     /// <param name="settingsPath">The settings file to read and write, which the caller deletes</param>
@@ -76,9 +94,10 @@ internal static class TestWindow
         InMemorySnapshotStore store,
         FakeApi api,
         out Notifier notifier,
-        out MainPresenter presenter)
+        out MainPresenter presenter,
+        FakeSecrets? secrets = null)
     {
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
+        var engine = new SyncEngine(api, store, secrets ?? new FakeSecrets { Stored = "tok" });
         engine.Load();
 
         var clock = new SystemClock();

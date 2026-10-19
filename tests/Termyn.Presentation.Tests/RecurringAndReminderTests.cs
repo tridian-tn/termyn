@@ -435,10 +435,10 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
-    public async Task A_rejected_token_takes_the_old_accounts_plan_with_it()
+    public async Task Another_accounts_token_takes_the_old_accounts_plan_with_it()
     {
-        // The cache is emptied and the exception propagates, so without publishing on the way out
-        // the view keeps the last account's rows and its plan keeps saying reminders are allowed.
+        // The cache is emptied when the switch is made, so without publishing then the view keeps
+        // the last account's rows and its plan keeps saying reminders are allowed.
         var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true}}""");
         var api = new FakeApi();
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
@@ -448,6 +448,12 @@ public class RecurringAndReminderTests
 
         api.Throw = new TodoistAuthException("rejected");
         await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+
+        // Held, plan and all, while the account waits for a token.
+        Assert.True(presenter.RemindersAvailable);
+        Assert.NotEmpty(presenter.Rows);
+
+        presenter.Reconnect("other", "u2");
 
         Assert.False(presenter.RemindersAvailable);
         Assert.Empty(presenter.Rows);

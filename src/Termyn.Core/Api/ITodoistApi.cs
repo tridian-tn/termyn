@@ -31,9 +31,12 @@ public interface ITodoistApi
     /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
     Task<CompletedPage> GetCompletedAsync(string token, CompletedQuery query, CancellationToken ct = default);
 
-    /// <summary>Validates a token with a minimal probe. Returns <c>false</c> if rejected (401/403).</summary>
+    /// <summary>
+    /// Validates a token with a minimal probe, and says which account it belongs to. Not accepted
+    /// if rejected (401/403).
+    /// </summary>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default);
+    Task<TokenProbe> ValidateTokenAsync(string token, CancellationToken ct = default);
 
     /// <summary>
     /// Copies a comment's file into <paramref name="destination"/>.
