@@ -11,7 +11,16 @@ public enum TokenValidationResult
     NetworkError,
 }
 
-/// <summary>Drives first-run authentication: validate a pasted token, then persist it on success.</summary>
+/// <summary>What checking a pasted token found.</summary>
+/// <param name="Result">Whether Todoist took it</param>
+/// <param name="Token">The token as it'll be stored, trimmed</param>
+/// <param name="UserId">The account it belongs to, when Todoist took it and said</param>
+public sealed record TokenCheck(TokenValidationResult Result, string Token, string? UserId);
+
+/// <summary>
+/// Drives token entry: validate a pasted token, then persist it on success, or hand it back for a
+/// reconnect to decide what to do with.
+/// </summary>
 public sealed class AuthPresenter
 {
     private readonly ITodoistApi _api;
@@ -32,21 +41,32 @@ public sealed class AuthPresenter
     /// </summary>
     public async Task<TokenValidationResult> ValidateAndStoreAsync(string token, CancellationToken ct = default)
     {
+        var check = await ValidateAsync(token, ct);
+        if (check.Result is TokenValidationResult.Valid)
+            _secrets.SetToken(check.Token);
+        return check.Result;
+    }
+
+    /// <summary>
+    /// Validates the token with a probe and says whose it is, storing nothing. For a reconnect,
+    /// where whether the token can be stored as it is depends on the account it turns out to be.
+    /// </summary>
+    public async Task<TokenCheck> ValidateAsync(string token, CancellationToken ct = default)
+    {
         if (string.IsNullOrWhiteSpace(token))
-            return TokenValidationResult.Rejected;
+            return new TokenCheck(TokenValidationResult.Rejected, string.Empty, null);
 
         var trimmed = token.Trim();
         try
         {
-            if (!await _api.ValidateTokenAsync(trimmed, ct))
-                return TokenValidationResult.Rejected;
+            var probe = await _api.ValidateTokenAsync(trimmed, ct);
+            return probe.Accepted
+                ? new TokenCheck(TokenValidationResult.Valid, trimmed, probe.UserId)
+                : new TokenCheck(TokenValidationResult.Rejected, trimmed, null);
         }
         catch (TodoistNetworkException)
         {
-            return TokenValidationResult.NetworkError;
+            return new TokenCheck(TokenValidationResult.NetworkError, trimmed, null);
         }
-
-        _secrets.SetToken(trimmed);
-        return TokenValidationResult.Valid;
     }
 }

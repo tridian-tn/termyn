@@ -54,14 +54,31 @@ public sealed class TodoistApiClient : ITodoistApi
     }
 
     /// <inheritdoc />
-    public async Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
+    /// <remarks>
+    /// The id is what tells a reconnect whether the cache it would carry on with is this account's.
+    /// An answer cut off or garbled on the way is a failure to try again, like any other: read as
+    /// "accepted, whose unknown", it would tell somebody pasting their own regenerated token that
+    /// it was another account's, and offer to wipe what they'd been waiting to send. An answer
+    /// that reads but names no user still accepts the token, with no id.
+    /// </remarks>
+    public async Task<TokenProbe> ValidateTokenAsync(string token, CancellationToken ct = default)
     {
         using var deadline = Deadline(ct);
         using var resp = await SendAsync(token, "*", ["user"], [], deadline.Token, ct);
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            return false;
+            return TokenProbe.Rejected;
         EnsureReachable(resp);
-        return true;
+
+        try
+        {
+            await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
+            var root = await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) as JsonObject;
+            return new TokenProbe(true, Model.Projections.ToUserId(root?["user"] as JsonObject));
+        }
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
+        {
+            throw new TodoistNetworkException("Todoist returned an unreadable answer to the token check.", ex);
+        }
     }
 
     /// <inheritdoc />

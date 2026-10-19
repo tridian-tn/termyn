@@ -43,12 +43,18 @@ internal sealed record Shell(
     /// True when the cache on disk couldn't be read and was started again from nothing. Said in the
     /// status bar rather than swallowed: anything queued and unsent went with the old file.
     /// </summary>
-    bool CacheRebuilt = false);
+    bool CacheRebuilt = false,
+
+    /// <summary>
+    /// What checks a token, for reconnecting once Todoist has turned the last one away. Null where
+    /// there's nothing to reconnect with, which only a test window has.
+    /// </summary>
+    AuthPresenter? Auth = null);
 
 /// <summary>Main window: sidebar, search box, task outline, and the keyboard map.</summary>
 internal sealed class MainForm : Form
 {
-    private const string ReconnectMessage = "Your Todoist token was rejected and cleared. Restart Termyn to reconnect.";
+    private const string ReconnectMessage = "Todoist turned your token away. Click here to reconnect; until then nothing can be changed.";
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
@@ -191,7 +197,6 @@ internal sealed class MainForm : Form
 
     private string? _editingId;
     private string? _editingText;
-    private bool _reconnectNeeded;
     private bool _syncingSidebar;
     private bool _exiting;
 
@@ -203,6 +208,16 @@ internal sealed class MainForm : Form
     /// window does, so the wipe is left to whoever ran the window, once they've stopped the loop.
     /// </remarks>
     public bool SignedOut { get; private set; }
+
+    /// <summary>
+    /// The token to go on with when the window closed to switch account: one pasted to reconnect,
+    /// which turned out to be for a different account than the one held here.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SignedOut"/> is set along with it, since the account held here is leaving either
+    /// way. Nothing has been wiped yet, for the same reason as there.
+    /// </remarks>
+    public TokenCheck? SwitchTo { get; private set; }
 
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
     private string _sidebarKey = ViewSelection.Default.Key;
@@ -518,11 +533,18 @@ internal sealed class MainForm : Form
             Text = "Loading…",
         };
 
-        // The failed count is the only part of the status there is anything to do about, and this
-        // is where the doing lives. Clicking anywhere on the status opens it, which is coarse but
-        // discoverable — the alternative is hit-testing a stretch of a label nobody would guess was
-        // a target. It does nothing at all while there is nothing to show.
-        _status.Click += (_, _) => ShowFailures();
+        // The failed count and a rejected token are the only parts of the status there is anything
+        // to do about, and this is where the doing lives. Clicking anywhere on the status opens
+        // whichever it is, which is coarse but discoverable — the alternative is hit-testing a
+        // stretch of a label nobody would guess was a target. It does nothing at all while there
+        // is nothing to show.
+        _status.Click += (_, _) =>
+        {
+            if (_presenter.ReconnectNeeded)
+                Guarded(Reconnect);
+            else
+                ShowFailures();
+        };
         _status.Cursor = Cursors.Default;
 
         Controls.Add(_split);
@@ -849,6 +871,52 @@ internal sealed class MainForm : Form
         _exiting = true;
         Close();
         Application.Exit();
+    }
+
+    /// <summary>
+    /// Asks for a new token once Todoist has turned the last one away, and goes on with it.
+    /// </summary>
+    /// <remarks>
+    /// The same account's token is taken in place, and what was held is sent. Another account's is
+    /// a sign-out followed by a sign-in, so after asking it closes the window the way signing out
+    /// does, and the switch is made once the sync loop has stopped.
+    /// </remarks>
+    private void Reconnect()
+    {
+        if (_shell.Auth is not { } auth || !_presenter.ReconnectNeeded)
+            return;
+
+        using var dialog = new TokenEntryForm(auth, reconnecting: true);
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Accepted is not { } check)
+            return;
+
+        if (_presenter.IsSameAccount(check.UserId))
+        {
+            _presenter.Reconnect(check.Token, check.UserId);
+            _scheduler.RequestNow();
+            return;
+        }
+
+        // The same reason as signing out: a transfer finishing after the wipe would write the last
+        // account's file into the next one's cache.
+        if (_transfer is not null)
+        {
+            MessageBox.Show(
+                this,
+                "A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then reconnect.",
+                "Termyn",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!Confirm(_presenter.SwitchAccountQuestion(check.UserId)))
+            return;
+
+        SwitchTo = check;
+        SignedOut = true;
+        _exiting = true;
+        Close();
     }
 
     /// <summary>
@@ -1246,10 +1314,11 @@ internal sealed class MainForm : Form
         if (IsDisposed)
             return;
 
-        if (_reconnectNeeded)
+        if (_presenter.ReconnectNeeded)
         {
             _status.Text = ReconnectMessage;
             _status.ForeColor = Theme.ForPriority(Priority.P1);
+            _status.Cursor = Cursors.Hand;
             return;
         }
 
@@ -1944,6 +2013,12 @@ internal sealed class MainForm : Form
 
         if (kind == _draft.Kind && id == _draft.OwnerId)
         {
+            // Asked again on the same subject, because it can change without the subject changing:
+            // the token turned away while the box is open, or a new one taken.
+            var access = _presenter.AccessToDescriptionOf(kind, id);
+            if (_description.ReadOnly != access is not DescriptionAccess.Writable)
+                ShowDescriptionEditable(access);
+
             RefreshDescription();
             return;
         }
@@ -2410,7 +2485,10 @@ internal sealed class MainForm : Form
         if (!Confirm($"Are you sure you want to remove {file.FileName} from this comment?\r\n\r\nThe file is deleted from Todoist as well, and that can't be undone."))
             return;
 
-        var trouble = await _presenter.DetachFileAsync(commentId);
+        // Guarded, since nothing above an async void handler would catch it: taking the file off is
+        // a write, and can be refused.
+        string? trouble = null;
+        await GuardedAsync(async () => trouble = await _presenter.DetachFileAsync(commentId));
         RefreshComments();
 
         if (trouble is not null)
@@ -2540,6 +2618,12 @@ internal sealed class MainForm : Form
     {
         // Whatever brought us here has done what the wait was for.
         _saveIdle.Stop();
+
+        // Left in the box while the token's been turned away. Taking the draft marks it saved, so a
+        // write that's refused would leave the next refresh to put the old text back over it. Kept,
+        // it's still there to save once a token comes.
+        if (_presenter.ReconnectNeeded)
+            return;
 
         // The draft puts the box's line endings back to the account's before it compares or saves.
         if (_draft.Take(_description.Text) is not { } edit)
@@ -2704,7 +2788,8 @@ internal sealed class MainForm : Form
         _presenter.CanExpandAll,
         _presenter.CanCollapseAll,
         _presenter.SelectionAbilitiesFor(selection),
-        NewTaskText(selection));
+        NewTaskText(selection),
+        _presenter.ReconnectNeeded);
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
     /// <param name="selection">The row, or null for none</param>
@@ -2963,6 +3048,14 @@ internal sealed class MainForm : Form
     /// <returns>True when it changed something the server has yet to hear about</returns>
     private bool Dispatch(AppCommand command)
     {
+        // The menus grey these, but a key reaches here without a menu, and a dialog opened for a
+        // change that can't be kept only throws away what's typed into it.
+        if (_presenter.ReconnectNeeded && Presentation.Commands.IsWrite(command))
+        {
+            RenderStatus();
+            return false;
+        }
+
         if (Presentation.Commands.IsTaskCommand(command))
             return _outline.SelectedId is { } id && RunTaskCommand(command, id);
 
@@ -3080,6 +3173,10 @@ internal sealed class MainForm : Form
 
             case AppCommand.About:
                 ShowAbout();
+                return false;
+
+            case AppCommand.Reconnect:
+                Guarded(Reconnect);
                 return false;
 
             case AppCommand.SignOut:
@@ -3443,6 +3540,14 @@ internal sealed class MainForm : Form
 
     private void OnBeforeLabelEdit(object? sender, LabelEditEventArgs e)
     {
+        // A rename can't be kept while the token's been turned away, so it isn't started.
+        if (_presenter.ReconnectNeeded)
+        {
+            e.CancelEdit = true;
+            RenderStatus();
+            return;
+        }
+
         var row = _outline.SelectedRow;
         _editingId = row?.Id;
         _editingText = row?.Content;
@@ -3764,14 +3869,12 @@ internal sealed class MainForm : Form
         if (IsDisposed)
             return;
 
-        if (ex is TodoistAuthException)
-            _reconnectNeeded = true;
-
-        // Once the token is gone every later sync fails the same way; keep the message that tells
-        // the user what to do rather than replacing it with the consequence.
-        if (_reconnectNeeded)
+        // Once the token is gone every later sync and write fails the same way; keep the message
+        // that tells the user what to do rather than replacing it with the consequence. Only that
+        // way, though: anything else going wrong meanwhile is still said and written down.
+        if (ex is TodoistAuthException && _presenter.ReconnectNeeded)
         {
-            _status.Text = ReconnectMessage;
+            RenderStatus();
             return;
         }
 

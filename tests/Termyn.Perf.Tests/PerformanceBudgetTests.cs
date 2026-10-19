@@ -290,7 +290,7 @@ public class PerformanceBudgetTests : IDisposable
         public Task<CompletedPage> GetCompletedAsync(string token, CompletedQuery query, CancellationToken ct = default)
             => throw new InvalidOperationException("Startup must not fetch completed tasks.");
 
-        public Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
+        public Task<TokenProbe> ValidateTokenAsync(string token, CancellationToken ct = default)
             => throw new InvalidOperationException("Startup must not validate the token.");
 
         public Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default)

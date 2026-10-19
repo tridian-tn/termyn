@@ -201,13 +201,12 @@ public class CompletedViewTests
     }
 
     [Fact]
-    public async Task A_rejected_token_during_the_fetch_takes_the_rows_with_it()
+    public async Task A_rejected_token_during_the_fetch_keeps_the_rows_and_asks_for_another()
     {
-        // The engine clears the token and purges the cache before rethrowing, so the rows on screen
-        // belong to an account we no longer hold.
+        // The account is held, read-only, for the next token, so the rows stay on screen.
         var api = new FakeApi
         {
-            Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Change("items", "a", """{"id":"a","content":"Secret"}""")] },
+            Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Change("items", "a", """{"id":"a","content":"Kept"}""")] },
             CompletedThrow = new TodoistAuthException("rejected"),
         };
         var presenter = await Loaded(api);
@@ -215,7 +214,7 @@ public class CompletedViewTests
 
         await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.ToggleCompletedAsync());
 
-        Assert.Empty(presenter.Rows);
+        Assert.NotEmpty(presenter.Rows);
         Assert.Equal(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
     }
 

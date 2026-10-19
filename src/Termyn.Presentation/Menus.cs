@@ -92,8 +92,10 @@ public static class Menus
             MenuEntry.AfterRule(AppCommand.SyncNow),
             MenuEntry.AfterRule(AppCommand.Settings),
 
-            // The two ways out, together at the bottom.
-            MenuEntry.AfterRule(AppCommand.SignOut),
+            // The two ways out, together at the bottom, with the way back in above them. It's
+            // only lit while the token's been turned away.
+            MenuEntry.AfterRule(AppCommand.Reconnect),
+            MenuEntry.Of(AppCommand.SignOut),
             MenuEntry.Of(AppCommand.Exit)),
 
         MenuEntry.Group(

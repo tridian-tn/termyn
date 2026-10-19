@@ -88,6 +88,9 @@ public sealed class FakeApi : ITodoistApi
 
     public Exception? Throw;
     public bool AcceptToken = true;
+
+    /// <summary>The account the probe says an accepted token belongs to.</summary>
+    public string? TokenUserId = "u1";
     public int ValidateCalls;
     public int QuickAddCalls;
     public IReadOnlyList<Command> LastCommands = [];
@@ -100,10 +103,12 @@ public sealed class FakeApi : ITodoistApi
         return Task.FromResult(Next is not null ? Next(commands) : new SyncResponse { SyncToken = syncToken });
     }
 
-    public Task<bool> ValidateTokenAsync(string token, CancellationToken ct = default)
+    public Task<TokenProbe> ValidateTokenAsync(string token, CancellationToken ct = default)
     {
         ValidateCalls++;
-        return Throw is not null ? throw Throw : Task.FromResult(AcceptToken);
+        return Throw is not null
+            ? throw Throw
+            : Task.FromResult(AcceptToken ? new TokenProbe(true, TokenUserId) : TokenProbe.Rejected);
     }
 
     public Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)

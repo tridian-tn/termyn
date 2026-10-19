@@ -167,14 +167,46 @@ public class TodoistApiClientTests
     public async Task ValidateToken_returns_false_when_rejected(HttpStatusCode status)
     {
         var client = ClientReturning(status, "{}");
-        Assert.False(await client.ValidateTokenAsync("bad"));
+        Assert.False((await client.ValidateTokenAsync("bad")).Accepted);
     }
 
     [Fact]
     public async Task ValidateToken_returns_true_on_success()
     {
         var client = ClientReturning(HttpStatusCode.OK, """{ "sync_token": "x" }""");
-        Assert.True(await client.ValidateTokenAsync("good"));
+        Assert.True((await client.ValidateTokenAsync("good")).Accepted);
+    }
+
+    [Fact]
+    public async Task ValidateToken_says_which_account_the_token_belongs_to()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{ "sync_token": "x", "user": { "id": "2671355", "full_name": "Someone" } }""");
+
+        var probe = await client.ValidateTokenAsync("good");
+
+        Assert.True(probe.Accepted);
+        Assert.Equal("2671355", probe.UserId);
+    }
+
+    [Fact]
+    public async Task ValidateToken_treats_an_unreadable_answer_as_a_failure_to_try_again()
+    {
+        // Read as "accepted, whose unknown", it would tell someone pasting their own token that it
+        // was another account's.
+        var client = ClientReturning(HttpStatusCode.OK, "{ this is not json");
+
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.ValidateTokenAsync("good"));
+    }
+
+    [Fact]
+    public async Task ValidateToken_accepts_a_token_whose_answer_names_no_user()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{ "sync_token": "x" }""");
+
+        var probe = await client.ValidateTokenAsync("good");
+
+        Assert.True(probe.Accepted);
+        Assert.Null(probe.UserId);
     }
 
     [Fact]

@@ -3,21 +3,31 @@ using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
 
-/// <summary>First-run dialog: paste a Todoist API token, validate it, and store it on success.</summary>
+/// <summary>
+/// Token dialog: paste a Todoist API token and validate it. On first run it's stored on success;
+/// on a reconnect it's handed back, for the window to check whose it is first.
+/// </summary>
 internal sealed class TokenEntryForm : Form
 {
     private const string IntegrationsUrl = "https://app.todoist.com/app/settings/integrations/developer";
 
     private readonly AuthPresenter _auth;
+    private readonly bool _reconnecting;
     private readonly TextBox _tokenBox;
     private readonly Label _status;
     private readonly Button _connect;
 
-    public TokenEntryForm(AuthPresenter auth)
+    /// <param name="auth">What checks the token</param>
+    /// <param name="reconnecting">
+    /// True once Todoist has turned the last token away: the new one is handed back through
+    /// <see cref="Accepted"/> rather than stored
+    /// </param>
+    public TokenEntryForm(AuthPresenter auth, bool reconnecting = false)
     {
         _auth = auth;
+        _reconnecting = reconnecting;
 
-        Text = "Connect Termyn to Todoist";
+        Text = reconnecting ? "Reconnect Termyn to Todoist" : "Connect Termyn to Todoist";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;
@@ -26,7 +36,9 @@ internal sealed class TokenEntryForm : Form
 
         var intro = new Label
         {
-            Text = "Paste your Todoist API token (Settings → Integrations → Developer → API token).",
+            Text = reconnecting
+                ? "Todoist turned the last token away. Paste the current one (Settings → Integrations → Developer → API token)."
+                : "Paste your Todoist API token (Settings → Integrations → Developer → API token).",
             Location = new Point(16, 16),
             Size = new Size(436, 40),
         };
@@ -82,7 +94,11 @@ internal sealed class TokenEntryForm : Form
         _tokenBox.Enabled = false;
         try
         {
-            switch (await _auth.ValidateAndStoreAsync(_tokenBox.Text))
+            var result = _reconnecting
+                ? await HandBackAsync()
+                : await _auth.ValidateAndStoreAsync(_tokenBox.Text);
+
+            switch (result)
             {
                 case TokenValidationResult.Valid:
                     DialogResult = DialogResult.OK;
@@ -104,6 +120,20 @@ internal sealed class TokenEntryForm : Form
             _connect.Enabled = true;
             _tokenBox.Enabled = true;
         }
+    }
+
+    /// <summary>
+    /// The token Todoist accepted on a reconnect, with the account it belongs to. Null until then,
+    /// and always on a first run, where the token is stored instead.
+    /// </summary>
+    public TokenCheck? Accepted { get; private set; }
+
+    private async Task<TokenValidationResult> HandBackAsync()
+    {
+        var check = await _auth.ValidateAsync(_tokenBox.Text);
+        if (check.Result is TokenValidationResult.Valid)
+            Accepted = check;
+        return check.Result;
     }
 
     private void OpenUrl(string url)

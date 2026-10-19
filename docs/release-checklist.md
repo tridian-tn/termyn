@@ -138,6 +138,16 @@ The remaining §16.2 criteria in the spec, in the words of the app.
       `%LOCALAPPDATA%\Termyn` holds no cache, outbox or attachments.
 - [ ] Sign in to the second account: nothing of the first shows up. No task, no comment, no file,
       nothing in **What you've done…**, and no folds.
+- [ ] Offline, regenerate the second account's API token in the web app (Settings › Integrations ›
+      Developer), then edit a task in Termyn. Go back online: the status line says *Todoist turned
+      your token away*, the task's menu is greyed, and the edit is still showing.
+- [ ] Quit and start Termyn again: it opens on the same account with the same status line, not the
+      token dialog.
+- [ ] Click the status line and paste the new token: the edit reaches the web app, and nothing else
+      in Termyn has changed.
+- [ ] Regenerate the token again, edit offline, go back online, and this time paste the first account's
+      token: it says the token is for a different account and that 1 change will be lost. After
+      confirming, it opens on the first account, with nothing of the second showing.
 
 ## Before uninstalling
 

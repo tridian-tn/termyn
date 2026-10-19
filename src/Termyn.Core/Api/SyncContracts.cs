@@ -31,6 +31,16 @@ public sealed record CompletedQuery(
 /// <summary>One page of completed tasks. <paramref name="NextCursor"/> is null on the last page.</summary>
 public sealed record CompletedPage(IReadOnlyList<ResourceChange> Items, string? NextCursor);
 
+/// <summary>What the token probe found out.</summary>
+/// <param name="Accepted">False when Todoist turned the token away (401/403)</param>
+/// <param name="UserId">
+/// The account the token belongs to, or null when it was turned away or the answer didn't say
+/// </param>
+public sealed record TokenProbe(bool Accepted, string? UserId)
+{
+    public static readonly TokenProbe Rejected = new(false, null);
+}
+
 /// <summary>The parsed result of a sync read+write round-trip.</summary>
 public sealed class SyncResponse
 {

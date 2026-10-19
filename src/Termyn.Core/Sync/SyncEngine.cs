@@ -107,6 +107,9 @@ public sealed class SyncEngine
     /// <summary>Bumped whenever the cache is wiped, so an in-flight response can't repopulate it.</summary>
     private int _generation;
 
+    /// <summary>See <see cref="AwaitingToken"/>.</summary>
+    private bool _awaitingToken;
+
     private sealed record UndoableWrite(string Type, string Id, string? PriorJson);
 
     /// <param name="log">
@@ -301,9 +304,26 @@ public sealed class SyncEngine
         get { lock (_gate) return _outbox.ToList(); }
     }
 
+    /// <summary>
+    /// Whether there's something to undo. Never while <see cref="AwaitingToken"/>: undoing a change
+    /// that hasn't been sent drops it from the queue, and the queue is being held as it is.
+    /// </summary>
     public bool CanUndo
     {
-        get { lock (_gate) return _undoStack.Count > 0; }
+        get { lock (_gate) return !_awaitingToken && _undoStack.Count > 0; }
+    }
+
+    /// <summary>
+    /// True while the account is held without a token that works: the server turned the last one
+    /// away, or Termyn has started over a cache with no token to sync it with.
+    /// </summary>
+    /// <remarks>
+    /// The cache and the queue are kept, read-only, until <see cref="AcceptToken"/>. Every write is
+    /// refused meanwhile, so nothing more is added to what a different account's token would wipe.
+    /// </remarks>
+    public bool AwaitingToken
+    {
+        get { lock (_gate) return _awaitingToken; }
     }
 
     /// <summary>
@@ -387,6 +407,9 @@ public sealed class SyncEngine
 
             if (unsendable > 0)
                 _log?.Warn($"{unsendable} queued changes couldn't be read and will never be sent.");
+
+            // An account left behind by a rejected token, with no token yet to go on with it.
+            _awaitingToken = _secrets.GetToken() is null && HoldsAnything;
         }
     }
 
@@ -401,8 +424,7 @@ public sealed class SyncEngine
 
         lock (_gate)
         {
-            token = _secrets.GetToken()
-                    ?? throw new InvalidOperationException("No Todoist token is stored.");
+            token = TokenOrThrow();
             syncToken = Model.SyncToken;
             generation = _generation;
             pending = _outbox.Where(c => c.State == OutboxState.Pending).Take(MaxCommandsPerSync).ToList();
@@ -420,10 +442,14 @@ public sealed class SyncEngine
         }
         catch (TodoistAuthException)
         {
-            // The token is no longer usable: drop it and the cache together so a different account
-            // can't be shown a previous one's tasks.
+            // The token is no longer usable, but what was being sent with it is still wanted: it
+            // goes back in the queue to wait for one that is.
             lock (_gate)
-                ForgetRejectedToken(generation);
+            {
+                foreach (var c in pending)
+                    c.InFlight = false;
+                ForgetRejectedToken(token);
+            }
             throw;
         }
         catch
@@ -457,8 +483,9 @@ public sealed class SyncEngine
     /// its token.
     /// </summary>
     /// <remarks>
-    /// The same wipe a rejected token gets, asked for on purpose. What's still queued goes with it
-    /// rather than being held for later, since later could be somebody else's token.
+    /// The same wipe a different account's token gets (<see cref="AcceptToken"/>), asked for on
+    /// purpose. What's still queued goes with it rather than being held for later, since later
+    /// could be somebody else's token.
     ///
     /// The token goes last. If the cache can't be emptied this throws with the token still stored,
     /// so the account stays signed in over data it can still sync, rather than signed out over a
@@ -470,6 +497,54 @@ public sealed class SyncEngine
         {
             PurgeLocal();
             _secrets.ClearToken();
+        }
+    }
+
+    /// <summary>
+    /// Whether what's held here belongs to an account, as far as the cache can say.
+    /// </summary>
+    /// <remarks>
+    /// True when nothing is held, since there's nothing then that could be somebody else's. A
+    /// cache holding tasks but no user resource can't say whose they are, so it's treated as
+    /// belonging to nobody — the safe way round, because it gets wiped.
+    /// </remarks>
+    /// <param name="userId">The account a token belongs to, or null when the probe couldn't say</param>
+    public bool IsHeldFor(string? userId)
+    {
+        lock (_gate)
+            return IsHeldForLocked(userId);
+    }
+
+    private bool IsHeldForLocked(string? userId)
+        => !HoldsAnything
+           || (userId is not null && Projections.ToUserId(Model.Get(ResourceType.User, ResourceType.User)) == userId);
+
+    /// <summary>
+    /// Takes a token Todoist has accepted, and goes on with the cache if it's the same account's.
+    /// </summary>
+    /// <remarks>
+    /// Another account's token wipes the cache first, queue and all, the same as signing out:
+    /// otherwise it would be shown this account's tasks, and sent changes it never made. Ask
+    /// before calling this with one (<see cref="IsHeldFor"/>), and stop the sync loop first, as
+    /// for <see cref="SignOut"/>.
+    ///
+    /// The token is stored last. If the cache can't be emptied this throws with no token stored,
+    /// so the next start still finds the account waiting rather than signed in over it.
+    /// </remarks>
+    /// <param name="token">The token, already accepted by the probe</param>
+    /// <param name="userId">The account the probe said it belongs to</param>
+    /// <returns>True when the cache was another account's and has been wiped</returns>
+    public bool AcceptToken(string token, string? userId)
+    {
+        lock (_gate)
+        {
+            var wiped = !IsHeldForLocked(userId);
+            if (wiped)
+                PurgeLocal();
+
+            _secrets.SetToken(token);
+            _awaitingToken = false;
+            return wiped;
         }
     }
 
@@ -502,8 +577,7 @@ public sealed class SyncEngine
         int generation;
         lock (_gate)
         {
-            token = _secrets.GetToken()
-                    ?? throw new InvalidOperationException("No Todoist token is stored.");
+            token = TokenOrThrow();
             generation = _generation;
         }
 
@@ -524,7 +598,7 @@ public sealed class SyncEngine
             catch (TodoistAuthException)
             {
                 lock (_gate)
-                    ForgetRejectedToken(generation);
+                    ForgetRejectedToken(token);
                 throw;
             }
 
@@ -583,8 +657,7 @@ public sealed class SyncEngine
         int generation;
         lock (_gate)
         {
-            token = _secrets.GetToken()
-                    ?? throw new InvalidOperationException("No Todoist token is stored.");
+            token = TokenOrThrow();
             generation = _generation;
         }
 
@@ -600,7 +673,7 @@ public sealed class SyncEngine
         catch (TodoistAuthException)
         {
             lock (_gate)
-                ForgetRejectedToken(generation);
+                ForgetRejectedToken(token);
             throw;
         }
 
@@ -858,6 +931,11 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            // Refused here rather than left to Persist: taking back a close that hasn't been sent
+            // drops it from the queue without writing anything, and the queue is being held.
+            if (_awaitingToken)
+                throw new TodoistAuthException("Todoist turned the token away. Reconnect to make changes.");
+
             id = Promoted(id);
 
             if (LastClose(id) is { } last)
@@ -2224,15 +2302,22 @@ public sealed class SyncEngine
             if (OwnerFieldFor(Promoted(ownerId)) is null)
                 return null;
 
-            if (_secrets.GetToken() is not { } stored)
-                throw new TodoistAuthException("Termyn isn't signed in to Todoist.");
-
-            token = stored;
+            token = TokenOrThrow();
         }
 
         // Outside the gate, as every network call is: this one can take a minute on a large file,
         // and holding the model shut for it would stop the UI reading anything at all.
-        var attachment = await _api.UploadAsync(token, file, fileName, ct);
+        JsonObject attachment;
+        try
+        {
+            attachment = await _api.UploadAsync(token, file, fileName, ct);
+        }
+        catch (TodoistAuthException)
+        {
+            lock (_gate)
+                ForgetRejectedToken(token);
+            throw;
+        }
 
         lock (_gate)
         {
@@ -2306,13 +2391,19 @@ public sealed class SyncEngine
         string token;
         lock (_gate)
         {
-            if (_secrets.GetToken() is not { } stored)
-                throw new TodoistAuthException("Termyn isn't signed in to Todoist.");
-
-            token = stored;
+            token = TokenOrThrow();
         }
 
-        await _api.DeleteUploadAsync(token, fileUrl, ct);
+        try
+        {
+            await _api.DeleteUploadAsync(token, fileUrl, ct);
+        }
+        catch (TodoistAuthException)
+        {
+            lock (_gate)
+                ForgetRejectedToken(token);
+            throw;
+        }
     }
 
     /// <summary>Rewrites a comment and queues a <c>note_update</c>.</summary>
@@ -2563,6 +2654,9 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            if (_awaitingToken)
+                return false;
+
             // Keep going past entries that can no longer be reversed — the task was deleted on
             // another device, say — rather than reporting "nothing to undo" with history left.
             while (_undoStack.Count > 0)
@@ -3715,26 +3809,43 @@ public sealed class SyncEngine
     public event Action? Queued;
 
     /// <summary>
-    /// Drops the token and the cache once the server has turned the token away, unless the account
-    /// has already been wiped since the request that heard it went out.
+    /// Drops the token once the server has turned it away, and holds the account until another
+    /// comes.
     /// </summary>
     /// <remarks>
-    /// Called with the lock held. A request can outlive the account it was sent for: signing out
-    /// waits only so long for a sync on its way back, and by the time one lands another account may
-    /// have signed in. Its rejection is about the old token, so it mustn't clear whichever token is
-    /// stored now.
+    /// Called with the lock held. The cache and the queue stay: the likeliest reason for a
+    /// rejection is the token being regenerated on the same account, and wiping then would lose
+    /// whatever was captured offline. Whether the next token's account is this one is checked when
+    /// it arrives (<see cref="AcceptToken"/>), and that's where a different account's wipe happens.
+    ///
+    /// A request can outlive the token it was sent with: signing out waits only so long for a sync
+    /// on its way back, and a slow quick-add can land after a new token has been pasted. Its
+    /// rejection is about the token it carried, so it mustn't clear whichever one is stored now.
     /// </remarks>
-    /// <param name="generation">The purge generation when the request went out</param>
-    private void ForgetRejectedToken(int generation)
+    /// <param name="rejected">The token the request went out with</param>
+    private void ForgetRejectedToken(string rejected)
     {
-        if (generation != _generation)
+        if (_secrets.GetToken() != rejected)
             return;
 
-        _log?.Warn("Todoist rejected the token. It has been cleared, and the local copy of the account wiped.");
+        _log?.Warn("Todoist rejected the token. It has been cleared; the account's cache and queued changes are kept for the next one.");
 
         _secrets.ClearToken();
-        PurgeLocal();
+        _awaitingToken = true;
     }
+
+    /// <summary>The stored token, for a request about to go out. Called with the lock held.</summary>
+    /// <remarks>
+    /// No token here doesn't put the account on hold the way a rejection does. The secret store
+    /// answers null for a token file it can't read just now, a scanner holding it say, as well as for
+    /// one that isn't there, and only Todoist turning a token away is reason to ask for another.
+    /// </remarks>
+    /// <exception cref="TodoistAuthException">There's no token, so there's nothing to send it with.</exception>
+    private string TokenOrThrow()
+        => _secrets.GetToken() ?? throw new TodoistAuthException("Termyn isn't signed in to Todoist.");
+
+    /// <summary>Whether anything at all is held: a resource, or a change waiting to be sent.</summary>
+    private bool HoldsAnything => !Model.IsEmpty || _outbox.Count > 0;
 
     private void PurgeLocal()
     {
@@ -3825,6 +3936,13 @@ public sealed class SyncEngine
             ArgsJson = args.ToJsonString(),
             PriorJson = prior,
         };
+
+        // Read-only until a token comes back. Refused here because every write passes through,
+        // and before anything is stored, so a refused write leaves no trace the way a store
+        // failure doesn't.
+        if (_awaitingToken)
+            throw new TodoistAuthException("Todoist turned the token away. Reconnect to make changes.");
+
         _store.ApplyLocalWrite(cmd, upserts, deletes);
         _outbox.Add(cmd);
 

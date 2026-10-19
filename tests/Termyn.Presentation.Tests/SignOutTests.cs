@@ -38,6 +38,7 @@ public class SignOutTests
     private static (MainPresenter Presenter, SyncEngine Engine, FakeApi Api, Held History) Seeded()
     {
         var store = new InMemorySnapshotStore();
+        store.PutResource("user", "user", """{"id":"u1"}""");
         store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
         store.PutResource("items", "t1", """{"id":"t1","content":"Plan the week","project_id":"p","child_order":1}""");
         store.PutResource("items", "t2", """{"id":"t2","content":"Tidy the garage","project_id":"p","child_order":2}""");
@@ -75,36 +76,42 @@ public class SignOutTests
     }
 
     [Fact]
-    public async Task A_rejected_token_takes_what_was_done_with_it()
+    public async Task A_rejected_token_keeps_what_was_done_until_another_account_comes()
     {
-        // The engine already wiped the tasks and the downloaded files here, so that a different
-        // account signing in next isn't shown the last one's. The history quotes those same tasks
-        // by name and was left behind.
+        // The account is held for the next token, and its history with it. The history quotes the
+        // account's tasks by name, so it goes when a different account's token wipes them.
         var (presenter, _, api, history) = Seeded();
         DoSomeWork(presenter);
         api.Throw = new TodoistAuthException("rejected");
 
         await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
 
+        Assert.NotEmpty(presenter.History.Recent());
+        Assert.NotEmpty(history.Entries);
+
+        presenter.Reconnect("other", "u2");
+
         Assert.Empty(presenter.History.Recent());
         Assert.Empty(history.Entries);
     }
 
     [Fact]
-    public async Task A_history_that_cannot_be_emptied_does_not_hide_a_rejected_token()
+    public void A_history_that_cannot_be_emptied_does_not_stop_a_switch_of_account()
     {
-        // The history is cleared from inside the engine's purge, on the way to rethrowing the
-        // rejection. If its file refused, that failure would arrive in the rejection's place, and
-        // the window would never be told to ask for a token.
+        // The history is cleared from inside the engine's purge, before the new token is stored.
+        // If its file refused and that failure got out, the switch would stop with the cache gone
+        // and no token, and the window would be left asking for one it had just been given.
         var store = new InMemorySnapshotStore();
-        var api = new FakeApi { Throw = new TodoistAuthException("rejected") };
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        store.PutResource("user", "user", """{"id":"u1"}""");
+        var secrets = new FakeSecrets { Stored = null };
+        var engine = new SyncEngine(new FakeApi(), store, secrets, new FixedClock(Today));
         engine.Load();
         var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today), history: new Locked());
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+        presenter.Reconnect("other", "u2");
 
-        Assert.Equal(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
+        Assert.Equal("other", secrets.Stored);
+        Assert.False(presenter.ReconnectNeeded);
     }
 
     /// <summary>A history store whose file can't be emptied.</summary>
