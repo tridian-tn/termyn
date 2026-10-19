@@ -1,7 +1,8 @@
 # Social preview
 
 The picture GitHub shows when the repository is linked somewhere — 1280×640, uploaded by hand
-under **Settings → General → Social preview**.
+under **Settings → General → Social preview**. The main README shows it at the top as well, from
+this folder, so a re-render updates that without uploading anything.
 
 | File | |
 | --- | --- |

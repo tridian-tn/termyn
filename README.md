@@ -1,3 +1,5 @@
+![Termyn: a fast, low-footprint Windows desktop client for Todoist](assets/social-preview/social-preview.png)
+
 # Termyn
 
 [![CI](https://github.com/tridian-tn/termyn/actions/workflows/ci.yml/badge.svg)](https://github.com/tridian-tn/termyn/actions/workflows/ci.yml)
