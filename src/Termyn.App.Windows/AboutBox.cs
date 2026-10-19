@@ -60,8 +60,10 @@ internal static class AboutBox
         // stretch on a scaled screen.
         var icon = new Icon(AppIcon.Window, iconSize, iconSize);
 
+        // One line between folders rather than a blank one, so opening the section doesn't stretch
+        // the dialog more than it has to.
         var diagnostics = string.Join(
-            "\n\n",
+            "\n",
             Folders(paths).Select(folder => $"{folder.Label}:\n<a href=\"{folder.Key}\">{folder.Path}</a>"));
 
         var page = new TaskDialogPage
@@ -74,8 +76,7 @@ internal static class AboutBox
 
                 // Linked rather than shown: the notices run to three hundred lines, most of them
                 // the Apache licence, which is no size for a dialog.
-                + $"The licences of the open-source components Termyn includes are in <a href=\"notices\">{NoticesFile}</a>, "
-                + "in the folder it's installed in.",
+                + $"Licences of included open-source components: <a href=\"notices\">{NoticesFile}</a>",
             EnableLinks = true,
             AllowCancel = true,
             Buttons = { TaskDialogButton.OK },
