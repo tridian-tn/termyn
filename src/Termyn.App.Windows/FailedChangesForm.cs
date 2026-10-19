@@ -30,6 +30,7 @@ internal sealed class FailedChangesForm : Form
         _dismissed = dismissed;
 
         Text = "Changes that didn't happen";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

@@ -267,6 +267,7 @@ internal sealed class MainForm : Form
         _theme = Theme.Resolve(_settings.Theme);
 
         Text = "Termyn";
+        Icon = AppIcon.Window;
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
 

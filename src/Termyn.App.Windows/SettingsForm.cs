@@ -34,6 +34,7 @@ internal sealed class SettingsForm : Form
     internal SettingsForm(AppSettings settings, Theme theme)
     {
         Text = "Termyn — settings";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

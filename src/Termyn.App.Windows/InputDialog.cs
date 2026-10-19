@@ -14,6 +14,7 @@ internal sealed class InputDialog : Form
     internal InputDialog(string title, string prompt, string initial = "", string? context = null)
     {
         Text = title;
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

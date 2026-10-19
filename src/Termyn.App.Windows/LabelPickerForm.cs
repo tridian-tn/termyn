@@ -12,6 +12,7 @@ internal sealed class LabelPickerForm : Form
     private LabelPickerForm(string task, IReadOnlyList<string> known, IReadOnlyList<string> applied)
     {
         Text = "Labels";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

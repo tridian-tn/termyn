@@ -28,6 +28,7 @@ internal sealed class QuickAddForm : Form
         _presenter = presenter;
 
         Text = "Termyn — quick add";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.Manual;
         MaximizeBox = false;

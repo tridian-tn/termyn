@@ -25,6 +25,7 @@ internal sealed class DeadlineForm : Form
     private DeadlineForm(string task, DateOnly? current, DateOnly today, Func<string, DayReading> read, bool english)
     {
         Text = "Deadline";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

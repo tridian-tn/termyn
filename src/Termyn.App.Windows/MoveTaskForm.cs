@@ -37,6 +37,7 @@ internal sealed class MoveTaskForm : Form
         _theme = theme;
 
         Text = "Move to";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

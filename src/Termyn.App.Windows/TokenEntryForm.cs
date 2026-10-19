@@ -28,6 +28,7 @@ internal sealed class TokenEntryForm : Form
         _reconnecting = reconnecting;
 
         Text = reconnecting ? "Reconnect Termyn to Todoist" : "Connect Termyn to Todoist";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterScreen;
         MaximizeBox = false;

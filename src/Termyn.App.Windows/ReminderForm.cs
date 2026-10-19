@@ -41,6 +41,7 @@ internal sealed class ReminderForm : Form
         _itemId = itemId;
 
         Text = "Reminders";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

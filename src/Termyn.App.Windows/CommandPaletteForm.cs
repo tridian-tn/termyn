@@ -25,6 +25,7 @@ internal sealed class CommandPaletteForm : Form
         _theme = theme;
 
         Text = "Termyn — commands";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;

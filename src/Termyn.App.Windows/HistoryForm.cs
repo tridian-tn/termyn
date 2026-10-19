@@ -26,6 +26,7 @@ internal sealed class HistoryForm : Form
         _cleared = cleared;
 
         Text = "What you've done";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;

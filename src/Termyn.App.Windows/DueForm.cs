@@ -46,6 +46,7 @@ internal sealed class DueForm : Form
     private DueForm(string task, string current, DateOnly today, Func<string, DayReading> read, bool english)
     {
         Text = "Due date";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
