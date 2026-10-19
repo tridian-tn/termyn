@@ -11,8 +11,8 @@ public class SearchPlacementTests
         using var window = TestWindow.Build("termyn-search-placement.json");
         var box = InWindow(TestWindow.Find<SearchBox>(window), window);
 
-        Assert.Equal(MainForm.SearchPadding.Left, box.Left);
-        Assert.Equal(MainForm.SearchPadding.Right, window.ClientSize.Width - box.Right);
+        Assert.Equal(MainForm.SearchPaddingAt(window.DeviceDpi).Left, box.Left);
+        Assert.Equal(MainForm.SearchPaddingAt(window.DeviceDpi).Right, window.ClientSize.Width - box.Right);
     }
 
     [WinFormsFact]
@@ -24,9 +24,19 @@ public class SearchPlacementTests
         var bar = window.MainMenuStrip!;
         var below = window.Controls.OfType<SplitContainer>().Single();
 
-        Assert.Equal(MainForm.SearchPadding.Top, box.Top - bar.Bottom);
-        Assert.Equal(MainForm.SearchPadding.Bottom, below.Top - box.Bottom);
+        Assert.Equal(MainForm.SearchPaddingAt(window.DeviceDpi).Top, box.Top - bar.Bottom);
+        Assert.Equal(MainForm.SearchPaddingAt(window.DeviceDpi).Bottom, below.Top - box.Bottom);
         Assert.Equal(search.PreferredHeight, box.Height);
+    }
+
+    [WinFormsFact]
+    public void The_space_round_it_grows_with_the_screen_s_scale()
+    {
+        // The sidebar's text lead is scaled, and the box is meant to line up with it, so a box
+        // padded in raw pixels drifts out of line at anything but 100%.
+        Assert.Equal(MainForm.SearchPadding, MainForm.SearchPaddingAt(96));
+        Assert.Equal(new Padding(6, 9, 6, 9), MainForm.SearchPaddingAt(144));
+        Assert.Equal(new Padding(8, 12, 8, 12), MainForm.SearchPaddingAt(192));
     }
 
     /// <summary>

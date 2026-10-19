@@ -58,10 +58,22 @@ internal sealed class MainForm : Form
     private static string ReconnectMessage => Strings.MainReconnect;
 
     /// <summary>
-    /// The space around the search box, so it sits in from the window's edges rather than running
-    /// into them. The sides line its border up with where the sidebar's text starts below it.
+    /// The space around the search box at 100%, so it sits in from the window's edges rather than
+    /// running into them. The sides line its border up with where the sidebar's text starts below
+    /// it, which is <see cref="DotLead"/> scaled the same way.
     /// </summary>
     internal static readonly Padding SearchPadding = new(4, 6, 4, 6);
+
+    /// <summary>
+    /// The space around the search box at a display's scale.
+    /// </summary>
+    /// <param name="dpi">The display's dots per inch, which is 96 at 100%</param>
+    /// <returns>The padding in the display's pixels</returns>
+    internal static Padding SearchPaddingAt(int dpi) => new(
+        StartupLayout.Scaled(SearchPadding.Left, dpi),
+        StartupLayout.Scaled(SearchPadding.Top, dpi),
+        StartupLayout.Scaled(SearchPadding.Right, dpi),
+        StartupLayout.Scaled(SearchPadding.Bottom, dpi));
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
@@ -69,6 +81,7 @@ internal sealed class MainForm : Form
     private readonly CancellationTokenSource _cts = new();
 
     private readonly SearchBox _search;
+    private readonly Panel _searchHolder;
     private readonly SidebarTree _sidebar;
     private readonly LinkLabel _crumbs;
 
@@ -557,18 +570,18 @@ internal sealed class MainForm : Form
 
         // A box docked to the window runs edge to edge, and docking ignores a control's margin, so
         // the space around it comes from a holder's padding. Sized to the box, so it grows with it.
-        var searchHolder = new Panel
+        _searchHolder = new Panel
         {
             Dock = DockStyle.Top,
-            Padding = SearchPadding,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
-        searchHolder.Controls.Add(_search);
+        _searchHolder.Controls.Add(_search);
+        PadSearch();
 
         Controls.Add(_split);
         Controls.Add(_status);
-        Controls.Add(searchHolder);
+        Controls.Add(_searchHolder);
 
         // Last, so it docks outermost and sits above the search box where a menu bar belongs.
         // Built after the outline and the sidebar exist: filling it asks both what is selected.
@@ -580,7 +593,7 @@ internal sealed class MainForm : Form
         // it otherwise — and that order is about docking, so Tab began at the split and reached the
         // search box third. It goes down the window now: the search, then the tree and the list and
         // the panel, which follow from how those are nested inside the split.
-        searchHolder.TabIndex = 0;
+        _searchHolder.TabIndex = 0;
         _split.TabIndex = 1;
         _status.TabIndex = 2;
         bar.TabIndex = 3;
@@ -1205,6 +1218,29 @@ internal sealed class MainForm : Form
     /// <param name="logical">The size at 100%</param>
     /// <returns>The size in the display's pixels</returns>
     private int AtScale(int logical) => StartupLayout.Scaled(logical, DeviceDpi);
+
+    /// <summary>Sets the space round the search box for the screen the window's on.</summary>
+    private void PadSearch() => _searchHolder.Padding = SearchPaddingAt(DeviceDpi);
+
+    /// <summary>
+    /// Pads the search box again once the window knows which screen it's on.
+    /// </summary>
+    /// <remarks>
+    /// Before its handle exists a window reports the scale of the screen the app started on, so the
+    /// padding set while it's built can be for the wrong one.
+    /// </remarks>
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        PadSearch();
+    }
+
+    /// <summary>Pads the search box again for a screen of another scale.</summary>
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        PadSearch();
+    }
 
     private ViewState CurrentViewState()
     {

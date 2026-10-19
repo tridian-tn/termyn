@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using Termyn.Core.Platform;
 using Termyn.Core.Update;
@@ -42,11 +43,34 @@ internal static class AboutBox
 
         about.Page.LinkClicked += (_, e) =>
         {
-            if (!Open(e.LinkHref, paths))
+            if (!Opened(() => Open(e.LinkHref, paths)))
                 failed(Failure(e.LinkHref));
         };
 
         TaskDialog.ShowDialog(owner, about.Page, TaskDialogStartupLocation.CenterOwner);
+    }
+
+    /// <summary>
+    /// Opens a link, counting the shell's refusal as a failure rather than letting it escape.
+    /// </summary>
+    /// <remarks>
+    /// A task dialog hands anything thrown from a callback to <c>Application.OnThreadException</c>,
+    /// and with nothing listening there that's WinForms' "unhandled exception" box — over a click
+    /// on a link to a folder. The shell refuses with a <see cref="Win32Exception"/> when nothing's
+    /// registered to open the thing, which is the likeliest way for one of these to fail.
+    /// </remarks>
+    /// <param name="open">Opens the link, saying whether it could</param>
+    /// <returns>False when it couldn't, whether it said so or the shell threw</returns>
+    internal static bool Opened(Func<bool> open)
+    {
+        try
+        {
+            return open();
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Termyn.Core;
 using Termyn.Core.Platform;
 
@@ -83,6 +84,23 @@ public class AboutBoxTests
             Assert.Contains($">{folder}</a>", diagnostics.Text);
             Assert.DoesNotContain(folder, page.Page.Text);
         }
+    }
+
+    [WinFormsFact]
+    public void A_link_the_shell_refuses_is_a_failure_rather_than_a_crash()
+    {
+        // What the shell throws when nothing's registered to open the thing. Escaping the dialog's
+        // callback, it would reach WinForms' unhandled exception box.
+        Assert.False(AboutBox.Opened(() => throw new Win32Exception(1155)));
+        Assert.False(AboutBox.Opened(() => throw new InvalidOperationException()));
+        Assert.True(AboutBox.Opened(() => true));
+    }
+
+    [WinFormsFact]
+    public void Anything_else_thrown_is_left_to_surface()
+    {
+        // Only the shell's refusals are a link that couldn't be opened. A bug is still a bug.
+        Assert.Throws<NullReferenceException>(() => AboutBox.Opened(() => throw new NullReferenceException()));
     }
 
     [WinFormsFact]

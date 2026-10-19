@@ -75,7 +75,9 @@ public class TextCatalogueTests
             Directory.EnumerateFiles(Path.Combine(RepoRoot(), "src", "Termyn.App.Windows"), "*.cs")
                 .Select(File.ReadAllText));
 
-        var unused = Entries().Select(e => e.Name).Where(name => !source.Contains($"Strings.{name}", StringComparison.Ordinal));
+        // Matched as a whole name: several keys are the start of another — DueTime and
+        // DueTimeAccessible — and the longer one's use would otherwise count for the shorter.
+        var unused = Entries().Select(e => e.Name).Where(name => !Regex.IsMatch(source, $@"\bStrings\.{name}\b"));
 
         Assert.Empty(unused);
     }
