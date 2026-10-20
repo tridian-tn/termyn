@@ -269,4 +269,326 @@
   <data name="CommandExit" xml:space="preserve">
     <value>Exit</value>
   </data>
+  <!-- The sync half of the status bar: the state, and how long ago the last sync was. -->
+  <data name="SyncStatusSyncing" xml:space="preserve">
+    <value>Syncing…</value>
+  </data>
+  <data name="SyncStatusOffline" xml:space="preserve">
+    <value>Offline (showing cached)</value>
+  </data>
+  <data name="SyncStatusPaused" xml:space="preserve">
+    <value>Paused</value>
+  </data>
+  <data name="SyncStatusPausedRetry" xml:space="preserve">
+    <value>Paused (retry in {0}s)</value>
+    <comment>{0} is the seconds until the paused loop tries again.</comment>
+  </data>
+  <data name="SyncStatusReconnectNeeded" xml:space="preserve">
+    <value>Reconnect needed</value>
+  </data>
+  <data name="SyncStatusSynced" xml:space="preserve">
+    <value>Synced</value>
+  </data>
+  <data name="SyncStatusSyncedAgo" xml:space="preserve">
+    <value>Synced {0}</value>
+    <comment>{0} is a span such as "3m ago".</comment>
+  </data>
+  <data name="SyncStatusNever" xml:space="preserve">
+    <value>Not synced yet</value>
+  </data>
+  <data name="SyncAgoJustNow" xml:space="preserve">
+    <value>just now</value>
+  </data>
+  <data name="SyncAgoSeconds" xml:space="preserve">
+    <value>{0}s ago</value>
+    <comment>{0} is a whole number of seconds.</comment>
+  </data>
+  <data name="SyncAgoMinutes" xml:space="preserve">
+    <value>{0}m ago</value>
+    <comment>{0} is a whole number of minutes.</comment>
+  </data>
+  <data name="SyncAgoHours" xml:space="preserve">
+    <value>{0}h ago</value>
+    <comment>{0} is a whole number of hours.</comment>
+  </data>
+  <data name="SyncAgoDays" xml:space="preserve">
+    <value>{0}d ago</value>
+    <comment>{0} is a whole number of days.</comment>
+  </data>
+
+  <!-- The capture box: its empty hint, and the line under it describing what was typed. -->
+  <data name="CaptureHint" xml:space="preserve">
+    <value>Add a task…  #project /section @label p1</value>
+    <comment>The #project /section @label p1 are literal examples of the quick-add syntax.</comment>
+  </data>
+  <data name="CaptureHintWithDay" xml:space="preserve">
+    <value>Add a task…  #project /section @label p1 tomorrow 4pm</value>
+    <comment>As CaptureHint, with a day example for accounts that read dates from the text.</comment>
+  </data>
+  <data name="CaptureProjectUnknown" xml:space="preserve">
+    <value>#{0} (unknown — goes to Inbox)</value>
+    <comment>{0} is the project name typed, which no project matches.</comment>
+  </data>
+  <data name="CaptureSectionUnknown" xml:space="preserve">
+    <value>/{0} (unknown)</value>
+    <comment>{0} is the section name typed, which no section matches.</comment>
+  </data>
+  <data name="CaptureNeedsConnection" xml:space="preserve">
+    <value>(needs a connection: {0})</value>
+    <comment>{0} is a comma-separated list of what the offline parser couldn't settle.</comment>
+  </data>
+
+  <!-- A write the server refused: what was being done, what it said, and what dismissing costs. -->
+  <data name="FailureChangeSubject" xml:space="preserve">
+    <value>{0} — {1}</value>
+    <comment>{0} is what was being done, {1} what it was being done to.</comment>
+  </data>
+  <data name="FailureItemAdd" xml:space="preserve">
+    <value>Adding a task</value>
+  </data>
+  <data name="FailureItemUpdate" xml:space="preserve">
+    <value>Changing a task</value>
+  </data>
+  <data name="FailureItemDelete" xml:space="preserve">
+    <value>Deleting a task</value>
+  </data>
+  <data name="FailureItemClose" xml:space="preserve">
+    <value>Completing a task</value>
+  </data>
+  <data name="FailureItemUncomplete" xml:space="preserve">
+    <value>Reopening a task</value>
+  </data>
+  <data name="FailureItemMove" xml:space="preserve">
+    <value>Moving a task</value>
+  </data>
+  <data name="FailureItemReorder" xml:space="preserve">
+    <value>Reordering tasks</value>
+  </data>
+  <data name="FailureProjectReorder" xml:space="preserve">
+    <value>Reordering projects</value>
+  </data>
+  <data name="FailureSectionReorder" xml:space="preserve">
+    <value>Reordering sections</value>
+  </data>
+  <data name="FailureProjectAdd" xml:space="preserve">
+    <value>Adding a project</value>
+  </data>
+  <data name="FailureSectionAdd" xml:space="preserve">
+    <value>Adding a section</value>
+  </data>
+  <data name="FailureLabelAdd" xml:space="preserve">
+    <value>Adding a label</value>
+  </data>
+  <data name="FailureLabelDelete" xml:space="preserve">
+    <value>Deleting a label</value>
+  </data>
+  <data name="FailureNoteAdd" xml:space="preserve">
+    <value>Adding a comment</value>
+  </data>
+  <data name="FailureReminderAdd" xml:space="preserve">
+    <value>Adding a reminder</value>
+  </data>
+  <data name="FailureReasonGiven" xml:space="preserve">
+    <value>Todoist said: {0}</value>
+    <comment>{0} is the server's own words, passed through as it sent them.</comment>
+  </data>
+  <data name="FailureReasonNone" xml:space="preserve">
+    <value>Todoist gave no reason.</value>
+  </data>
+  <data name="FailureLandedUnruled" xml:space="preserve">
+    <value>Todoist never reported a result, so whether your account has this is unknown.</value>
+  </data>
+  <data name="FailureLandedRefused" xml:space="preserve">
+    <value>Todoist refused it, so your account doesn't have it.</value>
+  </data>
+  <data name="FailureCostDiscards" xml:space="preserve">
+    <value>Dismissing removes Termyn's copy, which is the only one on this machine.</value>
+  </data>
+  <data name="FailureCostKept" xml:space="preserve">
+    <value>Termyn has already put this back. Dismissing only clears the notice.</value>
+  </data>
+
+  <!-- The sidebar group headings. -->
+  <data name="SidebarFavourites" xml:space="preserve">
+    <value>Favourites</value>
+  </data>
+  <data name="SidebarProjects" xml:space="preserve">
+    <value>Projects</value>
+  </data>
+  <data name="SidebarLabels" xml:space="preserve">
+    <value>Labels</value>
+  </data>
+  <data name="SidebarFilters" xml:space="preserve">
+    <value>Filters</value>
+  </data>
+
+  <!--
+    The action history: one line per thing the user did, in the words they'd use for it. Only new
+    lines read these; entries already written to the history file keep the wording they were written
+    with. Each {0}/{1} is the name of what was acted on, and the curly quotes are part of the wording.
+  -->
+  <data name="HistoryAdded" xml:space="preserve">
+    <value>Added “{0}”</value>
+  </data>
+  <data name="HistoryAddedUnder" xml:space="preserve">
+    <value>Added “{0}” under {1}</value>
+  </data>
+  <data name="HistoryReopened" xml:space="preserve">
+    <value>Reopened {0}</value>
+  </data>
+  <data name="HistoryRenamed" xml:space="preserve">
+    <value>Renamed {0} to “{1}”</value>
+  </data>
+  <data name="HistoryDescriptionEdited" xml:space="preserve">
+    <value>Edited the description of {0}</value>
+  </data>
+  <data name="HistoryDescriptionEditedProject" xml:space="preserve">
+    <value>Edited the description of a project</value>
+  </data>
+  <data name="HistoryCommentAdded" xml:space="preserve">
+    <value>Added a comment</value>
+  </data>
+  <data name="HistoryCommentEdited" xml:space="preserve">
+    <value>Edited a comment</value>
+  </data>
+  <data name="HistoryCommentDeleted" xml:space="preserve">
+    <value>Deleted a comment</value>
+  </data>
+  <data name="HistoryPriorityCleared" xml:space="preserve">
+    <value>Cleared the priority on {0}</value>
+  </data>
+  <data name="HistoryPrioritySet" xml:space="preserve">
+    <value>Set {0} to priority {1}</value>
+    <comment>{1} is the priority number, 1 to 3.</comment>
+  </data>
+  <data name="HistoryDueSet" xml:space="preserve">
+    <value>Set {0} due {1}</value>
+    <comment>{1} is a short date such as "4 Mar".</comment>
+  </data>
+  <data name="HistoryDueCleared" xml:space="preserve">
+    <value>Cleared the due date on {0}</value>
+  </data>
+  <data name="HistoryDueSetText" xml:space="preserve">
+    <value>Set {0} due “{1}”</value>
+    <comment>{1} is the due wording the user typed, such as "every Monday".</comment>
+  </data>
+  <data name="HistoryDeadlineSet" xml:space="preserve">
+    <value>Set {0} to finish by {1}</value>
+    <comment>{1} is a short date such as "4 Mar".</comment>
+  </data>
+  <data name="HistoryDeadlineCleared" xml:space="preserve">
+    <value>Cleared the deadline on {0}</value>
+  </data>
+  <data name="HistoryCompleted" xml:space="preserve">
+    <value>Completed {0}</value>
+  </data>
+  <data name="HistoryDeleted" xml:space="preserve">
+    <value>Deleted {0}</value>
+  </data>
+  <data name="HistoryUndo" xml:space="preserve">
+    <value>Took back the last change</value>
+  </data>
+  <data name="HistoryMovedUp" xml:space="preserve">
+    <value>Moved {0} up</value>
+  </data>
+  <data name="HistoryMovedDown" xml:space="preserve">
+    <value>Moved {0} down</value>
+  </data>
+  <data name="HistoryIndented" xml:space="preserve">
+    <value>Indented {0}</value>
+  </data>
+  <data name="HistoryOutdented" xml:space="preserve">
+    <value>Outdented {0}</value>
+  </data>
+  <data name="HistoryMovedTo" xml:space="preserve">
+    <value>Moved {0} to “{1}”</value>
+  </data>
+  <data name="HistoryMovedUnder" xml:space="preserve">
+    <value>Moved {0} under {1}</value>
+  </data>
+  <data name="HistoryMoved" xml:space="preserve">
+    <value>Moved {0}</value>
+  </data>
+  <data name="HistoryReminderAdded" xml:space="preserve">
+    <value>Added a reminder to {0}</value>
+  </data>
+  <data name="HistoryReminderRemoved" xml:space="preserve">
+    <value>Removed a reminder</value>
+  </data>
+  <data name="HistoryLabelAdded" xml:space="preserve">
+    <value>Added the label “{0}”</value>
+  </data>
+  <data name="HistoryProjectAdded" xml:space="preserve">
+    <value>Added the project “{0}”</value>
+  </data>
+  <data name="HistoryProjectRenamed" xml:space="preserve">
+    <value>Renamed a project to “{0}”</value>
+  </data>
+  <data name="HistoryProjectDeleted" xml:space="preserve">
+    <value>Deleted the project “{0}”</value>
+  </data>
+  <data name="HistoryProjectDeletedUnnamed" xml:space="preserve">
+    <value>Deleted a project</value>
+  </data>
+  <data name="HistorySectionAdded" xml:space="preserve">
+    <value>Added the section “{0}”</value>
+  </data>
+  <data name="HistorySectionRenamed" xml:space="preserve">
+    <value>Renamed a section to “{0}”</value>
+  </data>
+  <data name="HistorySectionDeleted" xml:space="preserve">
+    <value>Deleted the section “{0}”</value>
+  </data>
+  <data name="HistorySectionDeletedUnnamed" xml:space="preserve">
+    <value>Deleted a section</value>
+  </data>
+  <data name="HistoryProjectMovedUp" xml:space="preserve">
+    <value>Moved the project “{0}” up</value>
+  </data>
+  <data name="HistoryProjectMovedDown" xml:space="preserve">
+    <value>Moved the project “{0}” down</value>
+  </data>
+  <data name="HistorySectionMovedUp" xml:space="preserve">
+    <value>Moved the section “{0}” up</value>
+  </data>
+  <data name="HistorySectionMovedDown" xml:space="preserve">
+    <value>Moved the section “{0}” down</value>
+  </data>
+  <data name="HistoryProjectMoved" xml:space="preserve">
+    <value>Moved the project “{0}”</value>
+  </data>
+  <data name="HistorySectionMoved" xml:space="preserve">
+    <value>Moved the section “{0}”</value>
+  </data>
+
+  <!-- The questions asked before switching account or signing out, each with its pending-change warning. -->
+  <data name="SwitchAccountLeadUnknown" xml:space="preserve">
+    <value>Todoist didn't say which account that token is for, so Termyn can't tell whether it's this one.</value>
+  </data>
+  <data name="SwitchAccountLeadOther" xml:space="preserve">
+    <value>That token is for a different Todoist account.</value>
+  </data>
+  <data name="SwitchAccountBody" xml:space="preserve">
+    <value>Using it removes this account's tasks, comments, downloaded files and the list of what you've done from this computer, and then signs in to the other one. Nothing is removed from Todoist itself.</value>
+  </data>
+  <data name="SwitchAccountPendingOne" xml:space="preserve">
+    <value>1 change hasn't reached Todoist yet, and switching now loses it. Paste a token for the account it belongs to and it will be sent.</value>
+  </data>
+  <data name="SwitchAccountPendingMany" xml:space="preserve">
+    <value>{0} changes haven't reached Todoist yet, and switching now loses them. Paste a token for the account they belong to and they will be sent.</value>
+    <comment>{0} is the count of unsent changes, always two or more here.</comment>
+  </data>
+  <data name="SignOutQuestionHead" xml:space="preserve">
+    <value>Sign out of Todoist?</value>
+  </data>
+  <data name="SignOutBody" xml:space="preserve">
+    <value>Termyn will forget your token, and remove the account's tasks, comments, downloaded files and the list of what you've done from this computer. Nothing is removed from Todoist itself.</value>
+  </data>
+  <data name="SignOutPendingOne" xml:space="preserve">
+    <value>1 change hasn't reached Todoist yet, and signing out now loses it. Sync first if you want to keep it.</value>
+  </data>
+  <data name="SignOutPendingMany" xml:space="preserve">
+    <value>{0} changes haven't reached Todoist yet, and signing out now loses them. Sync first if you want to keep them.</value>
+    <comment>{0} is the count of unsent changes, always two or more here.</comment>
+  </data>
 </root>

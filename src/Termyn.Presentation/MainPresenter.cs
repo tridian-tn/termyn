@@ -474,20 +474,14 @@ public sealed class MainPresenter
     public string SwitchAccountQuestion(string? userId)
     {
         var question =
-            (userId is null
-                ? "Todoist didn't say which account that token is for, so Termyn can't tell whether it's this one.\n\n"
-                : "That token is for a different Todoist account.\n\n")
-            + "Using it removes this account's tasks, comments, downloaded files and the list of "
-            + "what you've done from this computer, and then signs in to the other one. Nothing is "
-            + "removed from Todoist itself.";
+            (userId is null ? Strings.SwitchAccountLeadUnknown : Strings.SwitchAccountLeadOther)
+            + "\n\n" + Strings.SwitchAccountBody;
 
         return _engine.PendingCount switch
         {
             0 => question,
-            1 => question + "\n\n1 change hasn't reached Todoist yet, and switching now loses it. "
-                          + "Paste a token for the account it belongs to and it will be sent.",
-            var n => question + $"\n\n{n} changes haven't reached Todoist yet, and switching now loses them. "
-                              + "Paste a token for the account they belong to and they will be sent.",
+            1 => question + "\n\n" + Strings.SwitchAccountPendingOne,
+            var n => question + "\n\n" + string.Format(CultureInfo.CurrentCulture, Strings.SwitchAccountPendingMany, n),
         };
     }
 
@@ -515,19 +509,13 @@ public sealed class MainPresenter
     /// <returns>The question, with a warning added when there are changes still to send</returns>
     public string SignOutQuestion()
     {
-        const string question =
-            "Sign out of Todoist?\n\n"
-            + "Termyn will forget your token, and remove the account's tasks, comments, downloaded "
-            + "files and the list of what you've done from this computer. Nothing is removed from "
-            + "Todoist itself.";
+        var question = Strings.SignOutQuestionHead + "\n\n" + Strings.SignOutBody;
 
         return _engine.PendingCount switch
         {
             0 => question,
-            1 => question + "\n\n1 change hasn't reached Todoist yet, and signing out now loses it. "
-                          + "Sync first if you want to keep it.",
-            var unsent => question + $"\n\n{unsent} changes haven't reached Todoist yet, and signing out now "
-                                   + "loses them. Sync first if you want to keep them.",
+            1 => question + "\n\n" + Strings.SignOutPendingOne,
+            var unsent => question + "\n\n" + string.Format(CultureInfo.CurrentCulture, Strings.SignOutPendingMany, unsent),
         };
     }
 
@@ -608,7 +596,7 @@ public sealed class MainPresenter
         // Said from the text rather than from the model: online the server parses it and what comes
         // back is a task this hasn't seen yet, so the words the user typed are the only ones there
         // are. A new id each time, so two captures are never folded into one.
-        History.Note($"Added “{text.Trim()}”", $"capture:{Guid.NewGuid():N}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAdded, text.Trim()), $"capture:{Guid.NewGuid():N}");
 
         Publish();
     }
@@ -677,7 +665,7 @@ public sealed class MainPresenter
 
         _collapsed.Remove(parentId);
 
-        History.Note($"Added “{parse.Content}” under {under}", $"subtask:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAddedUnder, parse.Content, under), $"subtask:{id}");
 
         Publish();
         return id;
@@ -839,7 +827,7 @@ public sealed class MainPresenter
         // Put back on purpose, so there's nothing left to keep it on the list for.
         _ticked.Remove(id);
 
-        History.Note($"Reopened {named}", $"reopen:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryReopened, named), $"reopen:{id}");
         Publish();
     }
 
@@ -1158,7 +1146,7 @@ public sealed class MainPresenter
         var was = Named(id);
         _engine.UpdateItem(id, new JsonObject { ["content"] = content });
 
-        History.Note($"Renamed {was} to “{content}”", $"rename:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryRenamed, was, content), $"rename:{id}");
         Publish();
     }
 
@@ -1207,8 +1195,8 @@ public sealed class MainPresenter
         // typing pauses, so an afternoon on a description is a line rather than forty.
         History.Note(
             kind == SubjectKind.Task
-                ? $"Edited the description of {Named(id)}"
-                : $"Edited the description of a project",
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDescriptionEdited, Named(id))
+                : Strings.HistoryDescriptionEditedProject,
             $"description:{kind}:{id}");
 
         Publish();
@@ -1309,7 +1297,7 @@ public sealed class MainPresenter
         // the same reason SetDescription is told the kind rather than guessing it. Naming it would
         // mean plumbing that through here too, and until it is, saying nothing beats saying "a
         // task" about a project. It reads alongside the edit and delete lines, which say no more.
-        History.Note("Added a comment", $"comment:add:{ownerId}");
+        History.Note(Strings.HistoryCommentAdded, $"comment:add:{ownerId}");
         Publish();
         return true;
     }
@@ -1323,7 +1311,7 @@ public sealed class MainPresenter
 
         _engine.EditComment(id, content.Trim());
 
-        History.Note("Edited a comment", $"comment:edit:{id}");
+        History.Note(Strings.HistoryCommentEdited, $"comment:edit:{id}");
         Publish();
         return true;
     }
@@ -1333,7 +1321,7 @@ public sealed class MainPresenter
     {
         _engine.DeleteComment(id);
 
-        History.Note("Deleted a comment", $"comment:delete:{id}");
+        History.Note(Strings.HistoryCommentDeleted, $"comment:delete:{id}");
         Publish();
     }
 
@@ -1462,7 +1450,9 @@ public sealed class MainPresenter
         _engine.UpdateItem(id, new JsonObject { ["priority"] = PriorityMap.ToApi(priority) });
 
         History.Note(
-            priority == Priority.P4 ? $"Cleared the priority on {named}" : $"Set {named} to priority {(int)priority}",
+            priority == Priority.P4
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryPriorityCleared, named)
+                : string.Format(CultureInfo.CurrentCulture, Strings.HistoryPrioritySet, named, (int)priority),
             $"priority:{id}");
 
         Publish();
@@ -1476,8 +1466,8 @@ public sealed class MainPresenter
 
         History.Note(
             date is { } day
-                ? $"Set {named} due {day.ToString("d MMM", CultureInfo.InvariantCulture)}"
-                : $"Cleared the due date on {named}",
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture))
+                : string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueCleared, named),
             $"due:{id}");
 
         Publish();
@@ -1513,7 +1503,7 @@ public sealed class MainPresenter
         var named = Named(id);
         _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
 
-        History.Note($"Set {named} due “{text.Trim()}”", $"due:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSetText, named, text.Trim()), $"due:{id}");
         Publish();
     }
 
@@ -1583,8 +1573,8 @@ public sealed class MainPresenter
 
         History.Note(
             date is { } day
-                ? $"Set {named} to finish by {day.ToString("d MMM", CultureInfo.InvariantCulture)}"
-                : $"Cleared the deadline on {named}",
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture))
+                : string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineCleared, named),
             $"deadline:{id}");
 
         Publish();
@@ -1673,7 +1663,7 @@ public sealed class MainPresenter
         if (_engine.CompleteItem(id) is { } under)
             _ticked[id] = new Ticked(_clock.UtcNow, under);
 
-        History.Note($"Completed {named}", $"complete:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryCompleted, named), $"complete:{id}");
         Publish();
     }
 
@@ -1683,7 +1673,7 @@ public sealed class MainPresenter
         var named = Named(id);
         _engine.DeleteItem(id);
 
-        History.Note($"Deleted {named}", $"delete:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeleted, named), $"delete:{id}");
         Publish();
     }
 
@@ -1703,7 +1693,7 @@ public sealed class MainPresenter
 
             // Its own line rather than rubbing out the one before it. Taking something back is a
             // thing that was done, and a list that quietly forgot it would be the less true account.
-            History.Note("Took back the last change", $"undo:{Guid.NewGuid():N}");
+            History.Note(Strings.HistoryUndo, $"undo:{Guid.NewGuid():N}");
             Publish();
         }
 
@@ -1754,7 +1744,7 @@ public sealed class MainPresenter
         if (moved)
         {
             // One line for a run of nudges: moving a row three places is three presses and one act.
-            History.Note($"Moved {named} {(offset < 0 ? "up" : "down")}", $"move:{id}");
+            History.Note(string.Format(CultureInfo.CurrentCulture, offset < 0 ? Strings.HistoryMovedUp : Strings.HistoryMovedDown, named), $"move:{id}");
             Publish();
         }
 
@@ -1769,7 +1759,7 @@ public sealed class MainPresenter
 
         if (indented)
         {
-            History.Note($"Indented {named}", $"nest:{id}");
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryIndented, named), $"nest:{id}");
             Publish();
         }
 
@@ -1792,7 +1782,7 @@ public sealed class MainPresenter
 
         if (outdented)
         {
-            History.Note($"Outdented {named}", $"nest:{id}");
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryOutdented, named), $"nest:{id}");
             Publish();
         }
 
@@ -1836,7 +1826,7 @@ public sealed class MainPresenter
 
         // Its own run rather than the nudges' one. Moving a row up and then sending it to another
         // project are two things done, and folding them would leave only the second.
-        History.Note($"Moved {named} to “{destination.Path}”", $"move:to:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedTo, named, destination.Path), $"move:to:{id}");
         Publish();
         return true;
     }
@@ -1908,7 +1898,7 @@ public sealed class MainPresenter
 
         // A line of its own each time. Nudges by key run together because three presses are one
         // move, but each drop is a whole move made with one gesture.
-        History.Note(onto ? $"Moved {named} under {Named(target.Id)}" : $"Moved {named}", $"drop:{Guid.NewGuid():N}");
+        History.Note(onto ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedUnder, named, Named(target.Id)) : string.Format(CultureInfo.CurrentCulture, Strings.HistoryMoved, named), $"drop:{Guid.NewGuid():N}");
         Publish();
         return true;
     }
@@ -1967,7 +1957,7 @@ public sealed class MainPresenter
 
         if (added)
         {
-            History.Note($"Added a reminder to {Named(itemId)}", $"reminder:add:{itemId}");
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryReminderAdded, Named(itemId)), $"reminder:add:{itemId}");
             Publish();
         }
 
@@ -1984,7 +1974,7 @@ public sealed class MainPresenter
 
         if (added)
         {
-            History.Note($"Added a reminder to {Named(itemId)}", $"reminder:add:{itemId}");
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryReminderAdded, Named(itemId)), $"reminder:add:{itemId}");
             Publish();
         }
 
@@ -2012,7 +2002,7 @@ public sealed class MainPresenter
     {
         _engine.DeleteReminder(id);
 
-        History.Note("Removed a reminder", $"reminder:delete:{id}");
+        History.Note(Strings.HistoryReminderRemoved, $"reminder:delete:{id}");
         Publish();
     }
 
@@ -2053,7 +2043,7 @@ public sealed class MainPresenter
 
         _engine.AddLabel(trimmed);
 
-        History.Note($"Added the label “{trimmed}”", $"label:add:{trimmed}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryLabelAdded, trimmed), $"label:add:{trimmed}");
         Publish();
         return trimmed;
     }
@@ -2114,7 +2104,7 @@ public sealed class MainPresenter
     {
         _engine.AddProject(name);
 
-        History.Note($"Added the project “{name}”", $"project:add:{name}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryProjectAdded, name), $"project:add:{name}");
         Publish();
     }
 
@@ -2122,7 +2112,7 @@ public sealed class MainPresenter
     {
         _engine.RenameProject(id, name);
 
-        History.Note($"Renamed a project to “{name}”", $"project:rename:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryProjectRenamed, name), $"project:rename:{id}");
         Publish();
     }
 
@@ -2149,7 +2139,7 @@ public sealed class MainPresenter
         var named = _engine.Snapshot().Projects.FirstOrDefault(p => p.Id == id)?.Name;
         _engine.DeleteProject(id);
 
-        History.Note(named is null ? "Deleted a project" : $"Deleted the project “{named}”", $"project:delete:{id}");
+        History.Note(named is null ? Strings.HistoryProjectDeletedUnnamed : string.Format(CultureInfo.CurrentCulture, Strings.HistoryProjectDeleted, named), $"project:delete:{id}");
 
         // Don't leave the outline pointed at something that no longer exists.
         if ((Selection.ProjectId is { } selected && doomed.Contains(selected))
@@ -2168,14 +2158,14 @@ public sealed class MainPresenter
     {
         _engine.AddSection(name, projectId);
 
-        History.Note($"Added the section “{name}”", $"section:add:{projectId}:{name}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistorySectionAdded, name), $"section:add:{projectId}:{name}");
         Publish();
     }
 
     public void RenameSection(string id, string name)
     {
         _engine.RenameSection(id, name);
-        History.Note($"Renamed a section to “{name}”", $"section:rename:{id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistorySectionRenamed, name), $"section:rename:{id}");
         Publish();
     }
 
@@ -2204,11 +2194,13 @@ public sealed class MainPresenter
             return false;
 
         var kind = node.Kind == SidebarKind.Section ? "section" : "project";
-        var way = offset < 0 ? "up" : "down";
+        var wording = node.Kind == SidebarKind.Section
+            ? (offset < 0 ? Strings.HistorySectionMovedUp : Strings.HistorySectionMovedDown)
+            : (offset < 0 ? Strings.HistoryProjectMovedUp : Strings.HistoryProjectMovedDown);
 
         // One line for a run of nudges, the same as moving a task: shifting a project three places
         // is three presses and one act.
-        History.Note($"Moved the {kind} “{node.Label}” {way}", $"{kind}:move:{node.Id}");
+        History.Note(string.Format(CultureInfo.CurrentCulture, wording, node.Label), $"{kind}:move:{node.Id}");
         Publish();
         return true;
     }
@@ -2285,8 +2277,8 @@ public sealed class MainPresenter
             return false;
 
         // A line each time, as a drop in the outline gets: each one is a whole move.
-        var kind = dragged.Kind == SidebarKind.Section ? "section" : "project";
-        History.Note($"Moved the {kind} “{dragged.Label}”", $"drop:{Guid.NewGuid():N}");
+        var wording = dragged.Kind == SidebarKind.Section ? Strings.HistorySectionMoved : Strings.HistoryProjectMoved;
+        History.Note(string.Format(CultureInfo.CurrentCulture, wording, dragged.Label), $"drop:{Guid.NewGuid():N}");
         Publish();
         return true;
     }
@@ -2336,7 +2328,7 @@ public sealed class MainPresenter
         var named = _engine.Snapshot().Sections.FirstOrDefault(x => x.Id == id)?.Name;
         _engine.DeleteSection(id);
 
-        History.Note(named is null ? "Deleted a section" : $"Deleted the section “{named}”", $"section:delete:{id}");
+        History.Note(named is null ? Strings.HistorySectionDeletedUnnamed : string.Format(CultureInfo.CurrentCulture, Strings.HistorySectionDeleted, named), $"section:delete:{id}");
 
         if (Selection.SectionId == id)
             Selection = ViewSelection.Default;
@@ -2528,7 +2520,7 @@ public sealed class MainPresenter
 
         if (favouriteProjects.Count + favouriteLabels.Count + favouriteFilters.Count > 0)
         {
-            nodes.Add(Header("Favourites"));
+            nodes.Add(Header("Favourites", Strings.SidebarFavourites));
 
             // Keyed apart from their copies further down, so clicking one doesn't select the other.
             foreach (var favorite in favouriteProjects)
@@ -2544,7 +2536,7 @@ public sealed class MainPresenter
                     Key: SidebarKeys.Favourite(SidebarKind.Filter, favorite.Id), IsFavorite: true, Colour: TodoistPalette.Of(favorite.Color)));
         }
 
-        nodes.Add(Header("Projects"));
+        nodes.Add(Header("Projects", Strings.SidebarProjects));
 
         // Projects nest, and each carries its sections beneath it.
         var byParent = projects
@@ -2556,7 +2548,7 @@ public sealed class MainPresenter
 
         if (labels.Count > 0)
         {
-            nodes.Add(Header("Labels"));
+            nodes.Add(Header("Labels", Strings.SidebarLabels));
 
             // Selected by name, since that is how a task refers to a label. Two labels sharing a
             // name are the same view, so they are listed once — starred if either of them is, or
@@ -2570,7 +2562,7 @@ public sealed class MainPresenter
 
         if (filters.Count > 0)
         {
-            nodes.Add(Header("Filters"));
+            nodes.Add(Header("Filters", Strings.SidebarFilters));
 
             // No count: unlike the others it can't be had from the single pass above, and running
             // every saved query over every task on each publish is not worth a number in brackets.
@@ -2611,8 +2603,8 @@ public sealed class MainPresenter
         SidebarNode View(SmartView view, string label, int count)
             => new(SidebarKind.SmartView, view.ToString(), label, 0, Key: SidebarKeys.For(SidebarKind.SmartView, view.ToString()), View: view, Count: count);
 
-        SidebarNode Header(string label)
-            => new(SidebarKind.Header, label, label, 0, Key: SidebarKeys.For(SidebarKind.Header, label));
+        SidebarNode Header(string id, string label)
+            => new(SidebarKind.Header, id, label, 0, Key: SidebarKeys.For(SidebarKind.Header, id));
     }
 
     /// <summary>Active tasks that aren't filed under an archived project.</summary>

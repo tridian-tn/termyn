@@ -49,12 +49,16 @@ public sealed record SyncStatus(
 
     private string StateText() => State switch
     {
-        SyncState.Syncing => "Syncing…",
-        SyncState.Offline => "Offline (showing cached)",
-        SyncState.Paused => RetryIn is { } wait ? $"Paused (retry in {Seconds(wait)}s)" : "Paused",
-        SyncState.ReconnectNeeded => "Reconnect needed",
-        SyncState.Synced => Since is { } ago ? "Synced " + Ago(ago) : "Synced",
-        _ => "Not synced yet",
+        SyncState.Syncing => Strings.SyncStatusSyncing,
+        SyncState.Offline => Strings.SyncStatusOffline,
+        SyncState.Paused => RetryIn is { } wait
+            ? string.Format(CultureInfo.CurrentCulture, Strings.SyncStatusPausedRetry, Seconds(wait))
+            : Strings.SyncStatusPaused,
+        SyncState.ReconnectNeeded => Strings.SyncStatusReconnectNeeded,
+        SyncState.Synced => Since is { } ago
+            ? string.Format(CultureInfo.CurrentCulture, Strings.SyncStatusSyncedAgo, Ago(ago))
+            : Strings.SyncStatusSynced,
+        _ => Strings.SyncStatusNever,
     };
 
     /// <summary>Rounded up, so a wait of under a second still reads as a second rather than none.</summary>
@@ -71,11 +75,11 @@ public sealed record SyncStatus(
 
         return elapsed.TotalSeconds switch
         {
-            < 5 => "just now",
-            < 60 => $"{(int)elapsed.TotalSeconds}s ago",
-            < 3600 => $"{(int)elapsed.TotalMinutes}m ago",
-            < 86400 => $"{(int)elapsed.TotalHours}h ago",
-            _ => $"{(int)elapsed.TotalDays}d ago",
+            < 5 => Strings.SyncAgoJustNow,
+            < 60 => string.Format(CultureInfo.CurrentCulture, Strings.SyncAgoSeconds, (int)elapsed.TotalSeconds),
+            < 3600 => string.Format(CultureInfo.CurrentCulture, Strings.SyncAgoMinutes, (int)elapsed.TotalMinutes),
+            < 86400 => string.Format(CultureInfo.CurrentCulture, Strings.SyncAgoHours, (int)elapsed.TotalHours),
+            _ => string.Format(CultureInfo.CurrentCulture, Strings.SyncAgoDays, (int)elapsed.TotalDays),
         };
     }
 }
