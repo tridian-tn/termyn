@@ -934,7 +934,7 @@ public sealed class SyncEngine
             // Refused here rather than left to Persist: taking back a close that hasn't been sent
             // drops it from the queue without writing anything, and the queue is being held.
             if (_awaitingToken)
-                throw new TodoistAuthException("Todoist turned the token away. Reconnect to make changes.");
+                throw new TodoistAuthException(Strings.TokenTurnedAway);
 
             id = Promoted(id);
 
@@ -3382,7 +3382,7 @@ public sealed class SyncEngine
                 // reports on cannot block its resource forever.
                 cmd.NoVerdictRounds++;
                 if (cmd.NoVerdictRounds >= _attemptCeiling)
-                    Fail(cmd, "Todoist did not report a result for this change.");
+                    Fail(cmd, Strings.NoResultForChange);
                 else
                     _store.UpdateCommand(cmd);
                 continue;
@@ -3842,7 +3842,7 @@ public sealed class SyncEngine
     /// </remarks>
     /// <exception cref="TodoistAuthException">There's no token, so there's nothing to send it with.</exception>
     private string TokenOrThrow()
-        => _secrets.GetToken() ?? throw new TodoistAuthException("Termyn isn't signed in to Todoist.");
+        => _secrets.GetToken() ?? throw new TodoistAuthException(Strings.NotSignedIn);
 
     /// <summary>Whether anything at all is held: a resource, or a change waiting to be sent.</summary>
     private bool HoldsAnything => !Model.IsEmpty || _outbox.Count > 0;
@@ -3941,7 +3941,7 @@ public sealed class SyncEngine
         // and before anything is stored, so a refused write leaves no trace the way a store
         // failure doesn't.
         if (_awaitingToken)
-            throw new TodoistAuthException("Todoist turned the token away. Reconnect to make changes.");
+            throw new TodoistAuthException(Strings.TokenTurnedAway);
 
         _store.ApplyLocalWrite(cmd, upserts, deletes);
         _outbox.Add(cmd);
