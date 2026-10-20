@@ -302,7 +302,7 @@ public class SidebarAndOutlineTests
         var presenter = NewPresenter(Seeded());
         presenter.Select(ViewSelection.OfProject("p1"));
 
-        await presenter.CaptureAsync("Written while looking at Work");
+        await presenter.CaptureAsync("Written while looking at Work", TestContext.Current.CancellationToken);
 
         Assert.Contains(presenter.Rows, r => r.Content == "Written while looking at Work");
     }
@@ -317,7 +317,7 @@ public class SidebarAndOutlineTests
         var presenter = NewPresenter(store);
         presenter.Select(ViewSelection.OfSection("sa"));
 
-        await presenter.CaptureAsync("Task #Beta");
+        await presenter.CaptureAsync("Task #Beta", TestContext.Current.CancellationToken);
 
         // Beta's task must not be filed into Alpha's section — that pair isn't a real place, and
         // the server would reject it.

@@ -104,7 +104,7 @@ public class RecentViewsTests
         presenter.Select(ViewSelection.Of(SmartView.Today));
 
         api.Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("projects", "p1")] };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Home"], Offered(presenter));
     }
@@ -121,7 +121,7 @@ public class RecentViewsTests
             SyncToken = "s1",
             Changes = [Json.Change("projects", "p1", """{"id":"p1","name":"Work (2026)","child_order":1}""")],
         };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Work (2026)"], Offered(presenter));
     }
@@ -273,7 +273,7 @@ public class RecentViewsTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["project_add"] = "p9" },
             Json.Change("projects", "p9", """{"id":"p9","name":"Errands","child_order":9}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Errands"], Offered(presenter));
     }
@@ -289,7 +289,7 @@ public class RecentViewsTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["section_add"] = "s9" },
             Json.Change("sections", "s9", """{"id":"s9","name":"Later","project_id":"p1","section_order":1}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Work › Later"], Offered(presenter));
     }
@@ -307,7 +307,7 @@ public class RecentViewsTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["project_add"] = "p99" },
             Json.Change("projects", "p99", """{"id":"p99","name":"Errands","child_order":99}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         presenter.Select(ViewSelection.OfProject("p99"));
         for (var i = 4; i <= 13; i++)
@@ -319,7 +319,7 @@ public class RecentViewsTests
             SyncToken = "s2",
             Changes = Enumerable.Range(4, 9).Select(i => Json.Deleted("projects", $"p{i}")).ToList(),
         };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Errands", "Work"], Offered(presenter));
     }
@@ -338,7 +338,7 @@ public class RecentViewsTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["project_add"] = "p9" },
             Json.Change("projects", "p9", """{"id":"p9","name":"Errands","child_order":9,"is_favorite":true}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Errands"], Offered(presenter));
     }

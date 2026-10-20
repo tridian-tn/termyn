@@ -82,7 +82,7 @@ public class SyncLoggingTests
             [uuid] = new(false, "INVALID_ARGUMENT", "Invalid argument value"),
         });
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains($"Todoist refused item_update (uuid {uuid}", log.All, StringComparison.Ordinal);
         Assert.Contains("Invalid argument value", log.All, StringComparison.Ordinal);
@@ -109,8 +109,8 @@ public class SyncLoggingTests
             [uuid] = new(false, "INVALID_ARGUMENT", "Invalid argument value"),
         });
 
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains($"Gave up on item_update (uuid {uuid}) after 2 attempts", log.All, StringComparison.Ordinal);
     }
@@ -124,7 +124,7 @@ public class SyncLoggingTests
         var secrets = new FakeSecrets { Stored = token };
         var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets, log: log);
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Contains("Todoist rejected the token", log.All, StringComparison.Ordinal);
         Assert.DoesNotContain(token, log.All, StringComparison.Ordinal);
@@ -139,8 +139,8 @@ public class SyncLoggingTests
         var engine = new SyncEngine(new FakeApi(), new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" }, log: log);
         engine.Load();
 
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(log.Lines);
     }

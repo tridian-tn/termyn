@@ -35,9 +35,9 @@ public class SyncLoggingTests
         var (presenter, api, log) = Built();
         api.Throw = new TodoistNetworkException("the network is not there");
 
-        await presenter.SyncAsync();
-        await presenter.SyncAsync();
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(log.Lines);
         Assert.Contains("Todoist couldn't be reached", log.All, StringComparison.Ordinal);
@@ -48,10 +48,10 @@ public class SyncLoggingTests
     {
         var (presenter, api, log) = Built();
         api.Throw = new TodoistNetworkException("the network is not there");
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Throw = null;
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("Todoist can be reached again", log.All, StringComparison.Ordinal);
     }
@@ -63,11 +63,11 @@ public class SyncLoggingTests
         // reached again" could turn up with nothing before it saying when it went.
         var (presenter, _, log) = Built();
 
-        await presenter.CaptureAsync("Buy milk");    // the fake answers nothing, so it went nowhere
+        await presenter.CaptureAsync("Buy milk", TestContext.Current.CancellationToken);    // the fake answers nothing, so it went nowhere
 
         Assert.Contains("Todoist couldn't be reached", log.All, StringComparison.Ordinal);
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("Todoist can be reached again", log.All, StringComparison.Ordinal);
         Assert.Equal(2, log.Lines.Count);
@@ -79,7 +79,7 @@ public class SyncLoggingTests
         var (presenter, api, log) = Built();
         api.Throw = new TodoistRateLimitException("too many", TimeSpan.FromSeconds(30));
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("rate-limiting us; waiting 30s", log.All, StringComparison.Ordinal);
     }
@@ -89,7 +89,7 @@ public class SyncLoggingTests
     {
         var (presenter, _, log) = Built();
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(log.Lines);
     }

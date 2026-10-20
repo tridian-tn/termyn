@@ -26,7 +26,7 @@ public class CompletedViewTests
         var api = WithCompleted(Done("c1", "Book dentist"));
         var presenter = await Loaded(api);
 
-        Assert.True(await presenter.ToggleCompletedAsync());
+        Assert.True(await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
 
         Assert.True(presenter.ShowingCompleted);
         var row = Assert.Single(presenter.Rows, r => r.Id == "c1");
@@ -39,9 +39,9 @@ public class CompletedViewTests
     {
         var api = WithCompleted(Done("c1", "Book dentist"));
         var presenter = await Loaded(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
-        Assert.True(await presenter.ToggleCompletedAsync());
+        Assert.True(await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
 
         Assert.False(presenter.ShowingCompleted);
         Assert.DoesNotContain(presenter.Rows, r => r.Id == "c1");
@@ -61,7 +61,7 @@ public class CompletedViewTests
         };
         var presenter = await Loaded(api);
 
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["a", "new", "old"], presenter.Rows.Select(r => r.Id).ToArray());
     }
@@ -82,7 +82,7 @@ public class CompletedViewTests
             ],
         };
         var presenter = await Loaded(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.Select(ViewSelection.OfProject("p1"));
 
@@ -101,7 +101,7 @@ public class CompletedViewTests
             Changes = [Json.Change("labels", "l1", """{"id":"l1","name":"urgent"}""")],
         };
         var presenter = await Loaded(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.Select(ViewSelection.OfLabel("urgent"));
 
@@ -112,7 +112,7 @@ public class CompletedViewTests
     public async Task Reopening_moves_it_back_among_the_active_tasks()
     {
         var presenter = await Loaded(WithCompleted(Done("c1", "Book dentist")));
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.Reopen("c1");
 
@@ -130,7 +130,7 @@ public class CompletedViewTests
         };
         var presenter = await Loaded(api);
 
-        Assert.False(await presenter.ToggleCompletedAsync());
+        Assert.False(await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
 
         // Switched on and empty would read as "you have completed nothing".
         Assert.False(presenter.ShowingCompleted);
@@ -147,7 +147,7 @@ public class CompletedViewTests
         };
         var presenter = await Loaded(api);
 
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(presenter.CompletedTruncated);
         Assert.Contains("most recent completed only", presenter.Status);
@@ -162,9 +162,9 @@ public class CompletedViewTests
             Completed = _ => new CompletedPage([Done("c1", "One")], "more"),
         };
         var presenter = await Loaded(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.False(presenter.CompletedTruncated);
         Assert.DoesNotContain("most recent", presenter.Status);
@@ -174,7 +174,7 @@ public class CompletedViewTests
     public async Task Searching_reaches_completed_tasks_once_they_are_loaded()
     {
         var presenter = await Loaded(WithCompleted(Done("c1", "Book dentist")));
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.Search("dentist");
 
@@ -193,7 +193,7 @@ public class CompletedViewTests
             Changes = [Json.Change("items", "a", """{"id":"a","content":"Active"}""")],
         };
         var presenter = await Loaded(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.Complete("a");
 
@@ -212,7 +212,7 @@ public class CompletedViewTests
         var presenter = await Loaded(api);
         Assert.NotEmpty(presenter.Rows);
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.ToggleCompletedAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
 
         Assert.NotEmpty(presenter.Rows);
         Assert.Equal(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
@@ -228,7 +228,7 @@ public class CompletedViewTests
         };
         var presenter = await Loaded(api);
 
-        Assert.False(await presenter.ToggleCompletedAsync());
+        Assert.False(await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
 
         Assert.False(presenter.ShowingCompleted);
         Assert.False(presenter.IsOffline); // being refused is not being unreachable
@@ -240,14 +240,14 @@ public class CompletedViewTests
     {
         var api = WithCompleted(Done("c1", "Book dentist"));
         var presenter = await Loaded(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         api.Response = new SyncResponse
         {
             SyncToken = "s2",
             Changes = [Json.Change("items", "new", """{"id":"new","content":"Arrived"}""")],
         };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(presenter.ShowingCompleted);
         Assert.Contains(presenter.Rows, r => r.Id == "c1");
@@ -327,7 +327,7 @@ public class SyncStatusTests
         var clock = new SteppableClock(Today);
         var presenter = Presenter(new FakeApi { Response = new SyncResponse { SyncToken = "s1" } }, clock);
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         clock.Advance(TimeSpan.FromSeconds(20));
         presenter.PublishStatus();
 
@@ -344,7 +344,7 @@ public class SyncStatusTests
         var presenter = Presenter(api, clock);
         presenter.StatusChanged += () => seen.Add(presenter.SyncStatus.State);
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal([SyncState.Syncing], seen);
         Assert.Equal(SyncState.Synced, presenter.SyncStatus.State);
@@ -357,7 +357,7 @@ public class SyncStatusTests
         var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.FromSeconds(30)) };
         var presenter = Presenter(api, clock);
 
-        var outcome = await presenter.SyncAsync();
+        var outcome = await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(TimeSpan.FromSeconds(30), outcome.PauseFor);
         Assert.False(outcome.MoreQueued);
@@ -373,8 +373,8 @@ public class SyncStatusTests
         var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", null) };
         var presenter = Presenter(api, clock);
 
-        var first = (await presenter.SyncAsync()).PauseFor!.Value;
-        var second = (await presenter.SyncAsync()).PauseFor!.Value;
+        var first = (await presenter.SyncAsync(TestContext.Current.CancellationToken)).PauseFor!.Value;
+        var second = (await presenter.SyncAsync(TestContext.Current.CancellationToken)).PauseFor!.Value;
 
         Assert.True(first >= TimeSpan.FromSeconds(2), $"first wait was {first}");
         Assert.True(second > first, $"{second} should be longer than {first}");
@@ -387,16 +387,16 @@ public class SyncStatusTests
         var clock = new SteppableClock(Today);
         var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", null) };
         var presenter = Presenter(api, clock);
-        await presenter.SyncAsync();
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Throw = null;
         api.Response = new SyncResponse { SyncToken = "s1" };
-        Assert.Null((await presenter.SyncAsync()).PauseFor);
+        Assert.Null((await presenter.SyncAsync(TestContext.Current.CancellationToken)).PauseFor);
 
         // Back to the first step, not the third, so one bad patch doesn't punish the next one.
         api.Throw = new TodoistRateLimitException("slow down", null);
-        Assert.True((await presenter.SyncAsync()).PauseFor < TimeSpan.FromSeconds(5));
+        Assert.True((await presenter.SyncAsync(TestContext.Current.CancellationToken)).PauseFor < TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -406,7 +406,7 @@ public class SyncStatusTests
         var api = new FakeApi { Throw = new TodoistAuthException("rejected") };
         var presenter = Presenter(api, clock);
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
         Assert.Contains("Reconnect needed", presenter.Status);
@@ -418,7 +418,7 @@ public class SyncStatusTests
         var clock = new SteppableClock(Today);
         var presenter = Presenter(new FakeApi { Throw = new TodoistNetworkException("offline") }, clock);
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(SyncState.Offline, presenter.SyncStatus.State);
     }
@@ -429,7 +429,7 @@ public class SyncStatusTests
         var clock = new SteppableClock(Today);
         var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.FromSeconds(30)) };
         var presenter = Presenter(api, clock);
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(SyncState.Paused, presenter.SyncStatus.State);
 
         clock.Advance(TimeSpan.FromSeconds(31));
@@ -448,7 +448,7 @@ public class SyncStatusTests
         var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.FromDays(40)) };
         var presenter = Presenter(api, clock);
 
-        var outcome = await presenter.SyncAsync();
+        var outcome = await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(TimeSpan.FromMinutes(5), outcome.PauseFor);
     }
@@ -460,7 +460,7 @@ public class SyncStatusTests
         var api = new FakeApi { Throw = new TodoistRateLimitException("slow down", TimeSpan.Zero) };
         var presenter = Presenter(api, clock);
 
-        var outcome = await presenter.SyncAsync();
+        var outcome = await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(TimeSpan.Zero, outcome.PauseFor);
         Assert.NotEqual(SyncState.Paused, presenter.SyncStatus.State);
@@ -472,12 +472,12 @@ public class SyncStatusTests
         var clock = new SteppableClock(Today);
         var api = new FakeApi { Throw = new TodoistNetworkException("offline") };
         var presenter = Presenter(api, clock);
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(SyncState.Offline, presenter.SyncStatus.State);
 
         api.Throw = null;
         api.Response = new SyncResponse { SyncToken = "s1" };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.False(presenter.IsOffline);
         Assert.Equal(SyncState.Synced, presenter.SyncStatus.State);
@@ -488,7 +488,7 @@ public class SyncStatusTests
     {
         var clock = new SteppableClock(Today);
         var presenter = Presenter(new FakeApi { Response = new SyncResponse { SyncToken = "s1" } }, clock);
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         var rowPublishes = 0;
         presenter.RowsChanged += () => rowPublishes++;

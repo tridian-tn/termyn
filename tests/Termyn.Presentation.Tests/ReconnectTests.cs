@@ -33,7 +33,7 @@ public class ReconnectTests
         Assert.Equal("new", secrets.Stored);
         Assert.NotEqual(SyncState.ReconnectNeeded, presenter.SyncStatus.State);
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal("item_update", api.LastCommands.Single().Type);
     }
 

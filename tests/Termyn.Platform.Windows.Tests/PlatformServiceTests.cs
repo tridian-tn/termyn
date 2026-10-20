@@ -527,7 +527,7 @@ public class SingleInstanceTests
             // waiting — and this test has just spent every thread the pool had, which is exactly
             // the state where it would happen.
             release.Set();
-            await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(20));
+            await Task.WhenAll(busy).WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
         }
     }
 
@@ -577,7 +577,7 @@ public class SingleInstanceTests
         Assert.False(second.TryAcquire());
         Assert.True(second.TrySignal(InstanceSignals.QuickAdd));
 
-        Assert.Equal(InstanceSignals.QuickAdd, await received.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(InstanceSignals.QuickAdd, await received.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -602,7 +602,7 @@ public class SingleInstanceTests
         Assert.True(second.TrySignal(InstanceSignals.Show));
         Assert.True(second.TrySignal(InstanceSignals.QuickAdd));
 
-        await twice.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await twice.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         lock (messages)
             Assert.Equal([InstanceSignals.Show, InstanceSignals.QuickAdd], messages);
     }
@@ -666,12 +666,12 @@ public class SingleInstanceTests
         Assert.True(second.TrySignal(InstanceSignals.QuickAdd));
 
         // Give the listener a moment to take it off the wire before anyone subscribes.
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         var received = new TaskCompletionSource<string>();
         holder.SignalReceived += m => received.TrySetResult(m);
 
-        Assert.Equal(InstanceSignals.QuickAdd, await received.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(InstanceSignals.QuickAdd, await received.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -686,7 +686,7 @@ public class SingleInstanceTests
         Assert.True(probe.TryAcquire());
 
         // Ten failures at five milliseconds apart; anything that hasn't stopped by now is spinning.
-        await probe.Listener!.WaitAsync(TimeSpan.FromSeconds(5));
+        await probe.Listener!.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.True(probe.Listener.IsCompleted);
     }
@@ -698,7 +698,7 @@ public class SingleInstanceTests
         using var holder = new WindowsSingleInstance(scope, retryDelay: TimeSpan.FromMilliseconds(5));
         Assert.True(holder.TryAcquire());
 
-        await Task.Delay(200);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
 
         Assert.False(holder.Listener!.IsCompleted);
     }
@@ -729,10 +729,10 @@ public class SingleInstanceTests
 
         using var launcher = new WindowsSingleInstance(scope);
         Assert.True(launcher.TrySignal(InstanceSignals.Show));
-        await Task.Delay(200);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.True(launcher.TrySignal(InstanceSignals.QuickAdd));
 
-        Assert.Equal(InstanceSignals.QuickAdd, await second.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(InstanceSignals.QuickAdd, await second.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -744,7 +744,7 @@ public class SingleInstanceTests
 
         using var launcher = new WindowsSingleInstance(scope);
         Assert.True(launcher.TrySignal(InstanceSignals.Show));
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         // The replay runs on the subscribing thread, so a throw would come out of whatever was
         // wiring the handler up — the window's constructor, in the app.
@@ -762,7 +762,7 @@ public class SingleInstanceTests
         for (var i = 0; i < 30; i++)
             launcher.TrySignal(InstanceSignals.Show);
 
-        await Task.Delay(700);
+        await Task.Delay(700, TestContext.Current.CancellationToken);
 
         var delivered = new List<string>();
         holder.SignalReceived += delivered.Add;

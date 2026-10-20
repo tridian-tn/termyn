@@ -77,7 +77,7 @@ public class RestoredViewTests
         presenter.RestoreView(Label("followup"));
 
         api.Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("labels", "l1")] };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.Default, presenter.Selection);
         Assert.Equal(ViewSelection.Default.Key, presenter.SelectedKey);
@@ -90,7 +90,7 @@ public class RestoredViewTests
         presenter.RestoreView(Project("p1"));
 
         api.Response = new SyncResponse { SyncToken = "s1" };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfProject("p1"), presenter.Selection);
         Assert.Equal(Project("p1"), presenter.SelectedKey);
@@ -108,7 +108,7 @@ public class RestoredViewTests
             SyncToken = "s1",
             Changes = [Json.Change("projects", "p1", """{"id":"p1","name":"Work","child_order":1,"is_favorite":false}""")],
         };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfProject("p1"), presenter.Selection);
         Assert.Equal(Project("p1"), presenter.SelectedKey);
@@ -122,13 +122,13 @@ public class RestoredViewTests
         presenter.RestoreView(Label("followup"));
 
         api.Throw = new TodoistNetworkException("offline");
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfLabel("followup"), presenter.Selection);
 
         api.Throw = null;
         api.Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("labels", "l1")] };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.Default, presenter.Selection);
     }
@@ -143,7 +143,7 @@ public class RestoredViewTests
         presenter.Select(ViewSelection.OfLabel("followup"));
 
         api.Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("labels", "l1")] };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.Default, presenter.Selection);
     }
@@ -166,7 +166,7 @@ public class RestoredViewTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["project_add"] = "p2" },
             Json.Change("projects", "p2", """{"id":"p2","name":"Errands","child_order":1}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfProject("p2"), presenter.Selection);
         Assert.Equal(Project("p2"), presenter.SelectedKey);

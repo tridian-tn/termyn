@@ -17,7 +17,7 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(handler));
 
         using var destination = new MemoryStream();
-        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination);
+        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(bytes, destination.ToArray());
     }
@@ -34,13 +34,13 @@ public class AttachmentApiTests
 
         var seen = new System.Collections.Concurrent.ConcurrentBag<long>();
         using var destination = new MemoryStream();
-        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination, new Progress<long>(seen.Add));
+        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination, new Progress<long>(seen.Add), TestContext.Current.CancellationToken);
 
         // Progress is raised through the synchronization context, so the last report can land after
         // the download itself has returned. Waited for rather than assumed, which is the difference
         // between a test that means something and one that flakes on a busy agent.
         for (var i = 0; i < 100 && !seen.Contains(200_000); i++)
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
 
         Assert.Contains(200_000, seen);
         Assert.Equal(200_000, destination.Length);
@@ -53,7 +53,7 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(handler));
 
         using var destination = new MemoryStream();
-        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination);
+        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal("Bearer", handler.LastRequest!.Headers.Authorization!.Scheme);
         Assert.Equal("tok", handler.LastRequest.Headers.Authorization.Parameter);
@@ -66,7 +66,7 @@ public class AttachmentApiTests
 
         using var destination = new MemoryStream();
         await Assert.ThrowsAsync<TodoistAuthException>(
-            () => client.DownloadAsync("tok", "https://files.todoist.test/a", destination));
+            () => client.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class AttachmentApiTests
 
         using var destination = new MemoryStream();
         await Assert.ThrowsAsync<TodoistNetworkException>(
-            () => client.DownloadAsync("tok", "https://files.todoist.test/a", destination));
+            () => client.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken));
     }
 
     // ---- Uploading --------------------------------------------------------------------------------
@@ -91,7 +91,7 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(handler));
 
         using var file = new MemoryStream(Encoding.UTF8.GetBytes("the bytes"));
-        var attachment = await client.UploadAsync("tok", file, "a.pdf");
+        var attachment = await client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken);
 
         Assert.Equal("https://files.todoist.test/a", attachment["file_url"]!.ToString());
         Assert.Contains("the bytes", handler.LastBody);
@@ -112,7 +112,7 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(handler));
 
         using var file = new MemoryStream(Encoding.UTF8.GetBytes("the bytes"));
-        await client.UploadAsync("tok", file, "a.pdf");
+        await client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken);
 
         // Quotes stripped first: .NET leaves them off a header value that is already a valid token,
         // so asserting on the quoted form would be testing the framework's formatting rather than
@@ -139,7 +139,7 @@ public class AttachmentApiTests
 
         using var destination = new MemoryStream();
         var ex = await Assert.ThrowsAsync<TodoistNetworkException>(
-            () => answered.DownloadAsync("tok", "https://files.todoist.test/a", destination));
+            () => answered.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken));
 
         Assert.Equal(500, ex.Status);
         Assert.False(ex.Unreachable);
@@ -154,7 +154,7 @@ public class AttachmentApiTests
         })));
 
         using var file = new MemoryStream([1, 2, 3]);
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.UploadAsync("tok", file, "a.pdf"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken));
     }
 
     // ---- Deleting ---------------------------------------------------------------------------------
@@ -165,7 +165,7 @@ public class AttachmentApiTests
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
         var client = new TodoistApiClient(new HttpClient(handler));
 
-        await client.DeleteUploadAsync("tok", "https://files.todoist.test/a b.pdf");
+        await client.DeleteUploadAsync("tok", "https://files.todoist.test/a b.pdf", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Delete, handler.LastRequest!.Method);
         Assert.Contains(Uri.EscapeDataString("https://files.todoist.test/a b.pdf"), handler.LastRequest.RequestUri!.Query);
@@ -178,7 +178,7 @@ public class AttachmentApiTests
         // retry that can never succeed.
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
 
-        await client.DeleteUploadAsync("tok", "https://files.todoist.test/a");
+        await client.DeleteUploadAsync("tok", "https://files.todoist.test/a", TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -187,7 +187,7 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError))));
 
         await Assert.ThrowsAsync<TodoistNetworkException>(
-            () => client.DeleteUploadAsync("tok", "https://files.todoist.test/a"));
+            () => client.DeleteUploadAsync("tok", "https://files.todoist.test/a", TestContext.Current.CancellationToken));
     }
 
     private sealed class StubHandler : HttpMessageHandler

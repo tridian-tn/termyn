@@ -23,7 +23,7 @@ public class SyncEngineTests
         };
         var engine = NewEngine(api);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("s1", engine.SyncToken);
         Assert.Equal("A", engine.Snapshot().Items.Single().Content);
@@ -37,11 +37,11 @@ public class SyncEngineTests
         var engine = NewEngine(api);
 
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"A"}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Single(engine.Snapshot().Items);
 
         api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i1")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Empty(engine.Snapshot().Items);
     }
 
@@ -51,10 +51,10 @@ public class SyncEngineTests
         var api = new FakeApi();
         var engine = NewEngine(api);
         api.Next = _ => Resp("s1");
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Next = _ => Resp(null);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("s1", engine.SyncToken);
     }
@@ -83,7 +83,7 @@ public class SyncEngineTests
         };
         var engine = NewEngine(api);
 
-        Assert.True(await engine.QuickAddOnlineAsync("Email report tomorrow"));
+        Assert.True(await engine.QuickAddOnlineAsync("Email report tomorrow", TestContext.Current.CancellationToken));
 
         var item = engine.Snapshot().Items.Single();
         Assert.Equal("Email report tomorrow", item.Content);
@@ -96,7 +96,7 @@ public class SyncEngineTests
     {
         var engine = NewEngine(new FakeApi()); // QuickAdd unset = unreachable
 
-        Assert.False(await engine.QuickAddOnlineAsync("Buy milk"));
+        Assert.False(await engine.QuickAddOnlineAsync("Buy milk", TestContext.Current.CancellationToken));
         Assert.Empty(engine.Snapshot().Items);
     }
 
@@ -106,7 +106,7 @@ public class SyncEngineTests
         var secrets = new FakeSecrets { Stored = "tok" };
         var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.QuickAddOnlineAsync("Buy milk"));
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.QuickAddOnlineAsync("Buy milk", TestContext.Current.CancellationToken));
         Assert.Null(secrets.Stored);
     }
 
@@ -219,7 +219,7 @@ public class SyncEngineTests
         var api = new FakeApi();
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets { Stored = null });
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
         Assert.Empty(api.LastCommands);
 
         // Not held as if Todoist had turned it away: the store answers null for a token file it
@@ -386,7 +386,7 @@ public class SyncEngineTests
 
         // The server deletes one of the tasks being reordered, before the reorder has flushed.
         api.Next = _ => Resp("s1", changes: [Json.Deleted("items", "b")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // Applying it now would leave the queued reorder pointing at a task that no longer exists.
         Assert.Contains(engine.Snapshot().Items, i => i.Id == "b");
@@ -478,7 +478,7 @@ public class SyncEngineTests
         engine.CompleteItem("i1");
 
         api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, engine.PendingCount);
 
         Assert.True(engine.Undo());
@@ -498,7 +498,7 @@ public class SyncEngineTests
 
         engine.DeleteItem("i1");
         api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Undo());
 
@@ -525,7 +525,7 @@ public class SyncEngineTests
             SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real1" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Undo());
 
@@ -548,7 +548,7 @@ public class SyncEngineTests
             Thread.Sleep(50);
             return Resp("s1", status: (cmds.Single().Uuid, true));
         };
-        var syncing = Task.Run(() => engine.SyncAsync());
+        var syncing = Task.Run(() => engine.SyncAsync(), TestContext.Current.CancellationToken);
         await gate.Task;
 
         var undone = engine.Undo();
@@ -576,11 +576,11 @@ public class SyncEngineTests
             SyncToken = "s1",
             SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // Another device deletes i2, the most recent undo target.
         api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i2")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // Undo should fall through to i1 rather than reporting there is nothing to undo.
         Assert.True(engine.Undo());
@@ -598,7 +598,7 @@ public class SyncEngineTests
 
         engine.DeleteItem("i1");
         api.Next = cmds => Resp("s1", status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.False(engine.Undo());
         Assert.Equal(0, engine.PendingCount);
@@ -688,7 +688,7 @@ public class SyncEngineTests
             var add = cmds.First(c => c.Type == "item_add");
             return Resp("s1", status: (add.Uuid, false));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.False(engine.CanUndo);
         Assert.Equal(0, engine.PendingCount);
@@ -711,7 +711,7 @@ public class SyncEngineTests
                 status: (add.Uuid, true),
                 temp: (add.TempId!, "real1"));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, engine.PendingCount);
         Assert.Null(engine.RawResource("items", temp));
@@ -731,7 +731,7 @@ public class SyncEngineTests
             var parentAdd = cmds.First(c => c.Args["content"]!.ToString() == "P");
             return Resp("s1", status: (parentAdd.Uuid, true), temp: (parent, "realP"));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var child = engine.Outbox.Single(c => Args(c)["content"]?.ToString() == "C");
         Assert.Equal("realP", Args(child)["parent_id"]!.ToString());
@@ -748,7 +748,7 @@ public class SyncEngineTests
         api.Next = cmds => Resp("s2",
             changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")],
             status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("SERVER", engine.Snapshot().Items.Single().Content);
     }
@@ -761,7 +761,7 @@ public class SyncEngineTests
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
         api.Next = _ => Resp("s2", changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("LOCAL", engine.Snapshot().Items.Single().Content);
     }
@@ -776,7 +776,7 @@ public class SyncEngineTests
         engine.CompleteItem("i1");
 
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"SERVER"}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // The token has advanced past this change, so dropping it would lose it permanently.
         Assert.Equal("SERVER", engine.Snapshot().Items.Single().Content);
@@ -796,7 +796,7 @@ public class SyncEngineTests
 
         // Another device renames A while our reorder is still queued.
         api.Next = _ => Resp("s1", changes: [Ch("items", "a", """{"id":"a","content":"RENAMED","project_id":"p","child_order":1}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // The reorder only owns the position, so the rename must land — the token moved past it.
         var a = engine.Snapshot().Items.Single(i => i.Id == "a");
@@ -821,7 +821,7 @@ public class SyncEngineTests
             var add = cmds.First(c => c.Type == "item_add");
             return Resp("s1", status: (add.Uuid, true), temp: (temp, "real1"));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var reorder = engine.Outbox.Single(c => c.Type == "item_reorder");
         var ids = Args(reorder)["items"]!.AsArray().Select(e => e!["id"]!.ToString());
@@ -847,7 +847,7 @@ public class SyncEngineTests
             var add = cmds.First(c => c.Type == "item_add");
             return Resp("s1", status: (add.Uuid, false));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // The reorder went with the failed create, so the server never hears about it: the local
         // positions must go back rather than silently diverging.
@@ -876,7 +876,7 @@ public class SyncEngineTests
             var add = cmds.First(c => c.Type == "item_add");
             return Resp("s1", status: (add.Uuid, false));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // A reorder naming a task that was never created could only fail forever.
         Assert.Equal(0, engine.PendingCount);
@@ -900,7 +900,7 @@ public class SyncEngineTests
             SyncToken = "s1",
             SyncStatus = cmds.ToDictionary(c => c.Uuid, c => c.Type == "item_add" ? new CommandResult(false, null, "err") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var b = engine.Snapshot().Items.Single(i => i.Id == "b");
         Assert.Equal("B renamed", b.Content);
@@ -925,7 +925,7 @@ public class SyncEngineTests
             SyncStatus = cmds.ToDictionary(c => c.Uuid, c => c.Type == "item_reorder" ? new CommandResult(false, null, "err") : new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real1" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(engine.Snapshot().Items, i => i.Content == "New");
         Assert.Equal("real1", added.Id);
@@ -948,7 +948,7 @@ public class SyncEngineTests
             SyncToken = "s1",
             SyncStatus = cmds.ToDictionary(c => c.Uuid, c => c.Type == "item_reorder" ? new CommandResult(false, null, "err") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.Equal("A renamed", items["a"].Content);
@@ -965,17 +965,17 @@ public class SyncEngineTests
 
         var first = new SyncEngine(api, store, secrets);
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"A"}""")]);
-        await first.SyncAsync();
+        await first.SyncAsync(TestContext.Current.CancellationToken);
         first.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
         api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i1")]);
-        await first.SyncAsync();
+        await first.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Single(first.Snapshot().Items);
 
         // Restart before the pending write resolved: the held deletion must still be waiting.
         var reloaded = new SyncEngine(api, store, secrets);
         reloaded.Load();
         api.Next = cmds => Resp("s3", status: (cmds.Single().Uuid, true));
-        await reloaded.SyncAsync();
+        await reloaded.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(reloaded.Snapshot().Items);
     }
@@ -989,11 +989,11 @@ public class SyncEngineTests
         engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
 
         api.Next = _ => Resp("s2", changes: [Json.Deleted("items", "i1")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Single(engine.Snapshot().Items);
 
         api.Next = cmds => Resp("s3", status: (cmds.Single().Uuid, true));
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(engine.Snapshot().Items);
     }
@@ -1013,7 +1013,7 @@ public class SyncEngineTests
             var parentAdd = cmds.First(c => c.Args["content"]!.ToString() == "P");
             return Resp("s1", status: (parentAdd.Uuid, false));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, engine.PendingCount);
         Assert.Empty(engine.Snapshot().Items);
@@ -1026,17 +1026,17 @@ public class SyncEngineTests
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets(), attemptCeiling: 2);
 
         api.Next = _ => Resp("s1", changes: [Ch("items", "i1", """{"id":"i1","content":"A"}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "B" });
         var uuid = engine.Outbox.Single(c => c.Type == "item_update").Uuid;
         api.Next = _ => Resp("s2", status: (uuid, false));
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, engine.PendingCount);
         Assert.Equal(0, engine.FailedCount);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, engine.PendingCount);
         Assert.Equal(1, engine.FailedCount);
     }
@@ -1048,10 +1048,10 @@ public class SyncEngineTests
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets(), attemptCeiling: 2);
         engine.AddItem(new JsonObject { ["content"] = "Orphan" });
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, engine.PendingCount);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, engine.PendingCount);
         Assert.Equal(1, engine.FailedCount);
@@ -1065,7 +1065,7 @@ public class SyncEngineTests
         for (var i = 0; i < 101; i++)
             engine.AddItem(new JsonObject { ["content"] = $"Task {i}" });
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(100, api.LastCommands.Count);
         Assert.Equal(101, engine.PendingCount);
@@ -1091,7 +1091,7 @@ public class SyncEngineTests
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
-        var inFlight = Task.Run(() => engine.SyncAsync());
+        var inFlight = Task.Run(() => engine.SyncAsync(), TestContext.Current.CancellationToken);
         await entered.Task;
 
         // Another account's token is taken while that response is still coming back, wiping the
@@ -1147,7 +1147,7 @@ public class SyncEngineTests
         [
             Ch("items", "i1", """{"id":"i1","content":"A","priority":1,"weird_field":"keep"}"""),
         ]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "B" });
 
@@ -1203,7 +1203,7 @@ public class SyncEngineTests
         engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited offline" });
 
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Null(secrets.Stored);
         Assert.True(engine.AwaitingToken);
@@ -1223,7 +1223,7 @@ public class SyncEngineTests
         var (engine, store, _) = HeldAccount(api);
 
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Throws<TodoistAuthException>(() => engine.UpdateItem("i1", new JsonObject { ["content"] = "Not kept" }));
         Assert.Throws<TodoistAuthException>(() => engine.AddItem(new JsonObject { ["content"] = "Not kept" }));
@@ -1244,7 +1244,7 @@ public class SyncEngineTests
         engine.CompleteItem("i1");
 
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Throws<TodoistAuthException>(() => engine.ReopenItem("i1"));
 
@@ -1258,7 +1258,7 @@ public class SyncEngineTests
         var api = new FakeApi { TransferThrow = new TodoistAuthException("no") };
         var (engine, _, secrets) = HeldAccount(api);
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.DeleteUploadAsync("https://files.todoist.test/notes.txt"));
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.DeleteUploadAsync("https://files.todoist.test/notes.txt", TestContext.Current.CancellationToken));
 
         Assert.Null(secrets.Stored);
         Assert.True(engine.AwaitingToken);
@@ -1275,7 +1275,7 @@ public class SyncEngineTests
         Assert.True(engine.CanUndo);
 
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.False(engine.CanUndo);
         Assert.False(engine.Undo());
@@ -1309,7 +1309,7 @@ public class SyncEngineTests
         var (engine, _, secrets) = HeldAccount(api);
         engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited offline" });
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
         api.Throw = null;
 
         var purged = 0;
@@ -1323,7 +1323,7 @@ public class SyncEngineTests
         Assert.Equal(0, purged);
         Assert.Equal("Edited offline", engine.Snapshot().Items.Single().Content);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal("item_update", api.LastCommands.Single().Type);
     }
 
@@ -1334,7 +1334,7 @@ public class SyncEngineTests
         var (engine, store, secrets) = HeldAccount(api);
         engine.UpdateItem("i1", new JsonObject { ["content"] = "Edited offline" });
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         var purged = 0;
         engine.Purged += () => purged++;
@@ -1380,7 +1380,7 @@ public class SyncEngineTests
         var api = new FakeApi { Throw = new TodoistAuthException("no") };
         var engine = new SyncEngine(api, store, secrets);
         engine.Load();
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Throws<IOException>(() => engine.AcceptToken("other", "u2"));
 
@@ -1411,7 +1411,7 @@ public class SyncEngineTests
         await entered.Task;
 
         api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
         api.Throw = null;
         engine.AcceptToken("new", "u1");
 
@@ -1429,7 +1429,7 @@ public class SyncEngineTests
         var (engine, _, secrets) = HeldAccount(api);
 
         await Assert.ThrowsAsync<TodoistAuthException>(
-            () => engine.AddCommentWithFileAsync("i1", "See attached", new MemoryStream([1, 2, 3]), "notes.txt"));
+            () => engine.AddCommentWithFileAsync("i1", "See attached", new MemoryStream([1, 2, 3]), "notes.txt", TestContext.Current.CancellationToken));
 
         Assert.Null(secrets.Stored);
         Assert.True(engine.AwaitingToken);
@@ -1493,7 +1493,7 @@ public class SyncEngineTests
         var store = new InMemorySnapshotStore();
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
 
-        var inFlight = Task.Run(() => engine.SyncAsync());
+        var inFlight = Task.Run(() => engine.SyncAsync(), TestContext.Current.CancellationToken);
         await entered.Task;
 
         engine.SignOut();
@@ -1525,7 +1525,7 @@ public class SyncEngineTests
         var secrets = new FakeSecrets { Stored = "old" };
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets);
 
-        var inFlight = Task.Run(() => engine.SyncAsync());
+        var inFlight = Task.Run(() => engine.SyncAsync(), TestContext.Current.CancellationToken);
         await entered.Task;
 
         engine.SignOut();

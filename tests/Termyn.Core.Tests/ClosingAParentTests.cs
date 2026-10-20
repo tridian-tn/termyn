@@ -94,7 +94,7 @@ public class ClosingAParentTests
         engine.CompleteItem("a");
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // The server never finished them, and won't resend what never changed there.
         var items = Items(engine);
@@ -117,7 +117,7 @@ public class ClosingAParentTests
             SyncToken = "s2",
             Changes = [Json.Change("items", "b", """{"id":"b","content":"B","project_id":"p","parent_id":"a","child_order":1}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, engine.PendingCount);
         Assert.True(Items(engine)["b"].Completed);
@@ -143,7 +143,7 @@ public class ClosingAParentTests
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
             Changes = [Json.Change("items", "real", """{"id":"real","content":"Added offline","project_id":"p","parent_id":"a","child_order":3}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, engine.PendingCount);
         Assert.True(Items(engine)["real"].Completed);
@@ -167,7 +167,7 @@ public class ClosingAParentTests
                 c => c.Uuid,
                 c => c.Type == "item_close" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var a = Items(engine)["a"];
         Assert.False(a.Completed);
@@ -195,7 +195,7 @@ public class ClosingAParentTests
                 c => c.Type == "item_close" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(engine.Snapshot().Items, i => i.Content == "Added offline");
         Assert.Equal("real", added.Id);
@@ -293,7 +293,7 @@ public class ClosingAParentTests
             SyncStatus = commands.Where(c => c.Type == "item_add").ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var restarted = NewEngine(store);
 

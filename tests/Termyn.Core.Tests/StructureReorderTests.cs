@@ -205,7 +205,7 @@ public class StructureReorderTests
         engine.MoveProject("b", -1);
 
         api.Next = _ => Resp("s1", [Json.Change("projects", "b", """{"id":"b","name":"Renamed","child_order":2}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var moved = engine.Snapshot().Projects.Single(p => p.Id == "b");
         Assert.Equal("Renamed", moved.Name);
@@ -235,7 +235,7 @@ public class StructureReorderTests
             var add = cmds.First(c => c.Type == "project_add");
             return Resp("s1", status: (add.Uuid, false));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var order = engine.Snapshot().Projects.ToDictionary(p => p.Id, p => p.ChildOrder);
         Assert.Equal(1, order["a"]);
@@ -260,7 +260,7 @@ public class StructureReorderTests
         api.Next = _ => Resp(
             "s1",
             [Json.Change("sections", "s2", """{"id":"s2","name":"Renamed","project_id":"p","section_order":2}""")]);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var moved = engine.Snapshot().Sections.Single(x => x.Id == "s2");
         Assert.Equal("Renamed", moved.Name);
@@ -286,7 +286,7 @@ public class StructureReorderTests
             var add = cmds.First(c => c.Type == "project_add");
             return Resp("s1", status: (add.Uuid, true), temp: (temp, "real1"));
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var reorder = engine.Outbox.Single(c => c.Type == "project_reorder");
         var ids = Args(reorder)["projects"]!.AsArray().Select(e => e!["id"]!.ToString()).ToList();

@@ -28,7 +28,7 @@ public class AttachmentWriteTests
     {
         var (engine, api) = Seeded();
 
-        await engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf");
+        await engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf", TestContext.Current.CancellationToken);
 
         var comment = Assert.Single(engine.CommentsFor("i1"));
         Assert.Equal("here it is", comment.Content);
@@ -48,7 +48,7 @@ public class AttachmentWriteTests
         // to queue until it has answered.
         var (engine, api) = Seeded();
 
-        await engine.AddCommentWithFileAsync("i1", string.Empty, File("the bytes"), "a.txt");
+        await engine.AddCommentWithFileAsync("i1", string.Empty, File("the bytes"), "a.txt", TestContext.Current.CancellationToken);
 
         Assert.Equal("the bytes", Encoding.UTF8.GetString(Assert.Single(api.Uploaded)));
     }
@@ -58,7 +58,7 @@ public class AttachmentWriteTests
     {
         var (engine, _) = Seeded();
 
-        await engine.AddCommentWithFileAsync("i1", string.Empty, File(), "agenda.pdf");
+        await engine.AddCommentWithFileAsync("i1", string.Empty, File(), "agenda.pdf", TestContext.Current.CancellationToken);
 
         var comment = Assert.Single(engine.CommentsFor("i1"));
         Assert.Equal(string.Empty, comment.Content);
@@ -74,7 +74,7 @@ public class AttachmentWriteTests
         api.TransferThrow = new TodoistNetworkException("offline");
 
         await Assert.ThrowsAsync<TodoistNetworkException>(
-            () => engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf"));
+            () => engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf", TestContext.Current.CancellationToken));
 
         Assert.Empty(engine.Outbox);
         Assert.Empty(engine.CommentsFor("i1"));
@@ -86,7 +86,7 @@ public class AttachmentWriteTests
         var (engine, api) = Seeded(token: null);
 
         await Assert.ThrowsAsync<TodoistAuthException>(
-            () => engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf"));
+            () => engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf", TestContext.Current.CancellationToken));
 
         Assert.Empty(api.Uploaded);
         Assert.Empty(engine.Outbox);
@@ -104,7 +104,7 @@ public class AttachmentWriteTests
             return new JsonObject { ["file_name"] = name, ["file_url"] = "https://files.todoist.test/x" };
         };
 
-        var added = await engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf");
+        var added = await engine.AddCommentWithFileAsync("i1", "here it is", File(), "agenda.pdf", TestContext.Current.CancellationToken);
 
         Assert.Null(added);
         Assert.DoesNotContain(engine.Outbox, c => c.Type == "note_add");
@@ -115,7 +115,7 @@ public class AttachmentWriteTests
     {
         var (engine, api) = Seeded();
 
-        Assert.Null(await engine.AddCommentWithFileAsync("gone", "here it is", File(), "agenda.pdf"));
+        Assert.Null(await engine.AddCommentWithFileAsync("gone", "here it is", File(), "agenda.pdf", TestContext.Current.CancellationToken));
         Assert.Empty(api.Uploaded);
     }
 
@@ -171,7 +171,7 @@ public class AttachmentWriteTests
         // one write here that simply fails when there is no connection rather than waiting for one.
         var (engine, api) = Seeded();
 
-        await engine.DeleteUploadAsync("https://files.todoist.test/a");
+        await engine.DeleteUploadAsync("https://files.todoist.test/a", TestContext.Current.CancellationToken);
 
         Assert.Equal("https://files.todoist.test/a", Assert.Single(api.DeletedUploads));
         Assert.Empty(engine.Outbox);
@@ -183,7 +183,7 @@ public class AttachmentWriteTests
         var (engine, api) = Seeded();
         api.TransferThrow = new TodoistNetworkException("offline");
 
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => engine.DeleteUploadAsync("https://files.todoist.test/a"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => engine.DeleteUploadAsync("https://files.todoist.test/a", TestContext.Current.CancellationToken));
 
         Assert.Empty(engine.Outbox);
     }

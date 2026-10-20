@@ -181,7 +181,7 @@ public class GitHubReleaseCheckTests
         { "tag_name": "v1.4.0", "html_url": "https://github.com/tridian-tn/termyn/releases/tag/v1.4.0" }
         """);
 
-        var result = await check.LatestAsync();
+        var result = await check.LatestAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new Version(1, 4, 0), result.Latest);
         Assert.Equal("https://github.com/tridian-tn/termyn/releases/tag/v1.4.0", result.ReleaseUrl);
@@ -193,7 +193,7 @@ public class GitHubReleaseCheckTests
         var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"tag_name":"v1.0.0"}"""));
         var check = new GitHubReleaseCheck(new HttpClient(handler));
 
-        await check.LatestAsync();
+        await check.LatestAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Get, handler.LastRequest!.Method);
         Assert.Equal(GitHubReleaseCheck.DefaultEndpoint, handler.LastRequest.RequestUri!.ToString());
@@ -207,7 +207,7 @@ public class GitHubReleaseCheckTests
     {
         var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"tag_name":"v1.0.0"}"""));
 
-        await new GitHubReleaseCheck(new HttpClient(handler)).LatestAsync();
+        await new GitHubReleaseCheck(new HttpClient(handler)).LatestAsync(TestContext.Current.CancellationToken);
 
         // No body, no query, and exactly the two headers the request needs — asserted as the whole
         // set, so an Authorization or an install identifier added later fails here rather than
@@ -222,7 +222,7 @@ public class GitHubReleaseCheckTests
     [InlineData(HttpStatusCode.Forbidden)]         // rate-limited, which GitHub answers with 403
     [InlineData(HttpStatusCode.InternalServerError)]
     public async Task An_unhelpful_answer_means_not_knowing_rather_than_failing(HttpStatusCode status)
-        => Assert.Equal(UpdateResult.Unknown, await Returning(status, "{}").LatestAsync());
+        => Assert.Equal(UpdateResult.Unknown, await Returning(status, "{}").LatestAsync(TestContext.Current.CancellationToken));
 
     [Theory]
     [InlineData("{ this is not json")]
@@ -234,7 +234,7 @@ public class GitHubReleaseCheckTests
     [InlineData("""{"tag_name":{"v":"1.0.0"}}""")]
     [InlineData("""{"tag_name":["v1.0.0"]}""")]
     public async Task An_unreadable_answer_means_not_knowing(string body)
-        => Assert.Equal(UpdateResult.Unknown, await Returning(HttpStatusCode.OK, body).LatestAsync());
+        => Assert.Equal(UpdateResult.Unknown, await Returning(HttpStatusCode.OK, body).LatestAsync(TestContext.Current.CancellationToken));
 
     [Theory]
     [InlineData("file:///C:/Windows/System32/cmd.exe")]
@@ -254,7 +254,7 @@ public class GitHubReleaseCheckTests
         // Escaped, so the body stays valid JSON and the test is about the URL rather than the parse.
         var body = $$"""{"tag_name":"v9.0.0","html_url":"{{url.Replace("\\", "\\\\")}}"}""";
 
-        var result = await Returning(HttpStatusCode.OK, body).LatestAsync();
+        var result = await Returning(HttpStatusCode.OK, body).LatestAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new Version(9, 0, 0), result.Latest);   // the version is still worth knowing
         Assert.Null(result.ReleaseUrl);
@@ -267,7 +267,7 @@ public class GitHubReleaseCheckTests
         // has to be enforced on the read.
         var huge = $$"""{"tag_name":"v9.0.0","note":"{{new string('x', 2 * 1024 * 1024)}}"}""";
 
-        Assert.Equal(UpdateResult.Unknown, await Returning(HttpStatusCode.OK, huge).LatestAsync());
+        Assert.Equal(UpdateResult.Unknown, await Returning(HttpStatusCode.OK, huge).LatestAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public class GitHubReleaseCheckTests
         var check = new GitHubReleaseCheck(new HttpClient(new StubHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new FailingStream()) })));
 
-        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync());
+        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -284,7 +284,7 @@ public class GitHubReleaseCheckTests
     {
         var check = new GitHubReleaseCheck(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
 
-        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync());
+        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -292,7 +292,7 @@ public class GitHubReleaseCheckTests
     {
         var check = new GitHubReleaseCheck(new HttpClient(new StubHandler(_ => throw new TaskCanceledException("timeout"))));
 
-        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync());
+        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -329,7 +329,7 @@ public class GitHubReleaseCheckTests
     {
         var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"tag_name":"v1.0.0"}"""));
 
-        await new GitHubReleaseCheck(new HttpClient(handler), "https://example.test/latest").LatestAsync();
+        await new GitHubReleaseCheck(new HttpClient(handler), "https://example.test/latest").LatestAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("https://example.test/latest", handler.LastRequest!.RequestUri!.ToString());
         Assert.Contains("application/vnd.github+json", handler.LastRequest.Headers.Accept.ToString());
@@ -348,7 +348,7 @@ public class GitHubReleaseCheckTests
 
         Assert.True(body.Length > 40 * 1024, "the point of this test is a realistically large body");
 
-        var result = await Returning(HttpStatusCode.OK, body).LatestAsync();
+        var result = await Returning(HttpStatusCode.OK, body).LatestAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new Version(1, 4, 0), result.Latest);
     }
@@ -364,7 +364,7 @@ public class GitHubReleaseCheckTests
         var body = head + new string('x', total - head.Length - 2) + @"""}";
         Assert.Equal(total, body.Length);
 
-        var result = await Returning(HttpStatusCode.OK, body).LatestAsync();
+        var result = await Returning(HttpStatusCode.OK, body).LatestAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(readable ? new Version(9, 0, 0) : null, result.Latest);
     }
@@ -381,7 +381,7 @@ public class GitHubReleaseCheckTests
         var check = new GitHubReleaseCheck(new HttpClient(new StubHandler(
             _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
 
-        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync());
+        Assert.Equal(UpdateResult.Unknown, await check.LatestAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -399,8 +399,8 @@ public class GitHubReleaseCheckTests
 
         // Raced against a clock rather than simply awaited: without the deadline this never returns
         // at all, and a test that hangs forever is a worse thing to leave in CI than one that fails.
-        var running = check.LatestAsync();
-        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10)));
+        var running = check.LatestAsync(TestContext.Current.CancellationToken);
+        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         Assert.Same(running, finished);
         Assert.Equal(UpdateResult.Unknown, await running);

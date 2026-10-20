@@ -84,7 +84,7 @@ public class SignOutTests
         DoSomeWork(presenter);
         api.Throw = new TodoistAuthException("rejected");
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.NotEmpty(presenter.History.Recent());
         Assert.NotEmpty(history.Entries);

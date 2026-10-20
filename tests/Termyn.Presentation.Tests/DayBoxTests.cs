@@ -56,7 +56,7 @@ public class DayBoxTests
         // wherever they were typed.
         var presenter = NewPresenter(WithUser("""{"id":"u","date_format":1,"tz_info":{"timezone":"UTC"}}"""));
 
-        await presenter.CaptureAsync("Renew passport 5/6");
+        await presenter.CaptureAsync("Renew passport 5/6", TestContext.Current.CancellationToken);
 
         var row = presenter.Rows.Single(r => r.Content == "Renew passport");
         Assert.Equal(new DateOnly(2027, 5, 6), row.DueOn);
@@ -328,8 +328,8 @@ public class DayBoxTests
     {
         var presenter = NewPresenter(Account("de"));
 
-        await presenter.CaptureAsync("Renew passport tomorrow");
-        await presenter.CaptureAsync("Christmas cards jedes Jahr am 25/12");
+        await presenter.CaptureAsync("Renew passport tomorrow", TestContext.Current.CancellationToken);
+        await presenter.CaptureAsync("Christmas cards jedes Jahr am 25/12", TestContext.Current.CancellationToken);
 
         Assert.Null(presenter.Rows.Single(r => r.Content == "Renew passport tomorrow").DueOn);
         Assert.Null(presenter.Rows.Single(r => r.Content == "Christmas cards jedes Jahr am 25/12").DueOn);
@@ -372,7 +372,7 @@ public class DayBoxTests
         // the task only had because the network was down. A sub-task is read the same way.
         var presenter = NewPresenter(Account("en", smartDatesOff: true));
 
-        await presenter.CaptureAsync("Renew passport tomorrow");
+        await presenter.CaptureAsync("Renew passport tomorrow", TestContext.Current.CancellationToken);
         presenter.AddSubtask("i1", "Book tickets next friday 4pm");
 
         Assert.Null(presenter.Rows.Single(r => r.Content == "Renew passport tomorrow").DueOn);

@@ -166,7 +166,7 @@ public class SortingTests
         };
 
         var presenter = new Fixture().Task("a", "Whenever", priority: 1).Presenter(api);
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.SortBy(TaskColumn.Priority);
 

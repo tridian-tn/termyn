@@ -40,13 +40,13 @@ public class RenamedViewTests
         presenter.Select(ViewSelection.OfProject(IdOf(presenter, SidebarKind.Project, "Errands")));
 
         // Offline, so it's filed here rather than parsed by the server.
-        await presenter.CaptureAsync("Buy milk");
+        await presenter.CaptureAsync("Buy milk", TestContext.Current.CancellationToken);
 
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["project_add"] = "p2", ["item_add"] = "i1" },
             Json.Change("projects", "p2", """{"id":"p2","name":"Errands","child_order":2}"""),
             Json.Change("items", "i1", """{"id":"i1","content":"Buy milk","project_id":"p2","child_order":1}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfProject("p2"), presenter.Selection);
         Assert.Equal(SidebarKeys.For(SidebarKind.Project, "p2"), presenter.SelectedKey);
@@ -63,7 +63,7 @@ public class RenamedViewTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["section_add"] = "s1" },
             Json.Change("sections", "s1", """{"id":"s1","name":"Later","project_id":"p1","section_order":1}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfSection("s1"), presenter.Selection);
         Assert.Equal(SidebarKeys.For(SidebarKind.Section, "s1"), presenter.SelectedKey);
@@ -82,7 +82,7 @@ public class RenamedViewTests
         api.Next = FakeApi.Naming(
             new Dictionary<string, string> { ["project_add"] = "p2" },
             Json.Change("projects", "p2", """{"id":"p2","name":"Errands","child_order":2,"is_favorite":true}"""));
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ViewSelection.OfProject("p2"), presenter.Selection);
         Assert.Equal(SidebarKeys.Favourite(SidebarKind.Project, "p2"), presenter.SelectedKey);

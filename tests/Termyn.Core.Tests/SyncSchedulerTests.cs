@@ -30,10 +30,10 @@ public class SyncSchedulerTests
         for (var i = 0; i < 10; i++)
         {
             scheduler.NotifyWrite();
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
         }
 
-        await settled.Task.WaitAsync(Patience);
+        await settled.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal(1, Volatile.Read(ref syncs));
     }
 
@@ -50,7 +50,7 @@ public class SyncSchedulerTests
         scheduler.Start();
         scheduler.RequestNow();
 
-        await ran.Task.WaitAsync(Patience);
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class SyncSchedulerTests
         scheduler.NotifyWrite();
         scheduler.Start();
 
-        await ran.Task.WaitAsync(Patience);
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class SyncSchedulerTests
 
         scheduler.Start();
 
-        await twice.Task.WaitAsync(Patience);
+        await twice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public class SyncSchedulerTests
         scheduler.Start();
         scheduler.RequestNow();
 
-        await twice.Task.WaitAsync(Patience);
+        await twice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -120,11 +120,11 @@ public class SyncSchedulerTests
 
         scheduler.Start();
 
-        var error = await failures.Task.WaitAsync(Patience);
+        var error = await failures.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal("boom", error.Message);
 
         // Still alive after the failure.
-        await Task.Delay(200);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.True(Volatile.Read(ref calls) > 1);
     }
 
@@ -143,8 +143,8 @@ public class SyncSchedulerTests
 
         scheduler.Start();
 
-        await reported.Task.WaitAsync(Patience);
-        await Task.Delay(200);
+        await reported.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.True(Volatile.Read(ref calls) > 1);
     }
 
@@ -169,10 +169,10 @@ public class SyncSchedulerTests
         }, Fast);
 
         scheduler.Start();
-        await entered.Task.WaitAsync(Patience);
+        await entered.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
 
         var dispose = scheduler.DisposeAsync().AsTask();
-        await dispose.WaitAsync(TimeSpan.FromSeconds(10));
+        await dispose.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -192,17 +192,17 @@ public class SyncSchedulerTests
         }, Fast);
 
         scheduler.Start();
-        await paused.Task.WaitAsync(Patience);
+        await paused.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
 
         // The server is refusing requests, so neither a write nor an F5 may cut the wait short.
         for (var i = 0; i < 5; i++)
         {
             scheduler.NotifyWrite();
             scheduler.RequestNow();
-            await Task.Delay(20);
+            await Task.Delay(20, TestContext.Current.CancellationToken);
         }
 
-        await Task.Delay(200);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.Equal(1, Volatile.Read(ref calls));
     }
 
@@ -225,7 +225,7 @@ public class SyncSchedulerTests
         scheduler.Start();
         scheduler.RequestNow();
 
-        await twice.Task.WaitAsync(Patience);
+        await twice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public class SyncSchedulerTests
         scheduler.Start();
 
         // A third call can only happen if the ordinary interval resumed after the pause.
-        await thrice.Task.WaitAsync(Patience);
+        await thrice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public class SyncSchedulerTests
 
         scheduler.Start();
 
-        await twice.Task.WaitAsync(Patience);
+        await twice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -284,8 +284,8 @@ public class SyncSchedulerTests
         scheduler.Start();
         scheduler.RequestNow();
 
-        await ran.Task.WaitAsync(Patience);
-        await Task.Delay(150);
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await Task.Delay(150, TestContext.Current.CancellationToken);
         Assert.Equal(1, Volatile.Read(ref calls));
     }
 }

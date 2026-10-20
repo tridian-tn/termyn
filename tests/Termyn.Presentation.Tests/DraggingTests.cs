@@ -182,11 +182,11 @@ public class DraggingTests
         var presenter = NewPresenter(store, api);
         presenter.Select(ViewSelection.OfSection("s1"));
 
-        await presenter.CaptureAsync("Fresh");
+        await presenter.CaptureAsync("Fresh", TestContext.Current.CancellationToken);
         var ours = presenter.Rows.Single(r => r.Content == "Fresh").Id;
 
         api.Next = FakeApi.Naming(new Dictionary<string, string> { ["item_add"] = "fresh" });
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(["fresh", "sb"], presenter.Rows.Select(r => r.Id));
 
         var aboveSecond = OutlineDrop.Over(presenter.Rows, 1, DropZone.Before)!;

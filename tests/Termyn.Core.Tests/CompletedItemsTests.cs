@@ -15,7 +15,7 @@ public class CompletedItemsTests
         var api = Returning([Done("c1", "Book dentist", "2026-07-30T09:00:00Z")]);
         var engine = NewEngine(api, new InMemorySnapshotStore());
 
-        var fetch = await engine.FetchCompletedAsync();
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, fetch.Count);
         Assert.False(fetch.Truncated);
@@ -30,7 +30,7 @@ public class CompletedItemsTests
         var api = Returning([]);
         var engine = NewEngine(api, new InMemorySnapshotStore());
 
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         var query = Assert.Single(api.CompletedQueries);
         Assert.Equal(CompletedQuery.MaxWindow, query.Until - query.Since);
@@ -51,7 +51,7 @@ public class CompletedItemsTests
         };
         var engine = NewEngine(api, new InMemorySnapshotStore());
 
-        var fetch = await engine.FetchCompletedAsync();
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(3, fetch.Count);
         Assert.False(fetch.Truncated);
@@ -66,7 +66,7 @@ public class CompletedItemsTests
         var api = new FakeApi { Completed = _ => new CompletedPage([Done("c" + page++, "Task")], "more") };
         var engine = NewEngine(api, new InMemorySnapshotStore());
 
-        var fetch = await engine.FetchCompletedAsync();
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(fetch.Truncated);
         Assert.Equal(10, api.CompletedQueries.Count);
@@ -78,7 +78,7 @@ public class CompletedItemsTests
         var store = new InMemorySnapshotStore();
         var engine = NewEngine(Returning([Done("c1", "Book dentist")]), store);
 
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         // Nothing durable: incremental sync never mentions completed tasks, so a persisted copy
         // would have nothing to correct it and no tombstone to remove it.
@@ -90,7 +90,7 @@ public class CompletedItemsTests
     {
         var store = new InMemorySnapshotStore();
         var engine = NewEngine(Returning([Done("c1", "Book dentist")]), store);
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         engine.Load();
 
@@ -104,7 +104,7 @@ public class CompletedItemsTests
         store.PutResource("items", "local", """{"id":"local","content":"Ticked here","checked":true}""");
         var engine = NewEngine(Returning([Done("c1", "From the server")]), store);
         engine.Load();
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
         Assert.Equal(2, engine.Snapshot().CompletedItems.Count);
 
         engine.ClearCompleted();
@@ -121,7 +121,7 @@ public class CompletedItemsTests
         var engine = NewEngine(Returning([Done("c1", "Stale server copy")]), store);
         engine.Load();
 
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         var completed = Assert.Single(engine.Snapshot().CompletedItems);
         Assert.Equal("Edited here", completed.Content);
@@ -132,7 +132,7 @@ public class CompletedItemsTests
     {
         var store = new InMemorySnapshotStore();
         var engine = NewEngine(Returning([Done("c1", "Book dentist")]), store);
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         engine.ReopenItem("c1");
 
@@ -155,7 +155,7 @@ public class CompletedItemsTests
         // A prior would have undo write a completed task back into the snapshot, where nothing would
         // ever arrive to remove it again.
         var engine = NewEngine(Returning([Done("c1", "Book dentist")]), new InMemorySnapshotStore());
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         engine.ReopenItem("c1");
 
@@ -167,11 +167,11 @@ public class CompletedItemsTests
     {
         var api = Returning([Done("c1", "Book dentist")]);
         var engine = NewEngine(api, new InMemorySnapshotStore());
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
         Assert.Single(engine.Snapshot().CompletedItems);
 
         api.Response = new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("items", "c1")] };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(engine.Snapshot().CompletedItems);
     }
@@ -185,10 +185,10 @@ public class CompletedItemsTests
         store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
         var engine = new SyncEngine(api, store, secrets, new FixedClock(Today));
         engine.Load();
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         api.Throw = new TodoistAuthException("rejected");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
 
         Assert.Null(secrets.Stored);
         Assert.Single(engine.Snapshot().CompletedItems);
@@ -208,7 +208,7 @@ public class CompletedItemsTests
         var engine = new SyncEngine(api, store, secrets, new FixedClock(Today));
         engine.Load();
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.FetchCompletedAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.FetchCompletedAsync(TestContext.Current.CancellationToken));
 
         Assert.Null(secrets.Stored);
         Assert.True(engine.AwaitingToken);
@@ -221,7 +221,7 @@ public class CompletedItemsTests
         // Otherwise the row survives the delete, and pressing delete again queues a second command
         // for an id the server no longer has — which retries to the ceiling and sits there failed.
         var engine = NewEngine(Returning([Done("c1", "Book dentist")]), new InMemorySnapshotStore());
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         engine.DeleteItem("c1");
 
@@ -236,7 +236,7 @@ public class CompletedItemsTests
         // absence as a deletion emptied the entire list — the state the toggle exists to avoid.
         var api = Returning([Done("old", "Done in May", "2026-05-02T09:00:00Z")]);
         var engine = NewEngine(api, new InMemorySnapshotStore());
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         api.Response = new SyncResponse
         {
@@ -244,7 +244,7 @@ public class CompletedItemsTests
             FullSync = true,
             Changes = [Json.Change("items", "active", """{"id":"active","content":"Still to do"}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(engine.Snapshot().CompletedItems);
     }
@@ -256,14 +256,14 @@ public class CompletedItemsTests
         // copy must not put it back among the finished.
         var api = Returning([Done("c1", "Book dentist")]);
         var engine = NewEngine(api, new InMemorySnapshotStore());
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         api.Response = new SyncResponse
         {
             SyncToken = "s1",
             Changes = [Json.Change("items", "c1", """{"id":"c1","content":"Reopened elsewhere","checked":false}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(engine.Snapshot().CompletedItems);
         Assert.False(Assert.Single(engine.Snapshot().Items).Completed);
@@ -288,7 +288,7 @@ public class CompletedItemsTests
             return new CompletedPage([Done("c1", "From the old account")], null);
         };
 
-        var fetch = await engine.FetchCompletedAsync();
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, fetch.Count);
         Assert.Empty(engine.Snapshot().CompletedItems);
@@ -303,7 +303,7 @@ public class CompletedItemsTests
         engine.Load();
 
         engine.CompleteItem("i1");
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
         engine.ReopenItem("i1");
 
         var item = Assert.Single(engine.Snapshot().Items);
@@ -325,7 +325,7 @@ public class CompletedItemsTests
         engine.Load();
 
         engine.CompleteItem("i1");
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
         engine.ReopenItem("i1");
 
         engine.Undo();
