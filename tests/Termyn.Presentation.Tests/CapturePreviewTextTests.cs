@@ -82,4 +82,29 @@ public class CapturePreviewTextTests
 
         Assert.Contains("goes to Inbox", preview);
     }
+
+    [Fact]
+    public void The_empty_hint_reads_what_the_catalogue_says()
+    {
+        Assert.Equal("Add a task…  #project /section @label p1 tomorrow 4pm", CapturePreviewText.Hint(readsDays: true));
+        Assert.Equal("Add a task…  #project /section @label p1", CapturePreviewText.Hint(readsDays: false));
+    }
+
+    [Fact]
+    public void An_unknown_section_says_it_is_unknown()
+    {
+        var parse = Parse("call mum") with { SectionName = "Nowhere" };
+        var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: false));
+
+        Assert.Contains("/Nowhere (unknown)", preview);
+    }
+
+    [Fact]
+    public void A_field_that_needs_the_server_is_named_as_offline()
+    {
+        var parse = Parse("call mum") with { Unsupported = ["deadline", "assignee"] };
+        var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: true));
+
+        Assert.Contains("(needs a connection: deadline, assignee)", preview);
+    }
 }

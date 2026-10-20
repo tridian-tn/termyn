@@ -174,6 +174,31 @@ public class TextCatalogueTests
         Assert.Throws<MissingManifestResourceException>(() => ProtocolText.InCataloguesOf(typeof(ProtocolText).Assembly));
     }
 
+    [Fact]
+    public void The_messages_the_app_shows_read_what_the_catalogue_says()
+    {
+        // Verbatim, so a reworded or mistyped entry fails here rather than in the dialog a user is
+        // the first to read it in. Only the unreachable-host message above is proved by driving the
+        // path; the rest are many separate HTTP conditions, and their wording is what's at risk.
+        Assert.Equal("Could not reach Todoist.", Strings.CouldNotReachTodoist);
+        Assert.Equal("Todoist rejected the API token.", Strings.TokenRejected);
+        Assert.Equal("The Todoist request timed out.", Strings.RequestTimedOut);
+        Assert.Equal("Todoist returned an unreadable answer to the token check.", Strings.UnreadableTokenCheck);
+        Assert.Equal("Todoist returned an unexpected sync response.", Strings.UnexpectedSyncResponse);
+        Assert.Equal("Todoist returned an unreadable sync response.", Strings.UnreadableSyncResponse);
+        Assert.Equal("Todoist returned an unexpected quick-add response.", Strings.UnexpectedQuickAddResponse);
+        Assert.Equal("Todoist returned an unreadable quick-add response.", Strings.UnreadableQuickAddResponse);
+        Assert.Equal("Todoist returned an unexpected completed-tasks response.", Strings.UnexpectedCompletedResponse);
+        Assert.Equal("Todoist returned an unreadable completed-tasks response.", Strings.UnreadableCompletedResponse);
+        Assert.Equal("The download from Todoist failed part-way.", Strings.DownloadFailedPartWay);
+        Assert.Equal("Todoist returned an unexpected upload response.", Strings.UnexpectedUploadResponse);
+        Assert.Equal("Todoist returned an unreadable upload response.", Strings.UnreadableUploadResponse);
+        Assert.Equal("Todoist returned HTTP {0}.", Strings.UnexpectedHttpStatus);
+        Assert.Equal("Todoist turned the token away. Reconnect to make changes.", Strings.TokenTurnedAway);
+        Assert.Equal("Todoist did not report a result for this change.", Strings.NoResultForChange);
+        Assert.Equal("Termyn isn't signed in to Todoist.", Strings.NotSignedIn);
+    }
+
     /// <summary>A host that can't be got to, which is what a dead link looks like from here.</summary>
     private sealed class UnreachableHandler : HttpMessageHandler
     {

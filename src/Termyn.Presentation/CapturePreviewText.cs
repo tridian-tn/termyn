@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Model;
 
 namespace Termyn.Presentation;
@@ -23,7 +24,7 @@ public static class CapturePreviewText
     /// <param name="readsDays">Whether a capture reads a day out of what's typed</param>
     /// <returns>The hint</returns>
     public static string Hint(bool readsDays)
-        => readsDays ? "Add a task…  #project /section @label p1 tomorrow 4pm" : "Add a task…  #project /section @label p1";
+        => readsDays ? Strings.CaptureHintWithDay : Strings.CaptureHint;
 
     /// <summary>Renders what the local parser made of some capture text, for the line under the box.</summary>
     public static string For(CapturePreview preview)
@@ -32,9 +33,9 @@ public static class CapturePreviewText
         var parts = new List<string> { $"\"{parse.Content}\"" };
 
         if (parse.ProjectName is { } project)
-            parts.Add(preview.ProjectResolved ? "#" + project : $"#{project} (unknown — goes to Inbox)");
+            parts.Add(preview.ProjectResolved ? "#" + project : string.Format(CultureInfo.CurrentCulture, Strings.CaptureProjectUnknown, project));
         if (parse.SectionName is { } section)
-            parts.Add(preview.SectionResolved ? "/" + section : $"/{section} (unknown)");
+            parts.Add(preview.SectionResolved ? "/" + section : string.Format(CultureInfo.CurrentCulture, Strings.CaptureSectionUnknown, section));
         foreach (var label in parse.Labels)
             parts.Add("@" + label);
         if (parse.Priority != Priority.P4)
@@ -45,7 +46,7 @@ public static class CapturePreviewText
         if (!parse.IsRecurrence && parse.DueDate is { } date)
             parts.Add(parse.DueTime is { } time ? $"{date:yyyy-MM-dd} {time:HH:mm}" : $"{date:yyyy-MM-dd}");
         if (parse.Unsupported.Count > 0)
-            parts.Add("(needs a connection: " + string.Join(", ", parse.Unsupported) + ")");
+            parts.Add(string.Format(CultureInfo.CurrentCulture, Strings.CaptureNeedsConnection, string.Join(", ", parse.Unsupported)));
 
         return string.Join("  ·  ", parts);
     }

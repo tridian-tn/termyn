@@ -21,4 +21,58 @@
     <value>Could not reach Todoist.</value>
     <comment>Shown when the network is down or the host cannot be resolved.</comment>
   </data>
+  <!--
+    What the client and the sync engine say when something goes wrong, for the dialogs that show an
+    exception's message. The rate-limit message stays in code: it drives the backoff and is only
+    ever logged, never shown.
+  -->
+  <data name="TokenRejected" xml:space="preserve">
+    <value>Todoist rejected the API token.</value>
+  </data>
+  <data name="RequestTimedOut" xml:space="preserve">
+    <value>The Todoist request timed out.</value>
+  </data>
+  <data name="UnreadableTokenCheck" xml:space="preserve">
+    <value>Todoist returned an unreadable answer to the token check.</value>
+  </data>
+  <data name="UnexpectedSyncResponse" xml:space="preserve">
+    <value>Todoist returned an unexpected sync response.</value>
+  </data>
+  <data name="UnreadableSyncResponse" xml:space="preserve">
+    <value>Todoist returned an unreadable sync response.</value>
+  </data>
+  <data name="UnexpectedQuickAddResponse" xml:space="preserve">
+    <value>Todoist returned an unexpected quick-add response.</value>
+  </data>
+  <data name="UnreadableQuickAddResponse" xml:space="preserve">
+    <value>Todoist returned an unreadable quick-add response.</value>
+  </data>
+  <data name="UnexpectedCompletedResponse" xml:space="preserve">
+    <value>Todoist returned an unexpected completed-tasks response.</value>
+  </data>
+  <data name="UnreadableCompletedResponse" xml:space="preserve">
+    <value>Todoist returned an unreadable completed-tasks response.</value>
+  </data>
+  <data name="DownloadFailedPartWay" xml:space="preserve">
+    <value>The download from Todoist failed part-way.</value>
+  </data>
+  <data name="UnexpectedUploadResponse" xml:space="preserve">
+    <value>Todoist returned an unexpected upload response.</value>
+  </data>
+  <data name="UnreadableUploadResponse" xml:space="preserve">
+    <value>Todoist returned an unreadable upload response.</value>
+  </data>
+  <data name="UnexpectedHttpStatus" xml:space="preserve">
+    <value>Todoist returned HTTP {0}.</value>
+    <comment>{0} is the HTTP status code of an answer the client didn't expect.</comment>
+  </data>
+  <data name="TokenTurnedAway" xml:space="preserve">
+    <value>Todoist turned the token away. Reconnect to make changes.</value>
+  </data>
+  <data name="NoResultForChange" xml:space="preserve">
+    <value>Todoist did not report a result for this change.</value>
+  </data>
+  <data name="NotSignedIn" xml:space="preserve">
+    <value>Termyn isn't signed in to Todoist.</value>
+  </data>
 </root>

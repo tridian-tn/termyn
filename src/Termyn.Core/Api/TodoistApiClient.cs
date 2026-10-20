@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -77,7 +78,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
         {
-            throw new TodoistNetworkException("Todoist returned an unreadable answer to the token check.", ex);
+            throw new TodoistNetworkException(Strings.UnreadableTokenCheck, ex);
         }
     }
 
@@ -87,7 +88,7 @@ public sealed class TodoistApiClient : ITodoistApi
         using var deadline = Deadline(ct);
         using var resp = await SendAsync(token, syncToken, resourceTypes, commands, deadline.Token, ct);
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            throw new TodoistAuthException("Todoist rejected the API token.");
+            throw new TodoistAuthException(Strings.TokenRejected);
         EnsureReachable(resp);
 
         // Parse straight off the response stream: buffering the whole body as a string first would
@@ -96,14 +97,14 @@ public sealed class TodoistApiClient : ITodoistApi
         {
             await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
             if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject root)
-                throw new TodoistNetworkException("Todoist returned an unexpected sync response.");
+                throw new TodoistNetworkException(Strings.UnexpectedSyncResponse);
             return Parse(root, resourceTypes);
         }
         catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
         {
             // A reachable server that answered with unusable content, or a body that failed midway:
             // treat like any other transient failure so the caller retries and keeps its last good state.
-            throw new TodoistNetworkException("Todoist returned an unreadable sync response.", ex);
+            throw new TodoistNetworkException(Strings.UnreadableSyncResponse, ex);
         }
     }
 
@@ -129,25 +130,25 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+            throw new TodoistNetworkException(Strings.RequestTimedOut, ex);
         }
 
         using (resp)
         {
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new TodoistAuthException("Todoist rejected the API token.");
+                throw new TodoistAuthException(Strings.TokenRejected);
             EnsureReachable(resp);
 
             try
             {
                 await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
                 if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject created || created["id"] is not { } id)
-                    throw new TodoistNetworkException("Todoist returned an unexpected quick-add response.");
+                    throw new TodoistNetworkException(Strings.UnexpectedQuickAddResponse);
                 return new ResourceChange(Model.ResourceType.Items, id.ToString(), false, created);
             }
             catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
             {
-                throw new TodoistNetworkException("Todoist returned an unreadable quick-add response.", ex);
+                throw new TodoistNetworkException(Strings.UnreadableQuickAddResponse, ex);
             }
         }
     }
@@ -184,20 +185,20 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+            throw new TodoistNetworkException(Strings.RequestTimedOut, ex);
         }
 
         using (resp)
         {
             if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new TodoistAuthException("Todoist rejected the API token.");
+                throw new TodoistAuthException(Strings.TokenRejected);
             EnsureReachable(resp);
 
             try
             {
                 await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
                 if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject root)
-                    throw new TodoistNetworkException("Todoist returned an unexpected completed-tasks response.");
+                    throw new TodoistNetworkException(Strings.UnexpectedCompletedResponse);
 
                 var items = new List<ResourceChange>();
                 if (root["items"] is JsonArray array)
@@ -215,7 +216,7 @@ public sealed class TodoistApiClient : ITodoistApi
             }
             catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
             {
-                throw new TodoistNetworkException("Todoist returned an unreadable completed-tasks response.", ex);
+                throw new TodoistNetworkException(Strings.UnreadableCompletedResponse, ex);
             }
         }
     }
@@ -256,7 +257,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
-            throw new TodoistNetworkException("The download from Todoist failed part-way.", ex);
+            throw new TodoistNetworkException(Strings.DownloadFailedPartWay, ex);
         }
     }
 
@@ -286,13 +287,13 @@ public sealed class TodoistApiClient : ITodoistApi
         {
             await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
             if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject root)
-                throw new TodoistNetworkException("Todoist returned an unexpected upload response.");
+                throw new TodoistNetworkException(Strings.UnexpectedUploadResponse);
 
             return root;
         }
         catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
         {
-            throw new TodoistNetworkException("Todoist returned an unreadable upload response.", ex);
+            throw new TodoistNetworkException(Strings.UnreadableUploadResponse, ex);
         }
     }
 
@@ -318,7 +319,7 @@ public sealed class TodoistApiClient : ITodoistApi
     private static void RejectBadToken(HttpResponseMessage resp)
     {
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            throw new TodoistAuthException("Todoist rejected the API token.");
+            throw new TodoistAuthException(Strings.TokenRejected);
     }
 
     /// <summary>Sends a prepared request, turning transport failures into the exception callers expect.</summary>
@@ -334,7 +335,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (TaskCanceledException ex) when (!caller.IsCancellationRequested)
         {
-            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+            throw new TodoistNetworkException(Strings.RequestTimedOut, ex);
         }
     }
 
@@ -365,7 +366,7 @@ public sealed class TodoistApiClient : ITodoistApi
         }
         catch (TaskCanceledException ex) when (!caller.IsCancellationRequested)
         {
-            throw new TodoistNetworkException("The Todoist request timed out.", ex);
+            throw new TodoistNetworkException(Strings.RequestTimedOut, ex);
         }
     }
 
@@ -395,7 +396,7 @@ public sealed class TodoistApiClient : ITodoistApi
         if (resp.StatusCode is HttpStatusCode.TooManyRequests)
             throw new TodoistRateLimitException("Todoist is rate-limiting this account.", RetryAfter(resp));
 
-        throw new TodoistNetworkException($"Todoist returned HTTP {(int)resp.StatusCode}.", (int)resp.StatusCode);
+        throw new TodoistNetworkException(string.Format(CultureInfo.CurrentCulture, Strings.UnexpectedHttpStatus, (int)resp.StatusCode), (int)resp.StatusCode);
     }
 
     /// <summary>

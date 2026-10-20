@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
@@ -39,7 +40,9 @@ public sealed record FailedChange(
     /// about a change that didn't happen is written and tested in one place. A list of these shows
     /// them by this.
     /// </remarks>
-    public override string ToString() => Subject is { } subject ? $"{Change} — {subject}" : Change;
+    public override string ToString() => Subject is { } subject
+        ? string.Format(CultureInfo.CurrentCulture, Strings.FailureChangeSubject, Change, subject)
+        : Change;
 
     /// <summary>
     /// What the server said about it, where that leaves it, and what letting it go would cost.
@@ -49,22 +52,22 @@ public sealed record FailedChange(
         get
         {
             var said = Reason is { } reason
-                ? $"Todoist said: {reason}"
-                : "Todoist gave no reason.";
+                ? string.Format(CultureInfo.CurrentCulture, Strings.FailureReasonGiven, reason)
+                : Strings.FailureReasonNone;
 
             // Where it ended up, which only a refusal actually settles. Saying "it never reached
             // your account" of a change the server simply went quiet about would be a guess, and
             // the wrong guess would have someone delete their only copy of something the account
             // already has.
             var landed = Unruled
-                ? "Todoist never reported a result, so whether your account has this is unknown."
-                : "Todoist refused it, so your account doesn't have it.";
+                ? Strings.FailureLandedUnruled
+                : Strings.FailureLandedRefused;
 
             // Said before it happens rather than asked about afterwards. Dismissing a change that
             // was already put back costs nothing, and this is the one time it costs something.
             var cost = DiscardsWork
-                ? "Dismissing removes Termyn's copy, which is the only one on this machine."
-                : "Termyn has already put this back. Dismissing only clears the notice.";
+                ? Strings.FailureCostDiscards
+                : Strings.FailureCostKept;
 
             return $"{said}\n{landed}\n\n{cost}";
         }
@@ -131,21 +134,21 @@ public static class Failures
     /// </remarks>
     private static string Change(string type) => type switch
     {
-        "item_add" => "Adding a task",
-        "item_update" => "Changing a task",
-        "item_delete" => "Deleting a task",
-        "item_close" => "Completing a task",
-        "item_uncomplete" => "Reopening a task",
-        "item_move" => "Moving a task",
-        "item_reorder" => "Reordering tasks",
-        "project_reorder" => "Reordering projects",
-        "section_reorder" => "Reordering sections",
-        "project_add" => "Adding a project",
-        "section_add" => "Adding a section",
-        "label_add" => "Adding a label",
-        "label_delete" => "Deleting a label",
-        "note_add" => "Adding a comment",
-        "reminder_add" => "Adding a reminder",
+        "item_add" => Strings.FailureItemAdd,
+        "item_update" => Strings.FailureItemUpdate,
+        "item_delete" => Strings.FailureItemDelete,
+        "item_close" => Strings.FailureItemClose,
+        "item_uncomplete" => Strings.FailureItemUncomplete,
+        "item_move" => Strings.FailureItemMove,
+        "item_reorder" => Strings.FailureItemReorder,
+        "project_reorder" => Strings.FailureProjectReorder,
+        "section_reorder" => Strings.FailureSectionReorder,
+        "project_add" => Strings.FailureProjectAdd,
+        "section_add" => Strings.FailureSectionAdd,
+        "label_add" => Strings.FailureLabelAdd,
+        "label_delete" => Strings.FailureLabelDelete,
+        "note_add" => Strings.FailureNoteAdd,
+        "reminder_add" => Strings.FailureReminderAdd,
         _ => type,
     };
 

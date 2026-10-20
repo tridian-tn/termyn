@@ -46,4 +46,26 @@ public class TextCatalogueTests
     [Fact]
     public void Nothing_in_the_catalogue_is_protocol()
         => Assert.Empty(ProtocolText.InCataloguesOf(typeof(SyncStatus).Assembly));
+
+    [Fact]
+    public void Each_sync_state_reads_what_the_catalogue_says()
+    {
+        Assert.Equal("Offline (showing cached)", new SyncStatus(SyncState.Offline).Describe());
+        Assert.Equal("Paused", new SyncStatus(SyncState.Paused).Describe());
+        Assert.Equal("Paused (retry in 5s)", new SyncStatus(SyncState.Paused, RetryIn: TimeSpan.FromSeconds(5)).Describe());
+        Assert.Equal("Reconnect needed", new SyncStatus(SyncState.ReconnectNeeded).Describe());
+        Assert.Equal("Synced", new SyncStatus(SyncState.Synced).Describe());
+        Assert.Equal("Synced 3m ago", new SyncStatus(SyncState.Synced, Since: TimeSpan.FromMinutes(3)).Describe());
+        Assert.Equal("Not synced yet", new SyncStatus(SyncState.Never).Describe());
+    }
+
+    [Fact]
+    public void How_long_ago_reads_what_the_catalogue_says()
+    {
+        Assert.Equal("just now", SyncStatus.Ago(TimeSpan.FromSeconds(2)));
+        Assert.Equal("30s ago", SyncStatus.Ago(TimeSpan.FromSeconds(30)));
+        Assert.Equal("3m ago", SyncStatus.Ago(TimeSpan.FromMinutes(3)));
+        Assert.Equal("5h ago", SyncStatus.Ago(TimeSpan.FromHours(5)));
+        Assert.Equal("2d ago", SyncStatus.Ago(TimeSpan.FromDays(2)));
+    }
 }
