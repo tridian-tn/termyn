@@ -317,7 +317,7 @@ public class ActionHistoryTests
         }
 
         // Just the one on the way up: eight hours of flushing is not a day.
-        Assert.Equal(1, store.Sweeps.Count);
+        Assert.Single(store.Sweeps);
 
         // And a day later it comes round, without having been asked any differently.
         clock.Pass(TimeSpan.FromDays(1));

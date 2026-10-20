@@ -12,7 +12,7 @@ public class AuthPresenterTests
         var secrets = new FakeSecrets { Stored = null };
         var presenter = new AuthPresenter(new FakeApi { AcceptToken = true }, secrets);
 
-        var result = await presenter.ValidateAndStoreAsync("tok");
+        var result = await presenter.ValidateAndStoreAsync("tok", TestContext.Current.CancellationToken);
 
         Assert.Equal(TokenValidationResult.Valid, result);
         Assert.Equal("tok", secrets.Stored);
@@ -26,7 +26,7 @@ public class AuthPresenterTests
         var secrets = new FakeSecrets { Stored = null };
         var presenter = new AuthPresenter(new FakeApi { TokenUserId = "u7" }, secrets);
 
-        var check = await presenter.ValidateAsync("  tok  ");
+        var check = await presenter.ValidateAsync("  tok  ", TestContext.Current.CancellationToken);
 
         Assert.Equal(new TokenCheck(TokenValidationResult.Valid, "tok", "u7"), check);
         Assert.Null(secrets.Stored);
@@ -38,7 +38,7 @@ public class AuthPresenterTests
         var secrets = new FakeSecrets { Stored = null };
         var presenter = new AuthPresenter(new FakeApi { AcceptToken = false }, secrets);
 
-        var result = await presenter.ValidateAndStoreAsync("bad");
+        var result = await presenter.ValidateAndStoreAsync("bad", TestContext.Current.CancellationToken);
 
         Assert.Equal(TokenValidationResult.Rejected, result);
         Assert.Null(secrets.Stored);
@@ -50,7 +50,7 @@ public class AuthPresenterTests
         var secrets = new FakeSecrets { Stored = null };
         var presenter = new AuthPresenter(new FakeApi { Throw = new TodoistNetworkException("offline") }, secrets);
 
-        var result = await presenter.ValidateAndStoreAsync("tok");
+        var result = await presenter.ValidateAndStoreAsync("tok", TestContext.Current.CancellationToken);
 
         Assert.Equal(TokenValidationResult.NetworkError, result);
         Assert.Null(secrets.Stored);
@@ -63,7 +63,7 @@ public class AuthPresenterTests
         var api = new FakeApi();
         var presenter = new AuthPresenter(api, secrets);
 
-        var result = await presenter.ValidateAndStoreAsync("   ");
+        var result = await presenter.ValidateAndStoreAsync("   ", TestContext.Current.CancellationToken);
 
         Assert.Equal(TokenValidationResult.Rejected, result);
         Assert.Null(secrets.Stored);

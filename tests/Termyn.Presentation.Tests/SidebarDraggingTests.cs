@@ -182,11 +182,11 @@ public class SidebarDraggingTests
         var api = new FakeApi();
         var presenter = NewPresenter(store, api);
 
-        await presenter.CaptureAsync("Fresh");
+        await presenter.CaptureAsync("Fresh", TestContext.Current.CancellationToken);
         var ours = presenter.Rows.Single(r => r.Content == "Fresh").Id;
 
         api.Next = FakeApi.Naming(new Dictionary<string, string> { ["item_add"] = "fresh" });
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Contains(presenter.Rows, r => r.Id == "fresh");
 
         Assert.True(presenter.DropTaskOn(ours, Row(presenter, "project:q")));

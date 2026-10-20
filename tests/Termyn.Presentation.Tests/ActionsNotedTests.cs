@@ -61,11 +61,11 @@ public class ActionsNotedTests
     }
 
     [Fact]
-    public void Creating_a_task_says_what_was_typed()
+    public async Task Creating_a_task_says_what_was_typed()
     {
         var presenter = Seeded();
 
-        presenter.CaptureAsync("Buy milk tomorrow").GetAwaiter().GetResult();
+        await presenter.CaptureAsync("Buy milk tomorrow", TestContext.Current.CancellationToken);
 
         Assert.Equal("Added “Buy milk tomorrow”", Newest(presenter));
     }

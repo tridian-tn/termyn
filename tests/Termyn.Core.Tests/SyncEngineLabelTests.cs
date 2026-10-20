@@ -178,7 +178,7 @@ public class SyncEngineLabelTests
             Changes = [new ResourceChange("items", "7", false, Json.Object("""{"id":"7","content":"Renamed on another device","project_id":"p"}"""))],
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("Renamed on another device", engine.Snapshot().Items.Single().Content);
         Assert.Equal("household", engine.Snapshot().Labels.Single().Name); // our own edit is untouched
@@ -206,7 +206,7 @@ public class SyncEngineLabelTests
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("L9", engine.Snapshot().Labels.Single().Id);
         Assert.Equal(["urgent"], engine.Snapshot().Items.Single().Labels);
@@ -229,7 +229,7 @@ public class SyncEngineLabelTests
             SyncToken = "s2",
             Changes = [new ResourceChange("labels", "l1", false, Json.Object("""{"id":"l1","name":"chores"}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("household", engine.Snapshot().Labels.Single().Name);
     }

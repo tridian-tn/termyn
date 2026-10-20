@@ -57,7 +57,7 @@ public class ServerIdTests
         var temp = engine.AddItem(new JsonObject { ["content"] = "New task" });
 
         Accepting(api, new Dictionary<string, string> { [temp] = "real1" });
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("real1", engine.ServerIdOf(temp));
         Assert.Equal("real1", engine.ServerIdOf("real1"));
@@ -90,7 +90,7 @@ public class ServerIdTests
         };
         var engine = Engine(api);
 
-        await engine.FetchCompletedAsync();
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.False(engine.Holds("done1"));
         Assert.Equal("done1", engine.ServerIdOf("done1"));

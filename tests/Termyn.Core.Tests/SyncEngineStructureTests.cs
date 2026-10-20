@@ -396,7 +396,7 @@ public class SyncEngineStructureTests
             SyncToken = "s2",
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // The server never moved them, and won't resend what never changed there — so nothing but
         // this would ever bring them home.
@@ -421,7 +421,7 @@ public class SyncEngineStructureTests
             SyncToken = "s2",
             Changes = [Json.Change("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","parent_id":"a","child_order":1}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, engine.PendingCount);
         Assert.Equal("q", engine.Snapshot().Items.Single(i => i.Id == "b").ProjectId);
@@ -438,10 +438,10 @@ public class SyncEngineStructureTests
         engine.MoveItemToProject("a", "q");
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands), Changes = [Json.Deleted("items", "c")] };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.DoesNotContain("c", items.Keys);
@@ -469,7 +469,7 @@ public class SyncEngineStructureTests
             SyncStatus = RefusingMoves(commands),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(engine.Snapshot().Items, i => i.Content == "Added offline");
         Assert.Equal("real", added.Id);
@@ -490,7 +490,7 @@ public class SyncEngineStructureTests
         engine.MoveItemToProject("a", "q");
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(engine.Snapshot().Items, i => i.Content == "Added offline");
         Assert.Equal("p", engine.Snapshot().Items.Single(i => i.Id == "a").ProjectId);
@@ -511,7 +511,7 @@ public class SyncEngineStructureTests
         Assert.Equal(added, engine.Snapshot().Items.Single(i => i.Id == "x").ParentId);
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = engine.Snapshot().Items.Single(i => i.Id == "x");
         Assert.Null(x.ParentId);
@@ -551,7 +551,7 @@ public class SyncEngineStructureTests
                 c => c.Type == "item_move" && c.Args["project_id"] is not null ? new CommandResult(true, null, null) : new CommandResult(false, "ERR", "rejected")),
             Changes = [Json.Change("items", "x", """{"id":"x","content":"X","project_id":"q","parent_id":null,"section_id":null,"child_order":1}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = engine.Snapshot().Items.Single(i => i.Id == "x");
         Assert.Equal("q", x.ProjectId);
@@ -581,13 +581,13 @@ public class SyncEngineStructureTests
             Assert.True(engine.MoveItemToProject("x", "q"));
             return new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, engine.PendingCount);
 
         var restarted = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
         restarted.Load();
         api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = restarted.Snapshot().Items.Single(i => i.Id == "x");
         Assert.Null(x.ParentId);
@@ -612,7 +612,7 @@ public class SyncEngineStructureTests
         Assert.True(engine.Snapshot().Items.Single(i => i.Id == "x").Completed);
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = engine.Snapshot().Items.Single(i => i.Id == "x");
         Assert.False(x.Completed);
@@ -634,7 +634,7 @@ public class SyncEngineStructureTests
         Assert.True(engine.MoveItemToProject("a", added));
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
@@ -665,7 +665,7 @@ public class SyncEngineStructureTests
             SyncToken = "s2",
             SyncStatus = commands.Where(c => c.Type == "project_add").ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
@@ -692,7 +692,7 @@ public class SyncEngineStructureTests
         Assert.True(engine.MoveItem("x", 1));
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = Assert.Single(engine.Snapshot().Items);
         Assert.Null(x.ParentId);
@@ -722,7 +722,7 @@ public class SyncEngineStructureTests
                 c => c.TempId == moved ? new CommandResult(true, null, null) : new CommandResult(false, "ERR", "rejected")),
             TempIdMapping = new Dictionary<string, string> { [moved] = "real" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var task = Assert.Single(engine.Snapshot().Items);
         Assert.Equal("real", task.Id);
@@ -748,7 +748,7 @@ public class SyncEngineStructureTests
         Assert.Equal(child, engine.Snapshot().Items.Single(i => i.Id == "x").ParentId);
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = Assert.Single(engine.Snapshot().Items);
         Assert.Equal("x", x.Id);
@@ -772,7 +772,7 @@ public class SyncEngineStructureTests
         Assert.True(engine.IndentItem(added));
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("r", Assert.Single(engine.Snapshot().Items).Id);
         Assert.Equal(0, engine.PendingCount);
@@ -797,7 +797,7 @@ public class SyncEngineStructureTests
         engine.UpdateItem("b", new JsonObject { ["content"] = "B renamed" });
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = RefusingMoves(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.Equal("A renamed", items["a"].Content);
@@ -826,7 +826,7 @@ public class SyncEngineStructureTests
                 c => c.Uuid,
                 c => c.Args["id"]!.ToString() == "a" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var c = engine.Snapshot().Items.Single(i => i.Id == "c");
         Assert.Equal("a", c.ParentId);
@@ -854,7 +854,7 @@ public class SyncEngineStructureTests
             SyncStatus = RefusingMoves(commands),
             TempIdMapping = new Dictionary<string, string> { [parent] = "parent", [child] = "child" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(engine.Snapshot().Items, i => i.Content == "Child");
         Assert.Equal("child", restored.Id);
@@ -881,7 +881,7 @@ public class SyncEngineStructureTests
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
             Changes = [Json.Change("items", "real", """{"id":"real","content":"Added offline","project_id":"p","section_id":"s1","parent_id":"a","child_order":2}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, engine.PendingCount);
         Assert.Equal("q", engine.Snapshot().Items.Single(i => i.Id == "real").ProjectId);
@@ -898,7 +898,7 @@ public class SyncEngineStructureTests
         var api = new FakeApi { Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) } };
         var restarted = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, attemptCeiling: 1);
         restarted.Load();
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(restarted.Snapshot().Items, i => i.Content == "Added offline");
         Assert.Equal("real", added.Id);
@@ -922,7 +922,7 @@ public class SyncEngineStructureTests
         };
         var restarted = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
         restarted.Load();
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, restarted.PendingCount);
         Assert.Equal("q", restarted.Snapshot().Items.Single(i => i.Id == "real").ProjectId);
@@ -941,7 +941,7 @@ public class SyncEngineStructureTests
         engine.MoveItemToProject("a", "other");
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
@@ -965,10 +965,10 @@ public class SyncEngineStructureTests
             Assert.True(engine.MoveItemToProject("a", "other"));
             return new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
@@ -998,10 +998,10 @@ public class SyncEngineStructureTests
                 [commands[1].Uuid] = new(true, null, null),
             },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("other", items[id].ProjectId));
@@ -1030,10 +1030,10 @@ public class SyncEngineStructureTests
                 c => c.Type == "item_move" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
             Changes = [Json.Deleted("projects", "q")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
         Assert.All(["a", "b", "c"], id => Assert.Equal("p", items[id].ProjectId));
@@ -1066,7 +1066,7 @@ public class SyncEngineStructureTests
                 c => c.Uuid,
                 c => c.Type == "section_add" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var x = Assert.Single(engine.Snapshot().Items, i => i.Id == "x");
         Assert.Equal("p", x.ProjectId);
@@ -1087,7 +1087,7 @@ public class SyncEngineStructureTests
         engine.DeleteItem("a");
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // The move fails for good ahead of the delete, which lands.
         api.Next = commands => new SyncResponse
@@ -1097,7 +1097,7 @@ public class SyncEngineStructureTests
                 c => c.Uuid,
                 c => c.Type == "item_move" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(engine.Snapshot().Items, i => i.Id == "a");
         Assert.Equal(1, engine.FailedCount);
@@ -1235,7 +1235,7 @@ public class SyncEngineStructureTests
             SyncToken = "s1",
             SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         // Todoist can't undelete a project, so Ctrl+Z must not quietly reverse the earlier delete.
         Assert.False(engine.Undo());

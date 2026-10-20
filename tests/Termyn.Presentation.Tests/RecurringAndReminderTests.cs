@@ -447,7 +447,7 @@ public class RecurringAndReminderTests
         Assert.True(presenter.RemindersAvailable);
 
         api.Throw = new TodoistAuthException("rejected");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync(TestContext.Current.CancellationToken));
 
         // Held, plan and all, while the account waits for a token.
         Assert.True(presenter.RemindersAvailable);

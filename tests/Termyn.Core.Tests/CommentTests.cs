@@ -101,7 +101,7 @@ public class CommentTests
             };
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var comment = Assert.Single(engine.CommentsFor("i1"));
         Assert.Equal("n-real", comment.Id);
@@ -120,7 +120,7 @@ public class CommentTests
             Changes = [Json.Change("notes", "n9", """{"id":"n9","item_id":"i1","content":"from the web"}""")],
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("from the web", Assert.Single(engine.CommentsFor("i1")).Content);
     }
@@ -184,7 +184,7 @@ public class CommentTests
             Changes = [Json.Change("project_notes", "pn1", """{"id":"pn1","project_id":"p1","content":"the server's copy"}""")],
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("my edit, not yet sent", Assert.Single(engine.CommentsFor("p1")).Content);
     }
@@ -202,7 +202,7 @@ public class CommentTests
             TempIdMapping = new Dictionary<string, string> { [commands[0].TempId!] = "pn-real" },
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("pn-real", Assert.Single(engine.CommentsFor("p1")).Id);
     }

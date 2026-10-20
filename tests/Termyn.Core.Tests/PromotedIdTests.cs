@@ -68,7 +68,7 @@ public class PromotedIdTests
             TempIdMapping = new Dictionary<string, string> { [temp] = "real1" },
             Changes = [Json.Change("items", "real1", """{"id":"real1","content":"New task"}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var restarted = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
         restarted.Load();
@@ -181,7 +181,7 @@ public class PromotedIdTests
             SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "p9" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         engine.RenameProject(temp, "Renamed");
 

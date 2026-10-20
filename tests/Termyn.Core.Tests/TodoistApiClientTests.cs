@@ -23,8 +23,8 @@ public class TodoistApiClientTests
         // Raced against a clock rather than simply awaited: without the deadline it never returns at
         // all, and a test that hangs forever is a worse thing to leave in CI than one that fails.
         // As a Task, because racing it against a timer needs one and this hands back a ValueTask.
-        var running = Record.ExceptionAsync(() => client.SyncAsync("tok", "*", ["items"], [])).AsTask();
-        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10)));
+        var running = Record.ExceptionAsync(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken)).AsTask();
+        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         Assert.Same(running, finished);
         // A cancellation, not some other failure — the point is that the deadline is what ended it.
@@ -85,7 +85,7 @@ public class TodoistApiClientTests
         """;
         var client = ClientReturning(HttpStatusCode.OK, json);
 
-        var result = await client.SyncAsync("tok", "*", ["items", "projects"], []);
+        var result = await client.SyncAsync("tok", "*", ["items", "projects"], [], TestContext.Current.CancellationToken);
 
         Assert.Equal("next", result.SyncToken);
         Assert.True(result.FullSync);
@@ -111,7 +111,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, "{}");
 
-        var result = await client.SyncAsync("tok", "*", ["items"], []);
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
 
         Assert.Empty(result.Changes);
         Assert.Empty(result.SyncStatus);
@@ -123,7 +123,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":{"error_code":15}}}""");
 
-        var result = await client.SyncAsync("tok", "*", ["items"], []);
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
 
         var status = result.SyncStatus["u"];
         Assert.False(status.Ok);
@@ -136,7 +136,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"items":[{"id":123,"content":"A"}]}""");
 
-        var result = await client.SyncAsync("tok", "*", ["items"], []);
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
 
         Assert.Equal("123", result.Changes.Single().Id);
     }
@@ -148,7 +148,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, $$"""{"items":[{"id":"i1","is_deleted":{{flag}}}]}""");
 
-        var result = await client.SyncAsync("tok", "*", ["items"], []);
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
 
         Assert.True(result.Changes.Single().IsDeleted);
     }
@@ -158,7 +158,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, "{ this is not json");
 
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -167,14 +167,14 @@ public class TodoistApiClientTests
     public async Task ValidateToken_returns_false_when_rejected(HttpStatusCode status)
     {
         var client = ClientReturning(status, "{}");
-        Assert.False((await client.ValidateTokenAsync("bad")).Accepted);
+        Assert.False((await client.ValidateTokenAsync("bad", TestContext.Current.CancellationToken)).Accepted);
     }
 
     [Fact]
     public async Task ValidateToken_returns_true_on_success()
     {
         var client = ClientReturning(HttpStatusCode.OK, """{ "sync_token": "x" }""");
-        Assert.True((await client.ValidateTokenAsync("good")).Accepted);
+        Assert.True((await client.ValidateTokenAsync("good", TestContext.Current.CancellationToken)).Accepted);
     }
 
     [Fact]
@@ -182,7 +182,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{ "sync_token": "x", "user": { "id": "2671355", "full_name": "Someone" } }""");
 
-        var probe = await client.ValidateTokenAsync("good");
+        var probe = await client.ValidateTokenAsync("good", TestContext.Current.CancellationToken);
 
         Assert.True(probe.Accepted);
         Assert.Equal("2671355", probe.UserId);
@@ -195,7 +195,7 @@ public class TodoistApiClientTests
         // was another account's.
         var client = ClientReturning(HttpStatusCode.OK, "{ this is not json");
 
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.ValidateTokenAsync("good"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.ValidateTokenAsync("good", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{ "sync_token": "x" }""");
 
-        var probe = await client.ValidateTokenAsync("good");
+        var probe = await client.ValidateTokenAsync("good", TestContext.Current.CancellationToken);
 
         Assert.True(probe.Accepted);
         Assert.Null(probe.UserId);
@@ -213,7 +213,7 @@ public class TodoistApiClientTests
     public async Task ValidateToken_throws_network_on_server_error()
     {
         var client = ClientReturning(HttpStatusCode.InternalServerError, "{}");
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.ValidateTokenAsync("tok"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.ValidateTokenAsync("tok", TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -222,28 +222,28 @@ public class TodoistApiClientTests
     public async Task Sync_throws_auth_when_token_rejected(HttpStatusCode status)
     {
         var client = ClientReturning(status, "{}");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        await Assert.ThrowsAsync<TodoistAuthException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Sync_throws_network_on_server_error()
     {
         var client = ClientReturning(HttpStatusCode.ServiceUnavailable, "{}");
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Sync_wraps_transport_failure_as_network()
     {
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Sync_wraps_timeout_as_network()
     {
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new TaskCanceledException("timeout"))));
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -262,7 +262,7 @@ public class TodoistApiClientTests
         var client = new TodoistApiClient(new HttpClient(handler));
         var command = new Command("item_add", "uuid-1", "temp-1", new JsonObject { ["content"] = "Hi" });
 
-        await client.SyncAsync("secret-token", "*", ["items", "projects"], [command]);
+        await client.SyncAsync("secret-token", "*", ["items", "projects"], [command], TestContext.Current.CancellationToken);
 
         Assert.Equal("secret-token", handler.LastRequest!.Headers.Authorization!.Parameter);
         var decoded = Uri.UnescapeDataString(handler.LastBody!.Replace("+", " "));
@@ -280,7 +280,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}", r => r.Headers.Add("Retry-After", "42"));
 
-        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
 
         Assert.Equal(TimeSpan.FromSeconds(42), ex.RetryAfter);
     }
@@ -290,7 +290,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}");
 
-        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.QuickAddAsync("tok", "A"));
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken));
 
         Assert.Null(ex.RetryAfter);
     }
@@ -301,7 +301,7 @@ public class TodoistApiClientTests
         var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
             r => r.Headers.Add("Retry-After", DateTimeOffset.UtcNow.AddMinutes(-5).ToString("R")));
 
-        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.ValidateTokenAsync("tok"));
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.ValidateTokenAsync("tok", TestContext.Current.CancellationToken));
 
         Assert.Equal(TimeSpan.Zero, ex.RetryAfter);
     }
@@ -312,7 +312,7 @@ public class TodoistApiClientTests
         var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}",
             r => r.Headers.Add("Retry-After", DateTimeOffset.UtcNow.AddSeconds(90).ToString("R")));
 
-        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], []));
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
 
         // A few seconds of slack: the header has one-second resolution and time passes in between.
         Assert.InRange(ex.RetryAfter!.Value, TimeSpan.FromSeconds(80), TimeSpan.FromSeconds(95));
@@ -325,7 +325,7 @@ public class TodoistApiClientTests
             r => r.Headers.Add("Retry-After", "12"));
 
         var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() =>
-            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow)));
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow), TestContext.Current.CancellationToken));
 
         Assert.Equal(TimeSpan.FromSeconds(12), ex.RetryAfter);
     }
@@ -340,7 +340,7 @@ public class TodoistApiClientTests
         var since = new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero);
         var until = new DateTimeOffset(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);
 
-        await client.GetCompletedAsync("secret-token", new CompletedQuery(since, until, Cursor: "c-1", Limit: 100));
+        await client.GetCompletedAsync("secret-token", new CompletedQuery(since, until, Cursor: "c-1", Limit: 100), TestContext.Current.CancellationToken);
 
         var uri = handler.LastRequest!.RequestUri!;
         Assert.Equal(HttpMethod.Get, handler.LastRequest.Method);
@@ -361,7 +361,7 @@ public class TodoistApiClientTests
         var client = new TodoistApiClient(new HttpClient(handler));
         var since = new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.FromHours(2));
 
-        await client.GetCompletedAsync("tok", new CompletedQuery(since, since.AddDays(1)));
+        await client.GetCompletedAsync("tok", new CompletedQuery(since, since.AddDays(1)), TestContext.Current.CancellationToken);
 
         var query = Uri.UnescapeDataString(handler.LastRequest!.RequestUri!.Query);
         Assert.Contains("since=2026-05-01T07:00:00Z", query);
@@ -382,7 +382,7 @@ public class TodoistApiClientTests
         """;
         var client = ClientReturning(HttpStatusCode.OK, json);
 
-        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow));
+        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
 
         Assert.Equal("page-2", page.NextCursor);
         var item = Assert.Single(page.Items);
@@ -397,7 +397,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"items":[],"next_cursor":null}""");
 
-        Assert.Null((await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))).NextCursor);
+        Assert.Null((await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken)).NextCursor);
     }
 
     [Theory]
@@ -407,7 +407,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(status, "{}");
         await Assert.ThrowsAsync<TodoistAuthException>(() =>
-            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -417,7 +417,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, body);
         await Assert.ThrowsAsync<TodoistNetworkException>(() =>
-            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -425,7 +425,7 @@ public class TodoistApiClientTests
     {
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
         await Assert.ThrowsAsync<TodoistNetworkException>(() =>
-            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+            client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -433,7 +433,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"items":{},"next_cursor":null}""");
 
-        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        var page = await client.GetCompletedAsync("tok", new CompletedQuery(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), TestContext.Current.CancellationToken);
 
         Assert.Empty(page.Items);
     }
@@ -457,7 +457,7 @@ public class TodoistApiClientTests
         var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"id":"srv1","content":"A"}"""));
         var client = new TodoistApiClient(new HttpClient(handler));
 
-        await client.QuickAddAsync("secret-token", "Email report #Work p1");
+        await client.QuickAddAsync("secret-token", "Email report #Work p1", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
         Assert.Equal("https://api.todoist.com/api/v1/tasks/quick_add", handler.LastRequest.RequestUri!.ToString());
@@ -470,7 +470,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"id":"srv1","content":"A","priority":4}""");
 
-        var created = await client.QuickAddAsync("tok", "A");
+        var created = await client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken);
 
         Assert.Equal("items", created.ResourceType);
         Assert.Equal("srv1", created.Id);
@@ -483,7 +483,7 @@ public class TodoistApiClientTests
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"id":123,"content":"A"}""");
 
-        Assert.Equal("123", (await client.QuickAddAsync("tok", "A")).Id);
+        Assert.Equal("123", (await client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken)).Id);
     }
 
     [Theory]
@@ -492,14 +492,14 @@ public class TodoistApiClientTests
     public async Task Quick_add_throws_auth_when_rejected(HttpStatusCode status)
     {
         var client = ClientReturning(status, "{}");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => client.QuickAddAsync("tok", "A"));
+        await Assert.ThrowsAsync<TodoistAuthException>(() => client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Quick_add_throws_network_on_server_error()
     {
         var client = ClientReturning(HttpStatusCode.InternalServerError, "{}");
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken));
     }
 
     [Theory]
@@ -508,14 +508,14 @@ public class TodoistApiClientTests
     public async Task Quick_add_reports_an_unusable_body_as_a_network_failure(string body)
     {
         var client = ClientReturning(HttpStatusCode.OK, body);
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Quick_add_wraps_transport_failure_as_network()
     {
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => throw new HttpRequestException("down"))));
-        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A"));
+        await Assert.ThrowsAsync<TodoistNetworkException>(() => client.QuickAddAsync("tok", "A", TestContext.Current.CancellationToken));
     }
 
     [Fact]

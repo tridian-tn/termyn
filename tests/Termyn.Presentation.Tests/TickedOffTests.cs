@@ -114,7 +114,7 @@ public class TickedOffTests
         // It's on the list because it's finished, not because it was just ticked off — and a task
         // counted by both would appear twice.
         var (presenter, _) = Seeded();
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         presenter.Complete("a");
 
@@ -189,7 +189,7 @@ public class TickedOffTests
     public async Task With_finished_work_on_show_it_stays_where_it_was_and_then_joins_it()
     {
         var (presenter, clock) = Seeded();
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
         var before = presenter.Rows.Select(r => r.Id).ToList();
 
         presenter.Complete("a");

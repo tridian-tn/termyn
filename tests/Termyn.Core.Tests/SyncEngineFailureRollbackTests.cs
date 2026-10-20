@@ -23,8 +23,8 @@ public class SyncEngineFailureRollbackTests
         engine.DeleteProject("p1");
         Fails(api, engine);
 
-        await engine.SyncAsync();
-        await engine.SyncAsync(); // the ceiling is two attempts
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken); // the ceiling is two attempts
 
         var snapshot = engine.Snapshot();
         Assert.Equal("Work", snapshot.Projects.Single(p => p.Id == "p1").Name);
@@ -44,8 +44,8 @@ public class SyncEngineFailureRollbackTests
         engine.DeleteLabel("l1");
         Fails(api, engine);
 
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("home", engine.Snapshot().Labels.Single().Name);
         Assert.Equal(["home"], engine.Snapshot().Items.Single().Labels);
@@ -70,7 +70,7 @@ public class SyncEngineFailureRollbackTests
                 c => c.Uuid,
                 c => c.Type == "label_delete" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var task = engine.Snapshot().Items.Single();
         Assert.Equal("Edited", task.Content);
@@ -94,7 +94,7 @@ public class SyncEngineFailureRollbackTests
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
             Changes = [new ResourceChange("items", "i1", false, Json.Object("""{"id":"i1","content":"Edited elsewhere","project_id":"p1","labels":["home"]}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Undo());
         var task = engine.Snapshot().Items.Single();
@@ -119,10 +119,10 @@ public class SyncEngineFailureRollbackTests
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
             Changes = [new ResourceChange("items", "i1", false, Json.Object("""{"id":"i1","content":"Task","project_id":"p1","labels":["home","errand"]}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Fails(api, engine);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["home", "errand"], engine.Snapshot().Items.Single().Labels);
     }
@@ -145,7 +145,7 @@ public class SyncEngineFailureRollbackTests
                 c => c.Uuid,
                 c => c.Type == "label_delete" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["work"], engine.Snapshot().Items.Single().Labels);
         Assert.Equal("home", engine.Snapshot().Labels.Single().Name);
@@ -160,8 +160,8 @@ public class SyncEngineFailureRollbackTests
         engine.UpdateItem("i1", new JsonObject { ["content"] = "Renamed" });
         Fails(api, engine);
 
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("Task", engine.Snapshot().Items.Single().Content);
     }
@@ -176,8 +176,8 @@ public class SyncEngineFailureRollbackTests
         engine.DeleteProject("p1");
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(engine.Snapshot().Projects);
         Assert.Equal(1, engine.FailedCount);
@@ -194,8 +194,8 @@ public class SyncEngineFailureRollbackTests
         engine.AddItem(new JsonObject { ["content"] = "Written offline" });
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Written offline"], engine.Snapshot().Items.Select(i => i.Content));
         Assert.Equal(1, engine.FailedCount);
@@ -210,15 +210,15 @@ public class SyncEngineFailureRollbackTests
 
         engine.DeleteProject("p1");
         Fails(api, engine);
-        await engine.SyncAsync();
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         api.Response = new SyncResponse
         {
             SyncToken = "s3",
             Changes = [new ResourceChange("projects", "p1", false, Json.Object("""{"id":"p1","name":"Renamed elsewhere"}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("Renamed elsewhere", engine.Snapshot().Projects.Single(p => p.Id == "p1").Name);
     }
@@ -244,7 +244,7 @@ public class SyncEngineFailureRollbackTests
                 c => c.Type == "item_update" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var added = Assert.Single(engine.Snapshot().Items, i => i.Id != "i1");
         Assert.Equal("real", added.Id);
@@ -275,10 +275,10 @@ public class SyncEngineFailureRollbackTests
                 TempIdMapping = new Dictionary<string, string> { [parent] = "parent", [child] = "child" },
             };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Fails(api, engine);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(engine.Snapshot().Items, i => i.Content == "Child");
         Assert.Equal("child", restored.Id);
@@ -306,11 +306,11 @@ public class SyncEngineFailureRollbackTests
                 c => c.Type == "item_update" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
             TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var (restarted, restartedApi) = Engine(store);
         Fails(restartedApi, restarted);
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, restarted.FailedCount);
         var added = Assert.Single(restarted.Snapshot().Items, i => i.Id != "i1");
@@ -339,7 +339,7 @@ public class SyncEngineFailureRollbackTests
                 TempIdMapping = new Dictionary<string, string> { [parent] = "parent", [child] = "child" },
             };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var restarted = Reload(store);
         Assert.True(restarted.Undo());
@@ -368,7 +368,7 @@ public class SyncEngineFailureRollbackTests
                 TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
             };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var restarted = Reload(store);
         Assert.True(restarted.Undo());
@@ -393,7 +393,7 @@ public class SyncEngineFailureRollbackTests
         engine.DeleteProject("p1");
         Fails(api, engine);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var snapshot = engine.Snapshot();
         Assert.Equal("Work", snapshot.Projects.Single(p => p.Id == "p1").Name);
@@ -414,7 +414,7 @@ public class SyncEngineFailureRollbackTests
         engine.DeleteLabel("l1");
         Fails(api, engine);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Task"], engine.Snapshot().Items.Select(i => i.Content));
         Assert.Equal(["home"], engine.Snapshot().Items.Single().Labels);
@@ -433,7 +433,7 @@ public class SyncEngineFailureRollbackTests
         engine.DeleteProject("p1");
         Fails(api, engine);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Undo());
         Assert.Equal("Work", engine.Snapshot().Projects.Single(p => p.Id == "p1").Name);
@@ -459,7 +459,7 @@ public class SyncEngineFailureRollbackTests
                 .Where(c => c.Type == "project_delete")
                 .ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var kept = Assert.Single(engine.Snapshot().Items, i => i.Content == "Written offline");
         Assert.Equal(temp, kept.Id);
@@ -486,11 +486,11 @@ public class SyncEngineFailureRollbackTests
                 SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
             };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var (restarted, restartedApi) = Engine(store, attemptCeiling: 1);
         Fails(restartedApi, restarted);
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(1, restarted.FailedCount);
         Assert.Equal("Work", restarted.Snapshot().Projects.Single(p => p.Id == "p1").Name);
@@ -519,11 +519,11 @@ public class SyncEngineFailureRollbackTests
                 TempIdMapping = new Dictionary<string, string> { [temp] = "real" },
             };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var (restarted, restartedApi) = Engine(store, attemptCeiling: 1);
         Fails(restartedApi, restarted);
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         var restored = Assert.Single(restarted.Snapshot().Items, i => i.Content == "Written offline");
         Assert.Equal("real", restored.Id);
@@ -541,12 +541,12 @@ public class SyncEngineFailureRollbackTests
 
         engine.MoveItemToProject("i1", "q");
         Fails(api, engine);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         var failed = engine.Outbox.Single(c => c.State == OutboxState.Failed).Uuid;
 
         engine.MoveItemToProject("i1", "r");
         Lands(api, """{"id":"i1","content":"Task","project_id":"r","labels":["home"]}""");
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         engine.Revert(failed);
 
@@ -562,12 +562,12 @@ public class SyncEngineFailureRollbackTests
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "Renamed" });
         Fails(api, engine);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         var failed = engine.Outbox.Single(c => c.State == OutboxState.Failed).Uuid;
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "Renamed again" });
         Lands(api, """{"id":"i1","content":"Renamed again","project_id":"p1","labels":["home"]}""");
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         engine.Revert(failed);
 
@@ -584,7 +584,7 @@ public class SyncEngineFailureRollbackTests
 
         engine.MoveItemToProject("i1", "q");
         Fails(api, engine);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         var failed = engine.Outbox.Single(c => c.State == OutboxState.Failed).Uuid;
 
         api.Next = _ => new SyncResponse
@@ -592,13 +592,13 @@ public class SyncEngineFailureRollbackTests
             SyncToken = "s3",
             Changes = [Json.Change("items", "i1", """{"id":"i1","content":"Task","project_id":"r","labels":["home"]}""")],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         engine.MoveItemToProject("i1", "q2");
         engine.Revert(failed);
 
         Fails(api, engine);
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("r", engine.Snapshot().Items.Single().ProjectId);
     }
@@ -674,7 +674,7 @@ public class SyncEngineFailureRollbackTests
             SyncToken = "s2",
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
-        await restarted.SyncAsync();
+        await restarted.SyncAsync(TestContext.Current.CancellationToken);
 
         // Ctrl+Z should still reach the completion underneath it.
         Assert.True(restarted.Undo());

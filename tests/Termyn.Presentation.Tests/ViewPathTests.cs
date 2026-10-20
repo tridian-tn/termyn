@@ -367,7 +367,7 @@ public class ViewPathTests
         presenter.Select(ViewSelection.OfProject("inner"));
         presenter.Search("task");
 
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal("Search results", Reads(presenter));
 
         presenter.Search(string.Empty);

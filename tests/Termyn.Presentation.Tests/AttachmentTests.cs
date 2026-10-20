@@ -109,7 +109,7 @@ public sealed class AttachmentTests : IDisposable
 
         Assert.False(presenter.IsAttachmentHeld(file));
 
-        var result = await presenter.FetchAttachmentAsync(file);
+        var result = await presenter.FetchAttachmentAsync(file, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Ready, result.Outcome);
         Assert.True(presenter.IsAttachmentHeld(file));
@@ -121,7 +121,7 @@ public sealed class AttachmentTests : IDisposable
         // A presenter built without a fetcher — which is how most of the tests here run.
         var presenter = Seeded(withFetcher: false);
 
-        var result = await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false));
+        var result = await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Failed, result.Outcome);
         Assert.NotNull(result.Message);
@@ -137,7 +137,7 @@ public sealed class AttachmentTests : IDisposable
     public async Task Clearing_the_downloads_takes_them_all()
     {
         var presenter = Seeded();
-        await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false));
+        await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, presenter.ClearDownloads());
         Assert.Equal(0, presenter.ClearDownloads());
@@ -147,7 +147,7 @@ public sealed class AttachmentTests : IDisposable
     public async Task Tightening_the_caps_sweeps_at_once_rather_than_at_the_next_start()
     {
         var presenter = Seeded();
-        await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false));
+        await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false), ct: TestContext.Current.CancellationToken);
 
         presenter.SetDownloadLimits(new CacheLimits(1, TimeSpan.FromDays(14)));
 

@@ -29,7 +29,7 @@ public class TextCatalogueTests
         var client = new TodoistApiClient(new HttpClient(new UnreachableHandler()));
 
         var thrown = await Assert.ThrowsAsync<TodoistNetworkException>(
-            async () => await client.SyncAsync("tok", "*", ["items"], []));
+            async () => await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
 
         Assert.Equal("Could not reach Todoist.", thrown.Message);
     }
@@ -50,7 +50,7 @@ public class TextCatalogueTests
 
             var client = new TodoistApiClient(new HttpClient(new UnreachableHandler()));
             var thrown = await Assert.ThrowsAsync<TodoistNetworkException>(
-                async () => await client.SyncAsync("tok", "*", ["items"], []));
+                async () => await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
 
             Assert.NotEmpty(thrown.Message);
         }

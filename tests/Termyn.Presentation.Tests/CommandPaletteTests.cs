@@ -175,7 +175,7 @@ public class CommandPaletteTests
 
         Assert.False(CheckedFor(presenter, AppCommand.ToggleCompleted));
 
-        Assert.True(await presenter.ToggleCompletedAsync());
+        Assert.True(await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
 
         Assert.True(CheckedFor(presenter, AppCommand.ToggleCompleted));
 
@@ -244,7 +244,7 @@ public class CommandPaletteTests
         Assert.Equal("Completed tasks", before.Label);
         Assert.False(before.Checked);
 
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         var after = presenter.Palette("").Single(e => e.Command == AppCommand.ToggleCompleted);
         Assert.Equal("Completed tasks", after.Label);

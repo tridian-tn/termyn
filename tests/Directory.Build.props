@@ -2,8 +2,12 @@
 
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
+  <!-- Warnings fail the build here as they do in src/. A test project that only warns still builds
+       and passes CI, so nobody sees them, and they'd built up to over four hundred before anyone
+       did. Set once here so a test project added later gets it too. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <!-- A v3 test project runs itself rather than waiting to be loaded by a runner, so it builds as

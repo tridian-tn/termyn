@@ -37,11 +37,11 @@ public sealed class AttachmentFetcherTests : IDisposable
     [Fact]
     public async Task A_file_is_fetched_and_can_then_be_opened()
     {
-        var result = await Fetcher().FetchAsync(File());
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Ready, result.Outcome);
         Assert.NotNull(result.Path);
-        Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, await System.IO.File.ReadAllBytesAsync(result.Path!));
+        Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, await System.IO.File.ReadAllBytesAsync(result.Path!, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -50,8 +50,8 @@ public sealed class AttachmentFetcherTests : IDisposable
         // The point of the cache: reopening the same file is free, and a hundred-megabyte
         // attachment is not fetched again every time somebody clicks it.
         var fetcher = Fetcher();
-        await fetcher.FetchAsync(File());
-        await fetcher.FetchAsync(File());
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Single(_api.Downloaded);
     }
@@ -65,11 +65,11 @@ public sealed class AttachmentFetcherTests : IDisposable
         // thread pool, so a report can still be landing while the assert below reads what's here,
         // and a list read mid-add throws.
         var seen = new System.Collections.Concurrent.ConcurrentBag<long>();
-        await Fetcher().FetchAsync(File(), new Progress<long>(seen.Add));
+        await Fetcher().FetchAsync(File(), new Progress<long>(seen.Add), TestContext.Current.CancellationToken);
 
         // Given a moment to land before reading it.
         for (var i = 0; i < 50 && seen.IsEmpty; i++)
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(seen);
     }
@@ -80,7 +80,7 @@ public sealed class AttachmentFetcherTests : IDisposable
         var fetcher = Fetcher();
         Assert.False(fetcher.IsHeld(File()));
 
-        await fetcher.FetchAsync(File());
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.True(fetcher.IsHeld(File()));
     }
@@ -92,7 +92,7 @@ public sealed class AttachmentFetcherTests : IDisposable
     {
         _api.TransferThrow = new TodoistNetworkException("offline");
 
-        var result = await Fetcher().FetchAsync(File());
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Offline, result.Outcome);
         Assert.Null(result.Path);
@@ -106,7 +106,7 @@ public sealed class AttachmentFetcherTests : IDisposable
         _api.TransferThrow = new TodoistNetworkException("offline");
         var fetcher = Fetcher();
 
-        await fetcher.FetchAsync(File());
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.False(fetcher.IsHeld(File()));
         Assert.True(
@@ -121,7 +121,7 @@ public sealed class AttachmentFetcherTests : IDisposable
         // Todoist returned a 500 — and it tells the user to wait for something that won't happen.
         _api.TransferThrow = new TodoistNetworkException("Todoist returned HTTP 500.", 500);
 
-        var result = await Fetcher().FetchAsync(File());
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Failed, result.Outcome);
         Assert.DoesNotContain("back online", result.Message);
@@ -130,7 +130,7 @@ public sealed class AttachmentFetcherTests : IDisposable
     [Fact]
     public async Task A_file_the_server_is_still_processing_is_not_fetched_at_all()
     {
-        var result = await Fetcher().FetchAsync(File(pending: true));
+        var result = await Fetcher().FetchAsync(File(pending: true), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Pending, result.Outcome);
         Assert.Empty(_api.Downloaded);
@@ -140,7 +140,7 @@ public sealed class AttachmentFetcherTests : IDisposable
     [Fact]
     public async Task An_attachment_naming_no_file_says_so_rather_than_trying()
     {
-        var result = await Fetcher().FetchAsync(File(url: string.Empty));
+        var result = await Fetcher().FetchAsync(File(url: string.Empty), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Missing, result.Outcome);
         Assert.Empty(_api.Downloaded);
@@ -151,7 +151,7 @@ public sealed class AttachmentFetcherTests : IDisposable
     {
         _secrets.Stored = null;
 
-        var result = await Fetcher().FetchAsync(File());
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Offline, result.Outcome);
         Assert.Empty(_api.Downloaded);
@@ -164,7 +164,7 @@ public sealed class AttachmentFetcherTests : IDisposable
         // the user to do something about it.
         _api.TransferThrow = new TodoistAuthException("rejected");
 
-        var result = await Fetcher().FetchAsync(File());
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Failed, result.Outcome);
         Assert.Contains("token", result.Message);
@@ -193,7 +193,7 @@ public sealed class AttachmentFetcherTests : IDisposable
         var cache = new AttachmentCache(_directory, new CacheLimits(4, TimeSpan.FromDays(14)));
         var fetcher = new AttachmentFetcher(_api, _secrets, cache);
 
-        await fetcher.FetchAsync(File());
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.True(cache.Size() <= 4, $"the cache holds {cache.Size()} bytes against a cap of 4");
     }

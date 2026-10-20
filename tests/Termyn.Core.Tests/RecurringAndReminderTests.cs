@@ -78,7 +78,7 @@ public class RecurringAndReminderTests
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
             Changes = [new ResourceChange("items", "r1", false, Json.Object("""{"id":"r1","content":"Water plants","project_id":"p","due":{"date":"2026-08-01","string":"every day","is_recurring":true}}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(engine.Snapshot().Closing);
         Assert.Equal("2026-08-01", engine.Snapshot().Items.Single(i => i.Id == "r1").DueDate);
@@ -99,10 +99,10 @@ public class RecurringAndReminderTests
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
         };
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Contains("r1", engine.Snapshot().Closing);
 
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Empty(engine.Snapshot().Closing);
     }
 
@@ -259,7 +259,7 @@ public class RecurringAndReminderTests
             TempIdMapping = new Dictionary<string, string> { [temp!] = "M9" },
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         var reminder = engine.Snapshot().Reminders.Single();
         Assert.Equal("M9", reminder.Id);
@@ -328,7 +328,7 @@ public class RecurringAndReminderTests
             SyncToken = "s2",
             Changes = [new ResourceChange("items", "r1", false, Json.Object("""{"id":"r1","content":"Water plants","due":{"date":"2026-08-01","string":"every day","is_recurring":true}}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("2026-08-01", engine.Snapshot().Items.Single(i => i.Id == "r1").DueDate);
     }
@@ -348,7 +348,7 @@ public class RecurringAndReminderTests
             SyncToken = "s2",
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.False(engine.Undo());
         Assert.Empty(engine.Outbox);
@@ -412,7 +412,7 @@ public class RecurringAndReminderTests
             TempIdMapping = new Dictionary<string, string> { [taskId] = "I9" },
             SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("I9", engine.Snapshot().Reminders.Single().ItemId);
     }
@@ -435,7 +435,7 @@ public class RecurringAndReminderTests
                 .Where(c => c.Type == "item_add")
                 .ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(engine.Snapshot().Reminders);
         Assert.Empty(engine.Outbox);
@@ -511,7 +511,7 @@ public class RecurringAndReminderTests
             FullSync = true,
             Changes = [new ResourceChange("items", "i1", false, Json.Object("""{"id":"i1","content":"Still there"}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["i1"], engine.Snapshot().Items.Select(i => i.Id));
     }
@@ -529,7 +529,7 @@ public class RecurringAndReminderTests
         engine.AddItem(new JsonObject { ["content"] = "Written offline" });
 
         api.Response = new SyncResponse { SyncToken = "s2", FullSync = true, Changes = [] };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains(engine.Snapshot().Items, i => i.Content == "Written offline");
     }
@@ -628,7 +628,7 @@ public class RecurringAndReminderTests
             engine.CompleteItem("i1");
             return new SyncResponse { SyncToken = "s2" };
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Snapshot().Items.Single(i => i.Id == "i1").Completed);
     }
@@ -669,7 +669,7 @@ public class RecurringAndReminderTests
             SyncToken = "s2",
             Changes = [new ResourceChange("reminders", "M1", false, Json.Object("""{"id":"M1","item_id":"i1","type":"relative","minute_offset":45}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(45, engine.Snapshot().Reminders.Single().MinuteOffset);
 
         api.Response = new SyncResponse
@@ -677,7 +677,7 @@ public class RecurringAndReminderTests
             SyncToken = "s3",
             Changes = [new ResourceChange("reminders", "M1", true, Json.Object("""{"id":"M1"}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Empty(engine.Snapshot().Reminders);
     }
 
@@ -695,7 +695,7 @@ public class RecurringAndReminderTests
             SyncToken = "s2",
             Changes = [new ResourceChange("user_plan_limits", "user_plan_limits", false, Json.Object("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":700}}"""))],
         };
-        await engine.SyncAsync();
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Snapshot().RemindersAvailable);
         Assert.Equal(700, engine.Snapshot().PlanLimits!.MaxTimeReminders);

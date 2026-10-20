@@ -31,7 +31,7 @@ public class MainPresenterTests
         };
         var presenter = NewPresenter(api, new InMemorySnapshotStore());
 
-        await presenter.LoadAsync();
+        await presenter.LoadAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new[] { "First", "Second" }, presenter.Rows.Select(r => r.Content).ToArray());
         Assert.Equal("Work", presenter.Rows.Single(r => r.Content == "Second").Project);
@@ -46,7 +46,7 @@ public class MainPresenterTests
 
         var publishes = new List<int>();
         presenter.RowsChanged += () => publishes.Add(presenter.Rows.Count);
-        await presenter.LoadAsync();
+        await presenter.LoadAsync(TestContext.Current.CancellationToken);
 
         // Two publishes: the cached view first, then the reconciled one.
         Assert.Equal(2, publishes.Count);
@@ -58,7 +58,7 @@ public class MainPresenterTests
     {
         var presenter = NewPresenter(new FakeApi { Throw = new TodoistNetworkException("offline") }, SeededStore());
 
-        await presenter.LoadAsync();
+        await presenter.LoadAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("Cached task", presenter.Rows.Single().Content);
         Assert.True(presenter.IsOffline);
@@ -70,12 +70,12 @@ public class MainPresenterTests
     {
         var api = new FakeApi { Throw = new TodoistNetworkException("offline") };
         var presenter = NewPresenter(api, SeededStore());
-        await presenter.LoadAsync();
+        await presenter.LoadAsync(TestContext.Current.CancellationToken);
         Assert.True(presenter.IsOffline);
 
         api.Throw = null;
         api.Response = new SyncResponse { SyncToken = "s1" };
-        await presenter.SyncAsync();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.False(presenter.IsOffline);
         Assert.DoesNotContain("offline", presenter.Status, StringComparison.OrdinalIgnoreCase);
@@ -88,7 +88,7 @@ public class MainPresenterTests
         var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
         var presenter = new MainPresenter(engine, Parser());
 
-        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.LoadAsync());
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.LoadAsync(TestContext.Current.CancellationToken));
         Assert.Null(secrets.Stored);
     }
 
@@ -113,7 +113,7 @@ public class MainPresenterTests
         };
         var presenter = NewPresenter(api, new InMemorySnapshotStore());
 
-        await presenter.CaptureAsync("Email report tomorrow p1");
+        await presenter.CaptureAsync("Email report tomorrow p1", TestContext.Current.CancellationToken);
 
         Assert.Equal(1, api.QuickAddCalls);
         Assert.Equal("Email report tomorrow p1", presenter.Rows.Single().Content);
@@ -125,7 +125,7 @@ public class MainPresenterTests
     {
         var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore()); // QuickAdd unset = unreachable
 
-        await presenter.CaptureAsync("Email report tomorrow p1 @followup");
+        await presenter.CaptureAsync("Email report tomorrow p1 @followup", TestContext.Current.CancellationToken);
 
         var row = presenter.Rows.Single();
         Assert.Equal("Email report", row.Content);
@@ -139,7 +139,7 @@ public class MainPresenterTests
     {
         var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
 
-        await presenter.CaptureAsync("#Work p1");
+        await presenter.CaptureAsync("#Work p1", TestContext.Current.CancellationToken);
 
         Assert.Equal("#Work p1", presenter.Rows.Single().Content);
     }
@@ -150,7 +150,7 @@ public class MainPresenterTests
         var api = new FakeApi();
         var presenter = NewPresenter(api, new InMemorySnapshotStore());
 
-        await presenter.CaptureAsync("   ");
+        await presenter.CaptureAsync("   ", TestContext.Current.CancellationToken);
 
         Assert.Empty(presenter.Rows);
         Assert.Equal(0, api.QuickAddCalls);
@@ -201,7 +201,7 @@ public class MainPresenterTests
         // The project was named and we don't know it, so we don't know where this task belongs.
         Assert.False(presenter.Preview("Task #Nope /Reports").SectionResolved);
 
-        await presenter.CaptureAsync("Task #Nope /Reports");
+        await presenter.CaptureAsync("Task #Nope /Reports", TestContext.Current.CancellationToken);
         Assert.Equal(string.Empty, presenter.Rows.Single().Project);
     }
 
@@ -213,7 +213,7 @@ public class MainPresenterTests
         store.PutResource("sections", "s1", """{"id":"s1","name":"Reports","project_id":"p1"}""");
         var presenter = NewPresenter(new FakeApi(), store);
 
-        await presenter.CaptureAsync("Task /Reports");
+        await presenter.CaptureAsync("Task /Reports", TestContext.Current.CancellationToken);
 
         // A section id without its project would be rejected, so the project comes along with it.
         Assert.Equal("Work", presenter.Rows.Single().Project);
@@ -257,7 +257,7 @@ public class MainPresenterTests
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
         var presenter = NewPresenter(new FakeApi(), store);
 
-        await presenter.CaptureAsync("Email report #Work");
+        await presenter.CaptureAsync("Email report #Work", TestContext.Current.CancellationToken);
 
         Assert.Equal("Work", presenter.Rows.Single().Project);
     }
@@ -431,7 +431,7 @@ public class MainPresenterTests
         api.Throw = new TodoistNetworkException("offline");
 
         // Asking for another round here would spin the scheduler against a dead network.
-        Assert.False((await presenter.SyncAsync()).MoreQueued);
+        Assert.False((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
         Assert.True(presenter.IsOffline);
     }
 
@@ -442,7 +442,7 @@ public class MainPresenterTests
         var presenter = NewPresenter(api, SeededStore());
         presenter.Rename("i1", "B");
 
-        Assert.True((await presenter.SyncAsync()).MoreQueued); // no verdict yet, so it stays queued
+        Assert.True((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued); // no verdict yet, so it stays queued
     }
 
     [Fact]

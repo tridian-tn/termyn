@@ -175,7 +175,7 @@ public class UpcomingByDayTests
         // It isn't work waiting on a day, so it stays where a finished task goes everywhere else.
         var presenter = Upcoming(Task("a", "Still to do", "2026-08-01"));
 
-        await presenter.ToggleCompletedAsync();
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["1 Aug · Tomorrow", "Still to do"], Contents(presenter));
     }
