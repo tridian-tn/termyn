@@ -70,6 +70,26 @@ public class ReconnectTests
     }
 
     [Fact]
+    public async Task The_body_of_the_switch_question_reads_what_the_catalogue_says()
+    {
+        var (presenter, _, _) = await TurnedAway();
+
+        Assert.Equal(
+            "That token is for a different Todoist account.\n\n"
+            + "Using it removes this account's tasks, comments, downloaded files and the list of "
+            + "what you've done from this computer, and then signs in to the other one. Nothing is "
+            + "removed from Todoist itself.",
+            presenter.SwitchAccountQuestion("u2"));
+
+        Assert.Equal(
+            "Todoist didn't say which account that token is for, so Termyn can't tell whether it's this one.\n\n"
+            + "Using it removes this account's tasks, comments, downloaded files and the list of "
+            + "what you've done from this computer, and then signs in to the other one. Nothing is "
+            + "removed from Todoist itself.",
+            presenter.SwitchAccountQuestion(null));
+    }
+
+    [Fact]
     public async Task Comments_and_drags_are_held_while_the_token_is_turned_away()
     {
         // A comment box empties as it sends, so a refused comment would take the typing with it.

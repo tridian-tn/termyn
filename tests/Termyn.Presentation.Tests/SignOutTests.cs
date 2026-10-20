@@ -142,6 +142,19 @@ public class SignOutTests
     }
 
     [Fact]
+    public void The_body_of_the_sign_out_question_reads_what_the_catalogue_says()
+    {
+        var (presenter, _, _, _) = Seeded();
+
+        Assert.Equal(
+            "Sign out of Todoist?\n\n"
+            + "Termyn will forget your token, and remove the account's tasks, comments, downloaded "
+            + "files and the list of what you've done from this computer. Nothing is removed from "
+            + "Todoist itself.",
+            presenter.SignOutQuestion());
+    }
+
+    [Fact]
     public void One_change_still_to_send_is_counted_in_the_question()
     {
         var (presenter, engine, _, _) = Seeded();
