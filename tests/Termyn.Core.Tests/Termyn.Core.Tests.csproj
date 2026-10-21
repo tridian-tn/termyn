@@ -9,4 +9,9 @@
     <ProjectReference Include="..\Termyn.TestSupport\Termyn.TestSupport.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Golden payloads recorded from the live API, replayed by GoldenPayloadTests. -->
+    <Content Include="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
