@@ -14,7 +14,7 @@ namespace Termyn.Core.Api;
 public sealed class TodoistApiClient : ITodoistApi
 {
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
-    private const string QuickAddUrl = "https://api.todoist.com/api/v1/tasks/quick_add";
+    private const string QuickAddUrl = "https://api.todoist.com/api/v1/tasks/quick";
     private const string CompletedUrl = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date";
     private const string UploadUrl = "https://api.todoist.com/api/v1/uploads";
 
@@ -111,10 +111,10 @@ public sealed class TodoistApiClient : ITodoistApi
     /// <inheritdoc />
     public async Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, QuickAddUrl)
-        {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["text"] = text }),
-        };
+        // The unified v1 endpoint parses the text out of a JSON body, not form fields.
+        var body = new StringContent(new JsonObject { ["text"] = text }.ToJsonString());
+        body.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        using var req = new HttpRequestMessage(HttpMethod.Post, QuickAddUrl) { Content = body };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var deadline = Deadline(ct);
