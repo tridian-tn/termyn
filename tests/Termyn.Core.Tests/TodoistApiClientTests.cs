@@ -469,6 +469,22 @@ public class TodoistApiClientTests
     }
 
     [Fact]
+    public async Task Quick_add_json_escapes_special_characters_so_the_text_survives()
+    {
+        var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"id":"srv1","content":"A"}"""));
+        var client = new TodoistApiClient(new HttpClient(handler));
+
+        // The encoder escapes & and non-ASCII to \uXXXX, and + is a space in a form body: whatever
+        // the wire encoding, the server has to read back exactly what was typed. Parsing the body
+        // rather than matching an escape sequence keeps this honest if the encoder ever changes.
+        const string text = "Café & cröissant +1 #Work";
+        await client.QuickAddAsync("tok", text, TestContext.Current.CancellationToken);
+
+        var sent = JsonNode.Parse(handler.LastBody!)!;
+        Assert.Equal(text, sent["text"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Quick_add_returns_the_created_task()
     {
         var client = ClientReturning(HttpStatusCode.OK, """{"id":"srv1","content":"A","priority":4}""");
