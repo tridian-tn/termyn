@@ -452,17 +452,20 @@ public class TodoistApiClientTests
     // ---- Quick add -----------------------------------------------------------------------------
 
     [Fact]
-    public async Task Quick_add_posts_the_raw_text_with_a_bearer_token()
+    public async Task Quick_add_posts_the_text_as_json_to_the_quick_endpoint()
     {
         var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"id":"srv1","content":"A"}"""));
         var client = new TodoistApiClient(new HttpClient(handler));
 
         await client.QuickAddAsync("secret-token", "Email report #Work p1", TestContext.Current.CancellationToken);
 
+        // The unified v1 endpoint is /tasks/quick and takes a JSON body, not /tasks/quick_add with
+        // form fields: the old path turns every shape away as "no supported fields".
         Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
-        Assert.Equal("https://api.todoist.com/api/v1/tasks/quick_add", handler.LastRequest.RequestUri!.ToString());
+        Assert.Equal("https://api.todoist.com/api/v1/tasks/quick", handler.LastRequest.RequestUri!.ToString());
         Assert.Equal("secret-token", handler.LastRequest.Headers.Authorization!.Parameter);
-        Assert.Equal("text=Email report #Work p1", Uri.UnescapeDataString(handler.LastBody!.Replace("+", " ")));
+        Assert.Equal("application/json", handler.LastRequest.Content!.Headers.ContentType!.MediaType);
+        Assert.Equal("""{"text":"Email report #Work p1"}""", handler.LastBody);
     }
 
     [Fact]
