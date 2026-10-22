@@ -86,8 +86,8 @@ public class CapturePreviewTextTests
     [Fact]
     public void The_empty_hint_reads_what_the_catalogue_says()
     {
-        Assert.Equal("Add a task…  #project /section @label p1 tomorrow 4pm", CapturePreviewText.Hint(readsDays: true));
-        Assert.Equal("Add a task…  #project /section @label p1", CapturePreviewText.Hint(readsDays: false));
+        Assert.Equal("Add a task…  #project /section @label p1 tomorrow 4pm", CapturePreviewText.Hint(english: true));
+        Assert.Equal("Add a task…  #project /section @label p1", CapturePreviewText.Hint(english: false));
     }
 
     [Fact]

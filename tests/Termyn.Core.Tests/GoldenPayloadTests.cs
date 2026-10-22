@@ -115,7 +115,6 @@ public class GoldenPayloadTests
         Assert.Equal(TimeZoneInfo.FindSystemTimeZoneById("America/New_York"), settings.TimeZone);
         Assert.True(settings.DayFirst);              // date_format 0
         Assert.Equal(DayOfWeek.Monday, settings.WeekStart);
-        Assert.False(settings.InlineDatesOff);       // smart dates on unless the account turns them off
     }
 
     [Fact]

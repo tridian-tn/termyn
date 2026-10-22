@@ -17,14 +17,13 @@ public static class CapturePreviewText
     /// One string for both boxes. They were separate literals that happened to match, which is a
     /// thing that stays true only until somebody edits one of them.
     ///
-    /// No day for an account that reads its dates in another language, or that's turned smart date
-    /// recognition off. A capture read offline reads none for either, and with recognition off
-    /// Todoist reads none online either, so a "tomorrow" typed from the hint ends up in the title.
+    /// No day for an account that reads its dates in another language. Todoist reads one in that
+    /// language, which there are no words for here, and a capture read offline reads none at all.
     /// </remarks>
-    /// <param name="readsDays">Whether a capture reads a day out of what's typed</param>
+    /// <param name="english">Whether the account reads a typed date in English</param>
     /// <returns>The hint</returns>
-    public static string Hint(bool readsDays)
-        => readsDays ? Strings.CaptureHintWithDay : Strings.CaptureHint;
+    public static string Hint(bool english)
+        => english ? Strings.CaptureHintWithDay : Strings.CaptureHint;
 
     /// <summary>Renders what the local parser made of some capture text, for the line under the box.</summary>
     public static string For(CapturePreview preview)

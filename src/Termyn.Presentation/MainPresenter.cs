@@ -726,8 +726,7 @@ public sealed class MainPresenter
     /// names its project as well, since a section's name is only unique inside one.
     ///
     /// Today gives its day: the word where the account reads English, and figures where it reads
-    /// another language. Nothing where smart date recognition is off, since Todoist would leave the
-    /// date in the title and the task wouldn't be today's.
+    /// another language.
     ///
     /// Nothing for a view that's neither a place nor a day. Upcoming covers a week, All covers
     /// everything, and a saved filter is a question rather than somewhere a task can be put.
@@ -742,7 +741,6 @@ public sealed class MainPresenter
         {
             { View: SmartView.Today } => _engine.DateSettings switch
             {
-                { InlineDatesOff: true } => null,
                 { ReadsEnglish: true } => "today",
                 _ => QuickAddParser.Written(_engine.Today, null, english: false),
             },
@@ -1547,12 +1545,6 @@ public sealed class MainPresenter
     /// day suggests and writes words or figures.
     /// </summary>
     public bool DatesInEnglish => _engine.DateSettings.ReadsEnglish;
-
-    /// <summary>
-    /// Whether a capture reads a day out of what's typed, which decides whether a capture box
-    /// suggests one.
-    /// </summary>
-    public bool CaptureReadsDays => _engine.DateSettings.CaptureReadsDays;
 
     /// <summary>
     /// Today in the account's own timezone, for a window with a date to offer.

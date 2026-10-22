@@ -42,11 +42,6 @@ namespace Termyn.Core.Capture;
 /// <c>2026-12-25</c>, <c>16:30</c> — which mean the same in any language, and a capture reads no day
 /// at all, since the words beside its figures may be ones that change them.
 /// </para>
-/// <para>
-/// An account can also turn smart date recognition off, and Todoist then reads no date out of a
-/// task's title, a repeat included. A capture for one reads none either, and leaves every word in
-/// the title. A box asking for a day still reads one, as Todoist's scheduler does.
-/// </para>
 /// </remarks>
 public sealed partial class QuickAddParser
 {
@@ -128,9 +123,13 @@ public sealed partial class QuickAddParser
         // For an account that reads its dates in another language, a capture reads no day or time
         // at all. Figures mean the same in any language, but the words beside them needn't: "jedes
         // Jahr am 25/12" repeats and "25/12 um 16 Uhr" has a time, and neither is read here, so the
-        // figures alone would give the task a day, or a day without its time, Todoist wouldn't. Nor
-        // for one with smart date recognition off, where Todoist leaves every date in the title.
-        var readsDays = settings.CaptureReadsDays;
+        // figures alone would give the task a day, or a day without its time, Todoist wouldn't.
+        //
+        // Smart date recognition being off doesn't stop a capture reading a date, though it reads
+        // like it should: the quick-add endpoint reads a date out of a title whatever that setting
+        // is, so a capture that didn't would give an offline task no day where the server gives one.
+        // The setting only changes what the apps' own type-in boxes do, which isn't this.
+        var readsDays = settings.ReadsEnglish;
 
         var tokens = CaptureTokens(text);
 
@@ -178,9 +177,7 @@ public sealed partial class QuickAddParser
 
             // Recurrence is resolved by the server, never guessed at here. The whole phrase stays in
             // the content and is skipped, so a weekday or time inside it can't become a due date.
-            // Not flagged with smart date recognition off, since the server wouldn't read it either,
-            // and saying it needs a connection would promise a repeat that's never coming.
-            if (!settings.InlineDatesOff && IsRepeatWord(token))
+            if (IsRepeatWord(token))
             {
                 var run = tokens[i..]
                     .TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+') && !TryParsePriority(t, out _))

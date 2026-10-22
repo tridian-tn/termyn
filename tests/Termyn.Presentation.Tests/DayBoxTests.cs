@@ -263,19 +263,18 @@ public class DayBoxTests
     }
 
     [Theory]
-    [InlineData(null, false)]
-    [InlineData("en", false)]
-    [InlineData("de", false)]
-    [InlineData("en", true)]
-    public void Everything_the_capture_hint_offers_is_read_by_capture(string? language, bool smartDatesOff)
+    [InlineData(null)]
+    [InlineData("en")]
+    [InlineData("de")]
+    public void Everything_the_capture_hint_offers_is_read_by_capture(string? language)
     {
         // A day offered to an account that capture reads no day for would sit in the task's title.
-        var presenter = NewPresenter(Account(language, smartDatesOff));
+        var presenter = NewPresenter(Account(language));
 
-        var parse = presenter.Preview(CapturePreviewText.Hint(presenter.CaptureReadsDays)).Parse;
+        var parse = presenter.Preview(CapturePreviewText.Hint(presenter.DatesInEnglish)).Parse;
 
         Assert.Equal("Add a task…", parse.Content);
-        Assert.Equal(presenter.CaptureReadsDays, parse.DueDate is not null);
+        Assert.Equal(presenter.DatesInEnglish, parse.DueDate is not null);
     }
 
     // ---- An account that reads another language ----------------------------------------------------
@@ -366,39 +365,16 @@ public class DayBoxTests
     // ---- An account with smart date recognition off ------------------------------------------------
 
     [Fact]
-    public async Task An_offline_capture_reads_no_day_for_an_account_with_smart_dates_off()
+    public async Task An_offline_capture_still_reads_the_day_for_an_account_with_smart_dates_off()
     {
-        // Todoist leaves the words in the title once recognition is off, so a day read here was one
-        // the task only had because the network was down. A sub-task is read the same way.
+        // The quick-add endpoint reads a date out of a title whatever the account's smart date
+        // recognition setting, so a capture reads one too — else an offline task would land with no
+        // day where the one the server makes for it online has one.
         var presenter = NewPresenter(Account("en", smartDatesOff: true));
 
         await presenter.CaptureAsync("Renew passport tomorrow", TestContext.Current.CancellationToken);
-        presenter.AddSubtask("i1", "Book tickets next friday 4pm");
 
-        Assert.Null(presenter.Rows.Single(r => r.Content == "Renew passport tomorrow").DueOn);
-        Assert.Null(presenter.Rows.Single(r => r.Content == "Book tickets next friday 4pm").DueOn);
-    }
-
-    [Fact]
-    public void The_capture_preview_promises_no_repeat_for_an_account_with_smart_dates_off()
-    {
-        // "Needs a connection" said the server would make it repeat, and it wouldn't.
-        var presenter = NewPresenter(Account("en", smartDatesOff: true));
-
-        Assert.Equal("\"Water plants every monday\"", presenter.PreviewText("Water plants every monday"));
-    }
-
-    [Fact]
-    public void A_due_date_box_still_reads_words_for_an_account_with_smart_dates_off()
-    {
-        // Recognition is about a task's title. Todoist's scheduler still reads what's typed into it,
-        // so the boxes keep reading, offering and writing words.
-        var presenter = NewPresenter(Account("en", smartDatesOff: true));
-
-        presenter.SetDueFromText("i1", "tomorrow");
-
-        Assert.Equal(Today.AddDays(1), Row(presenter).DueOn);
-        Assert.True(presenter.DatesInEnglish);
+        Assert.Equal(Today.AddDays(1), presenter.Rows.Single(r => r.Content == "Renew passport").DueOn);
     }
 
     // ---- Helpers -----------------------------------------------------------------------------------

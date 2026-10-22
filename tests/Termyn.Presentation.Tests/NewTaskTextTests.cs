@@ -92,13 +92,13 @@ public class NewTaskTextTests
     }
 
     [Fact]
-    public void Today_offers_nothing_with_smart_date_recognition_off()
+    public void Today_still_offers_its_day_with_smart_date_recognition_off()
     {
-        // Todoist would leave the date in the title, so the task would be called "… today" and not
-        // be today's at all.
+        // The quick-add endpoint reads "today" out of the title whatever that setting is, so a task
+        // started from the Today view lands there. Offering nothing would leave it with no day at all.
         var presenter = Seeded(language: "en", smartDatesOff: true);
 
-        Assert.Null(presenter.NewTaskText(ViewSelection.Of(SmartView.Today)));
+        Assert.Equal("today", presenter.NewTaskText(ViewSelection.Of(SmartView.Today)));
     }
 
     // ---- Views with nothing to start from ----------------------------------------------------------
