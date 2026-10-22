@@ -83,6 +83,9 @@ internal sealed class MainForm : Form
     private readonly SearchBox _search;
     private readonly Panel _searchHolder;
     private readonly SidebarTree _sidebar;
+
+    /// <summary>The line above the outline: the path to the view, and the buttons beside it.</summary>
+    private readonly ViewHeader _viewHeader;
     private readonly LinkLabel _crumbs;
 
     /// <summary>The description and the comments, as the two tabs of one panel.</summary>
@@ -332,14 +335,9 @@ internal sealed class MainForm : Form
         // Which list you are looking at, said in words above it. The sidebar says the same by
         // highlighting a row, but a tree that has lost the focus draws its selection faintly, and
         // that question shouldn't be answered differently depending on where the focus went.
-        _crumbs = new LinkLabel
-        {
-            Dock = DockStyle.Top,
-            Height = 24,
-            Padding = new Padding(6, 4, 6, 2),
-            LinkBehavior = LinkBehavior.HoverUnderline,
-            UseCompatibleTextRendering = false,
-        };
+        _viewHeader = new ViewHeader();
+        _viewHeader.Fill(Menus.ViewTools, Run);
+        _crumbs = _viewHeader.Crumbs;
         _crumbs.LinkClicked += OnCrumbClicked;
 
         // So a row selected while its task still had the name we gave it isn't read as deleted the
@@ -453,7 +451,7 @@ internal sealed class MainForm : Form
         // The outline first and the path after it: a docked control added later sits nearer the
         // edge, so this is what puts the line above the list rather than below it.
         _detail.Panel1.Controls.Add(_outline);
-        _detail.Panel1.Controls.Add(_crumbs);
+        _detail.Panel1.Controls.Add(_viewHeader);
 
         // Two tabs rather than three controls stacked on each other. What the panel is showing used
         // to be a thing you could only find out by looking at it; now it says so, and the way to the
@@ -1132,14 +1130,7 @@ internal sealed class MainForm : Form
         // Its cross is quiet at rest and lit under the pointer, so it wants the palette rather
         // than one colour out of it.
         _search.Theme = _theme;
-
-        // The step you are on is the one being read; the ones above it are offers, and drawn as
-        // links so they read as such without needing to be hovered to find out.
-        _crumbs.BackColor = _theme.Background;
-        _crumbs.ForeColor = _theme.Text;
-        _crumbs.LinkColor = _theme.Muted;
-        _crumbs.ActiveLinkColor = _theme.Accent;
-        _crumbs.VisitedLinkColor = _theme.Muted;
+        _viewHeader.Theme = _theme;
 
         _sidebar.BackColor = _theme.Background;
         _sidebar.MarkColour = _theme.Accent;
@@ -1233,23 +1224,35 @@ internal sealed class MainForm : Form
     private void PadSearch() => _searchHolder.Padding = SearchPaddingAt(DeviceDpi);
 
     /// <summary>
-    /// Pads the search box again once the window knows which screen it's on.
+    /// Sizes the line above the outline, and its buttons, for the screen the window's on.
+    /// </summary>
+    /// <remarks>
+    /// The text in it grows with the display's scale whether or not this is done, so a line left at
+    /// its 100% height cuts the bottoms off the letters on any screen scaled past that.
+    /// </remarks>
+    private void SizeViewHeader() => _viewHeader.ScaleTo(DeviceDpi);
+
+    /// <summary>
+    /// Sizes the search box's padding and the line above the outline again once the window knows
+    /// which screen it's on.
     /// </summary>
     /// <remarks>
     /// Before its handle exists a window reports the scale of the screen the app started on, so the
-    /// padding set while it's built can be for the wrong one.
+    /// sizes set while it's built can be for the wrong one.
     /// </remarks>
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         PadSearch();
+        SizeViewHeader();
     }
 
-    /// <summary>Pads the search box again for a screen of another scale.</summary>
+    /// <summary>Sizes the same two again for a screen of another scale.</summary>
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
         PadSearch();
+        SizeViewHeader();
     }
 
     private ViewState CurrentViewState()
@@ -1318,7 +1321,10 @@ internal sealed class MainForm : Form
     private void Collapse(string id, bool collapsed)
         => Folding(() => _presenter.SetCollapsed(id, collapsed));
 
-    /// <summary>Folds or unfolds every task in the view at once, from the View menu.</summary>
+    /// <summary>
+    /// Folds or unfolds every task in the view at once, from the View menu or the buttons above the
+    /// outline.
+    /// </summary>
     /// <param name="collapsed">True to put them all away, false to open them all up</param>
     private void FoldAll(bool collapsed) => Folding(() => _presenter.FoldAll(collapsed));
 
@@ -1451,6 +1457,10 @@ internal sealed class MainForm : Form
 
         // After the rows, which is what decides whether the selected task is still there.
         FollowSelection();
+
+        // After the rows as well: whether there's anything left to fold or unfold is read off them.
+        // Every fold republishes the rows, so this is the one place that needs to ask.
+        _viewHeader.Render(Context());
         RenderStatus();
         RenderUnsupported();
         RenderTray();

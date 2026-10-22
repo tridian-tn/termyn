@@ -151,6 +151,19 @@ public static class Menus
             MenuEntry.Of(AppCommand.About)),
     ];
 
+    /// <summary>
+    /// The buttons on the line above the outline, beside the name of the view.
+    /// </summary>
+    /// <remarks>
+    /// Commands about the whole view, within reach of it rather than two clicks into the View menu.
+    /// They're the menu's own entries, so they read and grey exactly as the menu does.
+    /// </remarks>
+    public static IReadOnlyList<MenuEntry> ViewTools { get; } =
+    [
+        MenuEntry.Of(AppCommand.ExpandAll),
+        MenuEntry.Of(AppCommand.CollapseAll),
+    ];
+
     /// <summary>Every command an entry list can raise, including the ones nested under a heading.</summary>
     public static IEnumerable<AppCommand> Commands(IEnumerable<MenuEntry> entries)
     {
