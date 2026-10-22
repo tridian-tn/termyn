@@ -105,33 +105,35 @@ public class MainPresenterTests
     // ---- Capture -------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Capture_uses_the_server_parse_when_online()
+    public async Task Capture_parses_locally_so_the_task_matches_the_preview()
     {
-        var api = new FakeApi
-        {
-            QuickAdd = text => Json.Change("items", "new", $$"""{"id":"new","content":"{{text}}"}"""),
-        };
-        var presenter = NewPresenter(api, new InMemorySnapshotStore());
+        // Read by the local grammar — the same one the box's preview uses — so the task created is
+        // the one the preview showed, and the account's settings are honoured the one way everywhere.
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
 
         await presenter.CaptureAsync("Email report tomorrow p1", TestContext.Current.CancellationToken);
-
-        Assert.Equal(1, api.QuickAddCalls);
-        Assert.Equal("Email report tomorrow p1", presenter.Rows.Single().Content);
-        Assert.False(presenter.IsOffline);
-    }
-
-    [Fact]
-    public async Task Capture_falls_back_to_the_local_grammar_when_offline()
-    {
-        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore()); // QuickAdd unset = unreachable
-
-        await presenter.CaptureAsync("Email report tomorrow p1 @followup", TestContext.Current.CancellationToken);
 
         var row = presenter.Rows.Single();
         Assert.Equal("Email report", row.Content);
         Assert.Equal(Priority.P1, row.Priority);
         Assert.Equal("1 Aug", row.Due);
-        Assert.True(presenter.IsOffline);
+
+        // Queued, not server-created: a capture now leaves an item_add to sync, where the old online
+        // path folded a finished task in with nothing pending.
+        Assert.Contains("1 pending", presenter.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Capture_refuses_a_repeat_rather_than_dropping_it()
+    {
+        // The local grammar can't tell where "every day" ends and the task's own words resume, so
+        // rather than file a one-off with the repeat stuck in its title, the capture is refused.
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+
+        await Assert.ThrowsAsync<CaptureRefusedException>(
+            () => presenter.CaptureAsync("Water plants every day", TestContext.Current.CancellationToken));
+
+        Assert.Empty(presenter.Rows);
     }
 
     [Fact]
@@ -147,13 +149,11 @@ public class MainPresenterTests
     [Fact]
     public async Task Capture_ignores_blank_text()
     {
-        var api = new FakeApi();
-        var presenter = NewPresenter(api, new InMemorySnapshotStore());
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
 
         await presenter.CaptureAsync("   ", TestContext.Current.CancellationToken);
 
         Assert.Empty(presenter.Rows);
-        Assert.Equal(0, api.QuickAddCalls);
     }
 
     [Fact]

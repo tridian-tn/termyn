@@ -38,6 +38,19 @@ public class ReconnectTests
     }
 
     [Fact]
+    public async Task A_capture_is_refused_while_the_token_is_turned_away()
+    {
+        // Capture reaches the box past the command gate, through the hotkey and the tray, so it has
+        // to refuse the write itself: the account is read-only until a token is accepted.
+        var (presenter, _, _) = await TurnedAway();
+
+        await Assert.ThrowsAsync<TodoistAuthException>(
+            () => presenter.CaptureAsync("Buy milk", TestContext.Current.CancellationToken));
+
+        Assert.DoesNotContain(presenter.Rows, r => r.Content == "Buy milk");
+    }
+
+    [Fact]
     public async Task Another_accounts_token_is_not_the_same_account()
     {
         var (presenter, _, _) = await TurnedAway();

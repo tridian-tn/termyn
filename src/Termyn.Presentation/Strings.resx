@@ -337,6 +337,10 @@
     <value>(needs a connection: {0})</value>
     <comment>{0} is a comma-separated list of what the offline parser couldn't settle.</comment>
   </data>
+  <data name="CaptureNoRepeat" xml:space="preserve">
+    <value>A repeat is Todoist's to read, so it can't be set from a capture — the task wasn't added.</value>
+    <comment>Shown in the quick-add box when the typed task names a recurrence the local grammar can't honour.</comment>
+  </data>
 
   <!-- A write the server refused: what was being done, what it said, and what dismissing costs. -->
   <data name="FailureChangeSubject" xml:space="preserve">

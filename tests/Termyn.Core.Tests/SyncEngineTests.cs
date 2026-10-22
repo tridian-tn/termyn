@@ -72,44 +72,6 @@ public class SyncEngineTests
         Assert.Equal("A", engine.Snapshot().Items.Single().Content);
     }
 
-    // ---- Capture -------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Quick_add_folds_the_server_created_task_into_the_model()
-    {
-        var api = new FakeApi
-        {
-            QuickAdd = text => Json.Change("items", "srv1", $$"""{"id":"srv1","content":"{{text}}","priority":4}"""),
-        };
-        var engine = NewEngine(api);
-
-        Assert.True(await engine.QuickAddOnlineAsync("Email report tomorrow", TestContext.Current.CancellationToken));
-
-        var item = engine.Snapshot().Items.Single();
-        Assert.Equal("Email report tomorrow", item.Content);
-        Assert.Equal(Priority.P1, item.Priority); // the server resolved it, API 4 -> P1
-        Assert.Equal(0, engine.PendingCount);     // nothing queued: it already exists server-side
-    }
-
-    [Fact]
-    public async Task Quick_add_reports_failure_when_offline_so_the_caller_can_fall_back()
-    {
-        var engine = NewEngine(new FakeApi()); // QuickAdd unset = unreachable
-
-        Assert.False(await engine.QuickAddOnlineAsync("Buy milk", TestContext.Current.CancellationToken));
-        Assert.Empty(engine.Snapshot().Items);
-    }
-
-    [Fact]
-    public async Task Quick_add_clears_the_token_when_rejected()
-    {
-        var secrets = new FakeSecrets { Stored = "tok" };
-        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("no") }, new InMemorySnapshotStore(), secrets);
-
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.QuickAddOnlineAsync("Buy milk", TestContext.Current.CancellationToken));
-        Assert.Null(secrets.Stored);
-    }
-
     // ---- Optimistic writes ---------------------------------------------------------------------
 
     [Fact]
@@ -1106,36 +1068,6 @@ public class SyncEngineTests
         Assert.Empty(store.Load().Resources);
     }
 
-    [Fact]
-    public async Task A_quick_add_that_lands_after_a_purge_does_not_repopulate_the_cache()
-    {
-        var entered = new TaskCompletionSource();
-        var release = new TaskCompletionSource();
-        var api = new FakeApi
-        {
-            QuickAdd = _ =>
-            {
-                entered.TrySetResult();
-                release.Task.Wait();
-                return Json.Change("items", "srv1", """{"id":"srv1","content":"Private"}""");
-            },
-        };
-        var store = new InMemorySnapshotStore();
-        store.PutResource(ResourceType.User, ResourceType.User, """{"id":"u1"}""");
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
-        engine.Load();
-
-        var inFlight = Task.Run(() => engine.QuickAddOnlineAsync("Private"));
-        await entered.Task;
-
-        Assert.True(engine.AcceptToken("other", "u2"));
-
-        release.SetResult();
-        Assert.True(await inFlight); // it was created server-side
-
-        Assert.Empty(engine.Snapshot().Items);
-    }
-
     // ---- Fidelity and durability ---------------------------------------------------------------
 
     [Fact]
@@ -1390,39 +1322,6 @@ public class SyncEngineTests
     }
 
     [Fact]
-    public async Task A_rejection_that_lands_after_a_new_token_leaves_the_new_one_alone()
-    {
-        // A slow quick-add carrying the old token is turned away after the new one has been
-        // pasted. Its rejection is about the old token.
-        var entered = new TaskCompletionSource();
-        var release = new TaskCompletionSource();
-        var api = new FakeApi
-        {
-            QuickAdd = _ =>
-            {
-                entered.TrySetResult();
-                release.Task.Wait();
-                throw new TodoistAuthException("rejected");
-            },
-        };
-        var (engine, _, secrets) = HeldAccount(api);
-
-        var inFlight = Task.Run(() => engine.QuickAddOnlineAsync("Buy milk"));
-        await entered.Task;
-
-        api.Throw = new TodoistAuthException("no");
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
-        api.Throw = null;
-        engine.AcceptToken("new", "u1");
-
-        release.SetResult();
-        await Assert.ThrowsAsync<TodoistAuthException>(() => inFlight);
-
-        Assert.Equal("new", secrets.Stored);
-        Assert.False(engine.AwaitingToken);
-    }
-
-    [Fact]
     public async Task An_upload_turned_away_holds_the_account_the_way_a_sync_does()
     {
         var api = new FakeApi { TransferThrow = new TodoistAuthException("no") };
@@ -1526,35 +1425,6 @@ public class SyncEngineTests
         var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets);
 
         var inFlight = Task.Run(() => engine.SyncAsync(), TestContext.Current.CancellationToken);
-        await entered.Task;
-
-        engine.SignOut();
-        secrets.SetToken("next");
-
-        release.SetResult();
-        await Assert.ThrowsAsync<TodoistAuthException>(() => inFlight);
-
-        Assert.Equal("next", secrets.Stored);
-    }
-
-    [Fact]
-    public async Task A_quick_add_rejected_after_signing_out_leaves_the_next_accounts_token_alone()
-    {
-        var entered = new TaskCompletionSource();
-        var release = new TaskCompletionSource();
-        var api = new FakeApi
-        {
-            QuickAdd = _ =>
-            {
-                entered.TrySetResult();
-                release.Task.Wait();
-                throw new TodoistAuthException("rejected");
-            },
-        };
-        var secrets = new FakeSecrets { Stored = "old" };
-        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets);
-
-        var inFlight = Task.Run(() => engine.QuickAddOnlineAsync("Buy milk"));
         await entered.Task;
 
         engine.SignOut();

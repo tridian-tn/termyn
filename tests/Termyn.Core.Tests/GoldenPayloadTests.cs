@@ -167,24 +167,6 @@ public class GoldenPayloadTests
         Assert.Equal(original.Priority, rebuilt.Priority);
     }
 
-    [Fact]
-    public async Task A_real_quick_add_response_projects_the_server_parsed_task()
-    {
-        var client = ClientReturning(Fixture("quick-add.json"));
-
-        var created = await client.QuickAddAsync("tok", "ignored by the stub", TestContext.Current.CancellationToken);
-        var item = Projections.ToTaskItem(created.Json);
-
-        Assert.Equal(ResourceType.Items, created.ResourceType);
-        Assert.NotEqual(string.Empty, item.Content);
-
-        // The whole reason quick-add goes to the server: it parsed the date out of the text.
-        Assert.Equal("2026-10-22T13:00:00Z", item.DueDate);
-        Assert.False(item.IsRecurring);
-        Assert.Equal("22 Oct 14:00", item.DueText);
-        Assert.Equal(Priority.P2, item.Priority);  // API 3
-    }
-
     // ---- replay plumbing -----------------------------------------------------------------------
 
     private static Task<SyncResponse> ReplaySync()
