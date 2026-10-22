@@ -83,16 +83,12 @@ public sealed class FakeApi : ITodoistApi
                 .ToDictionary(c => c.TempId!, c => ids[c.Type]),
         };
 
-    /// <summary>What the server returns for a quick add; unset means it is unreachable.</summary>
-    public Func<string, ResourceChange>? QuickAdd;
-
     public Exception? Throw;
     public bool AcceptToken = true;
 
     /// <summary>The account the probe says an accepted token belongs to.</summary>
     public string? TokenUserId = "u1";
     public int ValidateCalls;
-    public int QuickAddCalls;
     public IReadOnlyList<Command> LastCommands = [];
 
     public Task<SyncResponse> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct = default)
@@ -109,16 +105,6 @@ public sealed class FakeApi : ITodoistApi
         return Throw is not null
             ? throw Throw
             : Task.FromResult(AcceptToken ? new TokenProbe(true, TokenUserId) : TokenProbe.Rejected);
-    }
-
-    public Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)
-    {
-        QuickAddCalls++;
-        if (Throw is not null)
-            throw Throw;
-        return QuickAdd is not null
-            ? Task.FromResult(QuickAdd(text))
-            : throw new TodoistNetworkException("offline");
     }
 
     /// <summary>Builds the completed page for each request, so paging can be exercised.</summary>

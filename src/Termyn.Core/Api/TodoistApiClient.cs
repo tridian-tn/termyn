@@ -14,7 +14,6 @@ namespace Termyn.Core.Api;
 public sealed class TodoistApiClient : ITodoistApi
 {
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
-    private const string QuickAddUrl = "https://api.todoist.com/api/v1/tasks/quick";
     private const string CompletedUrl = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date";
     private const string UploadUrl = "https://api.todoist.com/api/v1/uploads";
 
@@ -105,51 +104,6 @@ public sealed class TodoistApiClient : ITodoistApi
             // A reachable server that answered with unusable content, or a body that failed midway:
             // treat like any other transient failure so the caller retries and keeps its last good state.
             throw new TodoistNetworkException(Strings.UnreadableSyncResponse, ex);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)
-    {
-        // The unified v1 endpoint parses the text out of a JSON body, not form fields.
-        var body = new StringContent(new JsonObject { ["text"] = text }.ToJsonString());
-        body.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        using var req = new HttpRequestMessage(HttpMethod.Post, QuickAddUrl) { Content = body };
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        using var deadline = Deadline(ct);
-
-        HttpResponseMessage resp;
-        try
-        {
-            resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new TodoistNetworkException(Strings.CouldNotReachTodoist, ex);
-        }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            throw new TodoistNetworkException(Strings.RequestTimedOut, ex);
-        }
-
-        using (resp)
-        {
-            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw new TodoistAuthException(Strings.TokenRejected);
-            EnsureReachable(resp);
-
-            try
-            {
-                await using var stream = await resp.Content.ReadAsStreamAsync(deadline.Token);
-                if (await JsonNode.ParseAsync(stream, cancellationToken: deadline.Token) is not JsonObject created || created["id"] is not { } id)
-                    throw new TodoistNetworkException(Strings.UnexpectedQuickAddResponse);
-                return new ResourceChange(Model.ResourceType.Items, id.ToString(), false, created);
-            }
-            catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException)
-            {
-                throw new TodoistNetworkException(Strings.UnreadableQuickAddResponse, ex);
-            }
         }
     }
 

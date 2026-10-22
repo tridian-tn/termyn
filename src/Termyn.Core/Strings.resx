@@ -41,12 +41,6 @@
   <data name="UnreadableSyncResponse" xml:space="preserve">
     <value>Todoist returned an unreadable sync response.</value>
   </data>
-  <data name="UnexpectedQuickAddResponse" xml:space="preserve">
-    <value>Todoist returned an unexpected quick-add response.</value>
-  </data>
-  <data name="UnreadableQuickAddResponse" xml:space="preserve">
-    <value>Todoist returned an unreadable quick-add response.</value>
-  </data>
   <data name="UnexpectedCompletedResponse" xml:space="preserve">
     <value>Todoist returned an unexpected completed-tasks response.</value>
   </data>

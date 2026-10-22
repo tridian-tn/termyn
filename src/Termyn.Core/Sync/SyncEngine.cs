@@ -646,49 +646,6 @@ public sealed class SyncEngine
 
     // ---- Optimistic writes (field-level) ---------------------------------------------------------
 
-    /// <summary>
-    /// Creates a task from raw text using the server's natural-language parsing, so capture matches
-    /// the web app exactly, and folds the created task into the model.
-    /// </summary>
-    /// <returns><c>false</c> if Todoist was unreachable, so the caller can fall back to local parsing.</returns>
-    public async Task<bool> QuickAddOnlineAsync(string text, CancellationToken ct = default)
-    {
-        string token;
-        int generation;
-        lock (_gate)
-        {
-            token = TokenOrThrow();
-            generation = _generation;
-        }
-
-        ResourceChange created;
-        try
-        {
-            created = await _api.QuickAddAsync(token, text, ct);
-        }
-        catch (TodoistNetworkException)
-        {
-            return false;
-        }
-        catch (TodoistAuthException)
-        {
-            lock (_gate)
-                ForgetRejectedToken(token);
-            throw;
-        }
-
-        lock (_gate)
-        {
-            if (generation != _generation)
-                return true; // created server-side, but our cache was wiped meanwhile
-
-            var json = created.Json.DeepClone().AsObject();
-            _store.PutResource(created.ResourceType, created.Id, json.ToJsonString());
-            Model.Upsert(created.ResourceType, created.Id, json);
-        }
-        return true;
-    }
-
     /// <summary>Creates a task optimistically and queues an <c>item_add</c>. Returns the temp id.</summary>
     public string AddItem(JsonObject fields)
     {

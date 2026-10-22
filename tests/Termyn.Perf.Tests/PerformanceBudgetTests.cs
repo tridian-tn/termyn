@@ -293,9 +293,6 @@ public class PerformanceBudgetTests : IDisposable
         public Task<SyncResponse> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct = default)
             => throw new InvalidOperationException("Startup must not sync.");
 
-        public Task<ResourceChange> QuickAddAsync(string token, string text, CancellationToken ct = default)
-            => throw new InvalidOperationException("Startup must not quick-add.");
-
         public Task<CompletedPage> GetCompletedAsync(string token, CompletedQuery query, CancellationToken ct = default)
             => throw new InvalidOperationException("Startup must not fetch completed tasks.");
 

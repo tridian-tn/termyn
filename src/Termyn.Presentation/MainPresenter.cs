@@ -558,47 +558,48 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// Captures a task from quick-add text. Online, the server parses it so the result matches the
-    /// web app; offline, the bounded local grammar is used and the task syncs later.
+    /// Captures a task from quick-add text, parsing it here with the same grammar that drives the
+    /// box's preview, so the task that's created is the one the preview showed, online or off.
     /// </summary>
     public Task CaptureAsync(string text, CancellationToken ct = default) => CaptureAsync(text, null, ct);
 
     /// <summary>
     /// Captures a task from quick-add text that New task started off.
     /// </summary>
+    /// <remarks>
+    /// Parsed here rather than handed to the server's quick-add, which the apps don't use either:
+    /// that endpoint reads an inline date out of a title whatever the account's smart date
+    /// recognition setting, so delegating to it ignored a setting the local grammar honours. Parsing
+    /// here keeps the preview, an online capture and an offline one the one behaviour, and queues an
+    /// <c>item_add</c> that syncs when there's a connection.
+    /// </remarks>
     /// <param name="text">Everything in the box</param>
     /// <param name="start">What New task put in the box, or null when it put nothing there</param>
-    /// <param name="ct">Cancels the online attempt</param>
-    public async Task CaptureAsync(string text, string? start, CancellationToken ct = default)
+    /// <param name="ct">Unused: a capture no longer reaches the server to be cancelled</param>
+    public Task CaptureAsync(string text, string? start, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
-            return;
+            return Task.CompletedTask;
 
-        var captured = await _engine.QuickAddOnlineAsync(text, ct);
-        NoteReachable(captured);
+        var (parse, projectId, sectionId) = Resolve(text);
+        parse = Dated(parse, start);
 
-        if (!captured)
+        // With nothing named at all, a capture belongs wherever the user is looking. Applied
+        // together: a section from one view with a project named in the text is not a real place.
+        if (projectId is null && sectionId is null)
         {
-            var (parse, projectId, sectionId) = Resolve(text);
-            parse = Dated(parse, start);
-
-            // With nothing named at all, a capture belongs wherever the user is looking. Applied
-            // together: a section from one view with a project named in the text is not a real place.
-            if (projectId is null && sectionId is null)
-            {
-                projectId = Selection.ProjectId ?? SectionProjectId();
-                sectionId = Selection.SectionId;
-            }
-
-            _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
+            projectId = Selection.ProjectId ?? SectionProjectId();
+            sectionId = Selection.SectionId;
         }
 
-        // Said from the text rather than from the model: online the server parses it and what comes
-        // back is a task this hasn't seen yet, so the words the user typed are the only ones there
-        // are. A new id each time, so two captures are never folded into one.
+        _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
+
+        // Said from the text rather than from the model: the words the user typed are the ones that
+        // go in, and a new id each time so two captures are never folded into one.
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAdded, text.Trim()), $"capture:{Guid.NewGuid():N}");
 
         Publish();
+        return Task.CompletedTask;
     }
 
     /// <summary>

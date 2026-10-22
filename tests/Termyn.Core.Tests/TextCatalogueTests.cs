@@ -186,8 +186,6 @@ public class TextCatalogueTests
         Assert.Equal("Todoist returned an unreadable answer to the token check.", Strings.UnreadableTokenCheck);
         Assert.Equal("Todoist returned an unexpected sync response.", Strings.UnexpectedSyncResponse);
         Assert.Equal("Todoist returned an unreadable sync response.", Strings.UnreadableSyncResponse);
-        Assert.Equal("Todoist returned an unexpected quick-add response.", Strings.UnexpectedQuickAddResponse);
-        Assert.Equal("Todoist returned an unreadable quick-add response.", Strings.UnreadableQuickAddResponse);
         Assert.Equal("Todoist returned an unexpected completed-tasks response.", Strings.UnexpectedCompletedResponse);
         Assert.Equal("Todoist returned an unreadable completed-tasks response.", Strings.UnreadableCompletedResponse);
         Assert.Equal("The download from Todoist failed part-way.", Strings.DownloadFailedPartWay);
