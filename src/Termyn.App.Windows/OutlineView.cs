@@ -210,6 +210,7 @@ internal sealed class OutlineView : ListView
             _struck?.Dispose();
             _heading?.Dispose();
             _rule?.Dispose();
+            _tip.Dispose();
         }
 
         base.Dispose(disposing);
@@ -302,6 +303,12 @@ internal sealed class OutlineView : ListView
                 base.OnSelectedIndexChanged(EventArgs.Empty);
 
             _publishedIndex = _selectedIndex;
+
+            // A tip that's up names the priority of whatever task was under the pointer, and a sync
+            // can put another one there, or change this one's, without the pointer moving at all.
+            if (_shownTip is not null && IsHandleCreated)
+                ShowTipFor(PointToClient(Cursor.Position));
+
             Invalidate();
         }
     }
@@ -596,6 +603,79 @@ internal sealed class OutlineView : ListView
     /// <returns>True when the point is left of the Task column's right edge</returns>
     private bool InTaskColumn(int index, Point point)
         => point.X < GetItemRect(index, ItemBoundsPortion.Entire).X + Columns[0].Width;
+
+    /// <summary>
+    /// Says what a priority dot means. Left at the toolkit's own delays, so it comes up after the
+    /// same half-second pause as every other tip in the window.
+    /// </summary>
+    private readonly ToolTip _tip = new();
+
+    /// <summary>What the tip currently says, so it isn't reset on every pixel of movement.</summary>
+    private string? _shownTip;
+
+    /// <summary>What the tip is set to say, as the tip itself has it, for a test to read.</summary>
+    internal string ShownTip => _tip.GetToolTip(this) ?? string.Empty;
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        ShowTipFor(e.Location);
+        base.OnMouseMove(e);
+    }
+
+    /// <summary>
+    /// Points the tip at whatever's under a point, or takes it away where there's nothing to say.
+    /// </summary>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    private void ShowTipFor(Point point)
+    {
+        var tip = PriorityTipAt(point);
+        if (tip == _shownTip)
+            return;
+
+        _shownTip = tip;
+        _tip.SetToolTip(this, tip ?? string.Empty);
+    }
+
+    /// <summary>
+    /// What the priority under a point says, or null where there's no dot.
+    /// </summary>
+    /// <remarks>
+    /// The whole cell answers rather than the dot drawn in it. The dot's nine pixels across, and
+    /// a target that small is one people miss; the column's only there to hold it.
+    /// </remarks>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The priority written out, or null when the point isn't on a dot's cell</returns>
+    internal string? PriorityTipAt(Point point)
+    {
+        if (HitTest(point).Item?.Index is not { } index || index < 0 || index >= _rows.Count)
+            return null;
+
+        return ColumnAt(index, point) is { } column && OutlineCells.PaintOf(column) == CellPaint.Priority
+            ? OutlineCells.PriorityTip(_rows[index])
+            : null;
+    }
+
+    /// <summary>
+    /// Which column a point on a row is in, measured from the row's own left edge so a list
+    /// scrolled sideways still answers for what's under the pointer.
+    /// </summary>
+    /// <param name="index">The row</param>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The column, or null past the last of them</returns>
+    private TaskColumn? ColumnAt(int index, Point point)
+    {
+        var left = GetItemRect(index, ItemBoundsPortion.Entire).X;
+
+        foreach (ColumnHeader header in Columns)
+        {
+            if (point.X < left + header.Width)
+                return header.Tag is TaskColumn column ? column : null;
+
+            left += header.Width;
+        }
+
+        return null;
+    }
 
     /// <summary>Whether the row for a task is currently collapsed, as the last rows said.</summary>
     private bool IsCollapsed(string id)
