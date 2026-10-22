@@ -117,6 +117,23 @@ public class MainPresenterTests
         Assert.Equal("Email report", row.Content);
         Assert.Equal(Priority.P1, row.Priority);
         Assert.Equal("1 Aug", row.Due);
+
+        // Queued, not server-created: a capture now leaves an item_add to sync, where the old online
+        // path folded a finished task in with nothing pending.
+        Assert.Contains("1 pending", presenter.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Capture_refuses_a_repeat_rather_than_dropping_it()
+    {
+        // The local grammar can't tell where "every day" ends and the task's own words resume, so
+        // rather than file a one-off with the repeat stuck in its title, the capture is refused.
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+
+        await Assert.ThrowsAsync<CaptureRefusedException>(
+            () => presenter.CaptureAsync("Water plants every day", TestContext.Current.CancellationToken));
+
+        Assert.Empty(presenter.Rows);
     }
 
     [Fact]

@@ -215,6 +215,15 @@ internal sealed class QuickAddForm : Form
             await _presenter.CaptureAsync(text, start);
             Captured?.Invoke();
         }
+        catch (CaptureRefusedException refused)
+        {
+            // Not a failure — a capture the app won't make. The words come back with the reason in
+            // place of the preview, so the user can change them rather than hunt for what went wrong.
+            Summon(start);
+            _capture.Text = text;
+            _capture.SelectionStart = text.Length;
+            _preview.Text = refused.Message;
+        }
         catch (Exception ex)
         {
             // Nothing was created anywhere, so the typing comes back rather than being lost, and

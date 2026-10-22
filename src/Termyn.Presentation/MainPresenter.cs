@@ -582,6 +582,13 @@ public sealed class MainPresenter
             return Task.CompletedTask;
 
         var (parse, projectId, sectionId) = Resolve(text);
+
+        // A repeat is Todoist's to read, and the grammar here can't tell where "every monday" ends
+        // and the task's own words resume. Rather than file a one-off with the repeat left in the
+        // title, the capture is refused and the words are handed back for the user to sort out.
+        if (parse.IsRecurrence)
+            throw new CaptureRefusedException(Strings.CaptureNoRepeat);
+
         parse = Dated(parse, start);
 
         // With nothing named at all, a capture belongs wherever the user is looking. Applied
