@@ -79,6 +79,8 @@ internal sealed class OutlineView : ListView
         DoubleBuffered = true;
         AllowDrop = true;
 
+        _tipDelay.Tick += RaiseTip;
+
         // Each header carries the column it stands for, so a click has something to name without a
         // second table of indices to keep in step with this one.
         Column(Strings.ColumnTask, TaskColumn.Content);
@@ -210,6 +212,7 @@ internal sealed class OutlineView : ListView
             _struck?.Dispose();
             _heading?.Dispose();
             _rule?.Dispose();
+            _tipDelay.Dispose();
             _tip.Dispose();
         }
 
@@ -304,10 +307,10 @@ internal sealed class OutlineView : ListView
 
             _publishedIndex = _selectedIndex;
 
-            // A tip that's up names the priority of whatever task was under the pointer, and a sync
-            // can put another one there, or change this one's, without the pointer moving at all.
-            if (_shownTip is not null && IsHandleCreated)
-                ShowTipFor(PointToClient(Cursor.Position));
+            // A tip names the priority of whatever task was under the pointer, and a sync can put
+            // another one there, or change this one's, without the pointer moving at all.
+            if (_tipOn is not null && IsHandleCreated)
+                AimTip(PointToClient(Cursor.Position));
 
             Invalidate();
         }
@@ -605,35 +608,117 @@ internal sealed class OutlineView : ListView
         => point.X < GetItemRect(index, ItemBoundsPortion.Entire).X + Columns[0].Width;
 
     /// <summary>
-    /// Says what a priority dot means. Left at the toolkit's own delays, so it comes up after the
-    /// same half-second pause as every other tip in the window.
+    /// Says what a priority dot means.
     /// </summary>
+    /// <remarks>
+    /// Shown by hand rather than handed the list with SetToolTip. That makes the whole list one
+    /// tip as far as Windows is concerned, and Windows shows a tip once per visit: moving on to
+    /// another row's dot left the first row's words up, and a click — which is how a row gets
+    /// selected — put it away until the pointer left the list altogether. The delays are still
+    /// the toolkit's own, so it keeps the same pause as every other tip in the window.
+    /// </remarks>
     private readonly ToolTip _tip = new();
 
-    /// <summary>What the tip currently says, so it isn't reset on every pixel of movement.</summary>
-    private string? _shownTip;
+    /// <summary>Counts down the pause before the tip comes up.</summary>
+    private readonly System.Windows.Forms.Timer _tipDelay = new();
 
-    /// <summary>What the tip is set to say, as the tip itself has it, for a test to read.</summary>
-    internal string ShownTip => _tip.GetToolTip(this) ?? string.Empty;
+    /// <summary>The dot the pointer is on, by task and what it says, or null when it's on none.</summary>
+    private (string Id, string Text)? _tipOn;
+
+    /// <summary>Where the pointer was last seen on that dot, which is where the tip comes up.</summary>
+    private Point _tipAt;
+
+    /// <summary>Whether the tip is up, which makes the next dot's pause the shorter one.</summary>
+    private bool _tipUp;
+
+    /// <summary>What the pointer's on, for a test to read.</summary>
+    internal string? TipAimedAt => _tipOn?.Text;
+
+    /// <summary>What the tip is showing, or null when it's down, for a test to read.</summary>
+    internal string? TipShowing => _tipUp ? _tipOn?.Text : null;
+
+    /// <summary>
+    /// Has the pointer come to a point, as a move there would.
+    /// </summary>
+    /// <remarks>
+    /// For a test, which can't send the move itself: Windows answers a move posted to a window the
+    /// real pointer isn't over by saying it's left again straight away.
+    /// </remarks>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    internal void PointerAt(Point point) => AimTip(point);
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        ShowTipFor(e.Location);
+        AimTip(e.Location);
         base.OnMouseMove(e);
     }
 
-    /// <summary>
-    /// Points the tip at whatever's under a point, or takes it away where there's nothing to say.
-    /// </summary>
-    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
-    private void ShowTipFor(Point point)
+    protected override void OnMouseLeave(EventArgs e)
     {
-        var tip = PriorityTipAt(point);
-        if (tip == _shownTip)
+        DropTip();
+        base.OnMouseLeave(e);
+    }
+
+    /// <summary>
+    /// The wheel moves the rows under a pointer that stays put, so the dot it was on has gone.
+    /// </summary>
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        DropTip();
+        base.OnMouseWheel(e);
+    }
+
+    /// <summary>
+    /// Points the tip at whatever dot's under a point, starting the pause when it's a new one.
+    /// </summary>
+    /// <remarks>
+    /// Another row's dot counts as new even when it says the same, so the tip moves with the
+    /// pointer rather than staying by a row it's left. Coming off one dot straight onto another
+    /// takes the short pause, the way moving between any two tips does.
+    /// </remarks>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    private void AimTip(Point point)
+    {
+        var on = TipAt(point);
+        _tipAt = point;
+
+        if (on == _tipOn)
             return;
 
-        _shownTip = tip;
-        _tip.SetToolTip(this, tip ?? string.Empty);
+        var wasUp = _tipUp;
+        DropTip();
+
+        _tipOn = on;
+        if (on is null)
+            return;
+
+        _tipDelay.Interval = wasUp ? _tip.ReshowDelay : _tip.InitialDelay;
+        _tipDelay.Start();
+    }
+
+    /// <summary>Puts the tip up, once the pointer's rested on a dot for long enough.</summary>
+    private void RaiseTip(object? sender, EventArgs e)
+    {
+        _tipDelay.Stop();
+        if (_tipOn is not { } on)
+            return;
+
+        // Below the pointer rather than on it, where a tip Windows placed itself would be.
+        _tip.Show(on.Text, this, new Point(_tipAt.X, _tipAt.Y + Cursor.Size.Height), _tip.AutoPopDelay);
+        _tipUp = true;
+    }
+
+    /// <summary>Takes the tip down and forgets the dot it was for.</summary>
+    private void DropTip()
+    {
+        _tipDelay.Stop();
+        _tipOn = null;
+
+        if (!_tipUp)
+            return;
+
+        _tip.Hide(this);
+        _tipUp = false;
     }
 
     /// <summary>
@@ -645,14 +730,22 @@ internal sealed class OutlineView : ListView
     /// </remarks>
     /// <param name="point">Where the pointer is, in the list's own coordinates</param>
     /// <returns>The priority written out, or null when the point isn't on a dot's cell</returns>
-    internal string? PriorityTipAt(Point point)
+    internal string? PriorityTipAt(Point point) => TipAt(point)?.Text;
+
+    /// <summary>
+    /// The dot under a point, by the task it's on and what it says.
+    /// </summary>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The task's id and the priority written out, or null when there's no dot there</returns>
+    private (string Id, string Text)? TipAt(Point point)
     {
         if (HitTest(point).Item?.Index is not { } index || index < 0 || index >= _rows.Count)
             return null;
 
-        return ColumnAt(index, point) is { } column && OutlineCells.PaintOf(column) == CellPaint.Priority
-            ? OutlineCells.PriorityTip(_rows[index])
-            : null;
+        if (ColumnAt(index, point) is not { } column || OutlineCells.PaintOf(column) != CellPaint.Priority)
+            return null;
+
+        return OutlineCells.PriorityTip(_rows[index]) is { } text ? (_rows[index].Id, text) : null;
     }
 
     /// <summary>
@@ -1175,6 +1268,12 @@ internal sealed class OutlineView : ListView
             m.Result = 1;
             return;
         }
+
+        // A press puts the tip away, as it does anywhere. Here rather than in OnMouseDown, which
+        // a press on a box, an expander or a heading never reaches. The next move brings it back
+        // after the pause, so a row that's just been selected still says what its dot means.
+        if (m.Msg is WmLeftDown or WmLeftDouble or WmRightDown)
+            DropTip();
 
         // A menu asked for with the keyboard is about the selected row, wherever that has got to on
         // screen. One asked for with the mouse is about the row under the pointer — and below the
