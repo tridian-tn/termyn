@@ -459,6 +459,51 @@ public class RecurringAndReminderTests
         Assert.Empty(presenter.Rows);
     }
 
+    // ---- Capture reminders -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_capture_with_a_reminder_sets_it_on_the_new_task_after_the_item()
+    {
+        var (engine, presenter) = NewPair(WithPlan("""{"current":{"plan_name":"pro","reminders":true}}"""));
+
+        await presenter.CaptureAsync("buy milk !30m", TestContext.Current.CancellationToken);
+
+        var item = engine.Snapshot().Items.Single(i => i.Content == "buy milk");
+        var reminder = engine.Snapshot().Reminders.Single();
+        Assert.Equal(item.Id, reminder.ItemId);   // the reminder points at the new task's temp id
+        Assert.Equal(ReminderKind.Absolute, reminder.Kind);
+
+        // Queued after the item_add, so the server has the task before the reminder names it — the
+        // order the outbox has to hold, or a reminder on a task the server hasn't got poisons it.
+        Assert.Equal(["item_add", "reminder_add"], engine.Outbox.Select(c => c.Type));
+    }
+
+    [Fact]
+    public async Task A_capture_reminder_the_plan_wont_take_adds_the_task_but_queues_no_reminder()
+    {
+        var (engine, presenter) = NewPair(WithPlan("""{"current":{"plan_name":"free","reminders":false}}"""));
+
+        await presenter.CaptureAsync("buy milk !30m", TestContext.Current.CancellationToken);
+
+        Assert.Contains(engine.Snapshot().Items, i => i.Content == "buy milk");
+        Assert.Empty(engine.Snapshot().Reminders);
+        Assert.Equal(["item_add"], engine.Outbox.Select(c => c.Type));
+    }
+
+    [Fact]
+    public async Task A_capture_queues_no_more_reminders_than_the_plan_allows()
+    {
+        // The cap counts reminders one by one, so a capture naming more than fit has to stop at it
+        // rather than queue ones the server would reject. Here three "!1hb/!2hb/!3hb" on a timed task
+        // are three relative reminders, against a cap of two.
+        var (engine, presenter) = NewPair(WithPlan("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":2}}"""));
+
+        await presenter.CaptureAsync("submit report tomorrow 11am !1hb !2hb !3hb", TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, engine.Snapshot().Reminders.Count);
+        Assert.Equal(2, engine.Outbox.Count(c => c.Type == "reminder_add"));
+    }
+
     // ---- Helpers -----------------------------------------------------------------------------------
 
     private static InMemorySnapshotStore Store()
@@ -484,6 +529,15 @@ public class RecurringAndReminderTests
         var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
         presenter.Select(ViewSelection.Of(SmartView.All));
         return presenter;
+    }
+
+    private static (SyncEngine Engine, MainPresenter Presenter) NewPair(InMemorySnapshotStore store)
+    {
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        return (engine, presenter);
     }
 
     /// <summary>

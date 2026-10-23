@@ -16,10 +16,20 @@ public sealed record QuickAddParse
     public TimeOnly? DueTime { get; init; }
 
     /// <summary>
-    /// Tokens the offline parser recognised but cannot act on — recurrence, reminders and
-    /// assignees. The capture UI surfaces these so the user knows what was left out.
+    /// Tokens the offline parser recognised but cannot act on — recurrence, assignees, and a
+    /// reminder it couldn't read (a recurring <c>!every</c>, or a form it hasn't the grammar for).
+    /// The capture UI surfaces these so the user knows what was left out. A reminder it could read
+    /// is in <see cref="Reminders"/> instead, not here.
     /// </summary>
     public IReadOnlyList<string> Unsupported { get; init; } = [];
+
+    /// <summary>
+    /// The reminders the text's <c>!</c> shortcuts name, read the way Todoist's apps read them.
+    /// Empty when none were typed, or when a <c>!</c> was flagged in <see cref="Unsupported"/>
+    /// rather than read. The caller adds these onto the task once it has an id, and only when the
+    /// plan takes reminders.
+    /// </summary>
+    public IReadOnlyList<CaptureReminder> Reminders { get; init; } = [];
 
     /// <summary>
     /// Whether the text describes a repeating schedule. Only the server resolves one, and a caller

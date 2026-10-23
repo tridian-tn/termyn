@@ -145,11 +145,111 @@ public class QuickAddParserTests
         Assert.Equal(Priority.P1, parse.Priority);
     }
 
+    [Theory]
+    [InlineData("Leave for airport !30m", 2026, 7, 31, 12, 30)]   // the clock stands at midday
+    [InlineData("Call the hotel !2h30m", 2026, 7, 31, 14, 30)]
+    [InlineData("Clear the trash !later", 2026, 7, 31, 16, 0)]    // ~4h on, floored to the hour
+    [InlineData("Get groceries !6pm", 2026, 7, 31, 18, 0)]        // the next instance of 6pm
+    [InlineData("Check the schedule !11am", 2026, 8, 1, 11, 0)]   // 11am has gone, so tomorrow's
+    public void An_absolute_reminder_is_worked_out_off_the_clock(string text, int y, int mo, int d, int h, int mi)
+    {
+        var parse = Parse(text);
+
+        var reminder = Assert.IsType<AbsoluteReminder>(parse.Reminders.Single());
+        Assert.Equal(new DateOnly(y, mo, d), reminder.Date);
+        Assert.Equal(new TimeOnly(h, mi), reminder.Time);
+        Assert.Empty(parse.Unsupported);
+    }
+
+    [Theory]
+    [InlineData("Dentist !tmr 3pm", 2026, 8, 1, 15, 0)]
+    [InlineData("Review notes !Mon 9am", 2026, 8, 3, 9, 0)]      // the coming Monday
+    [InlineData("Water the plants !tomorrow", 2026, 8, 1, 9, 0)] // a day with no time fires at nine
+    public void A_reminder_can_name_a_day_and_time_of_its_own(string text, int y, int mo, int d, int h, int mi)
+    {
+        var parse = Parse(text);
+
+        var reminder = Assert.IsType<AbsoluteReminder>(parse.Reminders.Single());
+        Assert.Equal(new DateOnly(y, mo, d), reminder.Date);
+        Assert.Equal(new TimeOnly(h, mi), reminder.Time);
+    }
+
+    [Theory]
+    [InlineData("Prepare agenda tomorrow 11am !1hb", 60)]
+    [InlineData("Prepare agenda tomorrow 11am !1h before", 60)]
+    [InlineData("Prepare agenda tomorrow 11am !30mb", 30)]
+    [InlineData("Prepare agenda tomorrow 11am !0mb", 0)]
+    public void A_before_due_reminder_on_a_timed_task_is_relative(string text, int minutes)
+    {
+        var parse = Parse(text);
+
+        var reminder = Assert.IsType<RelativeReminder>(parse.Reminders.Single());
+        Assert.Equal(minutes, reminder.MinutesBefore);
+    }
+
     [Fact]
-    public void Reminders_are_kept_as_text_and_flagged()
+    public void A_before_due_reminder_without_a_due_time_falls_back_to_a_span_from_now()
+    {
+        // Todoist's own rule: with no due time to count back from, "!1h before" is an hour from now.
+        var parse = Parse("Buy milk !1hb");
+
+        Assert.Null(parse.DueTime);
+        var reminder = Assert.IsType<AbsoluteReminder>(parse.Reminders.Single());
+        Assert.Equal(Today, reminder.Date);
+        Assert.Equal(new TimeOnly(13, 0), reminder.Time);
+    }
+
+    [Fact]
+    public void A_reminder_is_taken_out_of_the_content()
     {
         var parse = Parse("Leave for airport !30m");
 
+        Assert.Equal("Leave for airport", parse.Content);
+        Assert.Empty(parse.Unsupported);
+    }
+
+    [Fact]
+    public void Several_reminders_are_each_read()
+    {
+        var parse = Parse("Submit report tomorrow 11am !1hb !3hb");
+
+        Assert.Equal("Submit report", parse.Content);
+        Assert.Collection(
+            parse.Reminders,
+            r => Assert.Equal(60, Assert.IsType<RelativeReminder>(r).MinutesBefore),
+            r => Assert.Equal(180, Assert.IsType<RelativeReminder>(r).MinutesBefore));
+    }
+
+    [Fact]
+    public void A_recurring_reminder_is_left_to_the_server_and_flagged()
+    {
+        var parse = Parse("End of day review !every 5pm");
+
+        Assert.Empty(parse.Reminders);
+        Assert.False(parse.IsRecurrence);   // the task itself doesn't repeat, so the capture isn't refused
+        Assert.Contains("!every 5pm", parse.Unsupported);
+        Assert.Contains("!every 5pm", parse.Content);
+    }
+
+    [Fact]
+    public void A_reminder_shortcut_it_cannot_read_stays_in_the_words_and_is_flagged()
+    {
+        var parse = Parse("Some task !wat");
+
+        Assert.Empty(parse.Reminders);
+        Assert.Contains("!wat", parse.Unsupported);
+        Assert.Contains("!wat", parse.Content);
+    }
+
+    [Fact]
+    public void With_smart_dates_off_a_reminder_is_left_in_the_words()
+    {
+        // The "!" is read on the same setting a date is: for an account that reads none, it's left
+        // whole rather than guessed at, the safe direction when the apps' behaviour isn't settled.
+        var parser = new QuickAddParser(new FixedClock(Today));
+        var parse = parser.Parse("Leave for airport !30m", new DateSettings(TimeZoneInfo.Utc, InlineDatesOff: true));
+
+        Assert.Empty(parse.Reminders);
         Assert.Equal("Leave for airport !30m", parse.Content);
         Assert.Contains("!30m", parse.Unsupported);
     }

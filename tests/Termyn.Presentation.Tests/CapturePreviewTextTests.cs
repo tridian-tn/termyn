@@ -20,8 +20,8 @@ public class CapturePreviewTextTests
     private static QuickAddParse Parse(string text)
         => new QuickAddParser(new FixedClock(Today)).Parse(text);
 
-    private static string Preview(string text)
-        => CapturePreviewText.For(new CapturePreview(Parse(text), ProjectResolved: true, SectionResolved: true));
+    private static string Preview(string text, bool remindersAvailable = true)
+        => CapturePreviewText.For(new CapturePreview(Parse(text), ProjectResolved: true, SectionResolved: true, RemindersAvailable: remindersAvailable));
 
     [Fact]
     public void A_repeating_task_is_not_promised_a_due_date()
@@ -78,7 +78,7 @@ public class CapturePreviewTextTests
     public void An_unknown_project_says_where_the_task_will_go_instead()
     {
         var preview = CapturePreviewText.For(
-            new CapturePreview(Parse("call mum #Nowhere"), ProjectResolved: false, SectionResolved: true));
+            new CapturePreview(Parse("call mum #Nowhere"), ProjectResolved: false, SectionResolved: true, RemindersAvailable: true));
 
         Assert.Contains("goes to Inbox", preview);
     }
@@ -94,7 +94,7 @@ public class CapturePreviewTextTests
     public void An_unknown_section_says_it_is_unknown()
     {
         var parse = Parse("call mum") with { SectionName = "Nowhere" };
-        var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: false));
+        var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: false, RemindersAvailable: true));
 
         Assert.Contains("/Nowhere (unknown)", preview);
     }
@@ -103,8 +103,45 @@ public class CapturePreviewTextTests
     public void A_field_that_needs_the_server_is_named_as_offline()
     {
         var parse = Parse("call mum") with { Unsupported = ["deadline", "assignee"] };
-        var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: true));
+        var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: true, RemindersAvailable: true));
 
         Assert.Contains("(needs a connection: deadline, assignee)", preview);
+    }
+
+    [Fact]
+    public void A_reminder_the_plan_takes_is_shown_as_one_it_will_set()
+    {
+        var preview = Preview("leave for airport !30m");
+
+        Assert.Contains("remind", preview);
+        Assert.DoesNotContain("!30m", preview);   // read, not left in the words
+    }
+
+    [Fact]
+    public void A_before_due_reminder_reads_in_words()
+    {
+        var preview = Preview("submit report tomorrow 11am !1hb");
+
+        Assert.Contains("remind 1h before", preview);
+    }
+
+    [Fact]
+    public void A_reminder_the_plan_wont_take_says_so_rather_than_setting_it()
+    {
+        var preview = Preview("leave for airport !30m", remindersAvailable: false);
+
+        Assert.Contains("reminders aren't on this plan", preview);
+        Assert.DoesNotContain("needs a connection", preview);
+    }
+
+    [Fact]
+    public void A_recurring_capture_is_not_promised_a_reminder()
+    {
+        // The "!30m" is read, but the capture is refused whole for the repeat, so promising a
+        // reminder would describe a task that isn't created — the same reason the due date goes
+        // unsaid for a recurrence.
+        var preview = Preview("task !30m every day");
+
+        Assert.DoesNotContain("remind", preview);
     }
 }

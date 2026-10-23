@@ -117,6 +117,7 @@ public sealed partial class QuickAddParser
         DateOnly? date = null;
         TimeOnly? time = null;
         var recurrence = false;
+        var pending = new List<PendingReminder>();
 
         // Whether a day was passed over that Todoist would read, and where the time's words were
         // taken from, so they can go back if the time turns out to have no day it can go on.
@@ -164,10 +165,36 @@ public sealed partial class QuickAddParser
                     unsupported.Add(token);
                     continue;
                 case '!' when token.Length > 1:
-                    // Reminders need the server; keep the text and flag it.
+                {
+                    // A recurring reminder is the server's to resolve, like any repeat: consume the
+                    // run so a trailing time can't become a due time, and flag it. Not a recurrence
+                    // of the task itself, which repeats the task and would refuse the capture.
+                    if (token[1..].Equals("every", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var run = new List<string> { token };
+                        run.AddRange(tokens[(i + 1)..]
+                            .TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+' or '!') && !TryParsePriority(t, out _)));
+                        unsupported.Add(string.Join(' ', run));
+                        content.AddRange(run);
+                        i += run.Count - 1;
+                        continue;
+                    }
+
+                    // A reminder Todoist's apps read here is staged and set once the task has its id.
+                    // Gated on the same setting a date is: for an account that reads no dates, whether
+                    // "!" is read at all isn't something the docs settle, so it's left in the words.
+                    if (readsDays && ReminderAt(tokens, i, now, settings, out var remUsed) is { } reminder)
+                    {
+                        pending.Add(reminder);
+                        i += remUsed - 1;
+                        continue;
+                    }
+
+                    // One this grammar can't read keeps its text and is flagged, as before.
                     unsupported.Add(token);
                     content.Add(token);
                     continue;
+                }
             }
 
             if (TryParsePriority(token, out var parsedPriority))
@@ -243,6 +270,20 @@ public sealed partial class QuickAddParser
             }
         }
 
+        // Resolved now the due time is settled: a "before due" reminder needs one to count back from,
+        // and on a task without a time Todoist falls back to the same span from the current time.
+        var reminders = new List<CaptureReminder>(pending.Count);
+        foreach (var p in pending)
+        {
+            reminders.Add(p switch
+            {
+                StagedAbsolute a => new AbsoluteReminder(a.Date, a.Time),
+                StagedBeforeDue b when time is not null => new RelativeReminder(b.Minutes),
+                StagedBeforeDue b => Absolute(Moment(now, b.Minutes, floorToHour: false)),
+                _ => throw new InvalidOperationException(),
+            });
+        }
+
         return new QuickAddParse
         {
             Content = string.Join(' ', content),
@@ -253,8 +294,11 @@ public sealed partial class QuickAddParser
             DueDate = date,
             DueTime = time,
             Unsupported = unsupported,
+            Reminders = reminders,
             IsRecurrence = recurrence,
         };
+
+        static AbsoluteReminder Absolute((DateOnly Date, TimeOnly Time) moment) => new(moment.Date, moment.Time);
     }
 
     /// <summary>
@@ -845,6 +889,175 @@ public sealed partial class QuickAddParser
         return true;
     }
 
+    // ---- Reminders ---------------------------------------------------------------------------------
+
+    /// <summary>When a reminder set for a day with no time of its own fires. Todoist's default.</summary>
+    public static readonly TimeOnly ReminderDefaultTime = new(9, 0);
+
+    /// <summary>A reminder staged while a capture is read, before the due time is settled.</summary>
+    private abstract record PendingReminder;
+
+    /// <summary>A reminder for a moment of its own, already worked out.</summary>
+    private sealed record StagedAbsolute(DateOnly Date, TimeOnly Time) : PendingReminder;
+
+    /// <summary>
+    /// A reminder a span before the task is due. It becomes a relative reminder when the task has a
+    /// due time to count back from, or that same span from now when it hasn't, Todoist's own fallback.
+    /// </summary>
+    private sealed record StagedBeforeDue(int Minutes) : PendingReminder;
+
+    /// <summary>
+    /// Reads the reminder a <c>!</c> shortcut names, starting at one word and running on over the
+    /// next few where it must (<c>!1h before</c>, <c>!tmr 3pm</c>).
+    /// </summary>
+    /// <remarks>
+    /// Todoist's documented shortcuts: a span from now (<c>!30m</c>, <c>!2h30m</c>, <c>!later</c>), a
+    /// span before the task is due (<c>!30mb</c>, <c>!1h before</c>), or a day and time of its own
+    /// (<c>!3pm</c>, <c>!tmr 3pm</c>, <c>!Mon 9am</c>, <c>!tomorrow</c> at nine). A day with no time
+    /// fires at <see cref="ReminderDefaultTime"/>, and a time with no day on its next instance, both
+    /// as Todoist does. "tmr" and a bare shortened weekday are read as days here and nowhere else,
+    /// since after a <c>!</c> they can't be anything but a day.
+    /// </remarks>
+    /// <param name="tokens">Every word typed</param>
+    /// <param name="at">Where the <c>!</c> word is</param>
+    /// <param name="now">The account's wall-clock time</param>
+    /// <param name="settings">What the account says about reading a date</param>
+    /// <param name="used">How many words the reminder took, when there was one</param>
+    /// <returns>The reminder, or null when the words after the <c>!</c> aren't one this can read</returns>
+    private PendingReminder? ReminderAt(string[] tokens, int at, DateTime now, DateSettings settings, out int used)
+    {
+        used = 1;
+        var spec = tokens[at][1..].ToLowerInvariant();
+
+        // "around 4 hours later from current time, rounded down to the closest hour".
+        if (spec == "later")
+        {
+            var (d, t) = Moment(now, 4 * 60, floorToHour: true);
+            return new StagedAbsolute(d, t);
+        }
+
+        if (SpanMinutes(spec) is { } span)
+        {
+            // "!1h before" / "!30m before": a second word spells out the "b" of "!1hb".
+            if (at + 1 < tokens.Length && tokens[at + 1].Equals("before", StringComparison.OrdinalIgnoreCase))
+            {
+                used = 2;
+                return new StagedBeforeDue(span);
+            }
+
+            var (d, t) = Moment(now, span, floorToHour: false);
+            return new StagedAbsolute(d, t);
+        }
+
+        if (BeforeMinutes(spec) is { } before)
+            return new StagedBeforeDue(before);
+
+        return AbsoluteReminderAt(tokens, at, now, settings, out used);
+    }
+
+    /// <summary>Reads a reminder written as a day and/or a time of its own, after the <c>!</c>.</summary>
+    /// <param name="tokens">Every word typed</param>
+    /// <param name="at">Where the <c>!</c> word is</param>
+    /// <param name="now">The account's wall-clock time</param>
+    /// <param name="settings">What the account says about reading a date</param>
+    /// <param name="used">How many words it took, when it read one</param>
+    /// <returns>The reminder, or null when no day or time starts after the <c>!</c></returns>
+    private PendingReminder? AbsoluteReminderAt(string[] tokens, int at, DateTime now, DateSettings settings, out int used)
+    {
+        used = 1;
+        var today = DateOnly.FromDateTime(now);
+
+        // The reminder reads over its own words: the first is the "!" word with the mark taken off.
+        var syn = new string[tokens.Length - at];
+        syn[0] = tokens[at][1..];
+        Array.Copy(tokens, at + 1, syn, 1, syn.Length - 1);
+
+        DateOnly? day = null;
+        var dayWords = 0;
+        if (DayAt(syn, 0, today, settings, out var dUsed, out _) is { } readDay)
+        {
+            day = readDay;
+            dayWords = dUsed;
+        }
+        else if (syn[0].Equals("tmr", StringComparison.OrdinalIgnoreCase))
+        {
+            day = today.AddDays(1);
+            dayWords = 1;
+        }
+        else if (settings.ReadsEnglish && Weekday(syn[0].ToLowerInvariant()) is { } weekday)
+        {
+            day = Coming(weekday, today);
+            dayWords = 1;
+        }
+
+        TimeOnly? clock = null;
+        var timeWords = 0;
+        if (dayWords < syn.Length && TimeAt(syn, dayWords, settings, out var tUsed) is { } readTime)
+        {
+            clock = readTime;
+            timeWords = tUsed;
+        }
+
+        if (day is { } onDay && clock is { } atTime)
+        {
+            used = dayWords + timeWords;
+            return new StagedAbsolute(onDay, atTime);
+        }
+
+        if (day is { } dayOnly)
+        {
+            used = dayWords;
+            return new StagedAbsolute(dayOnly, ReminderDefaultTime);
+        }
+
+        if (clock is { } timeOnly)
+        {
+            used = timeWords;
+            return new StagedAbsolute(DayOfBareTime(timeOnly, now), timeOnly);
+        }
+
+        used = 1;
+        return null;
+    }
+
+    /// <summary>A span written as hours and/or minutes: <c>30m</c>, <c>90min</c>, <c>2h</c>, <c>2h30m</c>.</summary>
+    /// <param name="word">The word, lower-cased</param>
+    /// <returns>The span in minutes, or null when the word isn't one</returns>
+    private static int? SpanMinutes(string word)
+    {
+        var match = SpanPattern().Match(word);
+        if (!match.Success || (!match.Groups["h"].Success && !match.Groups["m"].Success))
+            return null;
+
+        var hours = match.Groups["h"].Success ? int.Parse(match.Groups["h"].Value, CultureInfo.InvariantCulture) : 0;
+        var minutes = match.Groups["m"].Success ? int.Parse(match.Groups["m"].Value, CultureInfo.InvariantCulture) : 0;
+        return hours * 60 + minutes;
+    }
+
+    /// <summary>A span before the task is due, written in one word: <c>30mb</c>, <c>1hb</c>, <c>0mb</c>.</summary>
+    /// <param name="word">The word, lower-cased</param>
+    /// <returns>The span in minutes, or null when the word isn't one</returns>
+    private static int? BeforeMinutes(string word)
+    {
+        var match = BeforePattern().Match(word);
+        if (!match.Success)
+            return null;
+
+        var count = int.Parse(match.Groups["n"].Value, CultureInfo.InvariantCulture);
+        return match.Groups["u"].Value == "h" ? count * 60 : count;
+    }
+
+    /// <summary>A moment a span of minutes on from now, to the minute, or floored to the hour.</summary>
+    /// <param name="now">The account's wall-clock time</param>
+    /// <param name="minutes">The span</param>
+    /// <param name="floorToHour">Whether to drop the minutes, as <c>!later</c> does</param>
+    /// <returns>The day and time it lands on</returns>
+    private static (DateOnly Date, TimeOnly Time) Moment(DateTime now, int minutes, bool floorToHour)
+    {
+        var at = now.AddMinutes(minutes);
+        return (DateOnly.FromDateTime(at), floorToHour ? new TimeOnly(at.Hour, 0) : new TimeOnly(at.Hour, at.Minute));
+    }
+
     // [0-9] and never \d, which takes in every script's digits: int.Parse throws on a full-width
     // one, and the date box reads on every keystroke.
     [GeneratedRegex(@"^(?<h>[0-9]{1,2})(:(?<m>[0-9]{2}))?(?<ap>am|pm|AM|PM)?$")]
@@ -858,4 +1071,10 @@ public sealed partial class QuickAddParser
 
     [GeneratedRegex(@"^(?<d>[0-9]{1,2})(st|nd|rd|th)?$")]
     private static partial Regex DayNumberPattern();
+
+    [GeneratedRegex(@"^(?:(?<h>[0-9]{1,4})h)?(?:(?<m>[0-9]{1,4})m(?:in)?)?$")]
+    private static partial Regex SpanPattern();
+
+    [GeneratedRegex(@"^(?<n>[0-9]{1,4})(?<u>m|h)b$")]
+    private static partial Regex BeforePattern();
 }

@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Linq;
+using Termyn.Core.Capture;
 using Termyn.Core.Model;
 
 namespace Termyn.Presentation;
@@ -45,9 +47,33 @@ public static class CapturePreviewText
         // the honest answer: the server settles when it next falls due, and nothing here can.
         if (!parse.IsRecurrence && parse.DueDate is { } date)
             parts.Add(parse.DueTime is { } time ? $"{date:yyyy-MM-dd} {time:HH:mm}" : $"{date:yyyy-MM-dd}");
+        // A reminder the plan takes is named as one it will set; one the plan won't is named as a
+        // reminder it can't, never silently, since the "!" was read and then dropped. Not for a
+        // repeating capture, which is refused whole — naming a reminder would promise one on a task
+        // that isn't created, the same reason the due date above goes unsaid.
+        if (!parse.IsRecurrence && parse.Reminders.Count > 0)
+        {
+            var when = string.Join(", ", parse.Reminders.Select(When));
+            parts.Add(string.Format(
+                CultureInfo.CurrentCulture,
+                preview.RemindersAvailable ? Strings.CaptureWillRemind : Strings.CaptureReminderNoPlan,
+                when));
+        }
         if (parse.Unsupported.Count > 0)
             parts.Add(string.Format(CultureInfo.CurrentCulture, Strings.CaptureNeedsConnection, string.Join(", ", parse.Unsupported)));
 
         return string.Join("  ·  ", parts);
     }
+
+    /// <summary>A reminder in the terse words the preview line uses, matching its due date.</summary>
+    /// <param name="reminder">The reminder the "!" named</param>
+    /// <returns>The words</returns>
+    private static string When(CaptureReminder reminder) => reminder switch
+    {
+        AbsoluteReminder a => $"{a.Date:yyyy-MM-dd} {a.Time:HH:mm}",
+        RelativeReminder { MinutesBefore: 0 } => "when due",
+        RelativeReminder { MinutesBefore: var m } when m % 60 == 0 => $"{m / 60}h before",
+        RelativeReminder { MinutesBefore: var m } => $"{m}m before",
+        _ => string.Empty,
+    };
 }
