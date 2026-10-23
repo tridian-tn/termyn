@@ -1054,9 +1054,17 @@ internal sealed class MainForm : Form
 
     private void OpenSettings()
     {
-        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is not { } amended)
-            return;
+        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is { } amended)
+            ApplySettings(amended);
+    }
 
+    /// <summary>
+    /// Puts settings the dialog has just saved into effect, and writes them.
+    /// </summary>
+    /// <remarks>Internal so a test can save settings without a dialog to press Save on.</remarks>
+    /// <param name="amended">The settings as the dialog handed them back</param>
+    internal void ApplySettings(AppSettings amended)
+    {
         var themeChanged = amended.Theme != _settings.Theme;
         var hotkeyChanged = amended.HotkeyEnabled != _settings.HotkeyEnabled
                             || amended.HotkeyBinding != _settings.HotkeyBinding;

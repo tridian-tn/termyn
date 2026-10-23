@@ -16,7 +16,6 @@ internal static class RealMouse
     private const int WmLeftDown = 0x0201;
     private const int WmLeftUp = 0x0202;
     private const int WmLeftDouble = 0x0203;
-    private const int WmMouseMove = 0x0200;
     private const int LeftButton = 0x0001;
 
     [DllImport("user32.dll")]
@@ -42,14 +41,5 @@ internal static class RealMouse
         // A few rounds, since what the press sets off can post messages of its own.
         for (var round = 0; round < 5; round++)
             Application.DoEvents();
-    }
-
-    /// <summary>The pointer moving to a point with no button held.</summary>
-    /// <param name="control">What it moves over</param>
-    /// <param name="at">Where, in the control's own coordinates</param>
-    public static void Move(Control control, Point at)
-    {
-        PostMessage(control.Handle, WmMouseMove, 0, (at.Y << 16) | (at.X & 0xFFFF));
-        Application.DoEvents();
     }
 }
