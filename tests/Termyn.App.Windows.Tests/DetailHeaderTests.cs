@@ -72,4 +72,46 @@ public class DetailHeaderTests
 
         Assert.True(header.Visible);
     }
+
+    [WinFormsTheory]
+    [InlineData(96)]
+    [InlineData(120)]
+    [InlineData(144)]
+    public void Letters_that_drop_below_the_line_are_drawn_in_full(int dpi)
+    {
+        // The name at the scale's size, in the strip at the scale's height, drawn the same as in a
+        // strip with room to spare. Held at 24 pixels it lost the tails of g, p and y from 125% up.
+        using var font = new Font(Control.DefaultFont.FontFamily, Control.DefaultFont.SizeInPoints * dpi / 96f);
+        var height = Termyn.Presentation.StartupLayout.Scaled(DetailHeader.LogicalHeight, dpi);
+
+        var fitted = Ink(font, height);
+        var roomy = Ink(font, height * 3);
+
+        Assert.True(fitted > 0, "the name was not drawn");
+        Assert.Equal(roomy, fitted);
+    }
+
+    /// <summary>How many pixels aren't the background, with a name that drops below the line.</summary>
+    /// <param name="font">The font to draw it in</param>
+    /// <param name="height">How tall the strip is</param>
+    /// <returns>The pixels drawn, the rule along the bottom included</returns>
+    private static int Ink(Font font, int height)
+    {
+        using var header = Header();
+        header.Height = height;
+        header.Font = font;
+        header.Subject = "Task: Shopping gjpqy";
+
+        using var shot = Painted(header);
+        var ink = 0;
+
+        for (var y = 0; y < shot.Height; y++)
+        for (var x = 0; x < shot.Width; x++)
+        {
+            if (shot.GetPixel(x, y).ToArgb() != header.Theme.Panel.ToArgb())
+                ink++;
+        }
+
+        return ink;
+    }
 }

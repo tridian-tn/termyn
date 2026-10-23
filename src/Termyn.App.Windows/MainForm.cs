@@ -86,7 +86,6 @@ internal sealed class MainForm : Form
 
     /// <summary>The line above the outline: the path to the view, and the buttons beside it.</summary>
     private readonly ViewHeader _viewHeader;
-    private readonly LinkLabel _crumbs;
 
     /// <summary>The description and the comments, as the two tabs of one panel.</summary>
     private readonly TabControl _tabs;
@@ -337,8 +336,7 @@ internal sealed class MainForm : Form
         // that question shouldn't be answered differently depending on where the focus went.
         _viewHeader = new ViewHeader();
         _viewHeader.Fill(Menus.ViewTools, Run);
-        _crumbs = _viewHeader.Crumbs;
-        _crumbs.LinkClicked += OnCrumbClicked;
+        _viewHeader.Crumbs.LinkClicked += OnCrumbClicked;
 
         // So a row selected while its task still had the name we gave it isn't read as deleted the
         // moment the sync learns what the server calls it.
@@ -547,7 +545,7 @@ internal sealed class MainForm : Form
         _status = new Label
         {
             Dock = DockStyle.Bottom,
-            Height = 24,
+            Height = StatusHeight,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 0, 0, 0),
             Text = Strings.MainLoading,
@@ -1223,17 +1221,28 @@ internal sealed class MainForm : Form
     /// <summary>Sets the space round the search box for the screen the window's on.</summary>
     private void PadSearch() => _searchHolder.Padding = SearchPaddingAt(DeviceDpi);
 
-    /// <summary>
-    /// Sizes the line above the outline, and its buttons, for the screen the window's on.
-    /// </summary>
-    /// <remarks>
-    /// The text in it grows with the display's scale whether or not this is done, so a line left at
-    /// its 100% height cuts the bottoms off the letters on any screen scaled past that.
-    /// </remarks>
-    private void SizeViewHeader() => _viewHeader.ScaleTo(DeviceDpi);
+    /// <summary>How tall the status line is at 100%.</summary>
+    internal const int StatusHeight = 24;
 
     /// <summary>
-    /// Sizes the search box's padding and the line above the outline again once the window knows
+    /// Sizes the strips of a fixed height for a display's scale: the line above the outline and its
+    /// buttons, the line naming what the panel's about, and the status line.
+    /// </summary>
+    /// <remarks>
+    /// The text in each grows with the display's scale whether or not this is done, so a strip left
+    /// at its 100% height cuts the bottoms off the letters on any screen scaled past that. Internal
+    /// so a test can size them for a scale the machine it runs on hasn't got.
+    /// </remarks>
+    /// <param name="dpi">The display's dots per inch, which is 96 at 100%</param>
+    internal void SizeStrips(int dpi)
+    {
+        _viewHeader.ScaleTo(dpi);
+        _panelHeader.Height = StartupLayout.Scaled(DetailHeader.LogicalHeight, dpi);
+        _status.Height = StartupLayout.Scaled(StatusHeight, dpi);
+    }
+
+    /// <summary>
+    /// Sizes the search box's padding and the strips of a fixed height again once the window knows
     /// which screen it's on.
     /// </summary>
     /// <remarks>
@@ -1244,15 +1253,15 @@ internal sealed class MainForm : Form
     {
         base.OnHandleCreated(e);
         PadSearch();
-        SizeViewHeader();
+        SizeStrips(DeviceDpi);
     }
 
-    /// <summary>Sizes the same two again for a screen of another scale.</summary>
+    /// <summary>Sizes the same again for a screen of another scale.</summary>
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
         PadSearch();
-        SizeViewHeader();
+        SizeStrips(e.DeviceDpiNew);
     }
 
     private ViewState CurrentViewState()
@@ -1460,7 +1469,7 @@ internal sealed class MainForm : Form
 
         // After the rows as well: whether there's anything left to fold or unfold is read off them.
         // Every fold republishes the rows, so this is the one place that needs to ask.
-        _viewHeader.Render(Context());
+        _viewHeader.Render(ToolsContext());
         RenderStatus();
         RenderUnsupported();
         RenderTray();
@@ -1710,17 +1719,18 @@ internal sealed class MainForm : Form
     {
         var line = ViewPath.Line(_presenter.Breadcrumbs, CrumbSeparator);
 
-        _crumbs.Text = line.Text;
-        _crumbs.Links.Clear();
+        var crumbs = _viewHeader.Crumbs;
+        crumbs.Text = line.Text;
+        crumbs.Links.Clear();
 
         foreach (var link in line.Links)
-            _crumbs.Links.Add(link.Start, link.Length, link.Target);
+            crumbs.Links.Add(link.Start, link.Length, link.Target);
 
         // Out of the tab order. With a link on it, it was a stop reached after the list though
         // it's drawn above it, and the tree goes to the same places anyway. Said here, after the
         // text and the links, since a LinkLabel decides for itself whether it's a stop as they
         // change, and a TabStop set once when it was made didn't last.
-        _crumbs.TabStop = false;
+        crumbs.TabStop = false;
     }
 
     private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
@@ -2813,6 +2823,22 @@ internal sealed class MainForm : Form
     /// <returns>The command, or <see cref="AppCommand.None"/> when it asks for nothing there</returns>
     internal static AppCommand CommandFor(Keys keys, ShortcutScope scope)
         => KeyMap.KeystrokeOf(keys) is { } keystroke ? Shortcuts.CommandFor(keystroke, scope) : AppCommand.None;
+
+    /// <summary>
+    /// What the buttons above the outline read from: only what their commands ask about.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Context"/>, which asks the engine what the selected task could be made to do
+    /// and works out what a new task would begin with. That's nothing once per menu opening, but
+    /// this is asked on every publish — every sync, and every key typed into the search. The
+    /// buttons still go through the menu's own <see cref="Presentation.Commands.StateOf"/>; they're
+    /// just handed a context holding the two answers it decides them with. A button whose command
+    /// reads anything else needs that adding here.
+    /// </remarks>
+    /// <returns>What the buttons read from</returns>
+    private CommandContext ToolsContext() => new(
+        CanExpandAll: _presenter.CanExpandAll,
+        CanCollapseAll: _presenter.CanCollapseAll);
 
     /// <summary>
     /// What the menus should be reading from right now — what is selected where, and what can be

@@ -15,10 +15,58 @@ namespace Termyn.App.Windows;
 internal static class FoldGlyph
 {
     /// <summary>
-    /// The grid the picture's drawn on, in steps. The front box runs from 0 to 10 across and 4 to 14
-    /// down, so its middle falls on a step and the plus and minus land on whole pixels at 100%.
+    /// Where the picture's parts go in a button.
     /// </summary>
-    private const float Grid = 15f;
+    /// <param name="Front">The front box, whose edges the outline is drawn along</param>
+    /// <param name="Behind">The part of the box behind that the front one doesn't cover</param>
+    /// <param name="Centre">The middle of the front box, where the plus and minus cross</param>
+    /// <param name="Arm">How far the plus and minus reach either side of the middle</param>
+    /// <param name="Stroke">How thick the lines are</param>
+    internal readonly record struct Shape(Rectangle Front, Point[] Behind, Point Centre, int Arm, int Stroke);
+
+    /// <summary>
+    /// Works out where the picture goes in <paramref name="bounds"/>.
+    /// </summary>
+    /// <remarks>
+    /// In whole pixels throughout, and the front box an even number of them across, so its middle is
+    /// a pixel rather than the line between two and the plus sits square in it at any size. At 100%
+    /// the picture's sixteen pixels in a 24-pixel button: a ten-pixel box with the other four up and
+    /// to the right, and a plus three either side.
+    /// </remarks>
+    /// <param name="bounds">The room the picture has, which it scales to</param>
+    /// <returns>Where each part goes</returns>
+    internal static Shape Layout(Rectangle bounds)
+    {
+        // Two thirds of the room, which is what an icon on a toolbar usually takes.
+        var size = Math.Max(10, Math.Min(bounds.Width, bounds.Height) * 2 / 3);
+        var unit = size / 16f;
+
+        int Steps(float steps, int least) => Math.Max(least, (int)Math.Round(steps * unit, MidpointRounding.AwayFromZero));
+
+        var half = Steps(5, 3);
+        var offset = Steps(4, 2);
+        var arm = Steps(3, 1);
+        var extent = (half * 2) + offset;
+
+        var left = bounds.X + ((bounds.Width - extent) / 2);
+        var top = bounds.Y + ((bounds.Height - extent) / 2) + offset;
+        var front = new Rectangle(left, top, half * 2, half * 2);
+
+        Point[] behind =
+        [
+            new(front.Left + offset, front.Top),
+            new(front.Left + offset, front.Top - offset),
+            new(front.Right + offset, front.Top - offset),
+            new(front.Right + offset, front.Bottom - offset),
+            new(front.Right, front.Bottom - offset),
+        ];
+
+        // Away from zero rather than to even, so the lines thicken in step with the scale: to even,
+        // 250% came out as thin as 150%.
+        var stroke = Math.Max(1, (int)Math.Round(size / 16f, MidpointRounding.AwayFromZero));
+
+        return new Shape(front, behind, new Point(left + half, top + half), arm, stroke);
+    }
 
     /// <summary>
     /// Draws the pair of boxes, centred in <paramref name="bounds"/>.
@@ -29,14 +77,8 @@ internal static class FoldGlyph
     /// <param name="colour">What to draw it in</param>
     internal static void Draw(Graphics g, Rectangle bounds, bool collapse, Color colour)
     {
-        // Two thirds of the room: sixteen pixels in a 24-pixel button at 100%, which is what an
-        // icon on a toolbar usually is.
-        var size = Math.Max(10, Math.Min(bounds.Width, bounds.Height) * 2 / 3);
-        var left = bounds.X + ((bounds.Width - size) / 2);
-        var top = bounds.Y + ((bounds.Height - size) / 2);
-
-        int X(float step) => left + (int)Math.Round(step * size / Grid);
-        int Y(float step) => top + (int)Math.Round(step * size / Grid);
+        var shape = Layout(bounds);
+        var (x, y) = (shape.Centre.X, shape.Centre.Y);
 
         var was = g.SmoothingMode;
 
@@ -45,24 +87,16 @@ internal static class FoldGlyph
 
         try
         {
-            using var pen = new Pen(colour, Math.Max(1, (int)Math.Round(size / 16f)));
+            using var pen = new Pen(colour, shape.Stroke);
 
-            // The box behind: only the part the front one doesn't cover, up and to the right.
-            g.DrawLines(pen, [
-                new Point(X(4), Y(4)),
-                new Point(X(4), Y(0)),
-                new Point(X(14), Y(0)),
-                new Point(X(14), Y(10)),
-                new Point(X(10), Y(10)),
-            ]);
-
-            g.DrawRectangle(pen, X(0), Y(4), X(10) - X(0), Y(14) - Y(4));
+            g.DrawLines(pen, shape.Behind);
+            g.DrawRectangle(pen, shape.Front);
 
             // The minus, and for a plus the upright through it.
-            g.DrawLine(pen, X(2.5f), Y(9), X(7.5f), Y(9));
+            g.DrawLine(pen, x - shape.Arm, y, x + shape.Arm, y);
 
             if (!collapse)
-                g.DrawLine(pen, X(5), Y(6.5f), X(5), Y(11.5f));
+                g.DrawLine(pen, x, y - shape.Arm, x, y + shape.Arm);
         }
         finally
         {

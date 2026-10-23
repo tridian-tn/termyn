@@ -57,6 +57,11 @@ internal sealed class ViewHeader : Panel
         {
             Dock = DockStyle.Right,
 
+            // Left off, a strip answers the click that brings its window forward by eating it: with
+            // another app in front, Collapse all only brought Termyn up and had to be clicked again,
+            // while the outline and the tree beside it act on that first click.
+            AllowClickThrough = true,
+
             // Said outright: left to itself a strip docked to a side turns vertical, and stacks its
             // buttons down a line that has room for one.
             LayoutStyle = ToolStripLayoutStyle.HorizontalStackWithOverflow,
@@ -238,10 +243,8 @@ internal sealed class ViewHeader : Panel
         /// Halfway from the quiet text colour to the background. The quiet colour itself is what the
         /// path's links are drawn in, so a greyed button in it would look like something to click.
         /// </remarks>
-        private readonly Color _disabled = Color.FromArgb(
-            (theme.Muted.R + theme.Background.R) / 2,
-            (theme.Muted.G + theme.Background.G) / 2,
-            (theme.Muted.B + theme.Background.B) / 2);
+        private readonly Color _disabled = Theme.ToColor(
+            ThemePalette.Blend(Theme.ToRgb(theme.Muted), Theme.ToRgb(theme.Background), 0.5));
 
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {

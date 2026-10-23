@@ -14,8 +14,21 @@ namespace Termyn.App.Windows.Tests;
 /// line having room for it, the buttons sitting where they should, and the buttons saying the same
 /// as the View menu about what there is to fold.
 /// </remarks>
-public class ViewHeaderTests
+public class ViewHeaderTests : IDisposable
 {
+    /// <summary>The settings files the windows here were given, to be cleared away after.</summary>
+    private readonly List<string> _settings = [];
+
+    /// <summary>Deletes each window's settings, and whatever the store wrote alongside them.</summary>
+    public void Dispose()
+    {
+        foreach (var name in _settings)
+        foreach (var file in Directory.GetFiles(Path.GetTempPath(), name + "*"))
+            File.Delete(file);
+
+        GC.SuppressFinalize(this);
+    }
+
     private static ViewHeader Header(int width = 600)
     {
         var header = new ViewHeader { Width = width, Theme = Theme.Resolve(ThemePreference.Light) };
@@ -328,14 +341,21 @@ public class ViewHeaderTests
     /// A window over <see cref="Store"/>, shown off-screen: one that was never displayed has no
     /// handle, and drops the renders these are about rather than running them.
     /// </summary>
-    /// <param name="settingsName">A file name of its own</param>
+    /// <remarks>
+    /// Its settings file is named afresh each time, so nothing one run saves is read back by the
+    /// next, and it's kept off the taskbar so a test run doesn't flash windows there.
+    /// </remarks>
     /// <param name="presenter">The presenter, to drive the window with</param>
     /// <returns>The window, which the caller disposes</returns>
-    private static MainForm Shown(string settingsName, out MainPresenter presenter)
+    private MainForm Shown(out MainPresenter presenter)
     {
-        var window = TestWindow.Build(settingsName, Store(), out _, out presenter);
+        var name = $"termyn-view-header-{Guid.NewGuid():N}.json";
+        _settings.Add(name);
+
+        var window = TestWindow.Build(name, Store(), out _, out presenter);
         window.StartPosition = FormStartPosition.Manual;
         window.Location = new Point(-2000, -2000);
+        window.ShowInTaskbar = false;
         window.Show();
         return window;
     }
@@ -343,7 +363,7 @@ public class ViewHeaderTests
     [WinFormsFact]
     public void The_buttons_fold_the_outline_and_keep_up_with_it()
     {
-        using var window = Shown("termyn-view-header.json", out var presenter);
+        using var window = Shown(out var presenter);
         presenter.Select(ViewSelection.Of(SmartView.All));
         var header = TestWindow.Find<ViewHeader>(window);
         var expand = Button(header, "Expand all");
@@ -372,7 +392,7 @@ public class ViewHeaderTests
     public void A_view_with_nothing_to_fold_offers_neither()
     {
         // Lit first, so a header that was never rendered can't pass by never having been lit.
-        using var window = Shown("termyn-view-header-flat.json", out var presenter);
+        using var window = Shown(out var presenter);
         presenter.Select(ViewSelection.Of(SmartView.All));
         var header = TestWindow.Find<ViewHeader>(window);
         Assert.True(Button(header, "Collapse all").Enabled);
@@ -383,5 +403,127 @@ public class ViewHeaderTests
 
         Assert.False(Button(header, "Expand all").Enabled);
         Assert.False(Button(header, "Collapse all").Enabled);
+    }
+
+    // ---- Scaled with the display ---------------------------------------------------------------
+
+    [WinFormsFact]
+    public void The_window_sizes_its_fixed_strips_for_the_display_it_is_told_of()
+    {
+        // The status line and the panel's own header had the line above the outline's bug: a fixed
+        // 24 pixels while their text grew. The window sizes all three together now.
+        using var window = Shown(out _);
+        var header = TestWindow.Find<ViewHeader>(window);
+        var panel = TestWindow.Find<DetailHeader>(window);
+        var status = window.Controls.OfType<System.Windows.Forms.Label>().Single(l => l.Dock == DockStyle.Bottom);
+
+        window.SizeStrips(144);
+
+        Assert.Equal(ViewHeader.HeightAt(144), header.Height);
+        Assert.All(header.Tools.Items.OfType<ToolStripButton>(), b => Assert.Equal(ViewHeader.ButtonSizeAt(144), b.Size));
+        Assert.Equal(36, panel.Height);
+        Assert.Equal(36, status.Height);
+    }
+
+    [WinFormsFact]
+    public void Being_moved_to_a_display_of_another_scale_resizes_the_strips()
+    {
+        // Through the window's own handler for a change of screen, rather than calling the sizing
+        // directly, so this fails if the handler stops asking for it. Raised by hand: the test
+        // host isn't aware of per-screen scales, so Windows never sends it the real message.
+        using var window = Shown(out _);
+        var header = TestWindow.Find<ViewHeader>(window);
+        var panel = TestWindow.Find<DetailHeader>(window);
+        var was = window.DeviceDpi;
+        var to = was == 144 ? 192 : 144;
+
+        try
+        {
+            DpiChanged(window, was, to);
+
+            Assert.Equal(ViewHeader.HeightAt(to), header.Height);
+            Assert.Equal(StartupLayout.Scaled(DetailHeader.LogicalHeight, to), panel.Height);
+        }
+        finally
+        {
+            DpiChanged(window, to, was);
+        }
+    }
+
+    /// <summary>Runs a window's handler for being moved to a screen of another scale.</summary>
+    /// <remarks>
+    /// The event's arguments can only be made the way the framework makes them, from the message
+    /// Windows sends, so they're built from one by reflection. It carries the window's own bounds as
+    /// the suggested ones, so the window stays where it is.
+    /// </remarks>
+    /// <param name="window">The window</param>
+    /// <param name="from">The old scale's dots per inch</param>
+    /// <param name="to">The new scale's dots per inch</param>
+    private static void DpiChanged(Form window, int from, int to)
+    {
+        const int WmDpiChanged = 0x02E0;
+        const System.Reflection.BindingFlags Hidden = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+
+        var bounds = window.Bounds;
+        var pointer = System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(int) * 4);
+
+        try
+        {
+            System.Runtime.InteropServices.Marshal.Copy(new[] { bounds.Left, bounds.Top, bounds.Right, bounds.Bottom }, 0, pointer, 4);
+            var message = Message.Create(window.Handle, WmDpiChanged, (nint)((to << 16) | to), pointer);
+            var args = (DpiChangedEventArgs)Activator.CreateInstance(typeof(DpiChangedEventArgs), Hidden, null, [from, message], null)!;
+
+            typeof(Form).GetMethod("OnDpiChanged", Hidden)!.Invoke(window, [args]);
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(pointer);
+        }
+    }
+
+    // ---- The first click -----------------------------------------------------------------------
+
+    [WinFormsFact]
+    public void The_click_that_brings_the_window_forward_is_let_through()
+    {
+        // Without this the strip answers a click that lands while another app is in front by
+        // activating the window and throwing the click away. Which it does depends on where the
+        // real pointer is, which a test can't set without moving the user's, so the switch is
+        // what's checked rather than a click.
+        using var header = Header();
+
+        Assert.True(header.Tools.AllowClickThrough);
+    }
+
+    // ---- The picture's geometry ----------------------------------------------------------------
+
+    [WinFormsTheory]
+    [InlineData(24)]
+    [InlineData(27)]
+    [InlineData(30)]
+    [InlineData(36)]
+    [InlineData(42)]
+    [InlineData(48)]
+    [InlineData(60)]
+    public void The_plus_sits_square_in_the_middle_of_its_box(int side)
+    {
+        // Whole pixels either side of the middle, both ways, at every size. On a grid that didn't
+        // match the picture's size the upright fell half a pixel left of the minus's middle at 100%.
+        var shape = FoldGlyph.Layout(new Rectangle(0, 0, side, side));
+
+        Assert.Equal(shape.Front.Left + shape.Front.Right, shape.Centre.X * 2);
+        Assert.Equal(shape.Front.Top + shape.Front.Bottom, shape.Centre.Y * 2);
+        Assert.InRange(shape.Arm, 1, (shape.Front.Width / 2) - 2);
+    }
+
+    [WinFormsTheory]
+    [InlineData(24, 1)]
+    [InlineData(36, 2)]
+    [InlineData(48, 2)]
+    [InlineData(60, 3)]
+    public void The_lines_thicken_as_the_picture_grows(int side, int stroke)
+    {
+        // 60 is a button at 250%: rounded to even it came out at 2, as thin as 150%'s.
+        Assert.Equal(stroke, FoldGlyph.Layout(new Rectangle(0, 0, side, side)).Stroke);
     }
 }
