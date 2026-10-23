@@ -773,3 +773,17 @@ public class SingleInstanceTests
     /// <summary>A scope unique to each test, so tests running side by side don't fight over one.</summary>
     private static string Scope() => "termyn-test-" + Guid.NewGuid().ToString("N");
 }
+
+public class AppPathsTests
+{
+    [Fact]
+    public void Downloads_comes_back_from_the_shell_as_a_whole_path()
+    {
+        // Asked of the shell rather than built, since the folder can be moved. Whatever it says,
+        // it's a full path: a save made against a relative one would land wherever the process
+        // happened to be started from.
+        var downloads = WindowsAppPaths.Downloads();
+
+        Assert.True(Path.IsPathFullyQualified(downloads), $"Downloads came back as \"{downloads}\"");
+    }
+}

@@ -337,6 +337,10 @@
     <value>Open attachment</value>
     <comment>Right-click menu item on a comment with a file.</comment>
   </data>
+  <data name="CommentsDownloadAttachment" xml:space="preserve">
+    <value>Download attachment</value>
+    <comment>Right-click menu item on a comment with a file. Saves a copy of the file in the Downloads folder.</comment>
+  </data>
   <data name="CommentsRemoveAttachment" xml:space="preserve">
     <value>Remove attachment</value>
     <comment>Right-click menu item on a comment with a file.</comment>
@@ -686,6 +690,14 @@ It can't be brought back — Todoist has no undelete.</value>
   <data name="FileOpenFailed" xml:space="preserve">
     <value>The file couldn't be opened.</value>
     <comment>Message when a downloaded attachment couldn't be opened.</comment>
+  </data>
+  <data name="FileSaveFailed" xml:space="preserve">
+    <value>The file couldn't be saved.</value>
+    <comment>Message when an attachment couldn't be saved to the Downloads folder.</comment>
+  </data>
+  <data name="AttachmentSaved" xml:space="preserve">
+    <value>Saved {0} to Downloads.</value>
+    <comment>Status bar once an attachment has been saved. {0} is the name it was saved under, which may have a number added if the folder already had a file of that name.</comment>
   </data>
   <data name="AttachPickerTitle" xml:space="preserve">
     <value>Attach a file to this comment</value>

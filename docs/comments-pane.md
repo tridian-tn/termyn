@@ -103,6 +103,19 @@ The sweep that follows a download leaves alone the file it just fetched. That fi
 towards the cap, so older ones go to make room, but one bigger than the whole cap would otherwise be
 deleted before it could be opened.
 
+**Download attachment saves a copy under its own name.** The cache's hashed names are no use to
+someone looking for the file, so the row menu also offers to put a copy in the Downloads folder,
+named as the account names it. It's fetched through the cache like opening, so a file already here
+saves offline. Downloads is asked of the shell rather than assumed to be `%USERPROFILE%\Downloads`,
+since Windows lets you move it.
+
+The name is the account's, so it's made safe before it becomes a path: anything Windows refuses in a
+name, separators included, becomes `_`, and a device name such as `CON` or `nul.txt` gets a leading
+`_`. Nothing already in the folder is written over. A taken name goes to `agenda (1).pdf`, then
+`(2)`, as a browser numbers them. The file's created with `CreateNew`, so the name check and the
+create are one step and nothing can take the name in between. The status bar names the file as
+saved, number and all.
+
 **Deleting a file is not undoable.** Taking one off a comment updates the comment through the outbox
 like any other write, and then deletes the upload directly, because Todoist has no command for it.
 The confirmation says so. If the delete fails, the file is orphaned on the account rather than lost
@@ -120,7 +133,9 @@ be the one that says no.
   filter or search by them.
 - Author identity isn't modelled. Everything is shown as though it's yours, which it is until shared
   projects are supported.
-- An attachment can't be added to a comment that already exists, or saved anywhere but the cache.
-  Attaching is part of writing a new comment, and opening hands the file to the desktop.
+- An attachment can't be added to a comment that already exists. Attaching is part of writing a new
+  comment.
+- A saved copy only goes to Downloads. There's no Save as… to pick a folder, and nothing offers to
+  show the file in Explorer afterwards.
 - Only one transfer at a time. The panel has one line to report progress in, and two at once would
   leave you unable to tell which had failed.

@@ -182,6 +182,7 @@ public class FoldsAcrossRestartTests : IDisposable
         public string CacheDirectory => Path.GetTempPath();
         public string LogDirectory => Path.GetTempPath();
         public string AttachmentDirectory => Path.GetTempPath();
+        public string DownloadsDirectory => Path.GetTempPath();
     }
 
     private sealed class Hotkey : IGlobalHotkey

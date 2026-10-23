@@ -430,6 +430,7 @@ internal sealed class MainForm : Form
         _comments.Edited += OnCommentEdited;
         _comments.Deleted += OnCommentDeleted;
         _comments.OpenRequested += OnAttachmentOpened;
+        _comments.DownloadRequested += OnAttachmentDownloaded;
         _comments.DetachRequested += OnAttachmentRemoved;
         _comments.AttachRequested += OnFileAttached;
         _comments.CancelRequested += () => _transfer?.Cancel();
@@ -2424,18 +2425,50 @@ internal sealed class MainForm : Form
     /// <summary>
     /// Fetches a comment's file if it isn't already here, and hands it to the desktop.
     /// </summary>
-    /// <remarks>
-    /// The one place in Termyn where the user deliberately waits on the network. Every outcome that
-    /// isn't the file opening is said out loud: not having it offline is the expected state of most
-    /// files most of the time, and a silent nothing would read as the app being broken.
-    /// </remarks>
     private async void OnAttachmentOpened(string commentId)
     {
+        if (await FetchFileAsync(commentId, _presenter.FetchAttachmentAsync, Strings.FileOpenFailed) is { } path)
+            AppVersion.OpenFile(path);
+    }
+
+    /// <summary>
+    /// Saves a copy of a comment's file in the Downloads folder, under the name it has on the account.
+    /// </summary>
+    /// <remarks>
+    /// Said in the status bar rather than in a box, since nothing's wrong. The name it gives is the
+    /// one the copy was saved under: a name the folder already had gets a number added, and the
+    /// original would send the user looking for the wrong file.
+    /// </remarks>
+    private async void OnAttachmentDownloaded(string commentId)
+    {
+        var folder = _shell.Paths.DownloadsDirectory;
+
+        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is { } path)
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, Path.GetFileName(path));
+    }
+
+    /// <summary>
+    /// Gets a comment's file, showing the wait under the comments.
+    /// </summary>
+    /// <remarks>
+    /// The one place in Termyn where the user deliberately waits on the network. Every outcome that
+    /// isn't the file arriving is said out loud: not having it offline is the expected state of most
+    /// files most of the time, and a silent nothing would read as the app being broken.
+    /// </remarks>
+    /// <param name="commentId">The comment whose file is wanted</param>
+    /// <param name="fetch">What getting it means: into the cache to open, or a copy into a folder</param>
+    /// <param name="failed">What to say if it goes wrong with nothing more particular to say</param>
+    /// <returns>Where the file is, or null when it isn't anywhere, having already said why</returns>
+    private async Task<string?> FetchFileAsync(
+        string commentId,
+        Func<FileAttachment, IProgress<long>, CancellationToken, Task<FetchResult>> fetch,
+        string failed)
+    {
         if (_transfer is not null)
-            return;
+            return null;
 
         if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
-            return;
+            return null;
 
         using var transfer = new CancellationTokenSource();
         _transfer = transfer;
@@ -2448,20 +2481,19 @@ internal sealed class MainForm : Form
                     ? string.Format(CultureInfo.CurrentCulture, Strings.DownloadPercent, file.FileName, read * 100 / file.FileSize)
                     : string.Format(CultureInfo.CurrentCulture, Strings.DownloadKilobytes, file.FileName, read / 1024));
 
-            var result = await _presenter.FetchAttachmentAsync(file, progress, transfer.Token);
+            var result = await fetch(file, progress, transfer.Token);
 
             switch (result.Outcome)
             {
                 case FetchOutcome.Ready when result.Path is { } path:
-                    AppVersion.OpenFile(path);
-                    break;
+                    return path;
 
                 case FetchOutcome.Cancelled:
-                    break;
+                    return null;
 
                 default:
-                    MessageBox.Show(this, result.Message ?? Strings.FileOpenFailed, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    break;
+                    MessageBox.Show(this, result.Message ?? failed, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return null;
             }
         }
         finally

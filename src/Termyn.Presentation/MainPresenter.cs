@@ -1403,6 +1403,20 @@ public sealed class MainPresenter
             : _fetcher.FetchAsync(attachment, progress, ct);
 
     /// <summary>
+    /// Puts a copy of an attachment in a folder under its own name, fetching it first if it isn't
+    /// here.
+    /// </summary>
+    /// <remarks>
+    /// Answers as fetching does, so the caller says the same things about a file it can't get. A
+    /// name that's already taken in the folder isn't written over, so the copy's path is the one to
+    /// report: it may carry a number the original didn't.
+    /// </remarks>
+    public Task<FetchResult> SaveAttachmentAsync(FileAttachment attachment, string folder, IProgress<long>? progress = null, CancellationToken ct = default)
+        => _fetcher is null
+            ? Task.FromResult(new FetchResult(FetchOutcome.Failed, Message: "Downloads aren't available in this window."))
+            : _fetcher.SaveAsync(attachment, folder, progress, ct);
+
+    /// <summary>
     /// The largest file this account's plan will take, or null when it hasn't said.
     /// </summary>
     /// <remarks>

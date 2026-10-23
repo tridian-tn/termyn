@@ -46,6 +46,9 @@ public sealed record FetchResult(FetchOutcome Outcome, string? Path = null, stri
 /// </remarks>
 public sealed class AttachmentFetcher
 {
+    /// <summary>The most numbered forms of a name tried before giving up on a folder.</summary>
+    private const int MostTried = 1000;
+
     private readonly ITodoistApi _api;
     private readonly ISecretStore _secrets;
     private readonly AttachmentCache _cache;
@@ -129,6 +132,120 @@ public sealed class AttachmentFetcher
         {
             _cache.Abandon(path);
             return new FetchResult(FetchOutcome.Failed, Message: $"{attachment.FileName} couldn't be written to the download folder.");
+        }
+    }
+
+    /// <summary>
+    /// Gets the file onto this machine and puts a copy of it in a folder, under the name it has on
+    /// the account.
+    /// </summary>
+    /// <remarks>
+    /// Fetched through the cache, as opening is, so a file that's already here is saved without
+    /// going to the server, offline included, and one saved now opens later without being fetched
+    /// again.
+    ///
+    /// Nothing in the folder is ever written over. A name that's taken gives way to "name (1).ext",
+    /// then "(2)", the way a browser numbers a second download of the same thing.
+    /// </remarks>
+    /// <param name="attachment">The file wanted</param>
+    /// <param name="folder">Where the copy goes, made if it isn't there</param>
+    /// <param name="progress">Told the running byte count while it's fetched, for a UI that has to show the wait</param>
+    /// <param name="ct">Cancelled when the user calls the download off</param>
+    /// <returns>Ready with the copy's path, or whatever fetching it said</returns>
+    public async Task<FetchResult> SaveAsync(FileAttachment attachment, string folder, IProgress<long>? progress = null, CancellationToken ct = default)
+    {
+        var fetched = await FetchAsync(attachment, progress, ct);
+        if (fetched is not { Outcome: FetchOutcome.Ready, Path: { } held })
+            return fetched;
+
+        try
+        {
+            return new FetchResult(FetchOutcome.Ready, await CopyOutAsync(held, folder, DownloadName.Safe(attachment.FileName), ct));
+        }
+        catch (OperationCanceledException)
+        {
+            return new FetchResult(FetchOutcome.Cancelled);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new FetchResult(FetchOutcome.Failed, Message: $"{attachment.FileName} couldn't be saved to {folder}.");
+        }
+    }
+
+    /// <summary>
+    /// Copies a file from the cache into a folder, under the first form of its name that's free.
+    /// </summary>
+    /// <param name="held">The cached file</param>
+    /// <param name="folder">Where the copy goes</param>
+    /// <param name="name">The name to save it under, already made safe</param>
+    /// <param name="ct">Cancelled when the user calls the save off</param>
+    /// <returns>Where the copy was made</returns>
+    private static async Task<string> CopyOutAsync(string held, string folder, string name, CancellationToken ct)
+    {
+        Directory.CreateDirectory(folder);
+
+        // Shared for writing as well as reading: the cached file may be open in whatever the user
+        // opened it with, and reading alongside that is all this needs.
+        await using var source = new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 81920, useAsync: true);
+        var (target, path) = CreateFree(folder, name);
+
+        try
+        {
+            await using (target)
+                await source.CopyToAsync(target, ct);
+
+            return path;
+        }
+        catch
+        {
+            // A copy that was called off or cut short isn't the file, and mustn't sit in the folder
+            // looking as though it is.
+            TryDelete(path);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Creates the first numbered form of a name that nothing in the folder has.
+    /// </summary>
+    /// <remarks>
+    /// Created outright rather than looked for first. Checking that a name is free and then creating
+    /// it leaves a moment between the two in which something else can take it, and CreateNew does
+    /// both at once.
+    /// </remarks>
+    /// <param name="folder">Where to create it</param>
+    /// <param name="name">The plain form of the name</param>
+    /// <returns>The new file, open for writing, and its path</returns>
+    private static (FileStream Stream, string Path) CreateFree(string folder, string name)
+    {
+        for (var number = 0; number < MostTried; number++)
+        {
+            var path = Path.Combine(folder, DownloadName.Numbered(name, number));
+
+            try
+            {
+                return (new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize: 81920, useAsync: true), path);
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && Path.Exists(path))
+            {
+                // Taken, by an earlier save of the same file or by anything else of that name, a
+                // folder included. It's never written over; the next number is tried instead.
+            }
+        }
+
+        throw new IOException($"Every form of {name} up to ({MostTried - 1}) is taken in {folder}.");
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left for the user to remove. Failing to tidy up isn't worth surfacing over a save
+            // that has already gone wrong.
         }
     }
 }
