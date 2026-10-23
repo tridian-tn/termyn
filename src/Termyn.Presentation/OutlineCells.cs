@@ -99,18 +99,7 @@ public static class OutlineCells
     /// <param name="row">The task the cell belongs to</param>
     /// <returns>The priority written out, or null for no tip</returns>
     public static string? PriorityTip(TaskRow row)
-    {
-        if (row.IsHeading)
-            return null;
-
-        return row.Priority switch
-        {
-            Priority.P1 => Strings.CommandPriority1,
-            Priority.P2 => Strings.CommandPriority2,
-            Priority.P3 => Strings.CommandPriority3,
-            _ => null,
-        };
-    }
+        => row.IsHeading || row.Priority == Priority.P4 ? null : Commands.PriorityLabel(row.Priority);
 
     /// <summary>
     /// The labels of a row, each with the colour it's written in.
