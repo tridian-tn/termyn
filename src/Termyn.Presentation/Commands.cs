@@ -250,7 +250,8 @@ public static class Commands
             AppCommand.Reminders => Task(Strings.CommandReminders),
 
             AppCommand.Priority1 or AppCommand.Priority2 or AppCommand.Priority3 or AppCommand.Priority4
-                => new CommandState(PriorityLabel(command), task is not null, task?.Priority == PriorityOf(command)),
+                when PriorityOf(command) is { } priority
+                => new CommandState(PriorityLabel(priority), task is not null, task?.Priority == priority),
 
             AppCommand.Indent => new CommandState(Strings.CommandIndent, can.CanIndent),
             AppCommand.Outdent => new CommandState(Strings.CommandOutdent, can.CanOutdent),
@@ -425,11 +426,20 @@ public static class Commands
             eligible);
     }
 
-    private static string PriorityLabel(AppCommand command) => command switch
+    /// <summary>
+    /// A priority written out, the way the Priority menu names it.
+    /// </summary>
+    /// <remarks>
+    /// The one place a priority's words are chosen, so the menu and anything else that names a
+    /// priority can't come to disagree.
+    /// </remarks>
+    /// <param name="priority">The priority to name</param>
+    /// <returns>Its name in the user's language</returns>
+    public static string PriorityLabel(Priority priority) => priority switch
     {
-        AppCommand.Priority1 => Strings.CommandPriority1,
-        AppCommand.Priority2 => Strings.CommandPriority2,
-        AppCommand.Priority3 => Strings.CommandPriority3,
+        Priority.P1 => Strings.CommandPriority1,
+        Priority.P2 => Strings.CommandPriority2,
+        Priority.P3 => Strings.CommandPriority3,
         _ => Strings.CommandPriority4,
     };
 }

@@ -345,6 +345,7 @@ internal sealed class MainForm : Form
         // So a row selected while its task still had the name we gave it isn't read as deleted the
         // moment the sync learns what the server calls it.
         _outline.Renamed = _presenter.CurrentIdOf;
+        _outline.PriorityTips = _settings.ShowPriorityTips;
 
         _outline.KeyDown += OnOutlineKeyDown;
         _outline.MouseDown += (_, _) => Noticed();
@@ -1053,9 +1054,17 @@ internal sealed class MainForm : Form
 
     private void OpenSettings()
     {
-        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is not { } amended)
-            return;
+        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is { } amended)
+            ApplySettings(amended);
+    }
 
+    /// <summary>
+    /// Puts settings the dialog has just saved into effect, and writes them.
+    /// </summary>
+    /// <remarks>Internal so a test can save settings without a dialog to press Save on.</remarks>
+    /// <param name="amended">The settings as the dialog handed them back</param>
+    internal void ApplySettings(AppSettings amended)
+    {
         var themeChanged = amended.Theme != _settings.Theme;
         var hotkeyChanged = amended.HotkeyEnabled != _settings.HotkeyEnabled
                             || amended.HotkeyBinding != _settings.HotkeyBinding;
@@ -1075,6 +1084,7 @@ internal sealed class MainForm : Form
         }
 
         _settings = amended;
+        _outline.PriorityTips = _settings.ShowPriorityTips;
 
         if (themeChanged)
         {

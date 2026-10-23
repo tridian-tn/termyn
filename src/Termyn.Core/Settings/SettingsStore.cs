@@ -191,6 +191,7 @@ public sealed class SettingsStore
             SyncIntervalSeconds = Int(root, "syncIntervalSeconds", defaults.SyncIntervalSeconds),
             LaunchAtLogin = Flag(root, "launchAtLogin", defaults.LaunchAtLogin),
             CloseToTray = Flag(root, "closeToTray", defaults.CloseToTray),
+            ShowPriorityTips = Flag(root, "showPriorityTips", defaults.ShowPriorityTips),
             View = ReadView(Object(root, "view")),
         };
     }

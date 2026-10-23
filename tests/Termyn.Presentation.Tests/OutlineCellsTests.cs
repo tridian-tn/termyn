@@ -37,6 +37,21 @@ public class OutlineCellsTests
         Assert.Equal(string.Empty, OutlineCells.CellOf(row, TaskColumn.Priority));
     }
 
+    [Theory]
+    [InlineData(Priority.P1, "Priority 1 — urgent")]
+    [InlineData(Priority.P2, "Priority 2 — high")]
+    [InlineData(Priority.P3, "Priority 3 — medium")]
+    public void A_priority_dot_is_written_out_the_way_the_menu_says_it(Priority priority, string said)
+        => Assert.Equal(said, OutlineCells.PriorityTip(Row() with { Priority = priority }));
+
+    [Fact]
+    public void No_priority_and_a_heading_have_no_tip()
+    {
+        // Neither has a dot drawn, so there's nothing for a tip to explain.
+        Assert.Null(OutlineCells.PriorityTip(Row() with { Priority = Priority.P4 }));
+        Assert.Null(OutlineCells.PriorityTip(Row() with { Priority = Priority.P1, IsHeading = true }));
+    }
+
     [Fact]
     public void Each_column_is_filled_the_way_it_says()
     {

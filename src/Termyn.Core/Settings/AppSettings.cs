@@ -73,6 +73,9 @@ public sealed record AppSettings
     /// <summary>Closing the window leaves Termyn in the tray, which keeps the global hotkey live.</summary>
     public bool CloseToTray { get; init; } = true;
 
+    /// <summary>Resting the pointer on a task's priority dot says which priority it is.</summary>
+    public bool ShowPriorityTips { get; init; } = true;
+
     public ViewState View { get; init; } = new();
 
     /// <summary>The hotkey as a binding, falling back to the default when the file holds nonsense.</summary>

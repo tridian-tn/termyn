@@ -1,3 +1,4 @@
+using Termyn.Core.Model;
 using Termyn.Core.Settings;
 
 namespace Termyn.Presentation;
@@ -86,6 +87,19 @@ public static class OutlineCells
     /// <param name="selected">Whether the row is drawn selected</param>
     /// <returns>The project's colour, or null for no dot</returns>
     public static Rgb? ProjectDot(TaskRow row, bool selected) => selected ? null : row.ProjectColour;
+
+    /// <summary>
+    /// What a row's priority dot says when the pointer rests on it, or null when there's no dot.
+    /// </summary>
+    /// <remarks>
+    /// The dot is a colour and nothing else, and the colours aren't something anyone's told. The
+    /// words are the ones the Priority menu uses, so the tip and the command that set it agree. A
+    /// task with no priority has no dot, and a day's heading has none to have.
+    /// </remarks>
+    /// <param name="row">The task the cell belongs to</param>
+    /// <returns>The priority written out, or null for no tip</returns>
+    public static string? PriorityTip(TaskRow row)
+        => row.IsHeading || row.Priority == Priority.P4 ? null : Commands.PriorityLabel(row.Priority);
 
     /// <summary>
     /// The labels of a row, each with the colour it's written in.

@@ -79,6 +79,8 @@ internal sealed class OutlineView : ListView
         DoubleBuffered = true;
         AllowDrop = true;
 
+        _tips = new HoverTip(this, TipAt);
+
         // Each header carries the column it stands for, so a click has something to name without a
         // second table of indices to keep in step with this one.
         Column(Strings.ColumnTask, TaskColumn.Content);
@@ -210,6 +212,7 @@ internal sealed class OutlineView : ListView
             _struck?.Dispose();
             _heading?.Dispose();
             _rule?.Dispose();
+            _tips.Dispose();
         }
 
         base.Dispose(disposing);
@@ -302,6 +305,11 @@ internal sealed class OutlineView : ListView
                 base.OnSelectedIndexChanged(EventArgs.Empty);
 
             _publishedIndex = _selectedIndex;
+
+            // A tip names the priority of whatever task was under the pointer, and a sync can put
+            // another one there, or change this one's, without the pointer moving at all.
+            _tips.Recheck();
+
             Invalidate();
         }
     }
@@ -338,6 +346,7 @@ internal sealed class OutlineView : ListView
             SelectedIndices.Add(index);
             FocusedItem = Items[index];
             EnsureVisible(index);
+            _tips.Recheck();
         }
     }
 
@@ -353,6 +362,8 @@ internal sealed class OutlineView : ListView
     {
         if (SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count)
             EnsureVisible(SelectedIndices[0]);
+
+        _tips.Recheck();
     }
 
     protected override void OnSelectedIndexChanged(EventArgs e)
@@ -594,8 +605,95 @@ internal sealed class OutlineView : ListView
     /// <param name="index">The row</param>
     /// <param name="point">Where the pointer is, in the list's own coordinates</param>
     /// <returns>True when the point is left of the Task column's right edge</returns>
-    private bool InTaskColumn(int index, Point point)
-        => point.X < GetItemRect(index, ItemBoundsPortion.Entire).X + Columns[0].Width;
+    private bool InTaskColumn(int index, Point point) => ColumnAt(index, point) is TaskColumn.Content;
+
+    /// <summary>Says what a priority dot means when the pointer rests on it.</summary>
+    private readonly HoverTip _tips;
+
+    /// <summary>The priority dots' tip, for a test to drive and read.</summary>
+    internal HoverTip Tips => _tips;
+
+    /// <summary>
+    /// Whether resting the pointer on a priority dot says what it means. Switching it off takes
+    /// down a tip that's up.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool PriorityTips
+    {
+        get => _tips.Enabled;
+        set => _tips.Enabled = value;
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        _tips.PointerAt(e.Location);
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        _tips.Leave();
+        base.OnMouseLeave(e);
+    }
+
+    /// <summary>
+    /// The wheel moves the rows under a pointer that stays put, so the dot it was on has gone.
+    /// </summary>
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        _tips.Drop();
+        base.OnMouseWheel(e);
+    }
+
+    /// <summary>
+    /// What the priority under a point says, or null where there's no dot.
+    /// </summary>
+    /// <remarks>
+    /// The whole cell answers rather than the dot drawn in it. The dot's nine pixels across, and
+    /// a target that small is one people miss; the column's only there to hold it.
+    /// </remarks>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The priority written out, or null when the point isn't on a dot's cell</returns>
+    internal string? PriorityTipAt(Point point) => TipAt(point)?.Text;
+
+    /// <summary>
+    /// The dot under a point, by the task it's on and what it says.
+    /// </summary>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The task's id, to tell one row's dot from another's, and the priority written out, or null when there's no dot there</returns>
+    private (string Key, string Text)? TipAt(Point point)
+    {
+        if (HitTest(point).Item?.Index is not { } index || index < 0 || index >= _rows.Count)
+            return null;
+
+        if (ColumnAt(index, point) is not { } column || OutlineCells.PaintOf(column) != CellPaint.Priority)
+            return null;
+
+        return OutlineCells.PriorityTip(_rows[index]) is { } text ? (_rows[index].Id, text) : null;
+    }
+
+    /// <summary>
+    /// Which column a point on a row is in, measured from the row's own left edge so a list
+    /// scrolled sideways still answers for what's under the pointer.
+    /// </summary>
+    /// <param name="index">The row</param>
+    /// <param name="point">Where the pointer is, in the list's own coordinates</param>
+    /// <returns>The column, or null past the last of them</returns>
+    private TaskColumn? ColumnAt(int index, Point point)
+    {
+        var left = GetItemRect(index, ItemBoundsPortion.Entire).X;
+
+        foreach (ColumnHeader header in Columns)
+        {
+            if (point.X < left + header.Width)
+                return header.Tag is TaskColumn column ? column : null;
+
+            left += header.Width;
+        }
+
+        return null;
+    }
 
     /// <summary>Whether the row for a task is currently collapsed, as the last rows said.</summary>
     private bool IsCollapsed(string id)
@@ -1074,6 +1172,7 @@ internal sealed class OutlineView : ListView
         const int WmLeftDown = 0x0201;
         const int WmLeftDouble = 0x0203;
         const int WmRightDown = 0x0204;
+        const int WmKeyDown = 0x0100;
 
         if (m.Msg == WmPaint)
         {
@@ -1095,6 +1194,12 @@ internal sealed class OutlineView : ListView
             m.Result = 1;
             return;
         }
+
+        // A press puts the tip away, as it does anywhere. Here rather than in OnMouseDown, which
+        // a press on a box, an expander or a heading never reaches. The next move brings it back
+        // after the pause, so a row that's just been selected still says what its dot means.
+        if (m.Msg is WmLeftDown or WmLeftDouble or WmRightDown)
+            _tips.Drop();
 
         // A menu asked for with the keyboard is about the selected row, wherever that has got to on
         // screen. One asked for with the mouse is about the row under the pointer — and below the
@@ -1124,6 +1229,11 @@ internal sealed class OutlineView : ListView
             _pressedTask = HitTest(PointOf(m.LParam)).Item?.Index is { } pressed && pressed >= 0 && pressed < _rows.Count ? _rows[pressed].Id : null;
 
         base.WndProc(ref m);
+
+        // A key can scroll the rows under a pointer that hasn't moved — Page Down, End, an arrow
+        // off the edge — and the list scrolls in its own handling of the key, so this is after it.
+        if (m.Msg == WmKeyDown)
+            _tips.Recheck();
     }
 
     /// <summary>

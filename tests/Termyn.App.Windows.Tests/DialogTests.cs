@@ -379,4 +379,20 @@ public class DialogTests
             box.Checked = false;
         Assert.Equal(HotkeyBinding.Default.ToString(), form.Apply(new AppSettings()).Hotkey);
     }
+
+    [WinFormsFact]
+    public void The_priority_tooltip_box_opens_as_saved_and_saves_as_ticked()
+    {
+        using var form = new SettingsForm(new AppSettings { ShowPriorityTips = false }, AnyTheme);
+        form.CreateControl();
+
+        var box = Every(form).OfType<CheckBox>().Single(b => b.Text == "Show a tooltip on priority dots");
+        Assert.False(box.Checked);
+
+        box.Checked = true;
+        Assert.True(form.Apply(new AppSettings { ShowPriorityTips = false }).ShowPriorityTips);
+
+        box.Checked = false;
+        Assert.False(form.Apply(new AppSettings()).ShowPriorityTips);
+    }
 }
