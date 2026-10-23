@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Termyn.Core.Attachments;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
 using Termyn.Core.Sync;
@@ -218,7 +219,7 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void The_download_caps_come_back_as_they_were_set()
+    public void The_download_caps_become_the_bytes_and_age_the_cache_sweeps_against()
     {
         var saved = new AppSettings { AttachmentCacheMb = 64, AttachmentCacheDays = 3 };
 
@@ -235,6 +236,32 @@ public class SettingsStoreTests : IDisposable
 
         Assert.True(saved.AttachmentCache.MaxBytes > 0);
         Assert.True(saved.AttachmentCache.MaxAge > TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void A_hand_edited_download_cap_too_big_for_the_dialog_is_held_to_its_ceiling()
+    {
+        // A million days counts back past the year one, so the sweep on the way up threw and the
+        // app wouldn't start until the file was fixed by hand.
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "attachmentCacheMb": 99999999, "attachmentCacheDays": 1000000 }""");
+        var downloads = Directory.CreateDirectory(Path.Combine(_dir, "downloads")).FullName;
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(AppSettings.MaxAttachmentCacheMb, settings.ClampedCacheMb);
+        Assert.Equal(AppSettings.MaxAttachmentCacheDays, settings.ClampedCacheDays);
+        Assert.Equal(0, new AttachmentCache(downloads, settings.AttachmentCache).Sweep());
+    }
+
+    [Fact]
+    public void A_download_cap_in_the_file_that_is_not_a_whole_number_reads_as_the_default()
+    {
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "attachmentCacheMb": "lots", "attachmentCacheDays": 2.5 }""");
+
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(256, settings.AttachmentCacheMb);
+        Assert.Equal(14, settings.AttachmentCacheDays);
     }
 
     [Fact]

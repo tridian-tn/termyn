@@ -25,6 +25,17 @@ public sealed record AppSettings
 
     public const int MaxSyncIntervalSeconds = 300;
 
+    /// <summary>Nought would sweep every download the moment it arrived.</summary>
+    public const int MinAttachmentCacheMb = 1;
+
+    public const int MaxAttachmentCacheMb = 10_000;
+
+    /// <summary>Nought would sweep every download the moment it arrived.</summary>
+    public const int MinAttachmentCacheDays = 1;
+
+    /// <summary>Ten years. The sweep counts back from today, so an age with no ceiling can't be counted.</summary>
+    public const int MaxAttachmentCacheDays = 3_650;
+
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
     /// <summary>The global quick-add combination, written the way <see cref="HotkeyBinding"/> reads it.</summary>
@@ -43,11 +54,17 @@ public sealed record AppSettings
     /// <summary>How long a downloaded attachment is kept after it was last opened, in days.</summary>
     public int AttachmentCacheDays { get; init; } = 14;
 
+    /// <summary>The cache size held within the range the dialog offers, whatever the file said.</summary>
+    [JsonIgnore]
+    public int ClampedCacheMb => Math.Clamp(AttachmentCacheMb, MinAttachmentCacheMb, MaxAttachmentCacheMb);
+
+    /// <summary>The cache age held within the range the dialog offers, whatever the file said.</summary>
+    [JsonIgnore]
+    public int ClampedCacheDays => Math.Clamp(AttachmentCacheDays, MinAttachmentCacheDays, MaxAttachmentCacheDays);
+
     /// <summary>The two caps above, in the form the cache sweeps against.</summary>
     [JsonIgnore]
-    public CacheLimits AttachmentCache => new(
-        Math.Max(1, AttachmentCacheMb) * 1024L * 1024,
-        TimeSpan.FromDays(Math.Max(1, AttachmentCacheDays)));
+    public CacheLimits AttachmentCache => new(ClampedCacheMb * 1024L * 1024, TimeSpan.FromDays(ClampedCacheDays));
 
     public int SyncIntervalSeconds { get; init; } = 45;
 

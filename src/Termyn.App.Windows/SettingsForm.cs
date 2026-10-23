@@ -103,18 +103,18 @@ internal sealed class SettingsForm : Form
         {
             Location = new Point(CaptionWidth + 24, 332),
             Size = new Size(100, 26),
-            Minimum = 1,
-            Maximum = 10_000,
-            Value = Math.Clamp(settings.AttachmentCacheMb, 1, 10_000),
+            Minimum = AppSettings.MinAttachmentCacheMb,
+            Maximum = AppSettings.MaxAttachmentCacheMb,
+            Value = settings.ClampedCacheMb,
         };
 
         _cacheDays = new NumericUpDown
         {
             Location = new Point(CaptionWidth + 24, 366),
             Size = new Size(100, 26),
-            Minimum = 1,
-            Maximum = 3_650,
-            Value = Math.Clamp(settings.AttachmentCacheDays, 1, 3_650),
+            Minimum = AppSettings.MinAttachmentCacheDays,
+            Maximum = AppSettings.MaxAttachmentCacheDays,
+            Value = settings.ClampedCacheDays,
         };
 
         // Deliberately immediate rather than saved with the rest: it isn't a preference, it's an
