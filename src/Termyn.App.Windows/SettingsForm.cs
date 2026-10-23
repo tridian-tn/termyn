@@ -7,8 +7,8 @@ using Label = System.Windows.Forms.Label;
 namespace Termyn.App.Windows;
 
 /// <summary>
-/// The settings dialog: hotkey, theme, sync cadence, what Termyn does at login and on close, and
-/// whether the priority dots have tooltips.
+/// The settings dialog: hotkey, theme, sync cadence, what Termyn does at login and on close, whether
+/// the priority dots have tooltips, and what happens to downloaded attachments.
 /// </summary>
 /// <remarks>
 /// Laid out in code like the rest of the windows here, so there is no designer file to keep in step
@@ -28,6 +28,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _launchAtLogin;
     private readonly CheckBox _closeToTray;
     private readonly CheckBox _priorityTips;
+    private readonly CheckBox _showDownloads;
     private readonly NumericUpDown _cacheMb;
     private readonly NumericUpDown _cacheDays;
     private readonly Button _clearDownloads;
@@ -42,7 +43,7 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(Width_, 532);
+        ClientSize = new Size(Width_, 564);
 
         var binding = settings.HotkeyBinding;
 
@@ -103,9 +104,11 @@ internal sealed class SettingsForm : Form
 
         _priorityTips = Check(Strings.SettingsPriorityTips, settings.ShowPriorityTips, 332);
 
+        _showDownloads = Check(Strings.SettingsShowAfterDownloading, settings.ShowAfterDownloading, 364);
+
         _cacheMb = new NumericUpDown
         {
-            Location = new Point(CaptionWidth + 24, 364),
+            Location = new Point(CaptionWidth + 24, 396),
             Size = new Size(100, 26),
             Minimum = AppSettings.MinAttachmentCacheMb,
             Maximum = AppSettings.MaxAttachmentCacheMb,
@@ -114,7 +117,7 @@ internal sealed class SettingsForm : Form
 
         _cacheDays = new NumericUpDown
         {
-            Location = new Point(CaptionWidth + 24, 398),
+            Location = new Point(CaptionWidth + 24, 430),
             Size = new Size(100, 26),
             Minimum = AppSettings.MinAttachmentCacheDays,
             Maximum = AppSettings.MaxAttachmentCacheDays,
@@ -126,7 +129,7 @@ internal sealed class SettingsForm : Form
         _clearDownloads = new Button
         {
             Text = Strings.SettingsClearDownloads,
-            Location = new Point(CaptionWidth + 24, 432),
+            Location = new Point(CaptionWidth + 24, 464),
             Size = new Size(200, 30),
         };
         _clearDownloads.Click += (_, _) =>
@@ -138,8 +141,8 @@ internal sealed class SettingsForm : Form
             _clearDownloads.Enabled = false;
         };
 
-        var ok = new Button { Text = Strings.ButtonSave, DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 480), Size = new Size(96, 32) };
-        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 480), Size = new Size(96, 32) };
+        var ok = new Button { Text = Strings.ButtonSave, DialogResult = DialogResult.OK, Location = new Point(Width_ - 216, 512), Size = new Size(96, 32) };
+        var cancel = new Button { Text = Strings.ButtonCancel, DialogResult = DialogResult.Cancel, Location = new Point(Width_ - 112, 512), Size = new Size(96, 32) };
 
         AcceptButton = ok;
         CancelButton = cancel;
@@ -150,9 +153,9 @@ internal sealed class SettingsForm : Form
             Caption(Strings.SettingsTheme, 138), _theme,
             Caption(Strings.SettingsBackgroundSync, 182), _syncMode,
             Caption(Strings.SettingsSyncInterval, 226), _interval,
-            _launchAtLogin, _closeToTray, _priorityTips,
-            Caption(Strings.SettingsDownloadsSize, 368), _cacheMb,
-            Caption(Strings.SettingsDownloadsAge, 402), _cacheDays,
+            _launchAtLogin, _closeToTray, _priorityTips, _showDownloads,
+            Caption(Strings.SettingsDownloadsSize, 400), _cacheMb,
+            Caption(Strings.SettingsDownloadsAge, 434), _cacheDays,
             _clearDownloads,
             ok, cancel,
         ]);
@@ -198,6 +201,7 @@ internal sealed class SettingsForm : Form
         LaunchAtLogin = _launchAtLogin.Checked,
         CloseToTray = _closeToTray.Checked,
         ShowPriorityTips = _priorityTips.Checked,
+        ShowAfterDownloading = _showDownloads.Checked,
         AttachmentCacheMb = (int)_cacheMb.Value,
         AttachmentCacheDays = (int)_cacheDays.Value,
     };

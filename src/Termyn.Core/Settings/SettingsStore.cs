@@ -192,6 +192,7 @@ public sealed class SettingsStore
             LaunchAtLogin = Flag(root, "launchAtLogin", defaults.LaunchAtLogin),
             CloseToTray = Flag(root, "closeToTray", defaults.CloseToTray),
             ShowPriorityTips = Flag(root, "showPriorityTips", defaults.ShowPriorityTips),
+            ShowAfterDownloading = Flag(root, "showAfterDownloading", defaults.ShowAfterDownloading),
             View = ReadView(Object(root, "view")),
         };
     }
