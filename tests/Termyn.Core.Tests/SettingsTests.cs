@@ -242,8 +242,11 @@ public class SettingsStoreTests : IDisposable
     {
         // Every existing user's file. It has no such keys in it, and must read as the settings it
         // does have rather than as nought of everything it doesn't.
-        var settings = new AppSettings();
+        File.WriteAllText(Config, """{ "schemaVersion": 1, "theme": "Dark" }""");
 
+        var settings = new SettingsStore(Config).Load();
+
+        Assert.Equal(ThemePreference.Dark, settings.Theme);
         Assert.Equal(256, settings.AttachmentCacheMb);
         Assert.Equal(14, settings.AttachmentCacheDays);
     }
@@ -540,6 +543,8 @@ public class SettingsStoreTests : IDisposable
             HotkeyEnabled = false,
             Theme = ThemePreference.Light,
             SyncMode = SyncMode.Manual,
+            AttachmentCacheMb = 64,
+            AttachmentCacheDays = 3,
             SyncIntervalSeconds = 120,
             LaunchAtLogin = true,
             CloseToTray = false,
@@ -547,6 +552,7 @@ public class SettingsStoreTests : IDisposable
             {
                 SelectedKey = "project:p1",
                 CollapsedKeys = ["Projects", "Labels"],
+                CollapsedTasks = ["t1", "t2"],
                 SidebarWidth = 300,
                 ShowDescription = true,
                 DescriptionHeight = 240,
