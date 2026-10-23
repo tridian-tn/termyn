@@ -186,6 +186,8 @@ public sealed class SettingsStore
             HotkeyEnabled = Flag(root, "hotkeyEnabled", defaults.HotkeyEnabled),
             Theme = Choice(root, "theme", defaults.Theme),
             SyncMode = Choice(root, "syncMode", defaults.SyncMode),
+            AttachmentCacheMb = Int(root, "attachmentCacheMb", defaults.AttachmentCacheMb),
+            AttachmentCacheDays = Int(root, "attachmentCacheDays", defaults.AttachmentCacheDays),
             SyncIntervalSeconds = Int(root, "syncIntervalSeconds", defaults.SyncIntervalSeconds),
             LaunchAtLogin = Flag(root, "launchAtLogin", defaults.LaunchAtLogin),
             CloseToTray = Flag(root, "closeToTray", defaults.CloseToTray),
