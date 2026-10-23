@@ -197,6 +197,38 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
+    public void Adding_a_recurring_reminder_sends_its_schedule_for_the_server_to_read()
+    {
+        var engine = Seeded();
+
+        engine.AddRecurringReminder("i1", "every sat 9am");
+
+        // The shape a live account took: an absolute reminder with words in place of a date.
+        var due = Args(engine.Outbox.Single())["due"]!.AsObject();
+        Assert.Equal("absolute", Args(engine.Outbox.Single())["type"]!.ToString());
+        Assert.Equal("every sat 9am", due["string"]!.ToString());
+        Assert.Equal("en", due["lang"]!.ToString());
+        Assert.True(due["is_recurring"]!.GetValue<bool>());
+        Assert.False(due.ContainsKey("date"));
+
+        // Held as one that repeats, with no next time until the server works it out.
+        var reminder = engine.Snapshot().Reminders.Single();
+        Assert.Equal(ReminderKind.Absolute, reminder.Kind);
+        Assert.Equal("every sat 9am", reminder.Schedule);
+        Assert.Null(reminder.DueDate);
+    }
+
+    [Fact]
+    public void A_one_off_absolute_reminder_has_no_schedule()
+    {
+        var engine = Seeded();
+
+        engine.AddAbsoluteReminder("i1", new DateOnly(2026, 8, 3), new TimeOnly(9, 0));
+
+        Assert.Null(engine.Snapshot().Reminders.Single().Schedule);
+    }
+
+    [Fact]
     public void Deleting_a_reminder_takes_it_off_and_queues_reminder_delete()
     {
         var store = Store();

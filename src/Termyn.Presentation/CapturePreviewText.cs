@@ -74,6 +74,7 @@ public static class CapturePreviewText
         RelativeReminder { MinutesBefore: 0 } => "when due",
         RelativeReminder { MinutesBefore: var m } when m % 60 == 0 => $"{m / 60}h before",
         RelativeReminder { MinutesBefore: var m } => $"{m}m before",
+        RecurringReminder r => r.Schedule,
         _ => string.Empty,
     };
 }

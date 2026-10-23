@@ -479,6 +479,21 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
+    public async Task A_capture_with_a_recurring_reminder_sets_it_on_the_new_task()
+    {
+        var (engine, presenter) = NewPair(WithPlan("""{"current":{"plan_name":"pro","reminders":true}}"""));
+
+        await presenter.CaptureAsync("call mum !every sat 9am", TestContext.Current.CancellationToken);
+
+        var item = engine.Snapshot().Items.Single(i => i.Content == "call mum");
+        Assert.False(item.IsRecurring);   // the reminder repeats, not the task
+        var reminder = engine.Snapshot().Reminders.Single();
+        Assert.Equal(item.Id, reminder.ItemId);
+        Assert.Equal("every sat 9am", reminder.Schedule);
+        Assert.Equal(["item_add", "reminder_add"], engine.Outbox.Select(c => c.Type));
+    }
+
+    [Fact]
     public async Task A_capture_reminder_the_plan_wont_take_adds_the_task_but_queues_no_reminder()
     {
         var (engine, presenter) = NewPair(WithPlan("""{"current":{"plan_name":"free","reminders":false}}"""));

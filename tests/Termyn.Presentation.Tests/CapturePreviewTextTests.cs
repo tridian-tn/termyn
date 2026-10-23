@@ -126,6 +126,16 @@ public class CapturePreviewTextTests
     }
 
     [Fact]
+    public void A_recurring_reminder_reads_as_its_schedule()
+    {
+        // The server works out when it next fires, so the preview can't name a moment, only the words.
+        var preview = Preview("call mum !every sat 9am");
+
+        Assert.Contains("remind every sat 9am", preview);
+        Assert.DoesNotContain("needs a connection", preview);
+    }
+
+    [Fact]
     public void A_reminder_the_plan_wont_take_says_so_rather_than_setting_it()
     {
         var preview = Preview("leave for airport !30m", remindersAvailable: false);

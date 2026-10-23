@@ -212,6 +212,7 @@ public static class Projections
             },
             MinuteOffset = JsonRead.Int(o, "minute_offset"),
             DueDate = due is null ? null : JsonRead.String(due, "date"),
+            Schedule = due is not null && JsonRead.Bool(due, "is_recurring") ? JsonRead.String(due, "string") : null,
             LocationName = JsonRead.String(o, "name"),
         };
     }
