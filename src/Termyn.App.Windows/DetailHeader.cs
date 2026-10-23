@@ -18,13 +18,23 @@ namespace Termyn.App.Windows;
 /// </remarks>
 internal sealed class DetailHeader : Panel
 {
+    /// <summary>
+    /// How tall the strip is at 100%.
+    /// </summary>
+    /// <remarks>
+    /// Scaled with the display by whoever holds it, the way the line above the outline is. Held at
+    /// 24 pixels whatever the scale, the name's tails were cut off from 125% up as the text grew and
+    /// the strip didn't.
+    /// </remarks>
+    internal const int LogicalHeight = 24;
+
     private readonly Label _name;
     private Theme _theme = Theme.Resolve(ThemePreference.System);
 
     public DetailHeader()
     {
         Dock = DockStyle.Top;
-        Height = 24;
+        Height = LogicalHeight;
 
         // The bottom row kept back from whatever is docked inside, so the rule drawn there isn't
         // painted over by a child filling the panel.

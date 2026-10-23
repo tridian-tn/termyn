@@ -184,5 +184,5 @@ internal sealed record Theme(
 
     internal static Color ToColor(Rgb rgb) => Color.FromArgb(rgb.R, rgb.G, rgb.B);
 
-    private static Rgb ToRgb(Color colour) => new(colour.R, colour.G, colour.B);
+    internal static Rgb ToRgb(Color colour) => new(colour.R, colour.G, colour.B);
 }

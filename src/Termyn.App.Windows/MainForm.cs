@@ -83,7 +83,9 @@ internal sealed class MainForm : Form
     private readonly SearchBox _search;
     private readonly Panel _searchHolder;
     private readonly SidebarTree _sidebar;
-    private readonly LinkLabel _crumbs;
+
+    /// <summary>The line above the outline: the path to the view, and the buttons beside it.</summary>
+    private readonly ViewHeader _viewHeader;
 
     /// <summary>The description and the comments, as the two tabs of one panel.</summary>
     private readonly TabControl _tabs;
@@ -332,15 +334,9 @@ internal sealed class MainForm : Form
         // Which list you are looking at, said in words above it. The sidebar says the same by
         // highlighting a row, but a tree that has lost the focus draws its selection faintly, and
         // that question shouldn't be answered differently depending on where the focus went.
-        _crumbs = new LinkLabel
-        {
-            Dock = DockStyle.Top,
-            Height = 24,
-            Padding = new Padding(6, 4, 6, 2),
-            LinkBehavior = LinkBehavior.HoverUnderline,
-            UseCompatibleTextRendering = false,
-        };
-        _crumbs.LinkClicked += OnCrumbClicked;
+        _viewHeader = new ViewHeader();
+        _viewHeader.Fill(Menus.ViewTools, Run);
+        _viewHeader.Crumbs.LinkClicked += OnCrumbClicked;
 
         // So a row selected while its task still had the name we gave it isn't read as deleted the
         // moment the sync learns what the server calls it.
@@ -453,7 +449,7 @@ internal sealed class MainForm : Form
         // The outline first and the path after it: a docked control added later sits nearer the
         // edge, so this is what puts the line above the list rather than below it.
         _detail.Panel1.Controls.Add(_outline);
-        _detail.Panel1.Controls.Add(_crumbs);
+        _detail.Panel1.Controls.Add(_viewHeader);
 
         // Two tabs rather than three controls stacked on each other. What the panel is showing used
         // to be a thing you could only find out by looking at it; now it says so, and the way to the
@@ -549,7 +545,7 @@ internal sealed class MainForm : Form
         _status = new Label
         {
             Dock = DockStyle.Bottom,
-            Height = 24,
+            Height = StatusHeight,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 0, 0, 0),
             Text = Strings.MainLoading,
@@ -1132,14 +1128,7 @@ internal sealed class MainForm : Form
         // Its cross is quiet at rest and lit under the pointer, so it wants the palette rather
         // than one colour out of it.
         _search.Theme = _theme;
-
-        // The step you are on is the one being read; the ones above it are offers, and drawn as
-        // links so they read as such without needing to be hovered to find out.
-        _crumbs.BackColor = _theme.Background;
-        _crumbs.ForeColor = _theme.Text;
-        _crumbs.LinkColor = _theme.Muted;
-        _crumbs.ActiveLinkColor = _theme.Accent;
-        _crumbs.VisitedLinkColor = _theme.Muted;
+        _viewHeader.Theme = _theme;
 
         _sidebar.BackColor = _theme.Background;
         _sidebar.MarkColour = _theme.Accent;
@@ -1232,24 +1221,47 @@ internal sealed class MainForm : Form
     /// <summary>Sets the space round the search box for the screen the window's on.</summary>
     private void PadSearch() => _searchHolder.Padding = SearchPaddingAt(DeviceDpi);
 
+    /// <summary>How tall the status line is at 100%.</summary>
+    internal const int StatusHeight = 24;
+
     /// <summary>
-    /// Pads the search box again once the window knows which screen it's on.
+    /// Sizes the strips of a fixed height for a display's scale: the line above the outline and its
+    /// buttons, the line naming what the panel's about, and the status line.
+    /// </summary>
+    /// <remarks>
+    /// The text in each grows with the display's scale whether or not this is done, so a strip left
+    /// at its 100% height cuts the bottoms off the letters on any screen scaled past that. Internal
+    /// so a test can size them for a scale the machine it runs on hasn't got.
+    /// </remarks>
+    /// <param name="dpi">The display's dots per inch, which is 96 at 100%</param>
+    internal void SizeStrips(int dpi)
+    {
+        _viewHeader.ScaleTo(dpi);
+        _panelHeader.Height = StartupLayout.Scaled(DetailHeader.LogicalHeight, dpi);
+        _status.Height = StartupLayout.Scaled(StatusHeight, dpi);
+    }
+
+    /// <summary>
+    /// Sizes the search box's padding and the strips of a fixed height again once the window knows
+    /// which screen it's on.
     /// </summary>
     /// <remarks>
     /// Before its handle exists a window reports the scale of the screen the app started on, so the
-    /// padding set while it's built can be for the wrong one.
+    /// sizes set while it's built can be for the wrong one.
     /// </remarks>
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         PadSearch();
+        SizeStrips(DeviceDpi);
     }
 
-    /// <summary>Pads the search box again for a screen of another scale.</summary>
+    /// <summary>Sizes the same again for a screen of another scale.</summary>
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
         PadSearch();
+        SizeStrips(e.DeviceDpiNew);
     }
 
     private ViewState CurrentViewState()
@@ -1318,7 +1330,10 @@ internal sealed class MainForm : Form
     private void Collapse(string id, bool collapsed)
         => Folding(() => _presenter.SetCollapsed(id, collapsed));
 
-    /// <summary>Folds or unfolds every task in the view at once, from the View menu.</summary>
+    /// <summary>
+    /// Folds or unfolds every task in the view at once, from the View menu or the buttons above the
+    /// outline.
+    /// </summary>
     /// <param name="collapsed">True to put them all away, false to open them all up</param>
     private void FoldAll(bool collapsed) => Folding(() => _presenter.FoldAll(collapsed));
 
@@ -1451,6 +1466,10 @@ internal sealed class MainForm : Form
 
         // After the rows, which is what decides whether the selected task is still there.
         FollowSelection();
+
+        // After the rows as well: whether there's anything left to fold or unfold is read off them.
+        // Every fold republishes the rows, so this is the one place that needs to ask.
+        _viewHeader.Render(ToolsContext());
         RenderStatus();
         RenderUnsupported();
         RenderTray();
@@ -1700,17 +1719,18 @@ internal sealed class MainForm : Form
     {
         var line = ViewPath.Line(_presenter.Breadcrumbs, CrumbSeparator);
 
-        _crumbs.Text = line.Text;
-        _crumbs.Links.Clear();
+        var crumbs = _viewHeader.Crumbs;
+        crumbs.Text = line.Text;
+        crumbs.Links.Clear();
 
         foreach (var link in line.Links)
-            _crumbs.Links.Add(link.Start, link.Length, link.Target);
+            crumbs.Links.Add(link.Start, link.Length, link.Target);
 
         // Out of the tab order. With a link on it, it was a stop reached after the list though
         // it's drawn above it, and the tree goes to the same places anyway. Said here, after the
         // text and the links, since a LinkLabel decides for itself whether it's a stop as they
         // change, and a TabStop set once when it was made didn't last.
-        _crumbs.TabStop = false;
+        crumbs.TabStop = false;
     }
 
     private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
@@ -2803,6 +2823,22 @@ internal sealed class MainForm : Form
     /// <returns>The command, or <see cref="AppCommand.None"/> when it asks for nothing there</returns>
     internal static AppCommand CommandFor(Keys keys, ShortcutScope scope)
         => KeyMap.KeystrokeOf(keys) is { } keystroke ? Shortcuts.CommandFor(keystroke, scope) : AppCommand.None;
+
+    /// <summary>
+    /// What the buttons above the outline read from: only what their commands ask about.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Context"/>, which asks the engine what the selected task could be made to do
+    /// and works out what a new task would begin with. That's nothing once per menu opening, but
+    /// this is asked on every publish — every sync, and every key typed into the search. The
+    /// buttons still go through the menu's own <see cref="Presentation.Commands.StateOf"/>; they're
+    /// just handed a context holding the two answers it decides them with. A button whose command
+    /// reads anything else needs that adding here.
+    /// </remarks>
+    /// <returns>What the buttons read from</returns>
+    private CommandContext ToolsContext() => new(
+        CanExpandAll: _presenter.CanExpandAll,
+        CanCollapseAll: _presenter.CanCollapseAll);
 
     /// <summary>
     /// What the menus should be reading from right now — what is selected where, and what can be
