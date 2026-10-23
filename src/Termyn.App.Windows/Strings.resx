@@ -137,6 +137,10 @@
     <value>Show a tooltip on priority dots</value>
     <comment>Check box in settings: hovering over a task's coloured priority dot shows a tooltip naming the priority.</comment>
   </data>
+  <data name="SettingsShowAfterDownloading" xml:space="preserve">
+    <value>Show attachments after downloading</value>
+    <comment>Check box in settings: once an attachment has been saved to the Downloads folder, a File Explorer window opens there with the file selected.</comment>
+  </data>
   <data name="SettingsClearDownloads" xml:space="preserve">
     <value>Clear downloaded files</value>
     <comment>Button in settings that deletes the comment attachments kept on disk.</comment>

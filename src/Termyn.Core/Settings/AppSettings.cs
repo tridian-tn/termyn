@@ -76,6 +76,9 @@ public sealed record AppSettings
     /// <summary>Resting the pointer on a task's priority dot says which priority it is.</summary>
     public bool ShowPriorityTips { get; init; } = true;
 
+    /// <summary>Once an attachment's been saved to Downloads, Explorer opens there with it selected.</summary>
+    public bool ShowAfterDownloading { get; init; } = true;
+
     public ViewState View { get; init; } = new();
 
     /// <summary>The hotkey as a binding, falling back to the default when the file holds nonsense.</summary>

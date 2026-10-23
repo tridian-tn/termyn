@@ -1,3 +1,4 @@
+using Termyn.Core.Attachments;
 using Termyn.Core.Capture;
 using Termyn.Core.Logging;
 using Termyn.Core.Platform;
@@ -88,6 +89,36 @@ internal static class TestWindow
         return Build(settings, settings.Load(), store, api, out _, out presenter);
     }
 
+    /// <summary>
+    /// A window whose comments can fetch their files, and saves copies into a folder of the test's
+    /// own rather than the real Downloads.
+    /// </summary>
+    /// <param name="settings">The settings it opens with</param>
+    /// <param name="store">What the account holds</param>
+    /// <param name="api">The server, which hands over each file's bytes</param>
+    /// <param name="folder">A folder of the test's own, which the caller deletes</param>
+    /// <param name="presenter">The presenter, for a test that needs to drive it</param>
+    /// <returns>The window, laid out but not shown, which the caller disposes</returns>
+    internal static MainForm WithDownloads(
+        AppSettings settings,
+        InMemorySnapshotStore store,
+        FakeApi api,
+        string folder,
+        out MainPresenter presenter)
+        => Build(
+            new SettingsStore(Path.Combine(folder, "config.json")),
+            settings,
+            store,
+            api,
+            out _,
+            out presenter,
+            attachments: folder);
+
+    /// <summary>Where a window built with <see cref="WithDownloads"/> saves its copies.</summary>
+    /// <param name="folder">The folder the window was given</param>
+    /// <returns>The Downloads folder inside it</returns>
+    internal static string DownloadsIn(string folder) => Path.Combine(folder, "downloads");
+
     private static MainForm Build(
         SettingsStore settingsStore,
         AppSettings settings,
@@ -95,18 +126,26 @@ internal static class TestWindow
         FakeApi api,
         out Notifier notifier,
         out MainPresenter presenter,
-        FakeSecrets? secrets = null)
+        FakeSecrets? secrets = null,
+        string? attachments = null)
     {
-        var engine = new SyncEngine(api, store, secrets ?? new FakeSecrets { Stored = "tok" });
+        secrets ??= new FakeSecrets { Stored = "tok" };
+        var engine = new SyncEngine(api, store, secrets);
         engine.Load();
 
+        // None unless asked for, which is how the presenter is built in most tests: opening or
+        // saving a file then says downloads aren't available rather than reaching anywhere.
+        var fetcher = attachments is null
+            ? null
+            : new AttachmentFetcher(api, secrets, new AttachmentCache(Path.Combine(attachments, "cache")));
+
         var clock = new SystemClock();
-        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock, fetcher: fetcher);
         var scheduler = new SyncScheduler(presenter.SyncAsync, SyncCadence.Default);
         notifier = new Notifier();
 
         var shell = new Shell(
-            new Paths(),
+            new Paths(attachments is null ? null : DownloadsIn(attachments)),
             settingsStore,
             settings,
             new Hotkey(),
@@ -172,13 +211,14 @@ internal static class TestWindow
 
     // ---- The shell, stood in for --------------------------------------------------------------
 
-    private sealed class Paths : IAppPaths
+    /// <summary>Everything in the temp folder, except a Downloads folder a test gives it.</summary>
+    private sealed class Paths(string? downloads = null) : IAppPaths
     {
         public string ConfigDirectory => Path.GetTempPath();
         public string CacheDirectory => Path.GetTempPath();
         public string LogDirectory => Path.GetTempPath();
         public string AttachmentDirectory => Path.GetTempPath();
-        public string DownloadsDirectory => Path.GetTempPath();
+        public string DownloadsDirectory => downloads ?? Path.GetTempPath();
     }
 
     private sealed class Hotkey : IGlobalHotkey

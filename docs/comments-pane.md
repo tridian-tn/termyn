@@ -116,6 +116,12 @@ name, separators included, becomes `_`, and a device name such as `CON` or `nul.
 create are one step and nothing can take the name in between. The status bar names the file as
 saved, number and all.
 
+Then, unless **Show attachments after downloading** is turned off in settings, Explorer opens on
+Downloads with the copy selected. That's asked of the shell (`SHOpenFolderAndSelectItems`) rather
+than run as `explorer /select,`, because the shell reuses a window already open on the folder, so
+three downloads in a row don't leave three windows behind. The setting's read when each download
+lands, so turning it off needs no restart.
+
 **Deleting a file is not undoable.** Taking one off a comment updates the comment through the outbox
 like any other write, and then deletes the upload directly, because Todoist has no command for it.
 The confirmation says so. If the delete fails, the file is orphaned on the account rather than lost
@@ -135,7 +141,6 @@ be the one that says no.
   projects are supported.
 - An attachment can't be added to a comment that already exists. Attaching is part of writing a new
   comment.
-- A saved copy only goes to Downloads. There's no Save as… to pick a folder, and nothing offers to
-  show the file in Explorer afterwards.
+- A saved copy only goes to Downloads. There's no Save as… to pick a folder.
 - Only one transfer at a time. The panel has one line to report progress in, and two at once would
   leave you unable to tell which had failed.

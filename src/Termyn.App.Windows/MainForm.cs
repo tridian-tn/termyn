@@ -350,6 +350,7 @@ internal sealed class MainForm : Form
         _outline.SortRequested += column => Guarded(() => _presenter.SortBy(column));
         AskForDue = AskDueWithDialog;
         AskForDeadline = AskWithDialog;
+        ShowInFolder = AppVersion.ShowInFolder;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.ToggleRequested += id => Guarded(() => TickOff(id));
         _outline.CanDrop = _presenter.CanDrop;
@@ -2437,15 +2438,32 @@ internal sealed class MainForm : Form
     /// <remarks>
     /// Said in the status bar rather than in a box, since nothing's wrong. The name it gives is the
     /// one the copy was saved under: a name the folder already had gets a number added, and the
-    /// original would send the user looking for the wrong file.
+    /// original would send the user looking for the wrong file. Explorer's given that same path, so
+    /// the file it selects is the copy just made.
+    ///
+    /// The setting's read now rather than when the window opened, so turning it off holds from the
+    /// next download.
     /// </remarks>
     private async void OnAttachmentDownloaded(string commentId)
     {
         var folder = _shell.Paths.DownloadsDirectory;
 
-        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is { } path)
-            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, Path.GetFileName(path));
+        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is not { } path)
+            return;
+
+        _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, Path.GetFileName(path));
+
+        if (_settings.ShowAfterDownloading)
+            ShowInFolder(path);
     }
+
+    /// <summary>
+    /// Opens Explorer with a saved file selected. A property so a test can see it asked for without
+    /// a window opening; the window sets it to the real one as it's built.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<string, bool> ShowInFolder { get; set; }
 
     /// <summary>
     /// Gets a comment's file, showing the wait under the comments.
