@@ -189,12 +189,30 @@ public sealed class AttachmentFetcherTests : IDisposable
     public async Task A_download_sweeps_rather_than_waiting_for_the_next_start()
     {
         // This download is exactly what may have put the cache over its cap, so the sweep happens
-        // here rather than only when the app is next opened.
+        // here rather than only when the app is next opened. Two eight-byte files against a cap of
+        // twelve: the second is what puts it over, and the first is the older of the two.
+        var now = DateTimeOffset.UtcNow;
+        var cache = new AttachmentCache(_directory, new CacheLimits(12, TimeSpan.FromDays(14)), () => now);
+        var fetcher = new AttachmentFetcher(_api, _secrets, cache);
+
+        await fetcher.FetchAsync(File(url: "https://files.example/a"), ct: TestContext.Current.CancellationToken);
+        now = now.AddMinutes(1);
+        await fetcher.FetchAsync(File(url: "https://files.example/b"), ct: TestContext.Current.CancellationToken);
+
+        Assert.True(cache.Size() <= 12, $"the cache holds {cache.Size()} bytes against a cap of 12");
+    }
+
+    [Fact]
+    public async Task A_file_bigger_than_the_whole_cap_is_still_there_once_fetched()
+    {
+        // The sweep that follows a download mustn't take the file that was just asked for. It's
+        // about to be opened or saved, and a path to nothing fails with no reason anyone can see.
         var cache = new AttachmentCache(_directory, new CacheLimits(4, TimeSpan.FromDays(14)));
         var fetcher = new AttachmentFetcher(_api, _secrets, cache);
 
-        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+        var result = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
-        Assert.True(cache.Size() <= 4, $"the cache holds {cache.Size()} bytes against a cap of 4");
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.True(System.IO.File.Exists(result.Path), "the file was swept away before it could be opened");
     }
 }

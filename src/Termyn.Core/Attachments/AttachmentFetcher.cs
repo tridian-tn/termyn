@@ -94,8 +94,9 @@ public sealed class AttachmentFetcher
             _cache.Commit(path);
 
             // Now, rather than only on the next start: this download is exactly what may have put
-            // the cache over its cap.
-            _cache.Sweep();
+            // the cache over its cap. Sparing it, though — it's what was asked for, and a file
+            // bigger than the whole cap would otherwise be gone before it could be opened.
+            _cache.Sweep(spare: path);
 
             return new FetchResult(FetchOutcome.Ready, path);
         }

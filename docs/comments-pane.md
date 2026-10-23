@@ -99,6 +99,10 @@ rather than when it arrived, so reopening the same document all week keeps it. N
 is authoritative, which is what makes all of that safe — and it's emptied along with everything else
 when the account is purged.
 
+The sweep that follows a download leaves alone the file it just fetched. That file still counts
+towards the cap, so older ones go to make room, but one bigger than the whole cap would otherwise be
+deleted before it could be opened.
+
 **Deleting a file is not undoable.** Taking one off a comment updates the comment through the outbox
 like any other write, and then deletes the upload directly, because Todoist has no command for it.
 The confirmation says so. If the delete fails, the file is orphaned on the account rather than lost
