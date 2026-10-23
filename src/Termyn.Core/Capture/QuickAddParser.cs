@@ -1100,6 +1100,12 @@ public sealed partial class QuickAddParser
             {
                 next += 1;
             }
+            else if (word == "at")
+            {
+                // An "at" goes after what it repeats on. Todoist has never been seen to take
+                // "every at 9am", so it's flagged rather than sent off to fail.
+                return null;
+            }
 
             // Anything slower than hourly fires at a time, and Todoist won't take one without it.
             return next < tokens.Length && TimeAt(tokens, next, settings, out var took) is not null ? next + took : null;
@@ -1108,11 +1114,11 @@ public sealed partial class QuickAddParser
         string? Word(int i) => i < tokens.Length ? tokens[i].ToLowerInvariant() : null;
     }
 
-    /// <summary>A count in front of a period, as in <c>every 2 weeks</c>: one or two figures, never nought.</summary>
+    /// <summary>A count in front of a period, as in <c>every 2 weeks</c>: one or two figures, with no nought in front.</summary>
     /// <param name="word">The word, or null when there isn't one</param>
     /// <returns>The count, or null when the word isn't one</returns>
     private static int? Interval(string? word)
-        => word is { Length: 1 or 2 } && int.TryParse(word, NumberStyles.None, CultureInfo.InvariantCulture, out var count) && count >= 1
+        => word is { Length: 1 or 2 } && word[0] != '0' && int.TryParse(word, NumberStyles.None, CultureInfo.InvariantCulture, out var count)
             ? count
             : null;
 

@@ -286,6 +286,8 @@ public class QuickAddParserTests
     [InlineData("Plan !every day report", "!every day report")]
     [InlineData("Stretch !every 2 hour", "!every 2 hour")]
     [InlineData("Water !every 0 days 9am", "!every 0 days 9am")]
+    [InlineData("Water !every 01 day 9am", "!every 01 day 9am")]
+    [InlineData("Review !every at 9am", "!every at 9am")]
     [InlineData("Water !every other hour", "!every other hour")]
     [InlineData("Review !every sat 9 am", "!every sat 9 am")]
     public void A_recurring_reminder_it_cannot_read_is_left_to_the_server_and_flagged(string text, string run)
