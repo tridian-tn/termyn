@@ -61,6 +61,35 @@ public class ReminderRowTests
     }
 
     [Fact]
+    public void A_repeating_one_reads_as_its_schedule_and_when_it_next_fires()
+    {
+        var was = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            var row = new ReminderRow(new Reminder
+            {
+                Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, DueDate = "2026-10-24T09:00:00", Schedule = "every sat 9am",
+            });
+
+            // Not "At Sat 24 Oct", which would say it fires once.
+            Assert.Equal("Every sat 9am (next Sat 24 Oct, 09:00)", row.ToString());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = was;
+        }
+    }
+
+    [Fact]
+    public void A_repeating_one_the_server_hasnt_answered_for_reads_as_its_schedule_alone()
+    {
+        var row = new ReminderRow(new Reminder { Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, Schedule = "every sat 9am" });
+
+        Assert.Equal("Every sat 9am", row.ToString());
+    }
+
+    [Fact]
     public void A_location_one_names_the_place_and_where_it_was_set()
     {
         Assert.Equal("At Home (set in Todoist)", Row(ReminderKind.Location, place: "Home").ToString());

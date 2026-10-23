@@ -20,6 +20,7 @@ public sealed record ReminderRow(Reminder Reminder)
 
     public override string ToString() => Reminder.Kind switch
     {
+        ReminderKind.Absolute when Reminder.Schedule is { } schedule => Repeating(schedule, Reminder.DueDate),
         ReminderKind.Absolute => $"At {Moment(Reminder.DueDate)}",
         ReminderKind.Location => $"At {Reminder.LocationName ?? "a place"} (set in Todoist)",
         ReminderKind.Unknown => "A reminder set in Todoist",
@@ -34,6 +35,19 @@ public sealed record ReminderRow(Reminder Reminder)
     /// </summary>
     private static string Moment(string? due)
         => DateTime.TryParse(due, out var when) ? when.ToString("ddd d MMM, HH:mm") : due ?? "a set time";
+
+    /// <summary>
+    /// A reminder that repeats, by its schedule, and by when it next fires once the server has said.
+    /// One just added offline has no next time yet, and the schedule alone is all there is to show.
+    /// </summary>
+    /// <param name="schedule">The words it repeats on, such as "every sat 9am"</param>
+    /// <param name="due">The next time it fires, as the server wrote it, or null before it has</param>
+    /// <returns>The words, such as "Every sat 9am (next Sat 24 Oct, 09:00)"</returns>
+    private static string Repeating(string schedule, string? due)
+    {
+        var words = schedule.Length > 0 ? char.ToUpperInvariant(schedule[0]) + schedule[1..] : schedule;
+        return due is null ? words : $"{words} (next {Moment(due)})";
+    }
 
     /// <summary>
     /// Offsets aren't limited to the ones the dialog offers — the web app sets whatever it likes —

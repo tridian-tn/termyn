@@ -220,15 +220,107 @@ public class QuickAddParserTests
             r => Assert.Equal(180, Assert.IsType<RelativeReminder>(r).MinutesBefore));
     }
 
-    [Fact]
-    public void A_recurring_reminder_is_left_to_the_server_and_flagged()
+    // Every schedule here was sent to a live account as a reminder_add and taken (23 Oct 2026).
+    [Theory]
+    [InlineData("End of day review !every 5pm", "every 5pm")]
+    [InlineData("Pills !every 16:30", "every 16:30")]
+    [InlineData("Call mum !every sat 9am", "every sat 9am")]
+    [InlineData("Call mum !every Sat 9AM", "every Sat 9AM")]   // sent as typed, case and all
+    [InlineData("Review !every monday 9am", "every monday 9am")]
+    [InlineData("Sync !every tue at 17:30", "every tue at 17:30")]
+    [InlineData("Standup !every weekday at 9:30am", "every weekday at 9:30am")]
+    [InlineData("Timesheet !every workday 9am", "every workday 9am")]
+    [InlineData("Lie in !every weekend 10am", "every weekend 10am")]
+    [InlineData("Plan !every day 9am", "every day 9am")]
+    [InlineData("Plan !every week 9am", "every week 9am")]
+    [InlineData("Rent !every month 9am", "every month 9am")]
+    [InlineData("Bins !every other sat 9am", "every other sat 9am")]
+    [InlineData("Plants !every other day 9am", "every other day 9am")]
+    [InlineData("Payroll !every 2 weeks 9am", "every 2 weeks 9am")]
+    [InlineData("Water !every 2 days 9am", "every 2 days 9am")]
+    [InlineData("Stretch !every 2 hours", "every 2 hours")]
+    [InlineData("Stretch !every 1 hour", "every 1 hour")]
+    [InlineData("Drink water !every hour", "every hour")]
+    [InlineData("Journal !every evening", "every evening")]
+    [InlineData("Plan the day !every morning", "every morning")]
+    public void A_recurring_reminder_is_read_as_its_schedule(string text, string schedule)
     {
-        var parse = Parse("End of day review !every 5pm");
+        var parse = Parse(text);
+
+        var reminder = Assert.IsType<RecurringReminder>(parse.Reminders.Single());
+        Assert.Equal(schedule, reminder.Schedule);
+        Assert.DoesNotContain("!every", parse.Content);
+        Assert.Empty(parse.Unsupported);
+        Assert.False(parse.IsRecurrence);   // the task itself doesn't repeat, so the capture isn't refused
+    }
+
+    [Fact]
+    public void The_words_after_a_recurring_reminder_are_the_tasks_again()
+    {
+        // Todoist refuses "every sat 9am call mum" outright, so the schedule has to stop where it does.
+        var parse = Parse("!every sat 9am call mum tomorrow #Home");
+
+        Assert.Equal("every sat 9am", Assert.IsType<RecurringReminder>(parse.Reminders.Single()).Schedule);
+        Assert.Equal("call mum", parse.Content);
+        Assert.Equal(new DateOnly(2026, 8, 1), parse.DueDate);
+        Assert.Equal("Home", parse.ProjectName);
+    }
+
+    [Fact]
+    public void A_time_after_an_hourly_reminder_is_the_tasks_due_time()
+    {
+        // An hourly schedule takes no time, so one after it is read as the task's, the same as after "!30m".
+        var parse = Parse("Stretch !every 2 hours tomorrow 9am");
+
+        Assert.Equal("every 2 hours", Assert.IsType<RecurringReminder>(parse.Reminders.Single()).Schedule);
+        Assert.Equal(new TimeOnly(9, 0), parse.DueTime);
+    }
+
+    // The first five were refused live: four for naming no time, and minutes as not a schedule at all.
+    [Theory]
+    [InlineData("Review !every monday", "!every monday")]
+    [InlineData("Review !every other monday", "!every other monday")]
+    [InlineData("Timesheet !every workday", "!every workday")]
+    [InlineData("Payday !every 3rd friday 9am", "!every 3rd friday 9am")]
+    [InlineData("Check !every 30 minutes 9am", "!every 30 minutes 9am")]
+    [InlineData("Plan !every day report", "!every day report")]
+    [InlineData("Stretch !every 2 hour", "!every 2 hour")]
+    [InlineData("Water !every 0 days 9am", "!every 0 days 9am")]
+    [InlineData("Water !every 01 day 9am", "!every 01 day 9am")]
+    [InlineData("Review !every at 9am", "!every at 9am")]
+    [InlineData("Water !every other hour", "!every other hour")]
+    [InlineData("Review !every sat 9 am", "!every sat 9 am")]
+    public void A_recurring_reminder_it_cannot_read_is_left_to_the_server_and_flagged(string text, string run)
+    {
+        var parse = Parse(text);
 
         Assert.Empty(parse.Reminders);
-        Assert.False(parse.IsRecurrence);   // the task itself doesn't repeat, so the capture isn't refused
-        Assert.Contains("!every 5pm", parse.Unsupported);
-        Assert.Contains("!every 5pm", parse.Content);
+        Assert.False(parse.IsRecurrence);
+        Assert.Contains(run, parse.Unsupported);
+        Assert.Contains(run, parse.Content);
+        Assert.Null(parse.DueTime);   // the run is taken whole, so a time in it can't become the task's
+    }
+
+    [Fact]
+    public void With_smart_dates_off_a_recurring_reminder_is_left_in_the_words()
+    {
+        var parser = new QuickAddParser(new FixedClock(Today));
+        var parse = parser.Parse("Call mum !every sat 9am", new DateSettings(TimeZoneInfo.Utc, InlineDatesOff: true));
+
+        Assert.Empty(parse.Reminders);
+        Assert.Contains("!every sat 9am", parse.Unsupported);
+        Assert.Equal("Call mum !every sat 9am", parse.Content);
+    }
+
+    [Fact]
+    public void For_an_account_that_reads_another_language_a_recurring_reminder_is_left_in_the_words()
+    {
+        // The schedule goes to the server in English, so it's only read for an account that reads English.
+        var parser = new QuickAddParser(new FixedClock(Today));
+        var parse = parser.Parse("Call mum !every sat 9am", new DateSettings(TimeZoneInfo.Utc, Language: "de"));
+
+        Assert.Empty(parse.Reminders);
+        Assert.Contains("!every sat 9am", parse.Unsupported);
     }
 
     [Fact]

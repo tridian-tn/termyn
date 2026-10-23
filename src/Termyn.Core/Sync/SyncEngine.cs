@@ -2122,6 +2122,31 @@ public sealed class SyncEngine
             ["due"] = ItemFields.Due(date, time),
         });
 
+    /// <summary>
+    /// Adds a reminder that repeats on a schedule, and queues a <c>reminder_add</c>.
+    /// </summary>
+    /// <remarks>
+    /// An absolute reminder whose due date is words rather than a moment, which the server reads the
+    /// way it reads a task's repeat and answers with the next time it fires. Until then the copy held
+    /// here has no date at all, only the schedule, which is what it's shown by. The words are English,
+    /// the only language a capture reads a reminder in.
+    /// </remarks>
+    /// <param name="itemId">The task it's on</param>
+    /// <param name="schedule">When it repeats, in words the server reads, such as "every sat 9am"</param>
+    /// <returns>The new reminder's temporary id, or null when the task isn't one we hold</returns>
+    public string? AddRecurringReminder(string itemId, string schedule)
+        => AddReminder(itemId, new JsonObject
+        {
+            ["item_id"] = itemId,
+            ["type"] = "absolute",
+            ["due"] = new JsonObject
+            {
+                ["string"] = schedule,
+                ["lang"] = "en",
+                ["is_recurring"] = true,
+            },
+        });
+
     /// <returns>The new reminder's temporary id, or null when the task isn't one we hold.</returns>
     private string? AddReminder(string itemId, JsonObject args)
     {

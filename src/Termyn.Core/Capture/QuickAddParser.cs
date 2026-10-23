@@ -9,7 +9,7 @@ namespace Termyn.Core.Capture;
 /// <summary>
 /// Parses quick-add text without the server, and reads a day typed into a box of its own. This is
 /// deliberately a strict subset of Todoist's syntax — only the tokens listed here are recognised;
-/// anything else is left in the task content verbatim. Recurrence, reminders and assignees are
+/// anything else is left in the task content verbatim. A task's recurrence and its assignees are
 /// flagged rather than guessed at, because getting them wrong offline would create the wrong task.
 /// </summary>
 /// <remarks>
@@ -166,11 +166,21 @@ public sealed partial class QuickAddParser
                     continue;
                 case '!' when token.Length > 1:
                 {
-                    // A recurring reminder is the server's to resolve, like any repeat: consume the
-                    // run so a trailing time can't become a due time, and flag it. Not a recurrence
-                    // of the task itself, which repeats the task and would refuse the capture.
                     if (token[1..].Equals("every", StringComparison.OrdinalIgnoreCase))
                     {
+                        // A recurring reminder goes to the server as its words, for it to work out
+                        // when it next fires. All that's read here is where those words end, and that
+                        // has to be exact: Todoist refuses a schedule with a word of the title on it.
+                        if (readsDays && RecurringReminderAt(tokens, i, settings, out var everyUsed) is { } schedule)
+                        {
+                            pending.Add(new StagedRecurring(schedule));
+                            i += everyUsed - 1;
+                            continue;
+                        }
+
+                        // One it can't read is the server's, like any repeat: consume the run so a
+                        // trailing time can't become a due time, and flag it. Not a recurrence of the
+                        // task itself, which repeats the task and would refuse the capture.
                         var run = new List<string> { token };
                         run.AddRange(tokens[(i + 1)..]
                             .TakeWhile(t => t[0] is not ('#' or '@' or '/' or '+' or '!') && !TryParsePriority(t, out _)));
@@ -280,6 +290,7 @@ public sealed partial class QuickAddParser
                 StagedAbsolute a => new AbsoluteReminder(a.Date, a.Time),
                 StagedBeforeDue b when time is not null => new RelativeReminder(b.Minutes),
                 StagedBeforeDue b => Absolute(Moment(now, b.Minutes, floorToHour: false)),
+                StagedRecurring r => new RecurringReminder(r.Schedule),
                 _ => throw new InvalidOperationException(),
             });
         }
@@ -906,6 +917,18 @@ public sealed partial class QuickAddParser
     /// </summary>
     private sealed record StagedBeforeDue(int Minutes) : PendingReminder;
 
+    /// <summary>A reminder that repeats, kept as the words the server reads it from.</summary>
+    private sealed record StagedRecurring(string Schedule) : PendingReminder;
+
+    /// <summary>The parts of the day a recurring reminder can name alone, each with a time Todoist gives it.</summary>
+    private static readonly string[] PartsOfDay = ["morning", "afternoon", "evening", "night"];
+
+    /// <summary>What a recurring reminder can repeat on with nothing before it, ahead of its time.</summary>
+    private static readonly string[] RepeatPeriods = ["day", "week", "month", "weekday", "workday", "weekend"];
+
+    /// <summary>The periods a count or an <c>other</c> can go in front of.</summary>
+    private static readonly string[] CountedPeriods = ["day", "week", "month"];
+
     /// <summary>
     /// Reads the reminder a <c>!</c> shortcut names, starting at one word and running on over the
     /// next few where it must (<c>!1h before</c>, <c>!tmr 3pm</c>).
@@ -1019,6 +1042,85 @@ public sealed partial class QuickAddParser
         used = 1;
         return null;
     }
+
+    /// <summary>
+    /// Reads how far a recurring reminder's words run, from the <c>!every</c> that opens it.
+    /// </summary>
+    /// <remarks>
+    /// Only a schedule Todoist is known to take. One that repeats on a day, a weekday, a week or a
+    /// month, counted (<c>2 weeks</c>) or every other one, at a time (<c>!every sat 9am</c>,
+    /// <c>!every other day at 17:30</c>, <c>!every 5pm</c>). One that repeats every so many hours
+    /// (<c>!every 2 hours</c>). Or a part of the day, which brings its own time
+    /// (<c>!every evening</c>). Every word comes from a closed set, so the run stops at the first one
+    /// that isn't and the task's words carry on from there. Todoist refuses a schedule with a title
+    /// word left on the end, and one that names no time, so anything else is left for the caller to
+    /// flag rather than sent off to fail.
+    /// </remarks>
+    /// <param name="tokens">Every word typed</param>
+    /// <param name="at">Where the <c>!every</c> word is</param>
+    /// <param name="settings">What the account says about reading a date</param>
+    /// <param name="used">How many words the reminder took, when there was one</param>
+    /// <returns>The schedule as typed, without its <c>!</c>, or null when it isn't one this can read</returns>
+    private static string? RecurringReminderAt(string[] tokens, int at, DateSettings settings, out int used)
+    {
+        used = 1;
+        if (End() is not { } end)
+            return null;
+
+        used = end - at;
+        return string.Join(' ', tokens[at..end])[1..];
+
+        int? End()
+        {
+            var next = at + 1;
+            var word = Word(next);
+
+            // A part of the day brings its own time, and one that repeats hourly needs none.
+            if ((word is not null && PartsOfDay.Contains(word)) || word == "hour")
+                return next + 1;
+
+            if (Interval(word) is { } count)
+            {
+                var unit = Word(next + 1);
+                var singular = count == 1;
+                if (unit == (singular ? "hour" : "hours"))
+                    return next + 2;
+                if (unit is null || !CountedPeriods.Any(p => unit == (singular ? p : p + "s")))
+                    return null;
+                next += 2;
+            }
+            else if (word == "other")
+            {
+                var period = Word(next + 1);
+                if (period is null || (!CountedPeriods.Contains(period) && Weekday(period) is null))
+                    return null;
+                next += 2;
+            }
+            else if (word is not null && (RepeatPeriods.Contains(word) || Weekday(word) is not null))
+            {
+                next += 1;
+            }
+            else if (word == "at")
+            {
+                // An "at" goes after what it repeats on. Todoist has never been seen to take
+                // "every at 9am", so it's flagged rather than sent off to fail.
+                return null;
+            }
+
+            // Anything slower than hourly fires at a time, and Todoist won't take one without it.
+            return next < tokens.Length && TimeAt(tokens, next, settings, out var took) is not null ? next + took : null;
+        }
+
+        string? Word(int i) => i < tokens.Length ? tokens[i].ToLowerInvariant() : null;
+    }
+
+    /// <summary>A count in front of a period, as in <c>every 2 weeks</c>: one or two figures, with no nought in front.</summary>
+    /// <param name="word">The word, or null when there isn't one</param>
+    /// <returns>The count, or null when the word isn't one</returns>
+    private static int? Interval(string? word)
+        => word is { Length: 1 or 2 } && word[0] != '0' && int.TryParse(word, NumberStyles.None, CultureInfo.InvariantCulture, out var count)
+            ? count
+            : null;
 
     /// <summary>A span written as hours and/or minutes: <c>30m</c>, <c>90min</c>, <c>2h</c>, <c>2h30m</c>.</summary>
     /// <param name="word">The word, lower-cased</param>

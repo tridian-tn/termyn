@@ -623,6 +623,9 @@ public sealed class MainPresenter
                 case RelativeReminder relative:
                     _engine.AddRelativeReminder(id, relative.MinutesBefore);
                     break;
+                case RecurringReminder recurring:
+                    _engine.AddRecurringReminder(id, recurring.Schedule);
+                    break;
             }
         }
 

@@ -95,6 +95,13 @@ public sealed class Reminder
     /// <summary>When an absolute reminder fires, as the server wrote it.</summary>
     public string? DueDate { get; init; }
 
+    /// <summary>
+    /// The words an absolute reminder repeats on, such as "every sat 9am", or null for one that
+    /// fires once. <see cref="DueDate"/> is then only the next time it fires, and is missing until
+    /// the server has worked that out.
+    /// </summary>
+    public string? Schedule { get; init; }
+
     /// <summary>The place a location reminder watches, for display.</summary>
     public string? LocationName { get; init; }
 }
