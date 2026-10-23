@@ -143,7 +143,11 @@ public sealed record CommentRow(
 /// What the local parser made of some capture text, and how its names resolved.
 /// <paramref name="Parse"/> already carries the text the task would be created with.
 /// </summary>
-public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved);
+/// <param name="Parse">What the local parser read the text as</param>
+/// <param name="ProjectResolved">Whether a named project was found, or none was named</param>
+/// <param name="SectionResolved">Whether a named section was found, or none was named</param>
+/// <param name="RemindersAvailable">Whether the plan takes the reminders the text named, so the preview can say it will set them rather than that it can't</param>
+public sealed record CapturePreview(QuickAddParse Parse, bool ProjectResolved, bool SectionResolved, bool RemindersAvailable);
 
 /// <summary>
 /// Drives the sidebar and the outline: exposes the engine's model as rows and turns user intents
@@ -599,7 +603,27 @@ public sealed class MainPresenter
             sectionId = Selection.SectionId;
         }
 
-        _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
+        var id = _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
+
+        // A reminder the text named with "!" is set onto the new task's id, queued after its
+        // item_add so the server has the task before the reminder points at it. Only when the plan
+        // takes reminders — the parser reads them whatever the plan, and sending one the plan
+        // refuses is the thing the reminder UI is built never to do.
+        if (parse.Reminders.Count > 0 && CanAddReminder())
+        {
+            foreach (var reminder in parse.Reminders)
+            {
+                switch (reminder)
+                {
+                    case AbsoluteReminder absolute:
+                        _engine.AddAbsoluteReminder(id, absolute.Date, absolute.Time);
+                        break;
+                    case RelativeReminder relative:
+                        _engine.AddRelativeReminder(id, relative.MinutesBefore);
+                        break;
+                }
+            }
+        }
 
         // Said from the text rather than from the model: the words the user typed are the ones that
         // go in, and a new id each time so two captures are never folded into one.
@@ -722,7 +746,8 @@ public sealed class MainPresenter
         return new CapturePreview(
             parse,
             parse.ProjectName is null || projectId is not null,
-            parse.SectionName is null || sectionId is not null);
+            parse.SectionName is null || sectionId is not null,
+            CanAddReminder());
     }
 
     /// <summary>

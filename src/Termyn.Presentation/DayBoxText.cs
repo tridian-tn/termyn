@@ -85,7 +85,7 @@ public static class DayBoxText
     };
 
     /// <summary>When a reminder set for a day with no time on it goes off.</summary>
-    public static TimeOnly ReminderTime { get; } = new(9, 0);
+    public static TimeOnly ReminderTime { get; } = QuickAddParser.ReminderDefaultTime;
 
     /// <summary>
     /// A day read from the box, written out in full so there's no mistaking which one it is.
