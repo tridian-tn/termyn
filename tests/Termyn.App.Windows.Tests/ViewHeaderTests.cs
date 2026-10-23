@@ -197,6 +197,46 @@ public class ViewHeaderTests
         Assert.Contains(greyed, p => p != background);
     }
 
+    [WinFormsTheory]
+    [InlineData(24)]
+    [InlineData(30)]
+    [InlineData(36)]
+    public void Expand_all_is_collapse_all_with_the_minus_made_a_plus(int side)
+    {
+        // The same two boxes on both, and only the mark on the front one differs: everything inked
+        // for Collapse all is inked for Expand all too, which has the plus's upright besides.
+        var expand = Inked(side, collapse: false);
+        var collapse = Inked(side, collapse: true);
+
+        Assert.NotEmpty(collapse);
+        Assert.Subset(expand, collapse);
+        Assert.True(expand.Count > collapse.Count, $"{expand.Count} inked for the plus, {collapse.Count} for the minus");
+    }
+
+    /// <summary>The pixels a fold picture inks, drawn on its own in a button-sized square.</summary>
+    /// <param name="side">How big the button is</param>
+    /// <param name="collapse">True for Collapse all's picture, false for Expand all's</param>
+    /// <returns>Where the ink is</returns>
+    private static HashSet<Point> Inked(int side, bool collapse)
+    {
+        using var shot = new Bitmap(side, side);
+        using (var g = Graphics.FromImage(shot))
+        {
+            g.Clear(Color.White);
+            FoldGlyph.Draw(g, new Rectangle(0, 0, side, side), collapse, Color.Black);
+        }
+
+        var inked = new HashSet<Point>();
+        for (var y = 0; y < side; y++)
+        for (var x = 0; x < side; x++)
+        {
+            if (shot.GetPixel(x, y).ToArgb() != Color.White.ToArgb())
+                inked.Add(new Point(x, y));
+        }
+
+        return inked;
+    }
+
     /// <summary>A button's pixels, row by row, as the header draws it.</summary>
     /// <param name="header">The header it's on</param>
     /// <param name="button">The button</param>

@@ -189,8 +189,8 @@ internal sealed class ViewHeader : Panel
     /// <returns>What draws it, given where and in what colour</returns>
     internal static Action<Graphics, Rectangle, Color> GlyphFor(AppCommand command) => command switch
     {
-        AppCommand.ExpandAll => (g, bounds, colour) => FoldGlyph.Draw(g, bounds, collapsed: false, colour),
-        AppCommand.CollapseAll => (g, bounds, colour) => FoldGlyph.Draw(g, bounds, collapsed: true, colour),
+        AppCommand.ExpandAll => (g, bounds, colour) => FoldGlyph.Draw(g, bounds, collapse: false, colour),
+        AppCommand.CollapseAll => (g, bounds, colour) => FoldGlyph.Draw(g, bounds, collapse: true, colour),
         _ => throw new ArgumentOutOfRangeException(nameof(command), command, "There's no picture drawn for this command."),
     };
 
