@@ -345,6 +345,7 @@ internal sealed class MainForm : Form
         // So a row selected while its task still had the name we gave it isn't read as deleted the
         // moment the sync learns what the server calls it.
         _outline.Renamed = _presenter.CurrentIdOf;
+        _outline.PriorityTips = _settings.ShowPriorityTips;
 
         _outline.KeyDown += OnOutlineKeyDown;
         _outline.MouseDown += (_, _) => Noticed();
@@ -1075,6 +1076,7 @@ internal sealed class MainForm : Form
         }
 
         _settings = amended;
+        _outline.PriorityTips = _settings.ShowPriorityTips;
 
         if (themeChanged)
         {

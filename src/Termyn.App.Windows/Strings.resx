@@ -133,6 +133,10 @@
     <value>Closing the window leaves Termyn in the tray</value>
     <comment>Check box in settings: closing the main window keeps the app running in the notification area.</comment>
   </data>
+  <data name="SettingsPriorityTips" xml:space="preserve">
+    <value>Show a tooltip on priority dots</value>
+    <comment>Check box in settings: hovering over a task's coloured priority dot shows a tooltip naming the priority.</comment>
+  </data>
   <data name="SettingsClearDownloads" xml:space="preserve">
     <value>Clear downloaded files</value>
     <comment>Button in settings that deletes the comment attachments kept on disk.</comment>

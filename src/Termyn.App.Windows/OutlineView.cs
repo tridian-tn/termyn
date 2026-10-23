@@ -615,9 +615,37 @@ internal sealed class OutlineView : ListView
     /// tip as far as Windows is concerned, and Windows shows a tip once per visit: moving on to
     /// another row's dot left the first row's words up, and a click — which is how a row gets
     /// selected — put it away until the pointer left the list altogether. The delays are still
-    /// the toolkit's own, so it keeps the same pause as every other tip in the window.
+    /// the toolkit's own, but see <see cref="FirstPause"/>.
     /// </remarks>
     private readonly ToolTip _tip = new();
+
+    /// <summary>
+    /// How long the pointer rests on a dot before the first tip comes up, in milliseconds.
+    /// </summary>
+    /// <remarks>
+    /// Half as long again as the toolkit's own pause, which was a touch quick in use. Moving on
+    /// from one dot to the next still takes the toolkit's short pause.
+    /// </remarks>
+    internal int FirstPause => _tip.InitialDelay * 3 / 2;
+
+    /// <summary>
+    /// Whether resting the pointer on a priority dot says what it means. Switching it off takes
+    /// down a tip that's up.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool PriorityTips
+    {
+        get => _priorityTips;
+        set
+        {
+            _priorityTips = value;
+            if (!value)
+                DropTip();
+        }
+    }
+
+    private bool _priorityTips = true;
 
     /// <summary>Counts down the pause before the tip comes up.</summary>
     private readonly System.Windows.Forms.Timer _tipDelay = new();
@@ -679,7 +707,7 @@ internal sealed class OutlineView : ListView
     /// <param name="point">Where the pointer is, in the list's own coordinates</param>
     private void AimTip(Point point)
     {
-        var on = TipAt(point);
+        var on = _priorityTips ? TipAt(point) : null;
         _tipAt = point;
 
         if (on == _tipOn)
@@ -692,7 +720,7 @@ internal sealed class OutlineView : ListView
         if (on is null)
             return;
 
-        _tipDelay.Interval = wasUp ? _tip.ReshowDelay : _tip.InitialDelay;
+        _tipDelay.Interval = wasUp ? _tip.ReshowDelay : FirstPause;
         _tipDelay.Start();
     }
 

@@ -138,6 +138,7 @@ public class SettingsStoreTests : IDisposable
         Assert.Equal(SyncMode.Automatic, settings.SyncMode);
         Assert.True(settings.CloseToTray);
         Assert.False(settings.LaunchAtLogin);
+        Assert.True(settings.ShowPriorityTips);
     }
 
     [Fact]
@@ -575,6 +576,7 @@ public class SettingsStoreTests : IDisposable
             SyncIntervalSeconds = 120,
             LaunchAtLogin = true,
             CloseToTray = false,
+            ShowPriorityTips = false,
             View = new ViewState
             {
                 SelectedKey = "project:p1",

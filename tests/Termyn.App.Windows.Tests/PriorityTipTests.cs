@@ -171,6 +171,53 @@ public class PriorityTipTests
     }
 
     [WinFormsFact]
+    public void The_first_pause_is_half_as_long_again_as_the_toolkits()
+    {
+        // Past the toolkit's half-second and still down. A timer can fire late but never early,
+        // so this can't pass by luck on a slow machine.
+        using var form = Window();
+        using var outline = Outline(form);
+
+        Assert.Equal(750, outline.FirstPause);
+
+        outline.PointerAt(PriorityCellOf(outline, 0));
+        Wait(550);
+        Assert.Null(outline.TipShowing);
+
+        Rest();
+        Assert.Equal("Priority 1 — urgent", outline.TipShowing);
+    }
+
+    [WinFormsFact]
+    public void Switched_off_no_dot_brings_the_tip_up()
+    {
+        using var form = Window();
+        using var outline = Outline(form);
+
+        outline.PriorityTips = false;
+        outline.PointerAt(PriorityCellOf(outline, 0));
+        Rest();
+
+        Assert.Null(outline.TipAimedAt);
+        Assert.Null(outline.TipShowing);
+    }
+
+    [WinFormsFact]
+    public void Switching_it_off_takes_down_a_tip_thats_up()
+    {
+        using var form = Window();
+        using var outline = Outline(form);
+
+        outline.PointerAt(PriorityCellOf(outline, 0));
+        Rest();
+        Assert.Equal("Priority 1 — urgent", outline.TipShowing);
+
+        outline.PriorityTips = false;
+
+        Assert.Null(outline.TipShowing);
+    }
+
+    [WinFormsFact]
     public void Moving_on_to_another_rows_dot_shows_that_rows_priority()
     {
         // With the whole list one tip as far as Windows was concerned, the first row's words
