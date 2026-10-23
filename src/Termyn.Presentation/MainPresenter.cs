@@ -606,22 +606,23 @@ public sealed class MainPresenter
         var id = _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
 
         // A reminder the text named with "!" is set onto the new task's id, queued after its
-        // item_add so the server has the task before the reminder points at it. Only when the plan
-        // takes reminders — the parser reads them whatever the plan, and sending one the plan
-        // refuses is the thing the reminder UI is built never to do.
-        if (parse.Reminders.Count > 0 && CanAddReminder())
+        // item_add so the server has the task before the reminder points at it. The plan is
+        // re-checked before each — a capture can name several and the cap counts them one by one, so
+        // checking once would queue ones over it — and sending one the plan refuses is the thing the
+        // reminder UI is built never to do. Each add is held in the model, so the next check sees it.
+        foreach (var reminder in parse.Reminders)
         {
-            foreach (var reminder in parse.Reminders)
+            if (!CanAddReminder())
+                break;
+
+            switch (reminder)
             {
-                switch (reminder)
-                {
-                    case AbsoluteReminder absolute:
-                        _engine.AddAbsoluteReminder(id, absolute.Date, absolute.Time);
-                        break;
-                    case RelativeReminder relative:
-                        _engine.AddRelativeReminder(id, relative.MinutesBefore);
-                        break;
-                }
+                case AbsoluteReminder absolute:
+                    _engine.AddAbsoluteReminder(id, absolute.Date, absolute.Time);
+                    break;
+                case RelativeReminder relative:
+                    _engine.AddRelativeReminder(id, relative.MinutesBefore);
+                    break;
             }
         }
 
@@ -747,7 +748,9 @@ public sealed class MainPresenter
             parse,
             parse.ProjectName is null || projectId is not null,
             parse.SectionName is null || sectionId is not null,
-            CanAddReminder());
+            // Only worth the snapshot a plan check costs when there's a reminder to say it about,
+            // and the preview reads this field only then. The box runs this on every keystroke.
+            parse.Reminders.Count > 0 && CanAddReminder());
     }
 
     /// <summary>

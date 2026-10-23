@@ -133,4 +133,15 @@ public class CapturePreviewTextTests
         Assert.Contains("reminders aren't on this plan", preview);
         Assert.DoesNotContain("needs a connection", preview);
     }
+
+    [Fact]
+    public void A_recurring_capture_is_not_promised_a_reminder()
+    {
+        // The "!30m" is read, but the capture is refused whole for the repeat, so promising a
+        // reminder would describe a task that isn't created — the same reason the due date goes
+        // unsaid for a recurrence.
+        var preview = Preview("task !30m every day");
+
+        Assert.DoesNotContain("remind", preview);
+    }
 }

@@ -48,8 +48,10 @@ public static class CapturePreviewText
         if (!parse.IsRecurrence && parse.DueDate is { } date)
             parts.Add(parse.DueTime is { } time ? $"{date:yyyy-MM-dd} {time:HH:mm}" : $"{date:yyyy-MM-dd}");
         // A reminder the plan takes is named as one it will set; one the plan won't is named as a
-        // reminder it can't, never silently, since the "!" was read and then dropped.
-        if (parse.Reminders.Count > 0)
+        // reminder it can't, never silently, since the "!" was read and then dropped. Not for a
+        // repeating capture, which is refused whole — naming a reminder would promise one on a task
+        // that isn't created, the same reason the due date above goes unsaid.
+        if (!parse.IsRecurrence && parse.Reminders.Count > 0)
         {
             var when = string.Join(", ", parse.Reminders.Select(When));
             parts.Add(string.Format(

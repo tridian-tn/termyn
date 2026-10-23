@@ -490,6 +490,20 @@ public class RecurringAndReminderTests
         Assert.Equal(["item_add"], engine.Outbox.Select(c => c.Type));
     }
 
+    [Fact]
+    public async Task A_capture_queues_no_more_reminders_than_the_plan_allows()
+    {
+        // The cap counts reminders one by one, so a capture naming more than fit has to stop at it
+        // rather than queue ones the server would reject. Here three "!1hb/!2hb/!3hb" on a timed task
+        // are three relative reminders, against a cap of two.
+        var (engine, presenter) = NewPair(WithPlan("""{"current":{"plan_name":"pro","reminders":true,"max_reminders_time":2}}"""));
+
+        await presenter.CaptureAsync("submit report tomorrow 11am !1hb !2hb !3hb", TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, engine.Snapshot().Reminders.Count);
+        Assert.Equal(2, engine.Outbox.Count(c => c.Type == "reminder_add"));
+    }
+
     // ---- Helpers -----------------------------------------------------------------------------------
 
     private static InMemorySnapshotStore Store()
