@@ -11,7 +11,8 @@ namespace Termyn.Presentation;
 /// rather than in the dialog that lists them.
 /// </remarks>
 /// <param name="Reminder">The reminder it stands for</param>
-public sealed record ReminderRow(Reminder Reminder)
+/// <param name="Zone">The account's timezone, which a reminder set in a fixed one is shown in</param>
+public sealed record ReminderRow(Reminder Reminder, TimeZoneInfo Zone)
 {
     /// <summary>
     /// Whether Termyn could put this reminder back if it were removed. A kind it can't author is a
@@ -34,13 +35,28 @@ public sealed record ReminderRow(Reminder Reminder)
 
     /// <summary>
     /// An absolute reminder's moment, in words rather than the timestamp the server sent, so it
-    /// sits beside the relative ones instead of standing out as raw data. A timestamp that can't be
-    /// read is shown as the server wrote it.
+    /// sits beside the relative ones instead of standing out as raw data.
     /// </summary>
-    private static string Moment(string due)
-        => DateTime.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
+    /// <remarks>
+    /// One set in a fixed timezone arrives as a UTC instant and is shown in the account's, the way
+    /// the due column shows a task's; the rest are already in the account's own terms. A timestamp
+    /// that can't be read is shown as the server wrote it.
+    /// </remarks>
+    /// <param name="due">The moment as the server wrote it</param>
+    /// <returns>The moment in words, such as "Fri, 14 Aug 09:30"</returns>
+    private string Moment(string due)
+    {
+        if (due.EndsWith('Z'))
+        {
+            return DateTimeOffset.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
+                ? DisplayDates.WeekdayAndTime(TimeZoneInfo.ConvertTime(instant, Zone).DateTime, CultureInfo.CurrentCulture)
+                : due;
+        }
+
+        return DateTime.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
             ? DisplayDates.WeekdayAndTime(when, CultureInfo.CurrentCulture)
             : due;
+    }
 
     /// <summary>
     /// A reminder that repeats, by its schedule, and by when it next fires once the server has said.
@@ -49,7 +65,7 @@ public sealed record ReminderRow(Reminder Reminder)
     /// <param name="schedule">The words it repeats on, such as "every sat 9am"</param>
     /// <param name="due">The next time it fires, as the server wrote it, or null before it has</param>
     /// <returns>The words, such as "Every sat 9am (next Sat, 24 Oct 09:00)"</returns>
-    private static string Repeating(string schedule, string? due)
+    private string Repeating(string schedule, string? due)
     {
         var words = schedule.Length > 0 ? char.ToUpperInvariant(schedule[0]) + schedule[1..] : schedule;
         return due is null ? words : string.Format(CultureInfo.CurrentCulture, Strings.ReminderRepeating, words, Moment(due));

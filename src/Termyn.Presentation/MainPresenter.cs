@@ -1997,6 +1997,18 @@ public sealed class MainPresenter
             .ThenByDescending(r => r.MinuteOffset)
             .ToList();
 
+    /// <summary>
+    /// The reminders on a task as the reminders dialog lists them, in the same order as
+    /// <see cref="RemindersFor"/>.
+    /// </summary>
+    /// <param name="itemId">The task</param>
+    /// <returns>A row for each reminder, showing a moment in the account's timezone</returns>
+    public IReadOnlyList<ReminderRow> ReminderRowsFor(string itemId)
+    {
+        var zone = _engine.Snapshot().TimeZone;
+        return [.. RemindersFor(itemId).Select(r => new ReminderRow(r, zone))];
+    }
+
     /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
     /// <returns>False when the plan won't take it, so the caller can say why rather than failing later.</returns>
     public bool AddRelativeReminder(string itemId, int minutesBefore)
