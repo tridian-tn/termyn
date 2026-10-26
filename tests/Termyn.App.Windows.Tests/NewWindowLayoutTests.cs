@@ -42,10 +42,7 @@ public class NewWindowLayoutTests : IDisposable
     private MainForm Shown()
     {
         var window = TestWindow.Start(_config, Store(), new FakeApi(), out var presenter);
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-32000, -32000);
-        window.ShowInTaskbar = false;
-        window.Show();
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfProject("p"));
         return window;

@@ -112,9 +112,7 @@ public class TrayMenuTests
 
         // Shown, off-screen: a form that was never displayed has no handle, and the window drops
         // work aimed at a window that isn't there.
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.Show();
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfProject("p1"));
         presenter.Select(ViewSelection.OfProject("p2"));
@@ -133,9 +131,7 @@ public class TrayMenuTests
 
         // Shown, off-screen: a form that was never displayed has no handle, and the window drops
         // work aimed at a window that isn't there.
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.Show();
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfProject("p1"));
         presenter.Select(ViewSelection.OfProject("p2"));
@@ -155,9 +151,7 @@ public class TrayMenuTests
 
         // Shown, off-screen: a form that was never displayed has no handle, and the window drops
         // work aimed at a window that isn't there.
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.Show();
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfProject("p1"));
         presenter.Select(ViewSelection.OfProject("p2"));

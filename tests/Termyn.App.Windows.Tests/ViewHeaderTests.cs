@@ -353,10 +353,7 @@ public class ViewHeaderTests : IDisposable
         _settings.Add(name);
 
         var window = TestWindow.Build(name, Store(), out _, out presenter);
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.ShowInTaskbar = false;
-        window.Show();
+        TestWindow.ShowOffScreen(window);
         return window;
     }
 

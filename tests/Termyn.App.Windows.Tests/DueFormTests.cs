@@ -49,9 +49,7 @@ public class DueFormTests
         // showed the minute the dialog opened, greyed, and ticking it set the task to that. Read off
         // the native field itself, since the control's own value said nine o'clock all along.
         using var dialog = Due("tomorrow");
-        dialog.StartPosition = FormStartPosition.Manual;
-        dialog.Location = new Point(-2000, -2000);
-        dialog.Show();
+        TestWindow.ShowOffScreen(dialog);
 
         var field = dialog.Controls.OfType<DateTimePicker>().Single();
 

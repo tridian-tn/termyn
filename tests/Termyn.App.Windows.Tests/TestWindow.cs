@@ -163,6 +163,24 @@ internal static class TestWindow
         return window;
     }
 
+    /// <summary>
+    /// Shows a window off the screen, for a test that needs it really shown.
+    /// </summary>
+    /// <remarks>
+    /// A window nobody has shown is missing a good deal: a control in it can't take the focus, a row
+    /// can't be selected in its outline, work posted to it is dropped, and it never raises the
+    /// closing event the view state is written from. Kept off the taskbar too, so a run doesn't
+    /// flash buttons along it.
+    /// </remarks>
+    /// <param name="window">The window to show</param>
+    internal static void ShowOffScreen(Form window)
+    {
+        window.StartPosition = FormStartPosition.Manual;
+        window.Location = new Point(-32000, -32000);
+        window.ShowInTaskbar = false;
+        window.Show();
+    }
+
     /// <summary>Every control under a parent, at any depth.</summary>
     /// <param name="parent">Where to start</param>
     /// <returns>Each control below it, parents before their children</returns>
