@@ -61,6 +61,41 @@ public class DisplayDatesTests
     }
 
     [Fact]
+    public void Thai_keeps_the_word_that_runs_on_from_its_weekday_with_the_weekday()
+    {
+        // "ddddที่ d MMMM" is "Monday the 5th October": "ที่" belongs with the weekday, so it goes
+        // when the weekday does, and a weekday put back is kept apart from the day by a space.
+        var thai = CultureInfo.GetCultureInfo("th-TH");
+
+        Assert.Equal(Moment.ToString("d MMM g yyyy HH:mm", thai), DisplayDates.DateAndTime(Moment, thai));
+        Assert.Equal(Moment.ToString("ddd d MMM HH:mm", thai), DisplayDates.WeekdayAndTime(Moment, thai));
+    }
+
+    [Fact]
+    public void Mongolian_takes_out_the_word_after_its_weekday_with_the_weekday()
+    {
+        // "Даваа гараг" is Monday, the second word saying it's a day of the week. Left behind
+        // without the weekday, it says nothing. The long date is Mongolian's, written out here
+        // because ICU's own puts a narrow no-break space after the year, which isn't what's in
+        // question.
+        var mongolian = (CultureInfo)CultureInfo.GetCultureInfo("mn-MN").Clone();
+        mongolian.DateTimeFormat.LongDatePattern = "yyyy 'оны' MMMM'ын' d, dddd 'гараг'";
+
+        Assert.Equal(Moment.ToString("yyyy 'оны' MMM'ын' d HH:mm", mongolian), DisplayDates.DateAndTime(Moment, mongolian));
+        Assert.Equal(Moment.ToString("MMM'ын' d, ddd HH:mm", mongolian), DisplayDates.WeekdayAndTime(Moment, mongolian));
+    }
+
+    [Fact]
+    public void A_weekday_put_back_against_the_day_is_kept_apart_from_it()
+    {
+        // "ddd" written straight against "d" is one run, which is the full weekday and no day.
+        var british = (CultureInfo)CultureInfo.GetCultureInfo("en-GB").Clone();
+        british.DateTimeFormat.LongDatePattern = "dddd/d MMMM yyyy";
+
+        Assert.Equal("Mon 5 Oct 09:30", DisplayDates.WeekdayAndTime(Moment, british));
+    }
+
+    [Fact]
     public void Text_quoted_in_a_pattern_is_kept_as_written()
     {
         // A letter inside quotes is text, so the "dd" in a quoted word isn't a day for the brief

@@ -85,7 +85,7 @@ public static class DisplayDates
             _ => p.Text,
         }));
 
-    /// <summary>A pattern with its weekday taken out, along with the punctuation that set it off.</summary>
+    /// <summary>A pattern with its weekday taken out, along with its words and the punctuation that set it off.</summary>
     /// <param name="pattern">A date pattern</param>
     /// <returns>The pattern, without a weekday</returns>
     private static string WithoutWeekday(string pattern)
@@ -99,31 +99,48 @@ public static class DisplayDates
     }
 
     /// <summary>A day and month with an abbreviated weekday, placed where a long date places its own.</summary>
+    /// <remarks>
+    /// The weekday's own words stay out, being the long date's rather than the brief form's. With
+    /// nothing at all between the weekday and a day, a space goes in: "ddd" written against "d" is
+    /// one run, the full weekday and no day.
+    /// </remarks>
     /// <param name="longDate">The region's long date pattern</param>
     /// <param name="dayMonth">The day and month pattern to put the weekday beside</param>
     /// <returns>The day and month, with a weekday when the long date has one</returns>
     private static string WithWeekday(string longDate, string dayMonth)
-        => Weekday(Pieces(longDate)) switch
-        {
-            null => dayMonth,
-            { Leads: true } weekday => "ddd" + weekday.Gap + dayMonth,
-            { } weekday => dayMonth + weekday.Gap + "ddd",
-        };
+    {
+        if (Weekday(Pieces(longDate)) is not { } weekday)
+            return dayMonth;
+
+        var against = weekday.Leads ? dayMonth.StartsWith('d') : dayMonth.EndsWith('d');
+        var gap = weekday.Gap.Length == 0 && against ? " " : weekday.Gap;
+
+        return weekday.Leads ? "ddd" + gap + dayMonth : dayMonth + gap + "ddd";
+    }
 
     /// <summary>
-    /// Where a pattern's weekday is, with the spaces and commas between it and the rest.
+    /// Where a pattern's weekday is, with any words of its own and the spaces and commas between it
+    /// and the rest.
     /// </summary>
     /// <remarks>
-    /// Only spaces and commas count as the gap. A full stop can be part of the date beside it, as in
-    /// Hungarian's "d., dddd", and a letter run on from it, as in Thai's "ddddที่".
+    /// A weekday's own words are text that runs straight on from it, as Thai's "ที่" does in
+    /// "ddddที่ d", or that follows it with nothing else in the pattern to belong to, as Mongolian's
+    /// "гараг" does at the end of "d, dddd 'гараг'". They come out with it. Only spaces and commas
+    /// count as the gap: a full stop can be part of the date beside it, as in Hungarian's "d., dddd".
     /// </remarks>
     /// <param name="pieces">A pattern's pieces</param>
-    /// <returns>The weekday and its gap, or null when the pattern has no weekday</returns>
+    /// <returns>The weekday, its words and its gap, or null when the pattern has no weekday</returns>
     private static (int From, int Count, string Gap, bool Leads)? Weekday(List<Piece> pieces)
     {
         var at = pieces.FindIndex(p => p is { Specifier: 'd', Text.Length: >= 3 });
         if (at < 0)
             return null;
+
+        var end = at + 1;
+        while (end < pieces.Count && pieces[end] is { Specifier: '\0' } && !IsGap(pieces[end]))
+            end++;
+        if (pieces.Skip(end).All(p => p.Specifier == '\0'))
+            end = pieces.Count;
 
         var before = at;
         while (before > 0 && IsGap(pieces[before - 1]))
@@ -131,14 +148,14 @@ public static class DisplayDates
 
         if (before == 0)
         {
-            var after = at + 1;
+            var after = end;
             while (after < pieces.Count && IsGap(pieces[after]))
                 after++;
 
-            return (before, after - before, Text(pieces, at + 1, after), Leads: true);
+            return (before, after - before, Text(pieces, end, after), Leads: true);
         }
 
-        return (before, at + 1 - before, Text(pieces, before, at), Leads: false);
+        return (before, end - before, Text(pieces, before, at), Leads: false);
     }
 
     private static bool IsGap(Piece piece)
