@@ -98,7 +98,7 @@ public sealed record CommentRow(
     public string? AttachmentLabel => Attachment is not { } file
         ? null
         : file.Pending
-            ? $"{file.FileName} (still processing)"
+            ? string.Format(CultureInfo.CurrentCulture, Strings.CommentFileProcessing, file.FileName)
             : file.FileSize > 0
                 ? $"{file.FileName} ({Size(file.FileSize)})"
                 : file.FileName;
@@ -114,7 +114,7 @@ public sealed record CommentRow(
     {
         get
         {
-            var when = Posted.Length == 0 ? "Not sent yet" : Posted;
+            var when = Posted.Length == 0 ? Strings.CommentNotSentYet : Posted;
             return AttachmentLabel is { } file ? $"{when}   📎 {file}" : when;
         }
     }
@@ -127,16 +127,24 @@ public sealed record CommentRow(
     /// row, which reads as a comment that failed to load rather than one that's a file.
     /// </remarks>
     public string Body
-        => Content.Length > 0 ? Content : AttachmentName is not null ? "(no message)" : "(empty)";
+        => Content.Length > 0 ? Content : AttachmentName is not null ? Strings.CommentNoMessage : Strings.CommentEmpty;
 
     /// <summary>A byte count as somebody would say it out loud.</summary>
+    /// <remarks>
+    /// Bytes are a count, so they take the count's form. The larger units are a size to a decimal
+    /// place, which isn't a count of anything.
+    /// </remarks>
     private static string Size(long bytes) => bytes switch
     {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024 * 1024):0.#} GB",
+        < 1024 => Plurals.Format(Strings.ResourceManager, nameof(Strings.FileSizeBytes_Other), (int)bytes),
+        < 1024 * 1024 => InUnits(Strings.FileSizeKilobytes, bytes / 1024.0),
+        < 1024L * 1024 * 1024 => InUnits(Strings.FileSizeMegabytes, bytes / (1024.0 * 1024)),
+        _ => InUnits(Strings.FileSizeGigabytes, bytes / (1024.0 * 1024 * 1024)),
     };
+
+    /// <summary>A size in a unit bigger than a byte, to one decimal place at most.</summary>
+    private static string InUnits(string unit, double size)
+        => string.Format(CultureInfo.CurrentCulture, unit, size.ToString("0.#", CultureInfo.CurrentCulture));
 }
 
 /// <summary>
@@ -1397,7 +1405,7 @@ public sealed class MainPresenter
     /// </remarks>
     public Task<FetchResult> FetchAttachmentAsync(FileAttachment attachment, IProgress<long>? progress = null, CancellationToken ct = default)
         => _fetcher is null
-            ? Task.FromResult(new FetchResult(FetchOutcome.Failed, Message: "Downloads aren't available in this window."))
+            ? Task.FromResult(new FetchResult(FetchOutcome.Failed, Message: Strings.DownloadsUnavailable))
             : _fetcher.FetchAsync(attachment, progress, ct);
 
     /// <summary>
@@ -1411,7 +1419,7 @@ public sealed class MainPresenter
     /// </remarks>
     public Task<FetchResult> SaveAttachmentAsync(FileAttachment attachment, string folder, IProgress<long>? progress = null, CancellationToken ct = default)
         => _fetcher is null
-            ? Task.FromResult(new FetchResult(FetchOutcome.Failed, Message: "Downloads aren't available in this window."))
+            ? Task.FromResult(new FetchResult(FetchOutcome.Failed, Message: Strings.DownloadsUnavailable))
             : _fetcher.SaveAsync(attachment, folder, progress, ct);
 
     /// <summary>
@@ -1468,7 +1476,7 @@ public sealed class MainPresenter
         }
         catch (Exception ex) when (ex is TodoistNetworkException or TodoistAuthException)
         {
-            return "The file was taken off the comment, but Todoist couldn't be reached to delete the upload itself.";
+            return Strings.UploadOutlivedComment;
         }
     }
 
@@ -1492,8 +1500,8 @@ public sealed class MainPresenter
     /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
     private string Named(string id)
         => _engine.Snapshot().Items.FirstOrDefault(i => i.Id == id) is { Content.Length: > 0 } item
-            ? $"“{item.Content}”"
-            : "a task";
+            ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryTaskNamed, item.Content)
+            : Strings.HistoryTaskUnnamed;
 
     public void SetPriority(string id, Priority priority)
     {
@@ -2555,9 +2563,9 @@ public sealed class MainPresenter
 
         var nodes = new List<SidebarNode>
         {
-            View(SmartView.Today, "Today", todayCount),
-            View(SmartView.Upcoming, "Upcoming", upcomingCount),
-            View(SmartView.Inbox, "Inbox", inboxCount),
+            View(SmartView.Today, todayCount),
+            View(SmartView.Upcoming, upcomingCount),
+            View(SmartView.Inbox, inboxCount),
         };
 
         // Already sorted by Publish; the sidebar only drops the ones it can't address.
@@ -2663,8 +2671,8 @@ public sealed class MainPresenter
             }
         }
 
-        SidebarNode View(SmartView view, string label, int count)
-            => new(SidebarKind.SmartView, view.ToString(), label, 0, Key: SidebarKeys.For(SidebarKind.SmartView, view.ToString()), View: view, Count: count);
+        SidebarNode View(SmartView view, int count)
+            => new(SidebarKind.SmartView, view.ToString(), ViewPath.Named(view), 0, Key: SidebarKeys.For(SidebarKind.SmartView, view.ToString()), View: view, Count: count);
 
         SidebarNode Header(string id, string label)
             => new(SidebarKind.Header, id, label, 0, Key: SidebarKeys.For(SidebarKind.Header, id));
@@ -2914,7 +2922,7 @@ public sealed class MainPresenter
         // A saved filter with no query at all still has to say something, or the notice trails off
         // after the colon with nothing behind it.
         if (flat.Length == 0)
-            return "(no query)";
+            return Strings.FilterNoQuery;
 
         return flat.Length > 200 ? flat[..200] + "…" : flat;
     }
@@ -3419,9 +3427,9 @@ public sealed class MainPresenter
                 // Said while the row is still there, which is the moment it's any use: a task
                 // ticked off by mistake is one keystroke from coming back, and this is where the
                 // app says what's going on.
-                Lingering ? "ticked off · Ctrl+Z puts it back" : null,
+                Lingering ? string.Format(CultureInfo.CurrentCulture, Strings.StatusTickedOff, Shortcuts.ShortcutFor(AppCommand.Undo)) : null,
 
-                CompletedTruncated ? "most recent completed only" : null,
+                CompletedTruncated ? Strings.StatusCompletedTruncated : null,
                 SyncStatus.Describe(),
             }.Where(s => s is not null));
     }

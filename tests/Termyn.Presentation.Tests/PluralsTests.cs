@@ -2,6 +2,7 @@ using System.Collections;
 using System.Globalization;
 using System.Resources;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.Presentation.Tests;
 
@@ -76,11 +77,20 @@ public class PluralsTests
         var entries = Strings.ResourceManager.GetResourceSet(CultureInfo.InvariantCulture, createIfNotExists: true, tryParents: true)!
             .Cast<DictionaryEntry>()
             .ToDictionary(e => (string)e.Key, e => (string)e.Value!);
-        var forms = entries.Where(e => IsForm(e.Key)).ToList();
+        var forms = entries.Where(e => CatalogueSource.IsCountedForm(e.Key)).ToList();
 
         Assert.NotEmpty(forms);
-        Assert.Empty(forms.Where(e => !entries.ContainsKey(e.Key[..e.Key.LastIndexOf('_')] + "_Other")).Select(e => e.Key));
+        Assert.Empty(forms.Where(e => !entries.ContainsKey(CatalogueSource.OtherFormOf(e.Key))).Select(e => e.Key));
         Assert.Empty(forms.Where(e => !e.Value.Contains("{0}", StringComparison.Ordinal)).Select(e => e.Key));
+    }
+
+    [Fact]
+    public void The_catalogue_checks_know_a_form_by_every_name_Plurals_has_for_one()
+    {
+        // The checks name the forms for themselves, so a category added here and not there would
+        // leave its entries unchecked.
+        Assert.All(Enum.GetNames<PluralCategory>(), form => Assert.True(CatalogueSource.IsCountedForm("Apples_" + form), form));
+        Assert.All(Enum.GetNames<PluralCategory>(), form => Assert.Equal("Apples_Other", CatalogueSource.OtherFormOf("Apples_" + form)));
     }
 
     /// <summary>A rule with a form for two to four, shaped like Polish's but simpler.</summary>
@@ -90,9 +100,6 @@ public class PluralsTests
         >= 2 and <= 4 => PluralCategory.Few,
         _ => PluralCategory.Other,
     };
-
-    private static bool IsForm(string name)
-        => Enum.GetNames<PluralCategory>().Any(form => name.EndsWith("_" + form, StringComparison.Ordinal));
 
     /// <summary>A catalogue held in memory, for a language the app has none in.</summary>
     /// <param name="entries">Its entries</param>

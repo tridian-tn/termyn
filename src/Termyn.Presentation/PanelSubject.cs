@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Termyn.Presentation;
 
 /// <summary>What the detail panel is about, when it is about anything.</summary>
@@ -44,9 +46,9 @@ public sealed record PanelSubject(SubjectKind Kind, string? Id, string About)
     /// <returns>What the panel is about, and what to call it</returns>
     public static PanelSubject Of(TaskRow? task, SidebarNode? selection) => (task, selection) switch
     {
-        ({ } row, _) => new PanelSubject(SubjectKind.Task, row.Id, $"Task: {row.Content}"),
+        ({ } row, _) => new PanelSubject(SubjectKind.Task, row.Id, string.Format(CultureInfo.CurrentCulture, Strings.PanelTask, row.Content)),
         (_, { Kind: SidebarKind.Project } project)
-            => new PanelSubject(SubjectKind.Project, project.Id, $"Project: {project.Label}"),
+            => new PanelSubject(SubjectKind.Project, project.Id, string.Format(CultureInfo.CurrentCulture, Strings.PanelProject, project.Label)),
         _ => None,
     };
 }

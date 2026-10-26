@@ -119,6 +119,17 @@ public class ActionsNotedTests
     }
 
     [Fact]
+    public void A_task_with_no_name_to_give_is_called_a_task()
+    {
+        // One the model hasn't heard of: an id nobody recognises would read worse in the sentence.
+        var presenter = Seeded();
+
+        presenter.SetPriority("gone", Priority.P1);
+
+        Assert.Equal("Set a task to priority 1", Newest(presenter));
+    }
+
+    [Fact]
     public void A_sub_task_says_what_it_went_under()
     {
         var presenter = Seeded();

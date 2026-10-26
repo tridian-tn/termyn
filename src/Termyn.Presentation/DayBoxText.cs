@@ -43,24 +43,29 @@ public static class DayBoxText
     /// <returns>The line under the box, and whether OK takes it</returns>
     public static DayVerdict ForDue(DayReading reading) => reading.Kind switch
     {
-        DayReadingKind.Blank => new("No due date", true),
+        DayReadingKind.Blank => new(Strings.DayBoxNoDue, true),
         DayReadingKind.Day => new(Written(reading), true),
-        DayReadingKind.Repeat => new("Repeats — Todoist works out the dates when it syncs", true),
-        _ => new("Todoist reads this when it syncs", true),
+        DayReadingKind.Repeat => new(Strings.DayBoxDueRepeats, true),
+        _ => new(Strings.DayBoxDueForTodoist, true),
     };
 
     /// <summary>What the deadline box says about what's been typed into it.</summary>
+    /// <remarks>
+    /// The examples in a refusal are the grammar's, like <see cref="Hint"/>'s, so they're handed to
+    /// the catalogue's sentence rather than written in it: translated, they'd be words the box
+    /// refuses.
+    /// </remarks>
     /// <param name="reading">What it was read as</param>
     /// <param name="english">Whether the account reads a typed date in English</param>
     /// <returns>The line under the box, and whether OK takes it</returns>
     public static DayVerdict ForDeadline(DayReading reading, bool english) => reading.Kind switch
     {
-        DayReadingKind.Blank => new("No deadline", true),
+        DayReadingKind.Blank => new(Strings.DayBoxNoDeadline, true),
         DayReadingKind.Day when reading.Time is null => new(Written(reading), true),
-        DayReadingKind.Day => new("A deadline is a whole day, without a time", false),
-        DayReadingKind.Repeat => new("A deadline can't repeat", false),
-        _ when english => new("Not a day this can read — try “4 aug” or “in 3 days”", false),
-        _ => new("Not a day this can read — try “25/12” or “2026-12-25”", false),
+        DayReadingKind.Day => new(Strings.DayBoxDeadlineTimed, false),
+        DayReadingKind.Repeat => new(Strings.DayBoxDeadlineRepeats, false),
+        _ when english => new(Format(Strings.DayBoxDeadlineUnread, "4 aug", "in 3 days"), false),
+        _ => new(Format(Strings.DayBoxDeadlineUnread, "25/12", "2026-12-25"), false),
     };
 
     /// <summary>
@@ -78,9 +83,9 @@ public static class DayBoxText
     public static DayVerdict ForReminder(DayReading reading, bool english) => reading.Kind switch
     {
         DayReadingKind.Day => new(Written(reading with { Time = reading.Time ?? ReminderTime }), true),
-        DayReadingKind.Repeat => new("A reminder can't repeat", false),
-        DayReadingKind.Unread when english => new("Not a day and time this can read — try “tomorrow 9am”", false),
-        DayReadingKind.Unread => new("Not a day and time this can read — try “25/12 09:00”", false),
+        DayReadingKind.Repeat => new(Strings.DayBoxReminderRepeats, false),
+        DayReadingKind.Unread when english => new(Format(Strings.DayBoxReminderUnread, "tomorrow 9am"), false),
+        DayReadingKind.Unread => new(Format(Strings.DayBoxReminderUnread, "25/12 09:00"), false),
         _ => new(string.Empty, false),
     };
 
@@ -103,6 +108,10 @@ public static class DayBoxText
     {
         var written = DisplayDates.LongDay(reading.Day!.Value, CultureInfo.CurrentCulture);
 
-        return reading.Time is { } time ? $"{written} at {time.ToString("t", CultureInfo.CurrentCulture)}" : written;
+        return reading.Time is { } time ? Format(Strings.DayBoxDayAtTime, written, time.ToString("t", CultureInfo.CurrentCulture)) : written;
     }
+
+    /// <summary>A catalogue entry with its placeholders filled in, as the machine writes them.</summary>
+    private static string Format(string wording, params object[] values)
+        => string.Format(CultureInfo.CurrentCulture, wording, values);
 }

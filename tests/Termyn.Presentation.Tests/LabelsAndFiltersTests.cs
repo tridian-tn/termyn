@@ -487,7 +487,7 @@ public class LabelsAndFiltersTests
         Assert.True(presenter.UnsupportedFilter!.Query.Length <= 201);
 
         presenter.Select(ViewSelection.OfFilter("f2"));
-        Assert.NotEmpty(presenter.UnsupportedFilter!.Query);
+        Assert.Equal("(no query)", presenter.UnsupportedFilter!.Query);
     }
 
     [Fact]

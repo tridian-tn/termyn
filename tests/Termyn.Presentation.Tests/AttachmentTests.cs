@@ -30,11 +30,22 @@ public sealed class AttachmentTests : IDisposable
     [InlineData(512, "agenda.pdf (512 B)")]
     [InlineData(2048, "agenda.pdf (2 KB)")]
     [InlineData(5 * 1024 * 1024, "agenda.pdf (5 MB)")]
+    [InlineData(3L * 1024 * 1024 * 1024, "agenda.pdf (3 GB)")]
     public void A_file_is_named_with_its_size_as_somebody_would_say_it(long bytes, string expected)
     {
         var row = new CommentRow("n1", "see attached", "12 Aug", new FileAttachment("agenda.pdf", bytes, "application/pdf", "https://x/a", false));
 
         Assert.Equal(expected, row.AttachmentLabel);
+    }
+
+    [Fact]
+    public void A_size_between_two_whole_units_keeps_a_decimal_place()
+    {
+        using var culture = new CultureScope("en-GB");
+
+        var row = new CommentRow("n1", "see attached", "12 Aug", new FileAttachment("agenda.pdf", 1536, "application/pdf", "https://x/a", false));
+
+        Assert.Equal("agenda.pdf (1.5 KB)", row.AttachmentLabel);
     }
 
     [Fact]
@@ -121,15 +132,43 @@ public sealed class AttachmentTests : IDisposable
         // A presenter built without a fetcher — which is how most of the tests here run.
         var presenter = Seeded(withFetcher: false);
 
-        var result = await presenter.FetchAttachmentAsync(new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false), ct: TestContext.Current.CancellationToken);
+        var file = new FileAttachment("a.pdf", 4, string.Empty, "https://files/a", false);
+        var fetched = await presenter.FetchAttachmentAsync(file, ct: TestContext.Current.CancellationToken);
+        var saved = await presenter.SaveAttachmentAsync(file, _directory, ct: TestContext.Current.CancellationToken);
 
-        Assert.Equal(FetchOutcome.Failed, result.Outcome);
-        Assert.NotNull(result.Message);
+        Assert.Equal(FetchOutcome.Failed, fetched.Outcome);
+        Assert.Equal("Downloads aren't available in this window.", fetched.Message);
+        Assert.Equal(FetchOutcome.Failed, saved.Outcome);
+        Assert.Equal("Downloads aren't available in this window.", saved.Message);
     }
 
     [Fact]
     public void Nothing_is_held_when_there_is_no_file_to_hold()
         => Assert.False(Seeded().IsAttachmentHeld(null));
+
+    // ---- Taking a file off ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Taking_a_file_off_says_nothing_when_the_upload_goes_with_it()
+    {
+        var presenter = Seeded(WithFile);
+
+        Assert.Null(await presenter.DetachFileAsync("n1", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Taking_a_file_off_offline_says_the_upload_is_still_on_Todoist()
+    {
+        // The comment's change waits in the outbox like any other, but Todoist has no command for
+        // deleting an upload, so that half needs the connection there and then.
+        var presenter = Seeded(WithFile);
+        _api.TransferThrow = new TodoistNetworkException("no route");
+
+        var said = await presenter.DetachFileAsync("n1", TestContext.Current.CancellationToken);
+
+        Assert.Equal("The file was taken off the comment, but Todoist couldn't be reached to delete the upload itself.", said);
+        Assert.Null(Assert.Single(presenter.CommentsOn("i1")).Attachment);
+    }
 
     // ---- Emptying the cache -----------------------------------------------------------------------
 
@@ -155,6 +194,12 @@ public sealed class AttachmentTests : IDisposable
     }
 
     // ---- Setup ------------------------------------------------------------------------------------
+
+    /// <summary>A comment on the task with an uploaded file on it.</summary>
+    private static readonly (string Type, string Id, string Json) WithFile = (
+        "notes",
+        "n1",
+        """{"id":"n1","item_id":"i1","content":"see attached","file_attachment":{"file_name":"a.pdf","file_size":2048,"file_url":"https://files/a","upload_state":"completed"}}""");
 
     private MainPresenter Seeded(
         params (string Type, string Id, string Json)[] resources)

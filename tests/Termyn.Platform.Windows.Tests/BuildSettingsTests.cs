@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using Termyn.TestSupport;
 
 namespace Termyn.Platform.Windows.Tests;
 
@@ -14,7 +15,7 @@ public class BuildSettingsTests
 {
     public static TheoryData<string> Projects()
     {
-        var solution = XDocument.Load(Path.Combine(BrandIconTests.RepoRoot(), "Termyn.slnx"));
+        var solution = XDocument.Load(Path.Combine(Repository.Root(), "Termyn.slnx"));
         return new(solution.Descendants("Project").Select(p => (string)p.Attribute("Path")!));
     }
 
@@ -22,7 +23,7 @@ public class BuildSettingsTests
     [MemberData(nameof(Projects))]
     public void Warnings_fail_the_build(string path)
     {
-        var root = BrandIconTests.RepoRoot();
+        var root = Repository.Root();
         var project = Path.Combine(root, path);
         Assert.True(File.Exists(project), $"the solution names {path}, which isn't there");
 

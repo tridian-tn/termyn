@@ -51,6 +51,33 @@ public class ViewPathTests
         Assert.Equal("Today", Reads(presenter));
     }
 
+    [Theory]
+    [InlineData(SmartView.Today, "Today")]
+    [InlineData(SmartView.Upcoming, "Upcoming")]
+    [InlineData(SmartView.Inbox, "Inbox")]
+    [InlineData(SmartView.All, "All")]
+    public void A_built_in_view_is_named_by_its_path(SmartView view, string name)
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.Select(ViewSelection.Of(view));
+
+        Assert.Equal(name, Reads(presenter));
+    }
+
+    [Theory]
+    [InlineData(SmartView.Today)]
+    [InlineData(SmartView.Upcoming)]
+    [InlineData(SmartView.Inbox)]
+    public void A_built_in_view_in_the_sidebar_is_named_as_its_path_names_it(SmartView view)
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.Select(ViewSelection.Of(view));
+
+        Assert.Equal(Reads(presenter), presenter.Sidebar.Single(n => n.View == view).Label);
+    }
+
     [Fact]
     public void A_project_inside_a_project_names_the_one_holding_it()
     {

@@ -55,13 +55,13 @@ public readonly record struct Keystroke(HotkeyModifiers Modifiers, Key Key)
         var parts = new List<string>(5);
 
         if (Modifiers.HasFlag(HotkeyModifiers.Control))
-            parts.Add("Ctrl");
+            parts.Add(Strings.KeyCtrl);
         if (Modifiers.HasFlag(HotkeyModifiers.Shift))
-            parts.Add("Shift");
+            parts.Add(Strings.KeyShift);
         if (Modifiers.HasFlag(HotkeyModifiers.Alt))
-            parts.Add("Alt");
+            parts.Add(Strings.KeyAlt);
         if (Modifiers.HasFlag(HotkeyModifiers.Meta))
-            parts.Add("Win");
+            parts.Add(Strings.KeyWin);
 
         parts.Add(Key switch
         {
@@ -70,13 +70,22 @@ public readonly record struct Keystroke(HotkeyModifiers Modifiers, Key Key)
             Key.Down => "↓",
             Key.Left => "←",
             Key.Right => "→",
-            Key.Delete => "Del",
             Key.Comma => ",",
+
+            // The keys a keyboard labels with a word, which isn't the same word everywhere.
+            Key.Space => Strings.KeySpace,
+            Key.Enter => Strings.KeyEnter,
+            Key.Delete => Strings.KeyDelete,
+            Key.Insert => Strings.KeyInsert,
 
             // Written the way a menu writes a zoom, whichever of the two keys it's on.
             Key.Plus or Key.NumPadPlus => "+",
             Key.Minus or Key.NumPadMinus => "-",
             Key.NumPad0 => "0",
+
+            // A letter or a function key, which reads the same on any keyboard. Tab and Escape would
+            // come out here in English, but nothing's bound to either: the shortcut table's tests
+            // hold it that way until one's given a catalogue entry like the keys above.
             _ => Key.ToString(),
         });
 
