@@ -105,9 +105,12 @@ deleted before it could be opened.
 
 **Download attachment saves a copy under its own name.** The cache's hashed names are no use to
 someone looking for the file, so the row menu also offers to put a copy in the Downloads folder,
-named as the account names it. It's fetched through the cache like opening, so a file already here
-saves offline. Downloads is asked of the shell rather than assumed to be `%USERPROFILE%\Downloads`,
-since Windows lets you move it.
+named as the account names it. A file that's already in the cache is copied out of it, so it saves
+offline. One that isn't is downloaded straight into Downloads and not cached: going through the cache
+kept two copies, and one bigger than the cap had the sweep clear every other cached file to make room
+for it. Downloads is asked of the shell rather than assumed to be `%USERPROFILE%\Downloads`, since
+Windows lets you move it, and the save runs off the UI thread, since a Downloads folder on a share
+that's gone away can hold whoever's making the folder for as long as Windows takes to give up.
 
 The name is the account's, so it's made safe before it becomes a path: anything Windows refuses in a
 name, separators included, becomes `_`, and a device name such as `CON` or `nul.txt` gets a leading
@@ -119,8 +122,10 @@ saved, number and all.
 Then, unless **Show attachments after downloading** is turned off in settings, Explorer opens on
 Downloads with the copy selected. That's asked of the shell (`SHOpenFolderAndSelectItems`) rather
 than run as `explorer /select,`, because the shell reuses a window already open on the folder, so
-three downloads in a row don't leave three windows behind. The setting's read when each download
-lands, so turning it off needs no restart.
+three downloads in a row don't leave three windows behind. It runs on a thread of its own, since it
+can take a second or more while Explorer starts. If neither the shell nor Explorer will show the file,
+the status bar says so. The setting's read when each download lands, so turning it off needs no
+restart.
 
 **Deleting a file is not undoable.** Taking one off a comment updates the comment through the outbox
 like any other write, and then deletes the upload directly, because Todoist has no command for it.

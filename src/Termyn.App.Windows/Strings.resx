@@ -703,6 +703,10 @@ It can't be brought back — Todoist has no undelete.</value>
     <value>Saved {0} to Downloads.</value>
     <comment>Status bar once an attachment has been saved. {0} is the name it was saved under, which may have a number added if the folder already had a file of that name.</comment>
   </data>
+  <data name="AttachmentSavedNotShown" xml:space="preserve">
+    <value>Saved {0} to Downloads, but File Explorer couldn't be opened to show it.</value>
+    <comment>Status bar when an attachment was saved but the setting to show it afterwards couldn't open File Explorer. {0} is the name it was saved under.</comment>
+  </data>
   <data name="AttachPickerTitle" xml:space="preserve">
     <value>Attach a file to this comment</value>
     <comment>Title bar of the file picker for attaching a file.</comment>

@@ -351,6 +351,7 @@ internal sealed class MainForm : Form
         AskForDue = AskDueWithDialog;
         AskForDeadline = AskWithDialog;
         ShowInFolder = AppVersion.ShowInFolder;
+        OpenFile = AppVersion.OpenFile;
         _outline.CollapseRequested += (id, collapsed) => Guarded(() => Collapse(id, collapsed));
         _outline.ToggleRequested += id => Guarded(() => TickOff(id));
         _outline.CanDrop = _presenter.CanDrop;
@@ -2429,8 +2430,16 @@ internal sealed class MainForm : Form
     private async void OnAttachmentOpened(string commentId)
     {
         if (await FetchFileAsync(commentId, _presenter.FetchAttachmentAsync, Strings.FileOpenFailed) is { } path)
-            AppVersion.OpenFile(path);
+            OpenFile(path);
     }
+
+    /// <summary>
+    /// Hands a fetched file to the desktop to open. A property so a test can see it asked for without
+    /// a program starting; the window sets it to the real one as it's built.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<string, bool> OpenFile { get; set; }
 
     /// <summary>
     /// Saves a copy of a comment's file in the Downloads folder, under the name it has on the account.
@@ -2442,7 +2451,8 @@ internal sealed class MainForm : Form
     /// the file it selects is the copy just made.
     ///
     /// The setting's read now rather than when the window opened, so turning it off holds from the
-    /// next download.
+    /// next download. When Explorer can't be got to show the file, the status bar says so, since
+    /// otherwise the setting would just appear not to work.
     /// </remarks>
     private async void OnAttachmentDownloaded(string commentId)
     {
@@ -2451,19 +2461,20 @@ internal sealed class MainForm : Form
         if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is not { } path)
             return;
 
-        _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, Path.GetFileName(path));
+        var name = Path.GetFileName(path);
+        _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, name);
 
-        if (_settings.ShowAfterDownloading)
-            ShowInFolder(path);
+        if (_settings.ShowAfterDownloading && !await ShowInFolder(path) && !IsDisposed)
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSavedNotShown, name);
     }
 
     /// <summary>
-    /// Opens Explorer with a saved file selected. A property so a test can see it asked for without
-    /// a window opening; the window sets it to the real one as it's built.
+    /// Opens Explorer with a saved file selected, answering whether it could. A property so a test can
+    /// see it asked for without a window opening; the window sets it to the real one as it's built.
     /// </summary>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    internal Func<string, bool> ShowInFolder { get; set; }
+    internal Func<string, Task<bool>> ShowInFolder { get; set; }
 
     /// <summary>
     /// Gets a comment's file, showing the wait under the comments.

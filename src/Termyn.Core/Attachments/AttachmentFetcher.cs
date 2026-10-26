@@ -75,17 +75,14 @@ public sealed class AttachmentFetcher
     /// <param name="ct">Cancelled when the user calls the download off</param>
     public async Task<FetchResult> FetchAsync(FileAttachment attachment, IProgress<long>? progress = null, CancellationToken ct = default)
     {
-        if (attachment.Pending)
-            return new FetchResult(FetchOutcome.Pending, Message: $"{attachment.FileName} is still being processed by Todoist.");
-
-        if (!attachment.CanFetch)
-            return new FetchResult(FetchOutcome.Missing, Message: $"{attachment.FileName} has no file to open.");
+        if (Unfetchable(attachment) is { } refused)
+            return refused;
 
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return new FetchResult(FetchOutcome.Ready, held);
 
         if (_secrets.GetToken() is not { } token)
-            return new FetchResult(FetchOutcome.Offline, Message: $"{attachment.FileName} hasn't been downloaded, and Termyn isn't signed in.");
+            return SignedOut(attachment);
 
         var (stream, path) = _cache.OpenForWrite(attachment.FileUrl, attachment.FileName);
 
@@ -103,107 +100,159 @@ public sealed class AttachmentFetcher
 
             return new FetchResult(FetchOutcome.Ready, path);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (Failure(attachment, ex, $"{attachment.FileName} couldn't be written to the download folder.") is { } failed)
         {
             _cache.Abandon(path);
-            return new FetchResult(FetchOutcome.Cancelled);
-        }
-        catch (TodoistNetworkException ex)
-        {
-            _cache.Abandon(path);
-
-            // Told apart deliberately. Nothing answering is the ordinary offline case, and it comes
-            // back on its own when the connection does. A server that answered and said no is a
-            // different thing to tell the user, and "you're offline" would be untrue.
-            return ex.Unreachable
-                ? new FetchResult(
-                    FetchOutcome.Offline,
-                    Message: $"{attachment.FileName} hasn't been downloaded, and Todoist can't be reached. It'll be there to try again when you're back online.")
-                : new FetchResult(
-                    FetchOutcome.Failed,
-                    Message: $"Todoist wouldn't hand over {attachment.FileName}. {ex.Message}");
-        }
-        catch (TodoistAuthException)
-        {
-            _cache.Abandon(path);
-            return new FetchResult(FetchOutcome.Failed, Message: "Todoist rejected the API token.");
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _cache.Abandon(path);
-            return new FetchResult(FetchOutcome.Failed, Message: $"{attachment.FileName} couldn't be written to the download folder.");
+            return failed;
         }
     }
 
     /// <summary>
-    /// Gets the file onto this machine and puts a copy of it in a folder, under the name it has on
-    /// the account.
+    /// Puts a copy of the file in a folder, under the name it has on the account.
     /// </summary>
     /// <remarks>
-    /// Fetched through the cache, as opening is, so a file that's already here is saved without
-    /// going to the server, offline included, and one saved now opens later without being fetched
-    /// again.
+    /// A file that's already in the cache is copied out of it, offline included. One that isn't is
+    /// downloaded straight into the folder rather than through the cache: going through it kept a
+    /// second copy, and one bigger than the cap had the sweep clear out every other cached file to
+    /// make room for something the user had just put somewhere of their own.
     ///
     /// Nothing in the folder is ever written over. A name that's taken gives way to "name (1).ext",
     /// then "(2)", the way a browser numbers a second download of the same thing.
+    ///
+    /// Run on the pool from the start. Making the folder and the file are blocking calls, and a
+    /// Downloads folder on a network share that's gone away can hold one for as long as Windows
+    /// takes to give up on it. Progress still reaches whoever's showing it, since a
+    /// <see cref="Progress{T}"/> reports through the context it was made on.
     /// </remarks>
     /// <param name="attachment">The file wanted</param>
     /// <param name="folder">Where the copy goes, made if it isn't there</param>
-    /// <param name="progress">Told the running byte count while it's fetched, for a UI that has to show the wait</param>
+    /// <param name="progress">Told the running byte count while it's downloaded, for a UI that has to show the wait</param>
     /// <param name="ct">Cancelled when the user calls the download off</param>
-    /// <returns>Ready with the copy's path, or whatever fetching it said</returns>
-    public async Task<FetchResult> SaveAsync(FileAttachment attachment, string folder, IProgress<long>? progress = null, CancellationToken ct = default)
-    {
-        var fetched = await FetchAsync(attachment, progress, ct);
-        if (fetched is not { Outcome: FetchOutcome.Ready, Path: { } held })
-            return fetched;
+    /// <returns>Ready with the copy's path, or what stopped it</returns>
+    public Task<FetchResult> SaveAsync(FileAttachment attachment, string folder, IProgress<long>? progress = null, CancellationToken ct = default)
+        => Task.Run(() => SaveHereAsync(attachment, folder, progress, ct));
 
-        try
-        {
-            return new FetchResult(FetchOutcome.Ready, await CopyOutAsync(held, folder, DownloadName.Safe(attachment.FileName), ct));
-        }
-        catch (OperationCanceledException)
-        {
-            return new FetchResult(FetchOutcome.Cancelled);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return new FetchResult(FetchOutcome.Failed, Message: $"{attachment.FileName} couldn't be saved to {folder}.");
-        }
+    /// <summary>The body of <see cref="SaveAsync"/>, on whichever thread it was started on.</summary>
+    private async Task<FetchResult> SaveHereAsync(FileAttachment attachment, string folder, IProgress<long>? progress, CancellationToken ct)
+    {
+        if (Unfetchable(attachment) is { } refused)
+            return refused;
+
+        if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
+            return await CopyOutAsync(attachment, held, folder, ct);
+
+        if (_secrets.GetToken() is not { } token)
+            return SignedOut(attachment);
+
+        return await WriteOutAsync(attachment, folder, target => _api.DownloadAsync(token, attachment.FileUrl, target, progress, ct));
     }
 
     /// <summary>
-    /// Copies a file from the cache into a folder, under the first form of its name that's free.
+    /// Copies a file from the cache into a folder.
     /// </summary>
-    /// <param name="held">The cached file</param>
+    /// <param name="attachment">The file being saved</param>
+    /// <param name="held">Its copy in the cache</param>
     /// <param name="folder">Where the copy goes</param>
-    /// <param name="name">The name to save it under, already made safe</param>
     /// <param name="ct">Cancelled when the user calls the save off</param>
-    /// <returns>Where the copy was made</returns>
-    private static async Task<string> CopyOutAsync(string held, string folder, string name, CancellationToken ct)
+    /// <returns>Ready with the copy's path, or what stopped it</returns>
+    private static async Task<FetchResult> CopyOutAsync(FileAttachment attachment, string held, string folder, CancellationToken ct)
     {
-        Directory.CreateDirectory(folder);
+        FileStream source;
+        try
+        {
+            // Shared for writing as well as reading: the cached file may be open in whatever the
+            // user opened it with, and reading alongside that is all this needs.
+            source = new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 81920, useAsync: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Said apart from a folder that won't take the copy. Here it's the cache's copy that's
+            // at fault, and blaming Downloads would send the user looking in the wrong place.
+            return new FetchResult(
+                FetchOutcome.Failed,
+                Message: $"Termyn's downloaded copy of {attachment.FileName} couldn't be read. It may be open in another program.");
+        }
 
-        // Shared for writing as well as reading: the cached file may be open in whatever the user
-        // opened it with, and reading alongside that is all this needs.
-        await using var source = new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 81920, useAsync: true);
-        var (target, path) = CreateFree(folder, name);
+        await using (source)
+            return await WriteOutAsync(attachment, folder, target => source.CopyToAsync(target, ct));
+    }
+
+    /// <summary>
+    /// Creates the first free form of a file's name in a folder and writes the file into it.
+    /// </summary>
+    /// <param name="attachment">The file being saved, for its name</param>
+    /// <param name="folder">Where it goes, made if it isn't there</param>
+    /// <param name="write">Fills the new file</param>
+    /// <returns>Ready with the new file's path, or what stopped it</returns>
+    private static async Task<FetchResult> WriteOutAsync(FileAttachment attachment, string folder, Func<Stream, Task> write)
+    {
+        string? path = null;
 
         try
         {
-            await using (target)
-                await source.CopyToAsync(target, ct);
+            Directory.CreateDirectory(folder);
 
-            return path;
+            var (target, created) = CreateFree(folder, DownloadName.Safe(attachment.FileName));
+            path = created;
+
+            await using (target)
+                await write(target);
+
+            return new FetchResult(FetchOutcome.Ready, path);
         }
-        catch
+        catch (Exception ex) when (Failure(attachment, ex, $"{attachment.FileName} couldn't be saved to {folder}.") is { } failed)
         {
-            // A copy that was called off or cut short isn't the file, and mustn't sit in the folder
+            // A file that was called off or cut short isn't the file, and mustn't sit in the folder
             // looking as though it is.
-            TryDelete(path);
-            throw;
+            if (path is not null)
+                TryDelete(path);
+
+            return failed;
         }
     }
+
+    /// <summary>The answer for a file there's nothing to fetch for yet, or null when there is.</summary>
+    /// <param name="attachment">The file wanted</param>
+    /// <returns>Pending or Missing, or null for a file that can be fetched</returns>
+    private static FetchResult? Unfetchable(FileAttachment attachment)
+    {
+        if (attachment.Pending)
+            return new FetchResult(FetchOutcome.Pending, Message: $"{attachment.FileName} is still being processed by Todoist.");
+
+        if (!attachment.CanFetch)
+            return new FetchResult(FetchOutcome.Missing, Message: $"{attachment.FileName} has no file to fetch.");
+
+        return null;
+    }
+
+    private static FetchResult SignedOut(FileAttachment attachment)
+        => new(FetchOutcome.Offline, Message: $"{attachment.FileName} hasn't been downloaded, and Termyn isn't signed in.");
+
+    /// <summary>
+    /// What a transfer that threw comes to, or null for anything a transfer isn't expected to throw.
+    /// </summary>
+    /// <param name="attachment">The file being transferred</param>
+    /// <param name="ex">What it threw</param>
+    /// <param name="unwritable">What to say when the file couldn't be written where it was going</param>
+    /// <returns>The answer to give, or null to let the exception go on up</returns>
+    private static FetchResult? Failure(FileAttachment attachment, Exception ex, string unwritable) => ex switch
+    {
+        OperationCanceledException => new FetchResult(FetchOutcome.Cancelled),
+
+        // Told apart deliberately. Nothing answering is the ordinary offline case, and it comes back
+        // on its own when the connection does. A server that answered and said no is a different
+        // thing to tell the user, and "you're offline" would be untrue.
+        TodoistNetworkException { Unreachable: true } => new FetchResult(
+            FetchOutcome.Offline,
+            Message: $"{attachment.FileName} hasn't been downloaded, and Todoist can't be reached. It'll be there to try again when you're back online."),
+        TodoistNetworkException refused => new FetchResult(
+            FetchOutcome.Failed,
+            Message: $"Todoist wouldn't hand over {attachment.FileName}. {refused.Message}"),
+
+        TodoistAuthException => new FetchResult(FetchOutcome.Failed, Message: "Todoist rejected the API token."),
+        IOException or UnauthorizedAccessException => new FetchResult(FetchOutcome.Failed, Message: unwritable),
+        _ => null,
+    };
 
     /// <summary>
     /// Creates the first numbered form of a name that nothing in the folder has.
