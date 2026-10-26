@@ -1,4 +1,3 @@
-using System.Globalization;
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
@@ -24,6 +23,7 @@ public class UpcomingByDayTests
     [Fact]
     public void Each_day_is_headed_before_the_tasks_due_on_it()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = Upcoming(
             Task("a", "Second day", "2026-08-02"),
             Task("b", "First day", "2026-08-01"),
@@ -37,6 +37,7 @@ public class UpcomingByDayTests
     [Fact]
     public void The_day_after_today_is_named_rather_than_numbered()
     {
+        using var british = new CultureScope("en-GB");
         // How anybody would say it. The rest are weekdays, which is what you'd say for a day this
         // side of the week after.
         var presenter = Upcoming(Task("a", "Soon", "2026-08-01"));
@@ -47,6 +48,7 @@ public class UpcomingByDayTests
     [Fact]
     public void A_heading_is_not_a_task()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = Upcoming(Task("a", "Soon", "2026-08-01"));
 
         var heading = presenter.Rows[0];
@@ -63,6 +65,7 @@ public class UpcomingByDayTests
     [Fact]
     public void A_day_with_nothing_due_is_not_headed()
     {
+        using var british = new CultureScope("en-GB");
         // Seven headings for two tasks would be a list mostly made of furniture.
         var presenter = Upcoming(
             Task("a", "Soon", "2026-08-01"),
@@ -74,7 +77,8 @@ public class UpcomingByDayTests
     [Fact]
     public void A_heading_dates_its_day_the_way_the_region_does()
     {
-        var presenter = UpcomingIn("en-US",
+        using var american = new CultureScope("en-US");
+        var presenter = Upcoming(
             Task("a", "Soon", "2026-08-01"),
             Task("b", "Later", "2026-08-06"));
 
@@ -84,6 +88,7 @@ public class UpcomingByDayTests
     [Fact]
     public void Every_other_view_is_left_as_one_list()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = Upcoming(Task("a", "Soon", "2026-08-01"));
 
         presenter.Select(ViewSelection.Of(SmartView.All));
@@ -94,6 +99,7 @@ public class UpcomingByDayTests
     [Fact]
     public void A_search_within_upcoming_drops_the_headings()
     {
+        using var british = new CultureScope("en-GB");
         // A search crosses the whole account and answers with matches, not with days — and the
         // matches aren't all due in the next week to be grouped by.
         var presenter = Upcoming(
@@ -108,6 +114,7 @@ public class UpcomingByDayTests
     [Fact]
     public void A_sub_task_stands_under_its_own_day_rather_than_its_parent()
     {
+        using var british = new CultureScope("en-GB");
         // It can't sit under both, and the day is what this view is for.
         var presenter = Upcoming(
             Task("a", "Parent", "2026-08-01"),
@@ -120,6 +127,7 @@ public class UpcomingByDayTests
     [Fact]
     public void A_repeat_is_filed_under_the_day_it_next_falls_on()
     {
+        using var british = new CultureScope("en-GB");
         // The row shows the words Todoist gave it — "every Monday" — which names no day at all, so
         // the day has to be read off the task rather than off what the column says.
         var presenter = Upcoming(
@@ -133,6 +141,7 @@ public class UpcomingByDayTests
     [Fact]
     public void Sorting_orders_each_day_and_leaves_the_days_where_they_are()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = Upcoming(
             Task("a", "Whenever", "2026-08-01", priority: 1),
             Task("b", "Urgent", "2026-08-01", priority: 4),
@@ -149,6 +158,7 @@ public class UpcomingByDayTests
     [Fact]
     public void A_task_folded_away_elsewhere_still_stands_under_its_own_day()
     {
+        using var british = new CultureScope("en-GB");
         // A fold hides sub-tasks under the task they belong to. There is no such task here — the
         // view is flat — so a fold made in a project would otherwise take a day's work off the
         // list entirely, with the sidebar still counting it.
@@ -164,6 +174,7 @@ public class UpcomingByDayTests
     [Fact]
     public void Folding_the_lot_isnt_offered_where_there_is_nothing_to_fold()
     {
+        using var british = new CultureScope("en-GB");
         // The view is flat under its days, so nothing on screen has anything under it. An entry
         // that did nothing visible would be worse than one that's plainly unavailable.
         var presenter = Upcoming(
@@ -182,6 +193,7 @@ public class UpcomingByDayTests
     [Fact]
     public async Task A_finished_task_keeps_to_the_bottom_under_no_heading()
     {
+        using var british = new CultureScope("en-GB");
         // It isn't work waiting on a day, so it stays where a finished task goes everywhere else.
         var presenter = Upcoming(Task("a", "Still to do", "2026-08-01"));
 
@@ -223,45 +235,31 @@ public class UpcomingByDayTests
             + $"\"due\":{{\"date\":\"{due}\",\"string\":\"{said}\",\"is_recurring\":true}}"
             + "}");
 
-    /// <summary>A presenter on Upcoming, with the machine set to en-GB so the headings can be asserted.</summary>
-    /// <param name="tasks">What the account holds</param>
-    /// <returns>The presenter, showing Upcoming</returns>
-    private static MainPresenter Upcoming(params (string Id, string Json)[] tasks) => UpcomingIn("en-GB", tasks);
-
     /// <summary>
-    /// A presenter on Upcoming, with the machine set to a given culture.
+    /// A presenter on Upcoming.
     /// </summary>
     /// <remarks>
     /// A heading is Termyn's own words about a day rather than the server's wording, so it's
     /// written in whatever culture the machine is set to — which leaves it unassertable unless the
-    /// culture is said.
+    /// culture is said. Each test holds one for the whole of itself, since the presenter writes its
+    /// headings again whenever something changes, and a culture set only round building it gave
+    /// the CI runner's en-US to every heading written after.
     /// </remarks>
-    /// <param name="culture">The culture the machine is set to, as its name</param>
     /// <param name="tasks">What the account holds</param>
     /// <returns>The presenter, showing Upcoming</returns>
-    private static MainPresenter UpcomingIn(string culture, params (string Id, string Json)[] tasks)
+    private static MainPresenter Upcoming(params (string Id, string Json)[] tasks)
     {
-        var was = CultureInfo.CurrentCulture;
-        try
-        {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");
+        foreach (var task in tasks)
+            store.PutResource("items", task.Id, task.Json);
 
-            var store = new InMemorySnapshotStore();
-            store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");
-            foreach (var task in tasks)
-                store.PutResource("items", task.Id, task.Json);
+        var clock = new FixedClock(Today);
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, clock);
+        engine.Load();
 
-            var clock = new FixedClock(Today);
-            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, clock);
-            engine.Load();
-
-            var presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
-            presenter.Select(ViewSelection.Of(SmartView.Upcoming));
-            return presenter;
-        }
-        finally
-        {
-            CultureInfo.CurrentCulture = was;
-        }
+        var presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+        presenter.Select(ViewSelection.Of(SmartView.Upcoming));
+        return presenter;
     }
 }
