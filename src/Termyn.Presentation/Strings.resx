@@ -56,15 +56,19 @@
   -->
   <data name="MenuFile" xml:space="preserve">
     <value>&amp;File</value>
+    <comment>The File menu on the menu bar: new tasks, projects and sections, syncing, settings, and signing out.</comment>
   </data>
   <data name="MenuEdit" xml:space="preserve">
     <value>&amp;Edit</value>
+    <comment>The Edit menu on the menu bar: undo, search and the command palette.</comment>
   </data>
   <data name="MenuView" xml:space="preserve">
     <value>&amp;View</value>
+    <comment>The View menu on the menu bar: moving between views, what the list and the panel under it show, and the panel's zoom.</comment>
   </data>
   <data name="MenuTask" xml:space="preserve">
     <value>&amp;Task</value>
+    <comment>The Task menu on the menu bar, which holds the same commands as a task's right-click menu.</comment>
   </data>
   <data name="MenuOrganise" xml:space="preserve">
     <value>&amp;Organise</value>
@@ -72,6 +76,7 @@
   </data>
   <data name="MenuHelp" xml:space="preserve">
     <value>&amp;Help</value>
+    <comment>The Help menu on the menu bar: checking for updates, and the about box.</comment>
   </data>
   <data name="MenuPriority" xml:space="preserve">
     <value>&amp;Priority</value>
@@ -97,12 +102,15 @@
   </data>
   <data name="CommandNewSubtask" xml:space="preserve">
     <value>New sub-task…</value>
+    <comment>Adds a task under the selected one, asking for its name first.</comment>
   </data>
   <data name="CommandDue" xml:space="preserve">
     <value>Due date…</value>
+    <comment>Opens the box for setting the selected task's due date, the day it's planned for.</comment>
   </data>
   <data name="CommandDeadline" xml:space="preserve">
     <value>Deadline…</value>
+    <comment>Opens the box for setting the selected task's deadline, the day it has to be finished by. Not the same thing as its due date.</comment>
   </data>
   <data name="CommandPriority1" xml:space="preserve">
     <value>Priority 1 — urgent</value>
@@ -110,9 +118,11 @@
   </data>
   <data name="CommandPriority2" xml:space="preserve">
     <value>Priority 2 — high</value>
+    <comment>The second of Todoist's four priorities. The number is Todoist's own and should stay as it is.</comment>
   </data>
   <data name="CommandPriority3" xml:space="preserve">
     <value>Priority 3 — medium</value>
+    <comment>The third of Todoist's four priorities. The number is Todoist's own and should stay as it is.</comment>
   </data>
   <data name="CommandPriority4" xml:space="preserve">
     <value>Priority 4 — none</value>
@@ -124,6 +134,7 @@
   </data>
   <data name="CommandReminders" xml:space="preserve">
     <value>Reminders…</value>
+    <comment>Opens the list of the selected task's reminders, where they're added and removed.</comment>
   </data>
   <data name="CommandIndent" xml:space="preserve">
     <value>Indent</value>
@@ -139,6 +150,7 @@
   </data>
   <data name="CommandMoveDown" xml:space="preserve">
     <value>Move down</value>
+    <comment>Moves the task one place down among the tasks beside it.</comment>
   </data>
   <data name="CommandMoveTo" xml:space="preserve">
     <value>Move to…</value>
@@ -163,9 +175,11 @@
   </data>
   <data name="CommandRenameSection" xml:space="preserve">
     <value>Rename section</value>
+    <comment>Renames the section selected in the sidebar, where it sits.</comment>
   </data>
   <data name="CommandRenameLabel" xml:space="preserve">
     <value>Rename label</value>
+    <comment>Renames the label selected in the sidebar, where it sits.</comment>
   </data>
   <data name="CommandDeleteProject" xml:space="preserve">
     <value>Delete project</value>
@@ -173,9 +187,11 @@
   </data>
   <data name="CommandDeleteSection" xml:space="preserve">
     <value>Delete section</value>
+    <comment>Deletes the section selected in the sidebar.</comment>
   </data>
   <data name="CommandDeleteLabel" xml:space="preserve">
     <value>Delete label</value>
+    <comment>Deletes the label selected in the sidebar.</comment>
   </data>
   <data name="CommandAddToFavourites" xml:space="preserve">
     <value>Add to favourites</value>
@@ -183,6 +199,7 @@
   </data>
   <data name="CommandRemoveFromFavourites" xml:space="preserve">
     <value>Remove from favourites</value>
+    <comment>Takes the star off the selected project or label, and it leaves the sidebar's Favourites. Shown in place of "Add to favourites" once it's starred.</comment>
   </data>
   <data name="CommandMoveProjectUp" xml:space="preserve">
     <value>Move project up</value>
@@ -190,12 +207,15 @@
   </data>
   <data name="CommandMoveProjectDown" xml:space="preserve">
     <value>Move project down</value>
+    <comment>Moves the project selected in the sidebar one place down among the projects beside it.</comment>
   </data>
   <data name="CommandMoveSectionUp" xml:space="preserve">
     <value>Move section up</value>
+    <comment>Moves the section selected in the sidebar one place up within its project.</comment>
   </data>
   <data name="CommandMoveSectionDown" xml:space="preserve">
     <value>Move section down</value>
+    <comment>Moves the section selected in the sidebar one place down within its project.</comment>
   </data>
 
   <!-- The commands that don't need anything selected. -->
@@ -205,9 +225,11 @@
   </data>
   <data name="CommandNewProject" xml:space="preserve">
     <value>New project</value>
+    <comment>Adds a project to the sidebar.</comment>
   </data>
   <data name="CommandNewSection" xml:space="preserve">
     <value>New section</value>
+    <comment>Adds a section to a project.</comment>
   </data>
   <data name="CommandQuickAdd" xml:space="preserve">
     <value>Quick add…</value>
@@ -215,6 +237,7 @@
   </data>
   <data name="CommandSyncNow" xml:space="preserve">
     <value>Sync now</value>
+    <comment>Syncs with Todoist straight away rather than waiting for the next one.</comment>
   </data>
   <data name="CommandHistory" xml:space="preserve">
     <value>What you've done…</value>
@@ -230,6 +253,7 @@
   </data>
   <data name="CommandCollapseAll" xml:space="preserve">
     <value>Collapse all</value>
+    <comment>Closes every task in the list, so only the ones at the top level show.</comment>
   </data>
   <data name="CommandDefaultOrder" xml:space="preserve">
     <value>Default order</value>
@@ -241,9 +265,11 @@
   </data>
   <data name="CommandViewDescription" xml:space="preserve">
     <value>View description</value>
+    <comment>Opens the panel under the list on the selected task's description.</comment>
   </data>
   <data name="CommandViewComments" xml:space="preserve">
     <value>View comments</value>
+    <comment>Opens the panel under the list on the selected task's comments.</comment>
   </data>
   <data name="CommandZoomIn" xml:space="preserve">
     <value>Zoom in</value>
@@ -251,15 +277,19 @@
   </data>
   <data name="CommandZoomOut" xml:space="preserve">
     <value>Zoom out</value>
+    <comment>Makes the description's text smaller.</comment>
   </data>
   <data name="CommandZoomReset" xml:space="preserve">
     <value>Restore default zoom</value>
+    <comment>Puts the description's text back to its usual size.</comment>
   </data>
   <data name="CommandUndo" xml:space="preserve">
     <value>Undo</value>
+    <comment>Takes back the last change made in the app.</comment>
   </data>
   <data name="CommandSearch" xml:space="preserve">
     <value>Search…</value>
+    <comment>Puts the cursor in the search box above the task list.</comment>
   </data>
   <data name="CommandPalette" xml:space="preserve">
     <value>Command palette…</value>
@@ -271,12 +301,15 @@
   </data>
   <data name="CommandNextView" xml:space="preserve">
     <value>Next view</value>
+    <comment>Selects the sidebar row below the current one.</comment>
   </data>
   <data name="CommandSettings" xml:space="preserve">
     <value>Settings…</value>
+    <comment>Opens the settings dialog.</comment>
   </data>
   <data name="CommandCheckForUpdates" xml:space="preserve">
     <value>Check for updates…</value>
+    <comment>Looks for a newer release of Termyn, and offers to open its page when there is one.</comment>
   </data>
   <data name="CommandAbout" xml:space="preserve">
     <value>About Termyn</value>
@@ -292,16 +325,63 @@
   </data>
   <data name="CommandExit" xml:space="preserve">
     <value>Exit</value>
+    <comment>Closes Termyn altogether, rather than leaving it in the tray.</comment>
   </data>
+
+  <!-- The keys a menu names in a shortcut, such as Ctrl+Z. Letters and function keys stay as they are. -->
+  <data name="KeyCtrl" xml:space="preserve">
+    <value>Ctrl</value>
+    <comment>The Ctrl key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="KeyShift" xml:space="preserve">
+    <value>Shift</value>
+    <comment>The Shift key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="KeyAlt" xml:space="preserve">
+    <value>Alt</value>
+    <comment>The Alt key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="KeyWin" xml:space="preserve">
+    <value>Win</value>
+    <comment>The Windows key, in a shortcut beside a menu entry.</comment>
+  </data>
+  <data name="KeySpace" xml:space="preserve">
+    <value>Space</value>
+    <comment>The space bar, in a shortcut beside a menu entry.</comment>
+  </data>
+  <data name="KeyEnter" xml:space="preserve">
+    <value>Enter</value>
+    <comment>The Enter key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="KeyTab" xml:space="preserve">
+    <value>Tab</value>
+    <comment>The Tab key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="KeyEscape" xml:space="preserve">
+    <value>Escape</value>
+    <comment>The Esc key, in a shortcut beside a menu entry.</comment>
+  </data>
+  <data name="KeyDelete" xml:space="preserve">
+    <value>Del</value>
+    <comment>The Delete key, in a shortcut beside a menu entry, written short the way keyboards print it. Use the name printed on keyboards in your language.</comment>
+  </data>
+  <data name="KeyInsert" xml:space="preserve">
+    <value>Insert</value>
+    <comment>The Insert key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
+  </data>
+
   <!-- The sync half of the status bar: the state, and how long ago the last sync was. -->
   <data name="SyncStatusSyncing" xml:space="preserve">
     <value>Syncing…</value>
+    <comment>In the status bar while a sync with Todoist is under way.</comment>
   </data>
   <data name="SyncStatusOffline" xml:space="preserve">
     <value>Offline (showing cached)</value>
+    <comment>In the status bar while Todoist can't be reached: the list is the copy kept on this computer, and changes wait to be sent.</comment>
   </data>
   <data name="SyncStatusPaused" xml:space="preserve">
     <value>Paused</value>
+    <comment>In the status bar while Todoist has asked for syncing to slow down, and it isn't known for how long.</comment>
   </data>
   <data name="SyncStatusPausedRetry" xml:space="preserve">
     <value>Paused (retry in {0}s)</value>
@@ -309,9 +389,11 @@
   </data>
   <data name="SyncStatusReconnectNeeded" xml:space="preserve">
     <value>Reconnect needed</value>
+    <comment>In the status bar once Todoist has turned the token away. Nothing syncs until a new one is given.</comment>
   </data>
   <data name="SyncStatusSynced" xml:space="preserve">
     <value>Synced</value>
+    <comment>In the status bar after a sync, when how long ago it was isn't known.</comment>
   </data>
   <data name="SyncStatusSyncedAgo" xml:space="preserve">
     <value>Synced {0}</value>
@@ -319,9 +401,11 @@
   </data>
   <data name="SyncStatusNever" xml:space="preserve">
     <value>Not synced yet</value>
+    <comment>In the status bar before the first sync of the session has finished, while the list is still the copy kept on this computer.</comment>
   </data>
   <data name="SyncAgoJustNow" xml:space="preserve">
     <value>just now</value>
+    <comment>How long ago the last sync was, when it was a few seconds ago. It follows "Synced".</comment>
   </data>
   <data name="SyncAgoSeconds" xml:space="preserve">
     <value>{0}s ago</value>
@@ -338,6 +422,16 @@
   <data name="SyncAgoDays" xml:space="preserve">
     <value>{0}d ago</value>
     <comment>{0} is a whole number of days.</comment>
+  </data>
+
+  <!-- The rest of the status bar, between the count of tasks and the sync state. -->
+  <data name="StatusTickedOff" xml:space="preserve">
+    <value>ticked off · {0} puts it back</value>
+    <comment>In the status bar for a moment after a task's ticked off, while it's still in the list. {0} is the undo shortcut as the menus write it, such as Ctrl+Z. Lower case: it follows the count of tasks.</comment>
+  </data>
+  <data name="StatusCompletedTruncated" xml:space="preserve">
+    <value>most recent completed only</value>
+    <comment>In the status bar while completed tasks are shown and Todoist had more than it sends at once, so only the latest are in the list. Lower case: it follows the count of tasks.</comment>
   </data>
 
   <!-- The capture box: its empty hint, and the line under it describing what was typed. -->
@@ -373,6 +467,64 @@
     <value>(can't remind — reminders aren't on this plan: {0})</value>
     <comment>{0} is the list of reminders the "!" named, which the plan won't take so none is set.</comment>
   </data>
+  <data name="CaptureReminderWhenDue" xml:space="preserve">
+    <value>when due</value>
+    <comment>One of the reminders in the list after "remind": one that goes off when the task's due. Short and lower case, like the rest of the line under the capture box.</comment>
+  </data>
+  <data name="CaptureReminderHoursBefore_Other" xml:space="preserve">
+    <value>{0}h before</value>
+    <comment>One of the reminders in the list after "remind": one that goes off a whole number of hours before the task's due. {0} is how many hours. English writes the h the same at one as at ten, so there's no _One.</comment>
+  </data>
+  <data name="CaptureReminderMinutesBefore_Other" xml:space="preserve">
+    <value>{0}m before</value>
+    <comment>One of the reminders in the list after "remind": one that goes off a number of minutes before the task's due. {0} is how many minutes. English writes the m the same at one as at ten, so there's no _One.</comment>
+  </data>
+
+  <!--
+    What the due-date box, the deadline box and the reminders dialog's box say under themselves
+    about what's been typed in them. The examples they offer are filled in rather than written here:
+    they're words the box reads, which a translation would turn into words it doesn't.
+  -->
+  <data name="DayBoxNoDue" xml:space="preserve">
+    <value>No due date</value>
+    <comment>Under the due-date box while it's empty, which OK takes as clearing the date.</comment>
+  </data>
+  <data name="DayBoxDueRepeats" xml:space="preserve">
+    <value>Repeats — Todoist works out the dates when it syncs</value>
+    <comment>Under the due-date box when what's typed is a repeating schedule, such as "every monday", which only Todoist turns into dates.</comment>
+  </data>
+  <data name="DayBoxDueForTodoist" xml:space="preserve">
+    <value>Todoist reads this when it syncs</value>
+    <comment>Under the due-date box when what's typed isn't a day Termyn can read, so it goes to Todoist as it was typed.</comment>
+  </data>
+  <data name="DayBoxNoDeadline" xml:space="preserve">
+    <value>No deadline</value>
+    <comment>Under the deadline box while it's empty, which OK takes as clearing the deadline.</comment>
+  </data>
+  <data name="DayBoxDeadlineTimed" xml:space="preserve">
+    <value>A deadline is a whole day, without a time</value>
+    <comment>Under the deadline box when what's typed has a time in it, which a deadline can't hold. OK waits for a day without one.</comment>
+  </data>
+  <data name="DayBoxDeadlineRepeats" xml:space="preserve">
+    <value>A deadline can't repeat</value>
+    <comment>Under the deadline box when what's typed is a repeating schedule. OK waits for a single day.</comment>
+  </data>
+  <data name="DayBoxDeadlineUnread" xml:space="preserve">
+    <value>Not a day this can read — try “{0}” or “{1}”</value>
+    <comment>Under the deadline box when what's typed can't be read as a day. {0} and {1} are two days typed the way the box reads them, such as 4 aug and in 3 days, or 25/12 and 2026-12-25.</comment>
+  </data>
+  <data name="DayBoxReminderRepeats" xml:space="preserve">
+    <value>A reminder can't repeat</value>
+    <comment>In the reminders dialog, under the box for when a reminder goes off, when what's typed is a repeating schedule.</comment>
+  </data>
+  <data name="DayBoxReminderUnread" xml:space="preserve">
+    <value>Not a day and time this can read — try “{0}”</value>
+    <comment>In the reminders dialog, under the box for when a reminder goes off, when what's typed can't be read as a moment. {0} is a day and time typed the way the box reads them, such as tomorrow 9am or 25/12 09:00.</comment>
+  </data>
+  <data name="DayBoxDayAtTime" xml:space="preserve">
+    <value>{0} at {1}</value>
+    <comment>Under a date box, the day it read from what's typed when there's a time with it. {0} is the day written in full, such as "Tuesday, 4 August 2026", and {1} is the time, such as "16:30".</comment>
+  </data>
 
   <!-- A write the server refused: what was being done, what it said, and what dismissing costs. -->
   <data name="FailureChangeSubject" xml:space="preserve">
@@ -381,48 +533,63 @@
   </data>
   <data name="FailureItemAdd" xml:space="preserve">
     <value>Adding a task</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureItemUpdate" xml:space="preserve">
     <value>Changing a task</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureItemDelete" xml:space="preserve">
     <value>Deleting a task</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureItemClose" xml:space="preserve">
     <value>Completing a task</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureItemUncomplete" xml:space="preserve">
     <value>Reopening a task</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureItemMove" xml:space="preserve">
     <value>Moving a task</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureItemReorder" xml:space="preserve">
     <value>Reordering tasks</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureProjectReorder" xml:space="preserve">
     <value>Reordering projects</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureSectionReorder" xml:space="preserve">
     <value>Reordering sections</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureProjectAdd" xml:space="preserve">
     <value>Adding a project</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureSectionAdd" xml:space="preserve">
     <value>Adding a section</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureLabelAdd" xml:space="preserve">
     <value>Adding a label</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureLabelDelete" xml:space="preserve">
     <value>Deleting a label</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureNoteAdd" xml:space="preserve">
     <value>Adding a comment</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureReminderAdd" xml:space="preserve">
     <value>Adding a reminder</value>
+    <comment>In the failed changes window, a change Todoist turned down: what was being done when it was made.</comment>
   </data>
   <data name="FailureReasonGiven" xml:space="preserve">
     <value>Todoist said: {0}</value>
@@ -430,182 +597,315 @@
   </data>
   <data name="FailureReasonNone" xml:space="preserve">
     <value>Todoist gave no reason.</value>
+    <comment>In the failed changes window, the first line about a change Todoist turned down without saying why.</comment>
   </data>
   <data name="FailureLandedUnruled" xml:space="preserve">
     <value>Todoist never reported a result, so whether your account has this is unknown.</value>
+    <comment>In the failed changes window, under what Todoist said: a change Termyn gave up on after Todoist went on saying nothing about it.</comment>
   </data>
   <data name="FailureLandedRefused" xml:space="preserve">
     <value>Todoist refused it, so your account doesn't have it.</value>
+    <comment>In the failed changes window, under what Todoist said: a change Todoist turned down outright.</comment>
   </data>
   <data name="FailureCostDiscards" xml:space="preserve">
     <value>Dismissing removes Termyn's copy, which is the only one on this machine.</value>
+    <comment>In the failed changes window, last: what dismissing costs when the change was adding something, which exists only on this computer until Todoist takes it.</comment>
   </data>
   <data name="FailureCostKept" xml:space="preserve">
     <value>Termyn has already put this back. Dismissing only clears the notice.</value>
+    <comment>In the failed changes window, last: dismissing a refused change to something that already existed, which Termyn has undone on this machine.</comment>
   </data>
 
-  <!-- The sidebar group headings. -->
+  <!-- The sidebar: its group headings, and the built-in views at the top of it. -->
   <data name="SidebarFavourites" xml:space="preserve">
     <value>Favourites</value>
+    <comment>Heading in the sidebar over the starred projects, labels and filters.</comment>
   </data>
   <data name="SidebarProjects" xml:space="preserve">
     <value>Projects</value>
+    <comment>Heading in the sidebar over the account's projects.</comment>
   </data>
   <data name="SidebarLabels" xml:space="preserve">
     <value>Labels</value>
+    <comment>Heading in the sidebar over the account's labels, the tags on tasks.</comment>
   </data>
   <data name="SidebarFilters" xml:space="preserve">
     <value>Filters</value>
+    <comment>Heading in the sidebar over the account's saved filters.</comment>
+  </data>
+  <data name="SmartViewToday" xml:space="preserve">
+    <value>Today</value>
+    <comment>The built-in view of what's due today or overdue. At the top of the sidebar and in the path above the list.</comment>
+  </data>
+  <data name="SmartViewUpcoming" xml:space="preserve">
+    <value>Upcoming</value>
+    <comment>The built-in view of what's due in the next week, under a heading for each day. At the top of the sidebar and in the path above the list.</comment>
+  </data>
+  <data name="SmartViewInbox" xml:space="preserve">
+    <value>Inbox</value>
+    <comment>The built-in view of the Inbox, the project a task goes to when nothing says where. At the top of the sidebar and in the path above the list.</comment>
+  </data>
+  <data name="SmartViewAll" xml:space="preserve">
+    <value>All</value>
+    <comment>The built-in view of every task, in the path above the list.</comment>
+  </data>
+  <data name="SearchResults" xml:space="preserve">
+    <value>Search results</value>
+    <comment>The path above the task list while a search is on, standing in for the name of the view: a search covers the whole account rather than the view that was open.</comment>
+  </data>
+  <data name="FilterNoQuery" xml:space="preserve">
+    <value>(no query)</value>
+    <comment>In the notice over a saved filter Termyn can't read, in place of the filter's query when it has none.</comment>
+  </data>
+
+  <!-- The panel under the list: its heading, and the comments in it. -->
+  <data name="PanelTask" xml:space="preserve">
+    <value>Task: {0}</value>
+    <comment>The heading over the panel under the list while it's showing a task's description and comments. {0} is the task's name.</comment>
+  </data>
+  <data name="PanelProject" xml:space="preserve">
+    <value>Project: {0}</value>
+    <comment>The heading over the panel under the list while it's showing a project's description and comments. {0} is the project's name.</comment>
+  </data>
+  <data name="CommentNotSentYet" xml:space="preserve">
+    <value>Not sent yet</value>
+    <comment>Above a comment in the panel, in place of when it was posted, while it's waiting on this computer to be sent to Todoist.</comment>
+  </data>
+  <data name="CommentNoMessage" xml:space="preserve">
+    <value>(no message)</value>
+    <comment>In place of a comment's text when it's a file with no words.</comment>
+  </data>
+  <data name="CommentEmpty" xml:space="preserve">
+    <value>(empty)</value>
+    <comment>In place of a comment's text when it has neither words nor a file.</comment>
+  </data>
+  <data name="CommentFileProcessing" xml:space="preserve">
+    <value>{0} (still processing)</value>
+    <comment>Above a comment in the panel, the file on it while Todoist is still taking the upload in. {0} is the file's name.</comment>
+  </data>
+  <data name="FileSizeBytes_Other" xml:space="preserve">
+    <value>{0} B</value>
+    <comment>A file's size beside its name above a comment, when it's under a kilobyte. {0} is the number of bytes. English writes the B the same at one as at ten, so there's no _One.</comment>
+  </data>
+  <data name="FileSizeKilobytes" xml:space="preserve">
+    <value>{0} KB</value>
+    <comment>A file's size beside its name above a comment. {0} is the size in kilobytes, to one decimal place at most, such as 2.5.</comment>
+  </data>
+  <data name="FileSizeMegabytes" xml:space="preserve">
+    <value>{0} MB</value>
+    <comment>A file's size beside its name above a comment. {0} is the size in megabytes, to one decimal place at most, such as 2.5.</comment>
+  </data>
+  <data name="FileSizeGigabytes" xml:space="preserve">
+    <value>{0} GB</value>
+    <comment>A file's size beside its name above a comment. {0} is the size in gigabytes, to one decimal place at most, such as 2.5.</comment>
+  </data>
+  <data name="DownloadsUnavailable" xml:space="preserve">
+    <value>Downloads aren't available in this window.</value>
+    <comment>Said on opening or saving a comment's file from a window that has nowhere to download it to.</comment>
+  </data>
+  <data name="UploadOutlivedComment" xml:space="preserve">
+    <value>The file was taken off the comment, but Todoist couldn't be reached to delete the upload itself.</value>
+    <comment>Said after removing a file from a comment while Todoist couldn't be reached: the comment no longer has it, but the uploaded copy is still on Todoist's servers.</comment>
   </data>
 
   <!--
-    The action history: one line per thing the user did, in the words they'd use for it. Only new
-    lines read these; entries already written to the history file keep the wording they were written
-    with. Each {0}/{1} is the name of what was acted on, and the curly quotes are part of the wording.
+    The action history, the list What you've done… opens: one line per thing the user did, in the
+    words they'd use for it. Only new lines read these; entries already written to the history file
+    keep the wording they were written with. The curly quotes are part of the wording.
   -->
+  <data name="HistoryTaskNamed" xml:space="preserve">
+    <value>“{0}”</value>
+    <comment>How the lines below quote a task. {0} is the task's name.</comment>
+  </data>
+  <data name="HistoryTaskUnnamed" xml:space="preserve">
+    <value>a task</value>
+    <comment>How the lines below refer to a task with no name to quote, such as one that's gone from the account. Lower case: it sits in the middle of a sentence.</comment>
+  </data>
   <data name="HistoryAdded" xml:space="preserve">
     <value>Added “{0}”</value>
+    <comment>A task added from the capture box. {0} is what was typed for it.</comment>
   </data>
   <data name="HistoryAddedUnder" xml:space="preserve">
     <value>Added “{0}” under {1}</value>
+    <comment>A sub-task added. {0} is its name, and {1} is the task it went under, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryReopened" xml:space="preserve">
     <value>Reopened {0}</value>
+    <comment>A completed task put back. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryRenamed" xml:space="preserve">
     <value>Renamed {0} to “{1}”</value>
+    <comment>A task renamed. {0} is the task under its old name, quoted as HistoryTaskNamed quotes it, and {1} is its new name.</comment>
   </data>
   <data name="HistoryDescriptionEdited" xml:space="preserve">
     <value>Edited the description of {0}</value>
+    <comment>A task's description changed. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryDescriptionEditedProject" xml:space="preserve">
     <value>Edited the description of a project</value>
+    <comment>A project's description changed.</comment>
   </data>
   <data name="HistoryCommentAdded" xml:space="preserve">
     <value>Added a comment</value>
+    <comment>A comment added to a task or a project.</comment>
   </data>
   <data name="HistoryCommentEdited" xml:space="preserve">
     <value>Edited a comment</value>
+    <comment>A comment's text changed.</comment>
   </data>
   <data name="HistoryCommentDeleted" xml:space="preserve">
     <value>Deleted a comment</value>
+    <comment>A comment deleted.</comment>
   </data>
   <data name="HistoryPriorityCleared" xml:space="preserve">
     <value>Cleared the priority on {0}</value>
+    <comment>A task set back to no priority. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryPrioritySet" xml:space="preserve">
     <value>Set {0} to priority {1}</value>
-    <comment>{1} is the priority number, 1 to 3.</comment>
+    <comment>{0} is the task, quoted as HistoryTaskNamed quotes it. {1} is the priority number, 1 to 3.</comment>
   </data>
   <data name="HistoryDueSet" xml:space="preserve">
     <value>Set {0} due {1}</value>
-    <comment>{1} is a short date such as "4 Mar".</comment>
+    <comment>{0} is the task, quoted as HistoryTaskNamed quotes it. {1} is a short date such as "4 Mar".</comment>
   </data>
   <data name="HistoryDueCleared" xml:space="preserve">
     <value>Cleared the due date on {0}</value>
+    <comment>A task's due date taken off. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryDueSetText" xml:space="preserve">
     <value>Set {0} due “{1}”</value>
-    <comment>{1} is the due wording the user typed, such as "every Monday".</comment>
+    <comment>{0} is the task, quoted as HistoryTaskNamed quotes it. {1} is the due wording the user typed, such as "every Monday".</comment>
   </data>
   <data name="HistoryDeadlineSet" xml:space="preserve">
     <value>Set {0} to finish by {1}</value>
-    <comment>{1} is a short date such as "4 Mar".</comment>
+    <comment>A task given a deadline. {0} is the task, quoted as HistoryTaskNamed quotes it. {1} is a short date such as "4 Mar".</comment>
   </data>
   <data name="HistoryDeadlineCleared" xml:space="preserve">
     <value>Cleared the deadline on {0}</value>
+    <comment>A task's deadline taken off. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryCompleted" xml:space="preserve">
     <value>Completed {0}</value>
+    <comment>A task ticked off. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryDeleted" xml:space="preserve">
     <value>Deleted {0}</value>
+    <comment>A task deleted. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryUndo" xml:space="preserve">
     <value>Took back the last change</value>
+    <comment>Undo used.</comment>
   </data>
   <data name="HistoryMovedUp" xml:space="preserve">
     <value>Moved {0} up</value>
+    <comment>A task moved one place up among the tasks beside it. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryMovedDown" xml:space="preserve">
     <value>Moved {0} down</value>
+    <comment>A task moved one place down among the tasks beside it. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryIndented" xml:space="preserve">
     <value>Indented {0}</value>
+    <comment>A task made a sub-task of the one above it. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryOutdented" xml:space="preserve">
     <value>Outdented {0}</value>
+    <comment>A sub-task lifted out to sit beside its parent. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryMovedTo" xml:space="preserve">
     <value>Moved {0} to “{1}”</value>
+    <comment>A task sent to another project or section. {0} is the task, quoted as HistoryTaskNamed quotes it, and {1} is where it went, such as "Work / Planning".</comment>
   </data>
   <data name="HistoryMovedUnder" xml:space="preserve">
     <value>Moved {0} under {1}</value>
+    <comment>A task dragged onto another, which it's now a sub-task of. {0} is the task dragged and {1} the one it went under, each quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryMoved" xml:space="preserve">
     <value>Moved {0}</value>
+    <comment>A task dragged to a new place in the list. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryReminderAdded" xml:space="preserve">
     <value>Added a reminder to {0}</value>
+    <comment>A reminder added to a task. {0} is the task, quoted as HistoryTaskNamed quotes it.</comment>
   </data>
   <data name="HistoryReminderRemoved" xml:space="preserve">
     <value>Removed a reminder</value>
+    <comment>A reminder taken off a task.</comment>
   </data>
   <data name="HistoryLabelAdded" xml:space="preserve">
     <value>Added the label “{0}”</value>
+    <comment>A label made. {0} is its name.</comment>
   </data>
   <data name="HistoryProjectAdded" xml:space="preserve">
     <value>Added the project “{0}”</value>
+    <comment>A project made. {0} is its name.</comment>
   </data>
   <data name="HistoryProjectRenamed" xml:space="preserve">
     <value>Renamed a project to “{0}”</value>
+    <comment>A project renamed. {0} is its new name.</comment>
   </data>
   <data name="HistoryProjectDeleted" xml:space="preserve">
     <value>Deleted the project “{0}”</value>
+    <comment>A project deleted. {0} is its name.</comment>
   </data>
   <data name="HistoryProjectDeletedUnnamed" xml:space="preserve">
     <value>Deleted a project</value>
+    <comment>A project deleted, when there's no name to give it.</comment>
   </data>
   <data name="HistorySectionAdded" xml:space="preserve">
     <value>Added the section “{0}”</value>
+    <comment>A section made. {0} is its name.</comment>
   </data>
   <data name="HistorySectionRenamed" xml:space="preserve">
     <value>Renamed a section to “{0}”</value>
+    <comment>A section renamed. {0} is its new name.</comment>
   </data>
   <data name="HistorySectionDeleted" xml:space="preserve">
     <value>Deleted the section “{0}”</value>
+    <comment>A section deleted. {0} is its name.</comment>
   </data>
   <data name="HistorySectionDeletedUnnamed" xml:space="preserve">
     <value>Deleted a section</value>
+    <comment>A section deleted, when there's no name to give it.</comment>
   </data>
   <data name="HistoryProjectMovedUp" xml:space="preserve">
     <value>Moved the project “{0}” up</value>
+    <comment>A project moved one place up in the sidebar. {0} is its name.</comment>
   </data>
   <data name="HistoryProjectMovedDown" xml:space="preserve">
     <value>Moved the project “{0}” down</value>
+    <comment>A project moved one place down in the sidebar. {0} is its name.</comment>
   </data>
   <data name="HistorySectionMovedUp" xml:space="preserve">
     <value>Moved the section “{0}” up</value>
+    <comment>A section moved one place up within its project. {0} is its name.</comment>
   </data>
   <data name="HistorySectionMovedDown" xml:space="preserve">
     <value>Moved the section “{0}” down</value>
+    <comment>A section moved one place down within its project. {0} is its name.</comment>
   </data>
   <data name="HistoryProjectMoved" xml:space="preserve">
     <value>Moved the project “{0}”</value>
+    <comment>A project dragged to a new place in the sidebar. {0} is its name.</comment>
   </data>
   <data name="HistorySectionMoved" xml:space="preserve">
     <value>Moved the section “{0}”</value>
+    <comment>A section dragged to a new place in the sidebar. {0} is its name.</comment>
   </data>
 
   <!-- The questions asked before switching account or signing out, each with its pending-change warning. -->
   <data name="SwitchAccountLeadUnknown" xml:space="preserve">
     <value>Todoist didn't say which account that token is for, so Termyn can't tell whether it's this one.</value>
+    <comment>The first paragraph of the question asked on pasting a token, when Todoist hasn't said whose it is.</comment>
   </data>
   <data name="SwitchAccountLeadOther" xml:space="preserve">
     <value>That token is for a different Todoist account.</value>
+    <comment>The first paragraph of the question asked on pasting a token that belongs to another account.</comment>
   </data>
   <data name="SwitchAccountBody" xml:space="preserve">
     <value>Using it removes this account's tasks, comments, downloaded files and the list of what you've done from this computer, and then signs in to the other one. Nothing is removed from Todoist itself.</value>
+    <comment>The second paragraph of the question asked on pasting a token for another account: what using it does.</comment>
   </data>
   <data name="SwitchAccountPending_One" xml:space="preserve">
     <value>{0} change hasn't reached Todoist yet, and switching now loses it. Paste a token for the account it belongs to and it will be sent.</value>
@@ -617,9 +917,11 @@
   </data>
   <data name="SignOutQuestionHead" xml:space="preserve">
     <value>Sign out of Todoist?</value>
+    <comment>The first line of the question asked before signing out.</comment>
   </data>
   <data name="SignOutBody" xml:space="preserve">
     <value>Termyn will forget your token, and remove the account's tasks, comments, downloaded files and the list of what you've done from this computer. Nothing is removed from Todoist itself.</value>
+    <comment>Under the question asked before signing out: what signing out does.</comment>
   </data>
   <data name="SignOutPending_One" xml:space="preserve">
     <value>{0} change hasn't reached Todoist yet, and signing out now loses it. Sync first if you want to keep it.</value>

@@ -125,6 +125,13 @@ public class CapturePreviewTextTests
         Assert.Contains("remind 1h before", preview);
     }
 
+    [Theory]
+    [InlineData("submit report tomorrow 11am !0mb", "remind when due")]
+    [InlineData("submit report tomorrow 11am !30mb", "remind 30m before")]
+    [InlineData("submit report tomorrow 11am !3hb", "remind 3h before")]
+    public void Each_kind_of_before_due_reminder_reads_what_the_catalogue_says(string text, string expected)
+        => Assert.Contains(expected, Preview(text));
+
     [Fact]
     public void A_recurring_reminder_reads_as_its_schedule()
     {

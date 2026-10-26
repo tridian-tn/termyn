@@ -43,7 +43,7 @@ public static class ViewPath
     /// naming that list would say the results came from it. And there's nothing above the results
     /// to go back up to — clearing the search box is the way back.
     /// </remarks>
-    public static readonly IReadOnlyList<Crumb> SearchResults = [new Crumb("Search results", null)];
+    public static readonly IReadOnlyList<Crumb> SearchResults = [new Crumb(Strings.SearchResults, null)];
 
     /// <summary>
     /// The path written as one line, with where in it each step that leads somewhere sits.
@@ -142,12 +142,14 @@ public static class ViewPath
         return chain;
     }
 
-    /// <summary>The wording the sidebar uses for a built-in view, so the two agree.</summary>
-    private static string Named(SmartView view) => view switch
+    /// <summary>What a built-in view is called, in the sidebar and in its path alike.</summary>
+    /// <param name="view">The built-in view</param>
+    /// <returns>Its name</returns>
+    internal static string Named(SmartView view) => view switch
     {
-        SmartView.Today => "Today",
-        SmartView.Upcoming => "Upcoming",
-        SmartView.Inbox => "Inbox",
-        _ => "All",
+        SmartView.Today => Strings.SmartViewToday,
+        SmartView.Upcoming => Strings.SmartViewUpcoming,
+        SmartView.Inbox => Strings.SmartViewInbox,
+        _ => Strings.SmartViewAll,
     };
 }

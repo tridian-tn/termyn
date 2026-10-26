@@ -178,6 +178,23 @@ public class DayBoxTests
     }
 
     [Fact]
+    public void Each_box_says_what_the_catalogue_says()
+    {
+        Assert.Equal("No due date", DayBoxText.ForDue(DayReading.Blank).Says);
+        Assert.Equal("Repeats — Todoist works out the dates when it syncs", DayBoxText.ForDue(DayReading.Repeat).Says);
+        Assert.Equal("Todoist reads this when it syncs", DayBoxText.ForDue(DayReading.Unread).Says);
+
+        Assert.Equal("No deadline", DayBoxText.ForDeadline(DayReading.Blank, english: true).Says);
+        Assert.Equal("A deadline is a whole day, without a time", DayBoxText.ForDeadline(DayReading.On(Today, new TimeOnly(9, 0)), english: true).Says);
+        Assert.Equal("A deadline can't repeat", DayBoxText.ForDeadline(DayReading.Repeat, english: true).Says);
+        Assert.Equal("Not a day this can read — try “4 aug” or “in 3 days”", DayBoxText.ForDeadline(DayReading.Unread, english: true).Says);
+        Assert.Equal("Not a day this can read — try “25/12” or “2026-12-25”", DayBoxText.ForDeadline(DayReading.Unread, english: false).Says);
+
+        Assert.Equal("Not a day and time this can read — try “tomorrow 9am”", DayBoxText.ForReminder(DayReading.Unread, english: true).Says);
+        Assert.Equal("Not a day and time this can read — try “25/12 09:00”", DayBoxText.ForReminder(DayReading.Unread, english: false).Says);
+    }
+
+    [Fact]
     public void A_day_is_described_in_full_with_its_time()
     {
         var was = System.Globalization.CultureInfo.CurrentCulture;
