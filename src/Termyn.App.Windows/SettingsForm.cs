@@ -1,5 +1,6 @@
 using System.Globalization;
 using Termyn.Core.Settings;
+using Termyn.Presentation;
 
 // Both namespaces have a Label, and in a form file the control is what it should mean.
 using Label = System.Windows.Forms.Label;
@@ -135,9 +136,7 @@ internal sealed class SettingsForm : Form
         _clearDownloads.Click += (_, _) =>
         {
             var removed = ClearDownloads?.Invoke() ?? 0;
-            _clearDownloads.Text = removed == 1
-                ? Strings.SettingsFileRemoved
-                : string.Format(CultureInfo.CurrentCulture, Strings.SettingsFilesRemoved, removed);
+            _clearDownloads.Text = Plurals.Format(Strings.ResourceManager, nameof(Strings.SettingsFilesRemoved_Other), removed);
             _clearDownloads.Enabled = false;
         };
 

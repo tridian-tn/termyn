@@ -17,6 +17,10 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="CatalogueLanguage" xml:space="preserve">
+    <value>en</value>
+    <comment>The language this catalogue is written in, as a language code. It decides which form of a counted phrase a count takes, from the entries named _One, _Other and so on: Termyn.Presentation's catalogue says how they work. A translation sets its own.</comment>
+  </data>
   <data name="SearchPlaceholder" xml:space="preserve">
     <value>Search…</value>
     <comment>Greyed prompt in the empty search box above the task list.</comment>
@@ -145,13 +149,13 @@
     <value>Clear downloaded files</value>
     <comment>Button in settings that deletes the comment attachments kept on disk.</comment>
   </data>
-  <data name="SettingsFileRemoved" xml:space="preserve">
-    <value>1 file removed</value>
-    <comment>Replaces the clear-downloads button's text after it has deleted exactly one file.</comment>
+  <data name="SettingsFilesRemoved_One" xml:space="preserve">
+    <value>{0} file removed</value>
+    <comment>Replaces the clear-downloads button's text after it has deleted the files. {0} is how many, which can be nought.</comment>
   </data>
-  <data name="SettingsFilesRemoved" xml:space="preserve">
+  <data name="SettingsFilesRemoved_Other" xml:space="preserve">
     <value>{0} files removed</value>
-    <comment>Replaces the clear-downloads button's text after it has deleted files. {0} is how many, never one.</comment>
+    <comment>Replaces the clear-downloads button's text after it has deleted the files. {0} is how many, which can be nought.</comment>
   </data>
   <data name="SettingsTheme" xml:space="preserve">
     <value>Theme</value>
@@ -563,13 +567,13 @@
     <value>Termyn — nothing due today</value>
     <comment>Tooltip on the notification area icon when no tasks are due today.</comment>
   </data>
-  <data name="TrayOneDue" xml:space="preserve">
-    <value>Termyn — 1 task due today</value>
-    <comment>Tooltip on the notification area icon when exactly one task is due today.</comment>
+  <data name="TrayDue_One" xml:space="preserve">
+    <value>Termyn — {0} task due today</value>
+    <comment>Tooltip on the notification area icon. {0} is how many tasks are due today, never nought: TrayNothingDue says that.</comment>
   </data>
-  <data name="TrayManyDue" xml:space="preserve">
+  <data name="TrayDue_Other" xml:space="preserve">
     <value>Termyn — {0} tasks due today</value>
-    <comment>Tooltip on the notification area icon. {0} is how many tasks are due today, never one.</comment>
+    <comment>Tooltip on the notification area icon. {0} is how many tasks are due today, never nought: TrayNothingDue says that.</comment>
   </data>
   <data name="TransferBeforeReconnect" xml:space="preserve">
     <value>A file is still being transferred. Let it finish, or press Esc in the comments to stop it, then reconnect.</value>

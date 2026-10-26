@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
@@ -22,6 +23,26 @@ public class CommentTests
         Assert.Equal("the first thing said", row.Content);
         Assert.NotEqual(string.Empty, row.Posted);
         Assert.Null(row.AttachmentName);
+    }
+
+    [Fact]
+    public void When_it_was_posted_is_written_in_the_accounts_timezone_the_way_the_region_writes_a_date()
+    {
+        // 08:30 UTC is 09:30 in London in August.
+        var was = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            var presenter = Seeded(
+                ("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}"""),
+                ("notes", "n1", """{"id":"n1","item_id":"i1","content":"said","posted_at":"2026-08-12T08:30:00Z"}"""));
+
+            Assert.Equal("Aug 12, 2026 9:30 AM", Assert.Single(presenter.CommentsOn("i1")).Posted);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = was;
+        }
     }
 
     [Fact]

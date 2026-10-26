@@ -43,9 +43,9 @@ public class ReminderRowTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
 
-            Assert.Equal("At Fri 14 Aug, 09:30", Row(ReminderKind.Absolute, due: "2026-08-14T09:30:00").ToString());
+            Assert.Equal("At Fri, 14 Aug 09:30", Row(ReminderKind.Absolute, due: "2026-08-14T09:30:00").ToString());
         }
         finally
         {
@@ -66,14 +66,14 @@ public class ReminderRowTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
             var row = new ReminderRow(new Reminder
             {
                 Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, DueDate = "2026-10-24T09:00:00", Schedule = "every sat 9am",
             });
 
-            // Not "At Sat 24 Oct", which would say it fires once.
-            Assert.Equal("Every sat 9am (next Sat 24 Oct, 09:00)", row.ToString());
+            // Not "At Sat, 24 Oct", which would say it fires once.
+            Assert.Equal("Every sat 9am (next Sat, 24 Oct 09:00)", row.ToString());
         }
         finally
         {

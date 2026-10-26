@@ -72,6 +72,16 @@ public class UpcomingByDayTests
     }
 
     [Fact]
+    public void A_heading_dates_its_day_the_way_the_region_does()
+    {
+        var presenter = UpcomingIn("en-US",
+            Task("a", "Soon", "2026-08-01"),
+            Task("b", "Later", "2026-08-06"));
+
+        Assert.Equal(["Aug 1 · Tomorrow", "Soon", "Aug 6 · Thursday", "Later"], Contents(presenter));
+    }
+
+    [Fact]
     public void Every_other_view_is_left_as_one_list()
     {
         var presenter = Upcoming(Task("a", "Soon", "2026-08-01"));
@@ -213,22 +223,28 @@ public class UpcomingByDayTests
             + $"\"due\":{{\"date\":\"{due}\",\"string\":\"{said}\",\"is_recurring\":true}}"
             + "}");
 
+    /// <summary>A presenter on Upcoming, with the machine set to en-GB so the headings can be asserted.</summary>
+    /// <param name="tasks">What the account holds</param>
+    /// <returns>The presenter, showing Upcoming</returns>
+    private static MainPresenter Upcoming(params (string Id, string Json)[] tasks) => UpcomingIn("en-GB", tasks);
+
     /// <summary>
-    /// A presenter on Upcoming, with the machine set to en-GB so the headings can be asserted.
+    /// A presenter on Upcoming, with the machine set to a given culture.
     /// </summary>
     /// <remarks>
     /// A heading is Termyn's own words about a day rather than the server's wording, so it's
     /// written in whatever culture the machine is set to — which leaves it unassertable unless the
     /// culture is said.
     /// </remarks>
+    /// <param name="culture">The culture the machine is set to, as its name</param>
     /// <param name="tasks">What the account holds</param>
     /// <returns>The presenter, showing Upcoming</returns>
-    private static MainPresenter Upcoming(params (string Id, string Json)[] tasks)
+    private static MainPresenter UpcomingIn(string culture, params (string Id, string Json)[] tasks)
     {
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
 
             var store = new InMemorySnapshotStore();
             store.PutResource("projects", "p", """{"id":"p","name":"Work"}""");

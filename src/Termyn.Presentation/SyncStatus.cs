@@ -40,9 +40,9 @@ public sealed record SyncStatus(
         var parts = new List<string>(3) { StateText() };
 
         if (Pending > 0)
-            parts.Add(string.Format(CultureInfo.CurrentCulture, Strings.SyncPending, Pending));
+            parts.Add(Plurals.Format(Strings.ResourceManager, nameof(Strings.SyncPending_Other), Pending));
         if (Failed > 0)
-            parts.Add(Failed == 1 ? "1 failed" : $"{Failed} failed");
+            parts.Add(Plurals.Format(Strings.ResourceManager, nameof(Strings.SyncFailed_Other), Failed));
 
         return string.Join(" · ", parts);
     }

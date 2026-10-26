@@ -411,4 +411,37 @@ public class DialogTests
         box.Checked = false;
         Assert.False(form.Apply(new AppSettings()).ShowAfterDownloading);
     }
+
+    [WinFormsTheory]
+    [InlineData(0, "0 files removed")]
+    [InlineData(1, "1 file removed")]
+    [InlineData(2, "2 files removed")]
+    public void Clearing_the_downloads_says_how_many_files_went(int removed, string expected)
+    {
+        // Shown, since a button on a form that isn't takes no clicks.
+        using var form = new SettingsForm(new AppSettings(), AnyTheme) { ClearDownloads = () => removed };
+        TestWindow.ShowOffScreen(form);
+
+        var button = Every(form).OfType<Button>().Single(b => b.Text == "Clear downloaded files");
+        button.PerformClick();
+
+        Assert.Equal(expected, button.Text);
+    }
+
+    [WinFormsFact]
+    public void The_history_gives_each_time_the_way_the_region_writes_one()
+    {
+        var was = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            var at = new DateTime(2026, 10, 5, 14, 30, 0, DateTimeKind.Local);
+
+            Assert.Equal("2:30 PM   Completed “Buy milk”", HistoryForm.Line(new HistoryEntry(at, "Completed “Buy milk”")));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = was;
+        }
+    }
 }

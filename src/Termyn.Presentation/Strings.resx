@@ -17,9 +17,33 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="SyncPending" xml:space="preserve">
+  <data name="CatalogueLanguage" xml:space="preserve">
+    <value>en</value>
+    <comment>The language this catalogue is written in, as a language code. It decides which form of a counted phrase a count takes, from the entries named _One, _Other and so on. A translation sets its own.</comment>
+  </data>
+
+  <!--
+    Counted phrases. Each is a family of entries named for the forms a count can take, as CLDR names
+    them for whole numbers: _Zero, _One, _Two, _Few, _Many and _Other. English uses _One and _Other,
+    and leaves out _One where both read the same. A translation adds the forms its language has, and
+    one it leaves out falls back to _Other, which every phrase has. {0} is the count in every form,
+    _One included: in some languages "one" covers 21 as well as 1.
+  -->
+  <data name="StatusTasks_One" xml:space="preserve">
+    <value>{0} task</value>
+    <comment>The status bar's count of the tasks on show. {0} is the count.</comment>
+  </data>
+  <data name="StatusTasks_Other" xml:space="preserve">
+    <value>{0} tasks</value>
+    <comment>The status bar's count of the tasks on show. {0} is the count.</comment>
+  </data>
+  <data name="SyncPending_Other" xml:space="preserve">
     <value>{0} pending</value>
-    <comment>How many writes are queued. {0} is the count, and this reads the same at one as at ten.</comment>
+    <comment>How many writes are queued. {0} is the count. English reads the same at one as at ten, so there's no _One.</comment>
+  </data>
+  <data name="SyncFailed_Other" xml:space="preserve">
+    <value>{0} failed</value>
+    <comment>How many writes Todoist turned down, which the failed changes window lists. {0} is the count. English reads the same at one as at ten, so there's no _One.</comment>
   </data>
   <data name="DueAdvancing" xml:space="preserve">
     <value>advancing…</value>
@@ -583,12 +607,13 @@
   <data name="SwitchAccountBody" xml:space="preserve">
     <value>Using it removes this account's tasks, comments, downloaded files and the list of what you've done from this computer, and then signs in to the other one. Nothing is removed from Todoist itself.</value>
   </data>
-  <data name="SwitchAccountPendingOne" xml:space="preserve">
-    <value>1 change hasn't reached Todoist yet, and switching now loses it. Paste a token for the account it belongs to and it will be sent.</value>
+  <data name="SwitchAccountPending_One" xml:space="preserve">
+    <value>{0} change hasn't reached Todoist yet, and switching now loses it. Paste a token for the account it belongs to and it will be sent.</value>
+    <comment>{0} is the count of unsent changes, never nought: with none, nothing is said.</comment>
   </data>
-  <data name="SwitchAccountPendingMany" xml:space="preserve">
+  <data name="SwitchAccountPending_Other" xml:space="preserve">
     <value>{0} changes haven't reached Todoist yet, and switching now loses them. Paste a token for the account they belong to and they will be sent.</value>
-    <comment>{0} is the count of unsent changes, always two or more here.</comment>
+    <comment>{0} is the count of unsent changes, never nought: with none, nothing is said.</comment>
   </data>
   <data name="SignOutQuestionHead" xml:space="preserve">
     <value>Sign out of Todoist?</value>
@@ -596,11 +621,76 @@
   <data name="SignOutBody" xml:space="preserve">
     <value>Termyn will forget your token, and remove the account's tasks, comments, downloaded files and the list of what you've done from this computer. Nothing is removed from Todoist itself.</value>
   </data>
-  <data name="SignOutPendingOne" xml:space="preserve">
-    <value>1 change hasn't reached Todoist yet, and signing out now loses it. Sync first if you want to keep it.</value>
+  <data name="SignOutPending_One" xml:space="preserve">
+    <value>{0} change hasn't reached Todoist yet, and signing out now loses it. Sync first if you want to keep it.</value>
+    <comment>{0} is the count of unsent changes, never nought: with none, nothing is said.</comment>
   </data>
-  <data name="SignOutPendingMany" xml:space="preserve">
+  <data name="SignOutPending_Other" xml:space="preserve">
     <value>{0} changes haven't reached Todoist yet, and signing out now loses them. Sync first if you want to keep them.</value>
-    <comment>{0} is the count of unsent changes, always two or more here.</comment>
+    <comment>{0} is the count of unsent changes, never nought: with none, nothing is said.</comment>
+  </data>
+
+  <!--
+    The reminders dialog's list, one line for each reminder on the task.
+  -->
+  <data name="ReminderWhenDue" xml:space="preserve">
+    <value>When it's due</value>
+    <comment>A reminder that goes off at the moment the task is due.</comment>
+  </data>
+  <data name="ReminderMinutesBefore_One" xml:space="preserve">
+    <value>{0} minute before it's due</value>
+    <comment>A reminder that goes off a while before the task is due. {0} is how many minutes.</comment>
+  </data>
+  <data name="ReminderMinutesBefore_Other" xml:space="preserve">
+    <value>{0} minutes before it's due</value>
+    <comment>A reminder that goes off a while before the task is due. {0} is how many minutes.</comment>
+  </data>
+  <data name="ReminderHoursBefore_One" xml:space="preserve">
+    <value>{0} hour before it's due</value>
+    <comment>A reminder that goes off a whole number of hours before the task is due. {0} is how many hours.</comment>
+  </data>
+  <data name="ReminderHoursBefore_Other" xml:space="preserve">
+    <value>{0} hours before it's due</value>
+    <comment>A reminder that goes off a whole number of hours before the task is due. {0} is how many hours.</comment>
+  </data>
+  <data name="ReminderDaysBefore_One" xml:space="preserve">
+    <value>{0} day before it's due</value>
+    <comment>A reminder that goes off a whole number of days before the task is due. {0} is how many days.</comment>
+  </data>
+  <data name="ReminderDaysBefore_Other" xml:space="preserve">
+    <value>{0} days before it's due</value>
+    <comment>A reminder that goes off a whole number of days before the task is due. {0} is how many days.</comment>
+  </data>
+  <data name="ReminderAt" xml:space="preserve">
+    <value>At {0}</value>
+    <comment>A reminder that goes off once. {0} is when, such as "Fri, 14 Aug 09:30", or Todoist's own text for it when that can't be read.</comment>
+  </data>
+  <data name="ReminderAtUnknownTime" xml:space="preserve">
+    <value>At a set time</value>
+    <comment>A reminder that goes off once, at a time Todoist hasn't said.</comment>
+  </data>
+  <data name="ReminderRepeating" xml:space="preserve">
+    <value>{0} (next {1})</value>
+    <comment>A reminder that repeats. {0} is its schedule in Todoist's own words, such as "Every sat 9am", and {1} is when it next goes off, such as "Sat, 24 Oct 09:00".</comment>
+  </data>
+  <data name="ReminderAtPlace" xml:space="preserve">
+    <value>At {0} (set in Todoist)</value>
+    <comment>A reminder that goes off on arriving at or leaving a place, which only Todoist can set. {0} is the place's name.</comment>
+  </data>
+  <data name="ReminderAtUnnamedPlace" xml:space="preserve">
+    <value>At a place (set in Todoist)</value>
+    <comment>A reminder that goes off on arriving at or leaving a place Todoist hasn't named.</comment>
+  </data>
+  <data name="ReminderSetElsewhere" xml:space="preserve">
+    <value>A reminder set in Todoist</value>
+    <comment>A reminder of a kind Termyn doesn't know, set from one of Todoist's own apps.</comment>
+  </data>
+
+  <!--
+    Upcoming's headings, one for each day with tasks on it.
+  -->
+  <data name="DayHeadingTomorrow" xml:space="preserve">
+    <value>Tomorrow</value>
+    <comment>Names tomorrow in its heading, in place of the weekday, after the date: "27 Oct · Tomorrow".</comment>
   </data>
 </root>

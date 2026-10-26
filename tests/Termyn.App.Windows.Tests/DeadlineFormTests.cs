@@ -231,7 +231,7 @@ public class DeadlineFormTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
             body();
         }
         finally

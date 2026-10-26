@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Core.Model;
 
 namespace Termyn.Presentation;
@@ -21,20 +22,25 @@ public sealed record ReminderRow(Reminder Reminder)
     public override string ToString() => Reminder.Kind switch
     {
         ReminderKind.Absolute when Reminder.Schedule is { } schedule => Repeating(schedule, Reminder.DueDate),
-        ReminderKind.Absolute => $"At {Moment(Reminder.DueDate)}",
-        ReminderKind.Location => $"At {Reminder.LocationName ?? "a place"} (set in Todoist)",
-        ReminderKind.Unknown => "A reminder set in Todoist",
+        ReminderKind.Absolute when Reminder.DueDate is { } due => string.Format(CultureInfo.CurrentCulture, Strings.ReminderAt, Moment(due)),
+        ReminderKind.Absolute => Strings.ReminderAtUnknownTime,
+        ReminderKind.Location when Reminder.LocationName is { } place => string.Format(CultureInfo.CurrentCulture, Strings.ReminderAtPlace, place),
+        ReminderKind.Location => Strings.ReminderAtUnnamedPlace,
+        ReminderKind.Unknown => Strings.ReminderSetElsewhere,
         _ => Reminder.MinuteOffset == 0
-            ? "When it's due"
-            : $"{Describe(Reminder.MinuteOffset)} before it's due",
+            ? Strings.ReminderWhenDue
+            : Before(Reminder.MinuteOffset),
     };
 
     /// <summary>
     /// An absolute reminder's moment, in words rather than the timestamp the server sent, so it
-    /// sits beside the relative ones instead of standing out as raw data.
+    /// sits beside the relative ones instead of standing out as raw data. A timestamp that can't be
+    /// read is shown as the server wrote it.
     /// </summary>
-    private static string Moment(string? due)
-        => DateTime.TryParse(due, out var when) ? when.ToString("ddd d MMM, HH:mm") : due ?? "a set time";
+    private static string Moment(string due)
+        => DateTime.TryParse(due, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when)
+            ? DisplayDates.WeekdayAndTime(when, CultureInfo.CurrentCulture)
+            : due;
 
     /// <summary>
     /// A reminder that repeats, by its schedule, and by when it next fires once the server has said.
@@ -42,24 +48,24 @@ public sealed record ReminderRow(Reminder Reminder)
     /// </summary>
     /// <param name="schedule">The words it repeats on, such as "every sat 9am"</param>
     /// <param name="due">The next time it fires, as the server wrote it, or null before it has</param>
-    /// <returns>The words, such as "Every sat 9am (next Sat 24 Oct, 09:00)"</returns>
+    /// <returns>The words, such as "Every sat 9am (next Sat, 24 Oct 09:00)"</returns>
     private static string Repeating(string schedule, string? due)
     {
         var words = schedule.Length > 0 ? char.ToUpperInvariant(schedule[0]) + schedule[1..] : schedule;
-        return due is null ? words : $"{words} (next {Moment(due)})";
+        return due is null ? words : string.Format(CultureInfo.CurrentCulture, Strings.ReminderRepeating, words, Moment(due));
     }
 
     /// <summary>
     /// Offsets aren't limited to the ones the dialog offers — the web app sets whatever it likes —
     /// so the odd sizes have to read properly too.
     /// </summary>
-    private static string Describe(int minutes) => minutes switch
+    private static string Before(int minutes) => minutes switch
     {
-        < 60 => Plural(minutes, "minute"),
-        < 1440 when minutes % 60 == 0 => Plural(minutes / 60, "hour"),
-        _ when minutes % 1440 == 0 => Plural(minutes / 1440, "day"),
-        _ => Plural(minutes, "minute"),
+        < 60 => Counted(nameof(Strings.ReminderMinutesBefore_Other), minutes),
+        < 1440 when minutes % 60 == 0 => Counted(nameof(Strings.ReminderHoursBefore_Other), minutes / 60),
+        _ when minutes % 1440 == 0 => Counted(nameof(Strings.ReminderDaysBefore_Other), minutes / 1440),
+        _ => Counted(nameof(Strings.ReminderMinutesBefore_Other), minutes),
     };
 
-    private static string Plural(int count, string unit) => $"{count} {unit}{(count == 1 ? "" : "s")}";
+    private static string Counted(string otherName, int count) => Plurals.Format(Strings.ResourceManager, otherName, count);
 }
