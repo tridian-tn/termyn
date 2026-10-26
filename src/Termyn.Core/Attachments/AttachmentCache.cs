@@ -177,13 +177,15 @@ public sealed class AttachmentCache
     /// Drops what's past either cap: anything untouched for longer than the age allows, then the
     /// least recently used until the total fits.
     /// </summary>
+    /// <param name="spare">A file to keep whatever the caps say — the one just fetched, which its caller is about to hand on</param>
     /// <returns>How many files were removed</returns>
-    public int Sweep()
+    public int Sweep(string? spare = null)
     {
         var files = Files().OrderBy(f => f.LastAccessTimeUtc).ToList();
         var removed = 0;
         var cutoff = _now().UtcDateTime - Limits.MaxAge;
         var total = files.Sum(f => f.Length);
+        var spared = spare is null ? null : Path.GetFileName(spare);
 
         foreach (var file in files)
         {
@@ -192,6 +194,12 @@ public sealed class AttachmentCache
 
             if (!stale && !over)
                 break;
+
+            // Still counted in the total, since it's taking the room, so the others go to make what
+            // space they can. It's only never removed: one bigger than the whole cap would otherwise
+            // be gone before whoever fetched it could open it.
+            if (string.Equals(file.Name, spared, StringComparison.OrdinalIgnoreCase))
+                continue;
 
             var length = file.Length;
             if (!TryDelete(file))

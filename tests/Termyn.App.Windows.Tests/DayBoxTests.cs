@@ -234,10 +234,10 @@ public class DayBoxTests
     /// <returns>The same box, now on a shown window that goes when the box does</returns>
     private static DayBox Shown(DayBox box)
     {
-        var window = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(-2000, -2000) };
+        var window = new Form();
         window.Controls.Add(box);
         box.Disposed += (_, _) => window.Dispose();
-        window.Show();
+        TestWindow.ShowOffScreen(window);
         return box;
     }
 }

@@ -210,7 +210,7 @@ public class TabOrderTests
         store.PutResource("items", "a", """{"id":"a","content":"Ship it","description":"Notes","project_id":"p2","child_order":1}""");
 
         var window = TestWindow.Build("termyn-tab-round.json", store, out _, out var presenter);
-        ShowOffScreen(window);
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfProject("p2"));
         TestWindow.Find<OutlineView>(window).SelectId("a");
@@ -234,7 +234,7 @@ public class TabOrderTests
         store.PutResource("filters", "f1", """{"id":"f1","name":"Home","query":"workspace: Home","item_order":1}""");
 
         var window = TestWindow.Build("termyn-tab-unreadable.json", store, out _, out var presenter);
-        ShowOffScreen(window);
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.OfFilter("f1"));
         window.ShowPanelTab(comments: false);
@@ -244,17 +244,5 @@ public class TabOrderTests
         Assert.Contains(TestWindow.Descendants(window).OfType<LinkLabel>(), l => l.Visible && l.Text.Contains("can't read"));
 
         return window;
-    }
-
-    /// <summary>
-    /// Shows a window off the screen, since a control on a window nobody has shown can't take the
-    /// focus.
-    /// </summary>
-    /// <param name="window">The window to show</param>
-    private static void ShowOffScreen(Form window)
-    {
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.Show();
     }
 }

@@ -395,4 +395,20 @@ public class DialogTests
         box.Checked = false;
         Assert.False(form.Apply(new AppSettings()).ShowPriorityTips);
     }
+
+    [WinFormsFact]
+    public void The_show_after_downloading_box_opens_as_saved_and_saves_as_ticked()
+    {
+        using var form = new SettingsForm(new AppSettings { ShowAfterDownloading = false }, AnyTheme);
+        form.CreateControl();
+
+        var box = Every(form).OfType<CheckBox>().Single(b => b.Text == "Show attachments after downloading");
+        Assert.False(box.Checked);
+
+        box.Checked = true;
+        Assert.True(form.Apply(new AppSettings { ShowAfterDownloading = false }).ShowAfterDownloading);
+
+        box.Checked = false;
+        Assert.False(form.Apply(new AppSettings()).ShowAfterDownloading);
+    }
 }

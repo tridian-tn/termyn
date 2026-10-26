@@ -32,10 +32,7 @@ public class SidebarRenameTests : IDisposable
         // never clicked, and the next start would open on that row rather than this one.
         var api = new FakeApi();
         using var window = TestWindow.Start(_config, new InMemorySnapshotStore(), api, out var presenter);
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-32000, -32000);
-        window.ShowInTaskbar = false;
-        window.Show();
+        TestWindow.ShowOffScreen(window);
 
         presenter.AddProject("Errands");
         var made = presenter.Sidebar.First(n => n.Kind == SidebarKind.Project && n.Label == "Errands").Id;

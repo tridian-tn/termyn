@@ -167,10 +167,7 @@ public class FoldsAcrossRestartTests : IDisposable
         // Shown, and off the screen while it is. A form that was never displayed doesn't raise its
         // closing event, and that event is where the view state is written — so a window that only
         // realised its handle could never be asked the question these are asking.
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-32000, -32000);
-        window.ShowInTaskbar = false;
-        window.Show();
+        TestWindow.ShowOffScreen(window);
         return window;
     }
 
@@ -182,6 +179,7 @@ public class FoldsAcrossRestartTests : IDisposable
         public string CacheDirectory => Path.GetTempPath();
         public string LogDirectory => Path.GetTempPath();
         public string AttachmentDirectory => Path.GetTempPath();
+        public string DownloadsDirectory => Path.GetTempPath();
     }
 
     private sealed class Hotkey : IGlobalHotkey

@@ -135,10 +135,7 @@ public class ViewAcrossRestartTests : IDisposable
     private MainForm Shown(FakeApi api, out MainPresenter presenter)
     {
         var window = TestWindow.Start(_config, Store(), api, out presenter);
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-32000, -32000);
-        window.ShowInTaskbar = false;
-        window.Show();
+        TestWindow.ShowOffScreen(window);
         return window;
     }
 }

@@ -139,6 +139,7 @@ public class SettingsStoreTests : IDisposable
         Assert.True(settings.CloseToTray);
         Assert.False(settings.LaunchAtLogin);
         Assert.True(settings.ShowPriorityTips);
+        Assert.True(settings.ShowAfterDownloading);
     }
 
     [Fact]
@@ -577,6 +578,7 @@ public class SettingsStoreTests : IDisposable
             LaunchAtLogin = true,
             CloseToTray = false,
             ShowPriorityTips = false,
+            ShowAfterDownloading = false,
             View = new ViewState
             {
                 SelectedKey = "project:p1",

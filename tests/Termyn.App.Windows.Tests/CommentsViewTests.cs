@@ -1,5 +1,6 @@
 using Termyn.Core.Settings;
 using Termyn.Presentation;
+using FileAttachment = Termyn.Core.Model.FileAttachment;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -32,6 +33,15 @@ public class CommentsViewTests
 
     private static CommentRow Comment(string id, string content, string posted = "12 Aug 2026, 09:30")
         => new(id, content, posted, null);
+
+    /// <summary>A comment carrying a file, which has no url to fetch from while it's still processing.</summary>
+    private static CommentRow WithFile(string id, bool pending = false)
+        => new(id, "see attached", "12 Aug 2026, 09:30", new FileAttachment(
+            "agenda.pdf", 8, "application/pdf", pending ? string.Empty : "https://files.example/a", pending));
+
+    /// <summary>An entry on the row menu, greyed as it would be when the menu opens.</summary>
+    private static ToolStripMenuItem MenuItem(CommentsView view, string text)
+        => view.OpenRowMenu()!.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == text);
 
     // ---- What it shows --------------------------------------------------------------------------
 
@@ -241,6 +251,50 @@ public class CommentsViewTests
 
         view.ClearDraft();
         Assert.Equal(string.Empty, view.Draft);
+    }
+
+    [WinFormsFact]
+    public void A_comment_with_a_file_offers_to_download_it()
+    {
+        using var view = Realised(WithFile("n1"));
+        var asked = new List<string>();
+        view.DownloadRequested += asked.Add;
+
+        var download = MenuItem(view, "Download attachment");
+        Assert.True(download.Enabled);
+
+        download.PerformClick();
+
+        Assert.Equal(["n1"], asked);
+    }
+
+    [WinFormsFact]
+    public void A_comment_without_a_file_has_nothing_to_download()
+    {
+        using var view = Realised(Comment("n1", "words only"));
+
+        Assert.False(MenuItem(view, "Download attachment").Enabled);
+    }
+
+    [WinFormsFact]
+    public void A_file_still_being_processed_cannot_be_downloaded_yet()
+    {
+        // There's no url to fetch it from until Todoist has finished with it.
+        using var view = Realised(WithFile("n1", pending: true));
+
+        Assert.False(MenuItem(view, "Download attachment").Enabled);
+    }
+
+    [WinFormsFact]
+    public void A_file_can_be_downloaded_from_a_comment_that_cannot_be_written_to()
+    {
+        // Saving a copy only reads, as opening does. A completed task's comments can't be added to,
+        // but the files on them are still worth keeping.
+        using var view = Realised(WithFile("n1"));
+        view.CanComment = false;
+
+        Assert.True(MenuItem(view, "Download attachment").Enabled);
+        Assert.False(MenuItem(view, "Remove attachment").Enabled);
     }
 
     // ---- Height ----------------------------------------------------------------------------------

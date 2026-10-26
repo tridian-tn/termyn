@@ -137,6 +137,10 @@
     <value>Show a tooltip on priority dots</value>
     <comment>Check box in settings: hovering over a task's coloured priority dot shows a tooltip naming the priority.</comment>
   </data>
+  <data name="SettingsShowAfterDownloading" xml:space="preserve">
+    <value>Show attachments after downloading</value>
+    <comment>Check box in settings: once an attachment has been saved to the Downloads folder, a File Explorer window opens there with the file selected.</comment>
+  </data>
   <data name="SettingsClearDownloads" xml:space="preserve">
     <value>Clear downloaded files</value>
     <comment>Button in settings that deletes the comment attachments kept on disk.</comment>
@@ -336,6 +340,10 @@
   <data name="CommentsOpenAttachment" xml:space="preserve">
     <value>Open attachment</value>
     <comment>Right-click menu item on a comment with a file.</comment>
+  </data>
+  <data name="CommentsDownloadAttachment" xml:space="preserve">
+    <value>Download attachment</value>
+    <comment>Right-click menu item on a comment with a file. Saves a copy of the file in the Downloads folder.</comment>
   </data>
   <data name="CommentsRemoveAttachment" xml:space="preserve">
     <value>Remove attachment</value>
@@ -686,6 +694,18 @@ It can't be brought back — Todoist has no undelete.</value>
   <data name="FileOpenFailed" xml:space="preserve">
     <value>The file couldn't be opened.</value>
     <comment>Message when a downloaded attachment couldn't be opened.</comment>
+  </data>
+  <data name="FileSaveFailed" xml:space="preserve">
+    <value>The file couldn't be saved.</value>
+    <comment>Message when an attachment couldn't be saved to the Downloads folder.</comment>
+  </data>
+  <data name="AttachmentSaved" xml:space="preserve">
+    <value>Saved {0} to Downloads.</value>
+    <comment>Status bar once an attachment has been saved. {0} is the name it was saved under, which may have a number added if the folder already had a file of that name.</comment>
+  </data>
+  <data name="AttachmentSavedNotShown" xml:space="preserve">
+    <value>Saved {0} to Downloads, but File Explorer couldn't be opened to show it.</value>
+    <comment>Status bar when an attachment was saved but the setting to show it afterwards couldn't open File Explorer. {0} is the name it was saved under.</comment>
   </data>
   <data name="AttachPickerTitle" xml:space="preserve">
     <value>Attach a file to this comment</value>

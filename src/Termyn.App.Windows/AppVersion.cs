@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Termyn.Core;
 using Termyn.Core.Update;
 
@@ -93,4 +94,73 @@ internal static class AppVersion
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         return true;
     }
+
+    /// <summary>
+    /// Opens Explorer on the folder a file's in, with the file selected.
+    /// </summary>
+    /// <remarks>
+    /// Asked of the shell rather than run as <c>explorer /select,</c>: the shell reuses a window
+    /// that's already open on the folder, so saving three files one after another doesn't leave
+    /// three windows behind. Explorer's only started by hand when the shell won't do it.
+    ///
+    /// On a thread of its own, since the shell call can hold whoever makes it for a second or more
+    /// while Explorer starts or reaches the folder, and the window shouldn't stop drawing for that.
+    /// The thread's single-threaded, as the shell's objects need it to be.
+    /// </remarks>
+    /// <param name="path">A file this app has just saved</param>
+    /// <returns>False when there's no such file or Explorer couldn't be got to show it, so the caller can say so</returns>
+    public static Task<bool> ShowInFolder(string path)
+    {
+        if (!File.Exists(path))
+            return Task.FromResult(false);
+
+        var shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() => shown.SetResult(Show(path))) { IsBackground = true, Name = "Show in folder" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        return shown.Task;
+    }
+
+    /// <summary>Shows a file in its folder, on whichever thread it's called from.</summary>
+    /// <param name="path">A file that's there</param>
+    /// <returns>False when neither the shell nor Explorer could be got to show it</returns>
+    private static bool Show(string path)
+    {
+        var item = ILCreateFromPathW(path);
+        try
+        {
+            // No items, and the file's own id where the folder's would go, is how the shell is
+            // asked to open the file's folder and select the file in it.
+            if (item != IntPtr.Zero && SHOpenFolderAndSelectItems(item, 0, IntPtr.Zero, 0) == 0)
+                return true;
+        }
+        finally
+        {
+            ILFree(item);
+        }
+
+        try
+        {
+            using var explorer = Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\""));
+            return true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // Not thrown on: this runs on a thread of its own, where an exception would end the
+            // process, and the file's been saved either way.
+            return false;
+        }
+    }
+
+    // DllImport rather than LibraryImport, as elsewhere here: the generated marshalling for the
+    // latter needs unsafe code, which is a lot to turn on for three calls.
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern IntPtr ILCreateFromPathW(string path);
+
+    [DllImport("shell32.dll", ExactSpelling = true)]
+    private static extern int SHOpenFolderAndSelectItems(IntPtr folder, uint count, IntPtr items, uint flags);
+
+    [DllImport("shell32.dll", ExactSpelling = true)]
+    private static extern void ILFree(IntPtr item);
 }

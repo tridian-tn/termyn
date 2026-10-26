@@ -18,6 +18,10 @@ public sealed class AttachmentFetcherTests : IDisposable
     private readonly string _directory =
         Path.Combine(Path.GetTempPath(), "termyn-fetch-tests", Guid.NewGuid().ToString("N"));
 
+    /// <summary>Where a saved copy goes, standing in for the Downloads folder.</summary>
+    private readonly string _downloads =
+        Path.Combine(Path.GetTempPath(), "termyn-fetch-tests", Guid.NewGuid().ToString("N") + "-downloads");
+
     private readonly FakeApi _api = new() { FileBytes = [1, 2, 3, 4, 5, 6, 7, 8] };
     private readonly FakeSecrets _secrets = new() { Stored = "tok" };
 
@@ -25,12 +29,17 @@ public sealed class AttachmentFetcherTests : IDisposable
     {
         if (Directory.Exists(_directory))
             Directory.Delete(_directory, recursive: true);
+
+        if (Directory.Exists(_downloads))
+            Directory.Delete(_downloads, recursive: true);
+        else if (System.IO.File.Exists(_downloads))
+            System.IO.File.Delete(_downloads);
     }
 
     private AttachmentFetcher Fetcher() => new(_api, _secrets, new AttachmentCache(_directory));
 
-    private static FileAttachment File(bool pending = false, string url = "https://files.example/a")
-        => new("agenda.pdf", 8, "application/pdf", url, pending);
+    private static FileAttachment File(bool pending = false, string url = "https://files.example/a", string name = "agenda.pdf")
+        => new(name, 8, "application/pdf", url, pending);
 
     // ---- When it works ---------------------------------------------------------------------------
 
@@ -189,12 +198,236 @@ public sealed class AttachmentFetcherTests : IDisposable
     public async Task A_download_sweeps_rather_than_waiting_for_the_next_start()
     {
         // This download is exactly what may have put the cache over its cap, so the sweep happens
-        // here rather than only when the app is next opened.
+        // here rather than only when the app is next opened. Two eight-byte files against a cap of
+        // twelve: the second is what puts it over, and the first is the older of the two.
+        var now = DateTimeOffset.UtcNow;
+        var cache = new AttachmentCache(_directory, new CacheLimits(12, TimeSpan.FromDays(14)), () => now);
+        var fetcher = new AttachmentFetcher(_api, _secrets, cache);
+
+        await fetcher.FetchAsync(File(url: "https://files.example/a"), ct: TestContext.Current.CancellationToken);
+        now = now.AddMinutes(1);
+        await fetcher.FetchAsync(File(url: "https://files.example/b"), ct: TestContext.Current.CancellationToken);
+
+        Assert.True(cache.Size() <= 12, $"the cache holds {cache.Size()} bytes against a cap of 12");
+    }
+
+    [Fact]
+    public async Task A_file_bigger_than_the_whole_cap_is_still_there_once_fetched()
+    {
+        // The sweep that follows a download mustn't take the file that was just asked for. It's
+        // about to be opened or saved, and a path to nothing fails with no reason anyone can see.
         var cache = new AttachmentCache(_directory, new CacheLimits(4, TimeSpan.FromDays(14)));
         var fetcher = new AttachmentFetcher(_api, _secrets, cache);
 
+        var result = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.True(System.IO.File.Exists(result.Path), "the file was swept away before it could be opened");
+    }
+
+    // ---- Saving a copy ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_saved_copy_has_the_name_and_the_bytes_it_has_on_the_account()
+    {
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.Equal(Path.Combine(_downloads, "agenda.pdf"), result.Path);
+        Assert.Equal(_api.FileBytes, await System.IO.File.ReadAllBytesAsync(result.Path!, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_name_already_taken_is_never_written_over()
+    {
+        // Something of the same name was there first: an earlier save, or a file that only shares
+        // the name. It keeps its bytes, and each new copy takes the next number.
+        Directory.CreateDirectory(_downloads);
+        var earlier = Path.Combine(_downloads, "agenda.pdf");
+        await System.IO.File.WriteAllBytesAsync(earlier, [9, 9], TestContext.Current.CancellationToken);
+
+        var fetcher = Fetcher();
+        var first = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+        var second = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(Path.Combine(_downloads, "agenda (1).pdf"), first.Path);
+        Assert.Equal(Path.Combine(_downloads, "agenda (2).pdf"), second.Path);
+        Assert.Equal(new byte[] { 9, 9 }, await System.IO.File.ReadAllBytesAsync(earlier, TestContext.Current.CancellationToken));
+        Assert.Equal(_api.FileBytes, await System.IO.File.ReadAllBytesAsync(second.Path!, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_folder_of_the_same_name_counts_as_taken()
+    {
+        Directory.CreateDirectory(Path.Combine(_downloads, "agenda.pdf"));
+
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(Path.Combine(_downloads, "agenda (1).pdf"), result.Path);
+    }
+
+    [Fact]
+    public async Task A_name_carrying_a_path_is_saved_in_the_folder_all_the_same()
+    {
+        var result = await Fetcher().SaveAsync(File(name: @"..\..\agenda.pdf"), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.Equal(_downloads, Path.GetDirectoryName(result.Path));
+    }
+
+    [Fact]
+    public async Task A_file_already_here_is_saved_without_going_back_to_the_server()
+    {
+        // Offline included: a file that's been opened once can be saved with no connection at all.
+        var fetcher = Fetcher();
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+        _api.TransferThrow = new TodoistNetworkException("offline");
+
+        var result = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.Single(_api.Downloaded);
+    }
+
+    [Fact]
+    public async Task Offline_it_says_so_and_puts_nothing_in_the_folder()
+    {
+        _api.TransferThrow = new TodoistNetworkException("offline");
+
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Offline, result.Outcome);
+        Assert.Contains("back online", result.Message);
+        Assert.False(Directory.Exists(_downloads) && Directory.EnumerateFileSystemEntries(_downloads).Any(), "something was saved");
+    }
+
+    [Fact]
+    public async Task A_file_bigger_than_the_whole_cap_can_still_be_saved()
+    {
+        var fetcher = new AttachmentFetcher(_api, _secrets, new AttachmentCache(_directory, new CacheLimits(4, TimeSpan.FromDays(14))));
+
+        var result = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.Equal(_api.FileBytes, await System.IO.File.ReadAllBytesAsync(result.Path!, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_save_called_off_leaves_nothing_in_the_folder()
+    {
+        // Held already, so it's the copy itself that's called off rather than the download.
+        var fetcher = Fetcher();
         await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
-        Assert.True(cache.Size() <= 4, $"the cache holds {cache.Size()} bytes against a cap of 4");
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        var result = await fetcher.SaveAsync(File(), _downloads, ct: cancelled.Token);
+
+        Assert.Equal(FetchOutcome.Cancelled, result.Outcome);
+        Assert.Empty(Directory.GetFileSystemEntries(_downloads));
+    }
+
+    [Fact]
+    public async Task A_file_not_already_here_is_saved_without_filling_the_cache()
+    {
+        // Downloaded straight into the folder. Through the cache it would sit on the disk twice.
+        var fetcher = Fetcher();
+
+        var result = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.Single(_api.Downloaded);
+        Assert.False(fetcher.IsHeld(File()), "the saved file was put in the cache as well");
+    }
+
+    [Fact]
+    public async Task Saving_a_file_leaves_what_is_already_cached_alone()
+    {
+        // Eight bytes cached against a cap of twelve. Saved through the cache, a second eight-byte
+        // file put it over, and the sweep cleared out the first to make room for a file that was
+        // only on its way to Downloads.
+        var cache = new AttachmentCache(_directory, new CacheLimits(12, TimeSpan.FromDays(14)));
+        var fetcher = new AttachmentFetcher(_api, _secrets, cache);
+        await fetcher.FetchAsync(File(url: "https://files.example/a"), ct: TestContext.Current.CancellationToken);
+
+        await fetcher.SaveAsync(File(url: "https://files.example/b"), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.True(fetcher.IsHeld(File(url: "https://files.example/a")), "saving a file swept the cache");
+    }
+
+    [Fact]
+    public async Task A_download_called_off_part_way_leaves_nothing_in_the_folder()
+    {
+        using var cancelled = new CancellationTokenSource();
+        _api.TransferThrow = new OperationCanceledException(cancelled.Token);
+
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: cancelled.Token);
+
+        Assert.Equal(FetchOutcome.Cancelled, result.Outcome);
+        Assert.Empty(Directory.GetFileSystemEntries(_downloads));
+    }
+
+    [Fact]
+    public async Task A_cached_copy_that_cannot_be_read_is_not_blamed_on_the_folder()
+    {
+        // Saying it couldn't be saved to Downloads would send the user looking in the wrong place.
+        var fetcher = Fetcher();
+        var held = (await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken)).Path!;
+
+        FetchResult result;
+        using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.None))
+            result = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Failed, result.Outcome);
+        Assert.Contains("downloaded copy", result.Message);
+        Assert.DoesNotContain(_downloads, result.Message);
+    }
+
+    [Fact]
+    public async Task A_save_does_its_work_off_the_thread_that_asked_for_it()
+    {
+        // Making the folder and the file block, and a Downloads folder on a share that's gone away
+        // can hold the thread for as long as Windows takes to give up. The token is read before
+        // anything is awaited, so where it's read is where the blocking calls would have run.
+        var secrets = new ThreadNoting();
+        var fetcher = new AttachmentFetcher(_api, secrets, new AttachmentCache(_directory));
+        Task<FetchResult>? save = null;
+
+        var caller = new Thread(() => save = fetcher.SaveAsync(File(), _downloads));
+        caller.Start();
+        caller.Join();
+        await save!.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(caller.ManagedThreadId, secrets.ReadOn);
+    }
+
+    /// <summary>A token store that notes which thread asked it for the token.</summary>
+    private sealed class ThreadNoting : Termyn.Core.Platform.ISecretStore
+    {
+        public int? ReadOn { get; private set; }
+
+        public string? GetToken()
+        {
+            ReadOn = Environment.CurrentManagedThreadId;
+            return "tok";
+        }
+
+        public void SetToken(string token) { }
+
+        public void ClearToken() { }
+    }
+
+    [Fact]
+    public async Task A_folder_that_cannot_be_made_is_reported_rather_than_thrown()
+    {
+        // A file sitting where the folder should be.
+        Directory.CreateDirectory(Path.GetDirectoryName(_downloads)!);
+        await System.IO.File.WriteAllBytesAsync(_downloads, [0], TestContext.Current.CancellationToken);
+
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Failed, result.Outcome);
+        Assert.Contains("agenda.pdf", result.Message);
     }
 }

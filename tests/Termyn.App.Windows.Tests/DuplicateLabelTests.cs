@@ -28,9 +28,7 @@ public class DuplicateLabelTests
 
         // Shown, off-screen: a window that was never displayed has no handle, and drops the
         // render this is about rather than running it.
-        window.StartPosition = FormStartPosition.Manual;
-        window.Location = new Point(-2000, -2000);
-        window.Show();
+        TestWindow.ShowOffScreen(window);
 
         presenter.Select(ViewSelection.Of(SmartView.All));
 

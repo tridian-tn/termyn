@@ -38,6 +38,7 @@ internal sealed class CommentsView : UserControl
     private readonly LinkLabel _attach;
     private readonly ContextMenuStrip _rowMenu;
     private readonly ToolStripMenuItem _openItem;
+    private readonly ToolStripMenuItem _downloadItem;
     private readonly ToolStripMenuItem _detachItem;
     private readonly ToolStripMenuItem _editItem;
     private readonly ToolStripMenuItem _deleteItem;
@@ -99,10 +100,11 @@ internal sealed class CommentsView : UserControl
 
         _rowMenu = new ContextMenuStrip();
         _openItem = new ToolStripMenuItem(Strings.CommentsOpenAttachment, null, (_, _) => RaiseForSelected(OpenRequested));
+        _downloadItem = new ToolStripMenuItem(Strings.CommentsDownloadAttachment, null, (_, _) => RaiseForSelected(DownloadRequested));
         _detachItem = new ToolStripMenuItem(Strings.CommentsRemoveAttachment, null, (_, _) => RaiseForSelected(DetachRequested));
         _editItem = new ToolStripMenuItem(Strings.CommentsEdit, null, (_, _) => BeginEdit());
         _deleteItem = new ToolStripMenuItem(Strings.CommentsDelete, null, (_, _) => RaiseForSelected(Deleted));
-        _rowMenu.Items.AddRange([_openItem, _detachItem, new ToolStripSeparator(), _editItem, _deleteItem]);
+        _rowMenu.Items.AddRange([_openItem, _downloadItem, _detachItem, new ToolStripSeparator(), _editItem, _deleteItem]);
         _rowMenu.Opening += OnRowMenuOpening;
         _list.ContextMenuStrip = _rowMenu;
 
@@ -138,6 +140,9 @@ internal sealed class CommentsView : UserControl
 
     /// <summary>Raised when a comment's file is to be opened, with the comment's id.</summary>
     public event Action<string>? OpenRequested;
+
+    /// <summary>Raised when a copy of a comment's file is to be saved, with the comment's id.</summary>
+    public event Action<string>? DownloadRequested;
 
     /// <summary>Raised when a comment's file is to be taken off it, with the comment's id.</summary>
     public event Action<string>? DetachRequested;
@@ -414,13 +419,28 @@ internal sealed class CommentsView : UserControl
         var comment = _list.SelectedItem as CommentRow;
         var attachment = comment?.Attachment;
 
-        // A file still being processed has no url to fetch from yet, so opening it can't work.
+        // A file still being processed has no url to fetch from yet, so neither opening it nor
+        // saving it can work. Both are reading, though, so a comment that can't be written to still
+        // offers them.
         _openItem.Enabled = attachment is { Pending: false, CanFetch: true };
+        _downloadItem.Enabled = _openItem.Enabled;
         _detachItem.Enabled = attachment is not null && CanComment;
         _editItem.Enabled = comment is not null && CanComment;
         _deleteItem.Enabled = comment is not null && CanComment;
 
         e.Cancel = comment is null;
+    }
+
+    /// <summary>
+    /// The row menu as it would open over the selected comment, greyed as opening it greys it, for a
+    /// test with no pointer to right-click with.
+    /// </summary>
+    /// <returns>The menu, or null when there's no comment for it to open over</returns>
+    internal ContextMenuStrip? OpenRowMenu()
+    {
+        var opening = new CancelEventArgs();
+        OnRowMenuOpening(_rowMenu, opening);
+        return opening.Cancel ? null : _rowMenu;
     }
 
     // ---- Drawing --------------------------------------------------------------------------------

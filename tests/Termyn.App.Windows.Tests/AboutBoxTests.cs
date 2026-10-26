@@ -121,5 +121,6 @@ public class AboutBoxTests
     private sealed record Paths(string ConfigDirectory, string CacheDirectory, string LogDirectory) : IAppPaths
     {
         public string AttachmentDirectory => CacheDirectory;
+        public string DownloadsDirectory => CacheDirectory;
     }
 }

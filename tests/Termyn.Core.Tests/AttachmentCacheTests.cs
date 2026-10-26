@@ -195,6 +195,22 @@ public sealed class AttachmentCacheTests : IDisposable
     }
 
     [Fact]
+    public void A_spared_file_stays_however_far_over_it_is_but_still_takes_its_room()
+    {
+        // The file a download has just put here is spared, since its caller is about to open it.
+        // It still counts towards the cap, though, so the older files go to make what room they can.
+        var cache = Cache(maxBytes: 250);
+        Put(cache, "https://files.example/older", "older.bin", 100);
+        _now = _now.AddHours(1);
+        var spared = Put(cache, "https://files.example/huge", "huge.bin", 300);
+
+        Assert.Equal(1, cache.Sweep(spare: spared));
+
+        Assert.True(File.Exists(spared), "the file just fetched was swept");
+        Assert.Null(cache.Find("https://files.example/older", "older.bin"));
+    }
+
+    [Fact]
     public void Emptying_it_takes_everything()
     {
         var cache = Cache();
