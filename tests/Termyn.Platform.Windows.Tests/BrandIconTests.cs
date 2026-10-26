@@ -3,6 +3,7 @@ using System.Drawing;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
 using Termyn.Platform.Windows;
+using Termyn.TestSupport;
 
 namespace Termyn.Platform.Windows.Tests;
 
@@ -93,7 +94,7 @@ public class BrandIconTests
     {
         // The executable and the installer both point at this file, and nothing regenerates it — so
         // without this, changing the mark updates the tray and leaves those two on the old one.
-        var committed = Path.Combine(RepoRoot(), "assets", "termyn.ico");
+        var committed = Path.Combine(Repository.Root(), "assets", "termyn.ico");
         Assert.True(File.Exists(committed), $"missing {committed}");
 
         var fresh = Temp();
@@ -139,7 +140,7 @@ public class BrandIconTests
         // Including 256, which the shell-loading test has to skip because the Icon API won't decode
         // it — so this is the only thing checking the size of the frame Explorer shows large and the
         // installer stamps on the setup binary.
-        var bytes = File.ReadAllBytes(Path.Combine(RepoRoot(), "assets", "termyn.ico"));
+        var bytes = File.ReadAllBytes(Path.Combine(Repository.Root(), "assets", "termyn.ico"));
         var count = BitConverter.ToUInt16(bytes, 4);
 
         Assert.Equal(BrandIcon.IconSizes.Count, count);
@@ -292,19 +293,5 @@ public class BrandIconTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"termyn-{Guid.NewGuid():N}.ico");
         return path;
-    }
-
-    /// <summary>
-    /// Walks up to the directory holding the solution, so committed assets can be read. Keyed on the
-    /// solution file rather than Directory.Build.props, which also sits in tests/.
-    /// </summary>
-    internal static string RepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Termyn.slnx")))
-            directory = directory.Parent;
-
-        Assert.NotNull(directory);
-        return directory.FullName;
     }
 }

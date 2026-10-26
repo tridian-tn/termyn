@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Termyn.TestSupport;
 
 namespace Termyn.Platform.Windows.Tests;
 
@@ -15,7 +16,7 @@ namespace Termyn.Platform.Windows.Tests;
 /// </remarks>
 public class ThirdPartyNoticesTests
 {
-    private static readonly string Root = BrandIconTests.RepoRoot();
+    private static readonly string Root = Repository.Root();
 
     private static readonly string Notices = File.ReadAllText(Path.Combine(Root, "THIRD-PARTY-NOTICES.txt"));
 

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
@@ -31,7 +30,7 @@ public sealed partial class CatalogueSource
     /// <param name="project">The project's folder name, such as "Termyn.Presentation"</param>
     public CatalogueSource(string project)
     {
-        _folder = Path.Combine(RepoRoot(), "src", project);
+        _folder = Path.Combine(Repository.Root(), "src", project);
         Entries = XDocument.Load(Path.Combine(_folder, "Strings.resx"))
             .Root!.Elements("data")
             .Select(d => new CatalogueEntry(
@@ -59,9 +58,21 @@ public sealed partial class CatalogueSource
     /// <returns>Each one, as the entry's name and the placeholder</returns>
     public IEnumerable<string> Unexplained()
         => Entries
-            .SelectMany(e => Placeholder().Matches(e.Value).Select(m => (e.Name, Placeholder: m.Value, e.Comment)))
+            .SelectMany(e => PlaceholdersIn(e.Value).Select(placeholder => (e.Name, Placeholder: placeholder, e.Comment)))
             .Where(p => !p.Comment.Contains(p.Placeholder, StringComparison.Ordinal))
             .Select(p => $"{p.Name} {p.Placeholder}");
+
+    /// <summary>
+    /// The placeholders in an entry's value, each once and by its number alone.
+    /// </summary>
+    /// <remarks>
+    /// By number because that's how a comment names one: "{0} is the count" explains a {0:N0} as
+    /// much as a {0}, and a translator keeps the format with the number.
+    /// </remarks>
+    /// <param name="value">An entry's value</param>
+    /// <returns>Each placeholder, such as "{0}", in the order it first appears</returns>
+    public static IEnumerable<string> PlaceholdersIn(string value)
+        => FormatItem().Matches(value).Select(m => $"{{{m.Groups[1].Value}}}").Distinct();
 
     /// <summary>
     /// The entries nothing in the project reads.
@@ -79,12 +90,24 @@ public sealed partial class CatalogueSource
     /// <returns>Each one's name</returns>
     public IEnumerable<string> Unused(params string[] readByName)
     {
-        var source = string.Concat(Code().Select(File.ReadAllText));
+        var read = Code()
+            .SelectMany(file => CatalogueRead().Matches(File.ReadAllText(file)).Select(m => m.Groups[1].Value))
+            .ToHashSet(StringComparer.Ordinal);
 
         return Entries.Select(e => e.Name)
             .Where(name => !readByName.Contains(name))
-            .Where(name => !Regex.IsMatch(source, $@"\bStrings\.{CountedForm().Replace(name, "_Other")}\b"));
+            .Where(name => !read.Contains(OtherFormOf(name)));
     }
+
+    /// <summary>Whether an entry is one form of a counted phrase, _Other included.</summary>
+    /// <param name="name">The entry's name</param>
+    /// <returns>Whether it ends in the name of one of CLDR's forms</returns>
+    public static bool IsCountedForm(string name) => CountedForm().IsMatch(name);
+
+    /// <summary>The _Other form of the counted phrase an entry's a form of.</summary>
+    /// <param name="name">The entry's name</param>
+    /// <returns>The _Other form's name, or the entry's own when it isn't a form of anything</returns>
+    public static string OtherFormOf(string name) => CountedForm().Replace(name, "_Other");
 
     /// <summary>
     /// Text in the project's code that reads like something said to a person, rather than coming
@@ -92,30 +115,42 @@ public sealed partial class CatalogueSource
     /// </summary>
     /// <remarks>
     /// Told apart by its shape, which can't be done perfectly: two words side by side, or a word
-    /// with a capital, the way a label or a sentence is written. A single lower-case word isn't
-    /// caught, since it's as often a field Todoist reads ("content") as a word a person does, and
-    /// nor is a unit of one letter. What's caught is the bulk of it — the sentences and the labels.
+    /// with a capital, the way a label or a sentence is written. A placeholder counts as a word, so
+    /// a format string's wording is caught however its values are put in. A single lower-case
+    /// word isn't caught, since it's as often a field Todoist reads ("content") as a word a person
+    /// does, and nor is a unit of one letter. What's caught is the bulk of it — the sentences and
+    /// the labels.
     ///
-    /// Left alone: what the log says, which is for whoever reads the log; an exception that means
-    /// the code's been called wrongly, which no user is shown; an attribute's arguments; and
-    /// anything <see cref="ProtocolText"/> calls protocol, or that's a date pattern or a dotted
-    /// name. The log is known by the name it's held under, <c>_log</c>, since this reads the
-    /// code's syntax and not its types.
+    /// Left alone: what the log says, which is for whoever reads the log; an attribute's arguments;
+    /// anything <see cref="ProtocolText"/> calls protocol, or that's a date pattern or a dotted name;
+    /// and an exception only a bug can raise. That message does reach the status bar, since the
+    /// window shows whatever an exception says, but only as a bug report would — and in the English
+    /// the log has it in too. An exception a person can cause, like an operation that can't be done
+    /// now, is checked like anything else.
+    ///
+    /// This reads the code's syntax and not its types, so a log is known by what it's called: a
+    /// receiver named log, whatever its case or leading underscores.
     /// </remarks>
-    /// <param name="allowed">Text that looks like prose and isn't, each one for a reason the caller gives</param>
+    /// <param name="namingCalls">
+    /// Methods whose first argument is a name the code keeps rather than words a person reads, such
+    /// as an id that settings remember something by. Only that argument of a call to one of them is
+    /// left alone, so the same words written anywhere else are still caught.
+    /// </param>
     /// <returns>Each piece of text, with the file and line it's on</returns>
-    public IEnumerable<string> InlineProse(params string[] allowed)
-        => Code().SelectMany(file => Prose(File.ReadAllText(file), Path.GetFileName(file), allowed));
+    public IEnumerable<string> InlineProse(params string[] namingCalls)
+        => Code().SelectMany(file => Prose(File.ReadAllText(file), Path.GetFileName(file), namingCalls));
 
     /// <summary>
     /// The text in a piece of code that <see cref="InlineProse"/> would report, so what it catches
     /// and what it lets go can be shown on code written to show it.
     /// </summary>
     /// <param name="code">C#, as it would be written in a file</param>
+    /// <param name="namingCalls">Methods whose first argument is a name the code keeps, as for <see cref="InlineProse"/></param>
     /// <returns>Each piece of text, with the line it's on</returns>
-    public static IEnumerable<string> InlineProseIn(string code) => Prose(code, "code", []);
+    public static IEnumerable<string> InlineProseIn(string code, params string[] namingCalls)
+        => Prose(code, "code", namingCalls);
 
-    private static IEnumerable<string> Prose(string code, string file, string[] allowed)
+    private static IEnumerable<string> Prose(string code, string file, string[] namingCalls)
     {
         foreach (var node in CSharpSyntaxTree.ParseText(code).GetRoot().DescendantNodes())
         {
@@ -127,7 +162,7 @@ public sealed partial class CatalogueSource
                 _ => null,
             };
 
-            if (text is null || allowed.Contains(text) || !ReadsAsProse(text) || IsExcused(node))
+            if (text is null || !ReadsAsProse(FormatItem().Replace(text, Hole)) || IsExcused(node) || NamesSomething(node, namingCalls))
                 continue;
 
             var line = node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
@@ -141,7 +176,10 @@ public sealed partial class CatalogueSource
             .Where(f => !Path.GetRelativePath(_folder, f).Split(Path.DirectorySeparatorChar).Any(d => d is "obj" or "bin"))
             .Order(StringComparer.Ordinal);
 
-    /// <summary>What an interpolation's hole is read as: a word, but not a word of English.</summary>
+    /// <summary>
+    /// What an interpolation's hole, or a format string's placeholder, is read as: a word, but not
+    /// a word of English.
+    /// </summary>
     private const string Hole = "{}";
 
     /// <summary>Whether some text is shaped like something said to a person.</summary>
@@ -153,54 +191,66 @@ public sealed partial class CatalogueSource
 
     /// <summary>
     /// Whether some text is somewhere prose is allowed: in what the log's told, in an exception
-    /// that means the code's been called wrongly, or in an attribute.
+    /// only a bug can raise, or in an attribute.
     /// </summary>
     private static bool IsExcused(SyntaxNode node)
         => node.Ancestors().Any(a => a switch
         {
             AttributeSyntax => true,
-            ConditionalAccessExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "_log" } } => true,
-            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "_log" } } } => true,
-            ObjectCreationExpressionSyntax { Type: var type } => ProgrammingErrors.Contains(type.ToString()),
+            ConditionalAccessExpressionSyntax { Expression: var receiver } when IsLog(receiver) => true,
+            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: var receiver } } when IsLog(receiver) => true,
+            ObjectCreationExpressionSyntax { Type: var type } => RaisedOnlyByBugs.Contains(type.ToString()),
             _ => false,
         });
 
+    /// <summary>Whether something's called log: <c>_log</c>, <c>log</c>, <c>this._log</c>, <c>_shell.Log</c>.</summary>
+    private static bool IsLog(ExpressionSyntax receiver) => receiver switch
+    {
+        IdentifierNameSyntax name => name.Identifier.ValueText.TrimStart('_').Equals("log", StringComparison.OrdinalIgnoreCase),
+        MemberAccessExpressionSyntax access => IsLog(access.Name),
+        _ => false,
+    };
+
+    /// <summary>Whether some text is the first argument of a call to one of the methods given.</summary>
+    private static bool NamesSomething(SyntaxNode node, string[] namingCalls)
+        => node.Parent is ArgumentSyntax { Parent: ArgumentListSyntax { Parent: InvocationExpressionSyntax call } arguments } argument
+        && arguments.Arguments[0] == argument
+        && namingCalls.Contains(call.Expression switch
+        {
+            IdentifierNameSyntax name => name.Identifier.ValueText,
+            MemberAccessExpressionSyntax access => access.Name.Identifier.ValueText,
+            _ => null,
+        });
+
     /// <summary>
-    /// The exceptions that mean the code's been called wrongly, whose message is for whoever wrote
-    /// the call. Not every exception: some carry what the user's told.
+    /// The exceptions only a bug can raise: an argument the code was wrongly handed, a branch it
+    /// shouldn't have reached, a catalogue missing from the build. Not one a person's own doing can
+    /// cause, such as InvalidOperationException for something that can't be done now.
     /// </summary>
-    private static readonly HashSet<string> ProgrammingErrors =
+    private static readonly HashSet<string> RaisedOnlyByBugs =
     [
-        "ArgumentException", "ArgumentNullException", "ArgumentOutOfRangeException", "InvalidOperationException",
-        "NotSupportedException", "NotImplementedException", "UnreachableException", "MissingManifestResourceException",
+        "ArgumentException", "ArgumentNullException", "ArgumentOutOfRangeException", "UnreachableException",
+        "MissingManifestResourceException",
     ];
 
-    /// <summary>The folder with <c>Termyn.slnx</c> in it, found from this file or from the build.</summary>
-    /// <param name="source">This file's path, filled in by the compiler</param>
-    /// <returns>The repository's root</returns>
-    public static string RepoRoot([CallerFilePath] string source = "")
-    {
-        foreach (var start in new[] { Path.GetDirectoryName(source), AppContext.BaseDirectory })
-        {
-            for (var directory = start is null ? null : new DirectoryInfo(start); directory is not null; directory = directory.Parent)
-                if (File.Exists(Path.Combine(directory.FullName, "Termyn.slnx"))) return directory.FullName;
-        }
+    /// <summary>A format item, with its number captured: {0}, {1,5}, {0:N0}.</summary>
+    [GeneratedRegex(@"\{(\d+)(,[^}:]*)?(:[^}]*)?\}")]
+    private static partial Regex FormatItem();
 
-        throw new DirectoryNotFoundException("couldn't find Termyn.slnx above the tests or their sources");
-    }
+    /// <summary>An entry read from the catalogue's generated class, with its name captured whole.</summary>
+    [GeneratedRegex(@"\bStrings\.(\w+)")]
+    private static partial Regex CatalogueRead();
 
-    [GeneratedRegex(@"\{\d+\}")]
-    private static partial Regex Placeholder();
-
-    /// <summary>The suffix of a counted phrase's forms, other than the _Other one every phrase has.</summary>
-    [GeneratedRegex("_(Zero|One|Two|Few|Many)$")]
+    /// <summary>The suffix of a counted phrase's forms, as CLDR names them for whole numbers.</summary>
+    [GeneratedRegex("_(Zero|One|Two|Few|Many|Other)$")]
     private static partial Regex CountedForm();
 
     /// <summary>
     /// Two words side by side, at least one of them a real one: "when due", "{0} at {1}", "{0}h
-    /// before". Two holes with a space between are layout, not wording.
+    /// before". Two holes with a space between are layout, not wording. Any space between counts,
+    /// a non-breaking one or a line break included.
     /// </summary>
-    [GeneratedRegex(@"\p{L}{2,}[ \t]+(\p{L}{2,}|\{\})|\{\}\p{L}*[ \t]+\p{L}{2,}")]
+    [GeneratedRegex(@"\p{L}{2,}\s+(\p{L}{2,}|\{\})|\{\}\p{L}*\s+\p{L}{2,}")]
     private static partial Regex TwoWords();
 
     /// <summary>

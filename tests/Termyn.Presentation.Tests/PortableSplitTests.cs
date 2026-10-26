@@ -1,9 +1,9 @@
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Termyn.Core;
+using Termyn.TestSupport;
 
 namespace Termyn.Presentation.Tests;
 
@@ -188,7 +188,7 @@ public class PortableSplitTests
         // .editorconfig severity for it or for its whole category, an analysis mode of None, or
         // analysers or warnings-as-errors turned off. Those last can be set in any folder from the
         // project up to the repo, and a Directory.Build.targets there has the last word.
-        var root = RepoRoot();
+        var root = Repository.Root();
         var directory = Path.Combine(root, "src", project);
 
         var inProject = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
@@ -234,26 +234,6 @@ public class PortableSplitTests
         // project, it'd have one checked twice and this one never.
         Assert.Equal(project, assembly.GetName().Name);
         return assembly;
-    }
-
-    /// <summary>
-    /// The folder holding the solution.
-    /// </summary>
-    /// <remarks>
-    /// Found from this file as it was compiled, so the tests can run from a build put anywhere, and
-    /// from the test binary if the compiler was told to hide where the sources were.
-    /// </remarks>
-    /// <param name="source">This file's path, filled in by the compiler</param>
-    /// <returns>The folder with <c>Termyn.slnx</c> in it</returns>
-    private static string RepoRoot([CallerFilePath] string source = "")
-    {
-        foreach (var start in new[] { Path.GetDirectoryName(source), AppContext.BaseDirectory })
-        {
-            for (var directory = start is null ? null : new DirectoryInfo(start); directory is not null; directory = directory.Parent)
-                if (File.Exists(Path.Combine(directory.FullName, "Termyn.slnx"))) return directory.FullName;
-        }
-
-        throw new DirectoryNotFoundException("couldn't find Termyn.slnx above the tests or their sources");
     }
 
     /// <summary>

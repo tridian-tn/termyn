@@ -75,8 +75,6 @@ public readonly record struct Keystroke(HotkeyModifiers Modifiers, Key Key)
             // The keys a keyboard labels with a word, which isn't the same word everywhere.
             Key.Space => Strings.KeySpace,
             Key.Enter => Strings.KeyEnter,
-            Key.Tab => Strings.KeyTab,
-            Key.Escape => Strings.KeyEscape,
             Key.Delete => Strings.KeyDelete,
             Key.Insert => Strings.KeyInsert,
 
@@ -85,7 +83,9 @@ public readonly record struct Keystroke(HotkeyModifiers Modifiers, Key Key)
             Key.Minus or Key.NumPadMinus => "-",
             Key.NumPad0 => "0",
 
-            // A letter or a function key, which reads the same on any keyboard.
+            // A letter or a function key, which reads the same on any keyboard. Tab and Escape would
+            // come out here in English, but nothing's bound to either: the shortcut table's tests
+            // hold it that way until one's given a catalogue entry like the keys above.
             _ => Key.ToString(),
         });
 

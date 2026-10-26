@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Termyn.Presentation;
 using Termyn.TestSupport;
 
@@ -14,7 +13,7 @@ namespace Termyn.App.Windows.Tests;
 /// null here and an empty prompt on screen — and putting a form up to read it back would test the
 /// form instead.
 /// </remarks>
-public partial class TextCatalogueTests
+public class TextCatalogueTests
 {
     [WinFormsTheory]
     [InlineData(1, "Termyn — 1 task due today")]
@@ -33,11 +32,11 @@ public partial class TextCatalogueTests
         // _Other is what every count falls back to, so a phrase without one has nothing to say for a
         // form a translation leaves out. And {0} is in every form, _One included: in some languages
         // "one" covers 21 as well as 1.
-        var entries = Source.Entries;
-        var forms = entries.Where(e => CountedForm().IsMatch(e.Name) || e.Name.EndsWith("_Other", StringComparison.Ordinal)).ToList();
+        var entries = Source.Value.Entries;
+        var forms = entries.Where(e => CatalogueSource.IsCountedForm(e.Name)).ToList();
 
         Assert.NotEmpty(forms);
-        Assert.Empty(forms.Where(e => !entries.Any(other => other.Name == CountedForm().Replace(e.Name, "_Other"))).Select(e => e.Name));
+        Assert.Empty(forms.Where(e => !entries.Any(other => other.Name == CatalogueSource.OtherFormOf(e.Name))).Select(e => e.Name));
         Assert.Empty(forms.Where(e => !e.Value.Contains("{0}", StringComparison.Ordinal)).Select(e => e.Name));
     }
 
@@ -69,20 +68,19 @@ public partial class TextCatalogueTests
 
     [WinFormsFact]
     public void Every_entry_tells_a_translator_where_it_appears()
-        => Assert.Empty(Source.Bare());
+        => Assert.Empty(Source.Value.Bare());
 
     [WinFormsFact]
     public void Every_placeholder_is_explained()
-        => Assert.Empty(Source.Unexplained());
+        => Assert.Empty(Source.Value.Unexplained());
 
     [WinFormsFact]
     public void Every_entry_is_used()
-        => Assert.Empty(Source.Unused(Plurals.LanguageEntry));
+        => Assert.Empty(Source.Value.Unused(Plurals.LanguageEntry));
 
-    /// <summary>The catalogue as it's written, and the code that reads it.</summary>
-    private static readonly CatalogueSource Source = new("Termyn.App.Windows");
-
-    /// <summary>The suffix of a counted phrase's forms, other than the _Other one every phrase has.</summary>
-    [GeneratedRegex("_(Zero|One|Two|Few|Many)$")]
-    private static partial Regex CountedForm();
+    /// <summary>
+    /// The catalogue as it's written, and the code that reads it. Read when a test first asks, so
+    /// a source tree that can't be found fails the tests that read it and not the rest of this class.
+    /// </summary>
+    private static readonly Lazy<CatalogueSource> Source = new(() => new CatalogueSource("Termyn.App.Windows"));
 }

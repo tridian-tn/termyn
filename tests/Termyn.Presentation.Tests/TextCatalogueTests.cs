@@ -75,19 +75,27 @@ public class TextCatalogueTests
 
     // ---- The catalogue as it's written -------------------------------------------------------------
 
-    private static readonly CatalogueSource Source = new("Termyn.Presentation");
+    /// <summary>
+    /// Read when a test first asks, so a source tree that can't be found fails the tests that read
+    /// it and not the rest of this class with them.
+    /// </summary>
+    private static readonly Lazy<CatalogueSource> Source = new(() => new CatalogueSource("Termyn.Presentation"));
 
     [Fact]
     public void Every_entry_tells_a_translator_where_it_appears()
-        => Assert.Empty(Source.Bare());
+        => Assert.Empty(Source.Value.Bare());
 
     [Fact]
     public void Every_placeholder_is_explained()
-        => Assert.Empty(Source.Unexplained());
+        => Assert.Empty(Source.Value.Unexplained());
+
+    [Fact]
+    public void A_placeholder_is_known_by_its_number_whatever_format_it_carries()
+        => Assert.Equal(["{0}", "{1}"], CatalogueSource.PlaceholdersIn("{0:N0} of {1,5}, then {0}"));
 
     [Fact]
     public void Every_entry_is_used()
-        => Assert.Empty(Source.Unused(Plurals.LanguageEntry));
+        => Assert.Empty(Source.Value.Unused(Plurals.LanguageEntry));
 
     [Fact]
     public void Nothing_said_to_a_person_is_written_into_the_code()
@@ -95,7 +103,7 @@ public class TextCatalogueTests
         // The sidebar's headings are named in the code for settings to remember a folded one by,
         // and that name has to stay put whatever language the heading's shown in: the heading's
         // own words come from the catalogue beside it.
-        var found = Source.InlineProse("Favourites", "Projects", "Labels", "Filters");
+        var found = Source.Value.InlineProse(namingCalls: "Header");
 
         Assert.Empty(found);
     }
@@ -109,16 +117,37 @@ public class TextCatalogueTests
     [InlineData("""var s = $"{day} at {time}";""")]
     [InlineData("""var s = $"Task: {row.Content}";""")]
     [InlineData("""var s = $"{(done ? "Ticked off" : "")}";""")]
+    [InlineData("""var s = string.Format(culture, "{0} at {1}", day, time);""")]
+    [InlineData("""var s = string.Format(culture, "{0:N0}m before", minutes);""")]
+    [InlineData("""var s = "not\u00a0sent";""")]
+    [InlineData("""var s = "not\nsent";""")]
     [InlineData("""throw new CaptureRefusedException("That can't be added");""")]
+    [InlineData("""throw new InvalidOperationException("there's nothing to undo");""")]
     public void Text_for_a_person_written_into_the_code_is_seen(string code)
     {
         // The check above expects nothing, so one that read nothing would pass it too.
         Assert.Single(CatalogueSource.InlineProseIn(code));
     }
 
+    [Fact]
+    public void A_name_the_code_keeps_is_left_alone_only_where_its_kept()
+    {
+        var found = CatalogueSource.InlineProseIn(
+            """
+            Header("Projects", Strings.SidebarProjects);
+            var s = "Projects";
+            """,
+            "Header");
+
+        Assert.Equal(["code:2: Projects"], found);
+    }
+
     [Theory]
     [InlineData("""_log?.Warn("Todoist couldn't be reached.");""")]
     [InlineData("""_log.Info($"Synced {count} items");""")]
+    [InlineData("""this._log?.Warn("Todoist couldn't be reached.");""")]
+    [InlineData("""log.Error("Signing out couldn't finish", ex);""")]
+    [InlineData("""_shell.Log.Error("Background sync failed", ex);""")]
     [InlineData("""throw new ArgumentException("isn't the _Other form of a counted phrase", nameof(name));""")]
     [InlineData("""[assembly: InternalsVisibleTo("Termyn.Presentation.Tests")]""")]
     [InlineData("""var s = "item_add";""")]

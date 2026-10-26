@@ -3,6 +3,7 @@ using Microsoft.Win32;
 using Termyn.Core.Platform;
 using Termyn.Core.Update;
 using Termyn.Platform.Windows;
+using Termyn.TestSupport;
 
 namespace Termyn.Platform.Windows.Tests;
 
@@ -17,7 +18,7 @@ namespace Termyn.Platform.Windows.Tests;
 /// </remarks>
 public class PackagingConsistencyTests
 {
-    private static readonly string Script = File.ReadAllText(Path.Combine(BrandIconTests.RepoRoot(), "packaging", "Termyn.iss"));
+    private static readonly string Script = File.ReadAllText(Path.Combine(Repository.Root(), "packaging", "Termyn.iss"));
 
     [Fact]
     public void The_installer_writes_the_startup_entry_the_app_writes()
@@ -94,7 +95,7 @@ public class PackagingConsistencyTests
     public void The_installer_launches_the_executable_the_build_produces()
     {
         var csproj = File.ReadAllText(Path.Combine(
-            BrandIconTests.RepoRoot(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
+            Repository.Root(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
 
         var assemblyName = Match(@"<AssemblyName>([^<]+)</AssemblyName>", csproj).Groups[1].Value;
 
@@ -105,7 +106,7 @@ public class PackagingConsistencyTests
     public void The_installer_and_the_executable_carry_the_same_mark()
     {
         var csproj = File.ReadAllText(Path.Combine(
-            BrandIconTests.RepoRoot(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
+            Repository.Root(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
 
         var appIcon = Match(@"<ApplicationIcon>([^<]+)</ApplicationIcon>", csproj).Groups[1].Value;
         var setupIcon = Match(@"SetupIconFile=(\S+)").Groups[1].Value;
@@ -138,7 +139,7 @@ public class PackagingConsistencyTests
     public void The_runtime_the_installer_looks_for_is_the_one_the_app_targets()
     {
         var csproj = File.ReadAllText(Path.Combine(
-            BrandIconTests.RepoRoot(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
+            Repository.Root(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
 
         // net10.0-windows → the 10.0 desktop runtime channel.
         var target = Match(@"<TargetFramework>net([\d.]+)-windows</TargetFramework>", csproj).Groups[1].Value;
@@ -150,7 +151,7 @@ public class PackagingConsistencyTests
     public void The_installer_looks_where_the_architecture_it_publishes_keeps_its_runtime()
     {
         var csproj = File.ReadAllText(Path.Combine(
-            BrandIconTests.RepoRoot(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
+            Repository.Root(), "src", "Termyn.App.Windows", "Termyn.App.Windows.csproj"));
 
         // The roots below are the ones this RID in particular needs; a change here wants them revisited.
         Assert.Equal("win-x64", Match(@"<RuntimeIdentifier>([^<]+)</RuntimeIdentifier>", csproj).Groups[1].Value);
@@ -205,7 +206,7 @@ public class PackagingConsistencyTests
         Assert.Contains("{param:REMOVEDATA", body);
         Assert.Contains(
             "/REMOVEDATA=yes",
-            File.ReadAllText(Path.Combine(BrandIconTests.RepoRoot(), "docs", "packaging.md")));
+            File.ReadAllText(Path.Combine(Repository.Root(), "docs", "packaging.md")));
 
         // And interactively, No is the button under the finger.
         Assert.Contains("MB_DEFBUTTON2", body);
@@ -229,7 +230,7 @@ public class PackagingConsistencyTests
         // third and both writers agree with one another and are wrong — so every sign-in opens a
         // full window instead of going to the tray, which is the whole point of the tick-box.
         var program = File.ReadAllText(Path.Combine(
-            BrandIconTests.RepoRoot(), "src", "Termyn.App.Windows", "Program.cs"));
+            Repository.Root(), "src", "Termyn.App.Windows", "Program.cs"));
 
         Assert.Contains(
             WindowsAutoStart.StartupArgument,

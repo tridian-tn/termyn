@@ -343,7 +343,7 @@
   </data>
   <data name="KeyWin" xml:space="preserve">
     <value>Win</value>
-    <comment>The Windows key, in a shortcut beside a menu entry.</comment>
+    <comment>The Windows key, as a shortcut beside a menu entry would name it. No shortcut uses it at the moment, but one that did would be written with this.</comment>
   </data>
   <data name="KeySpace" xml:space="preserve">
     <value>Space</value>
@@ -352,14 +352,6 @@
   <data name="KeyEnter" xml:space="preserve">
     <value>Enter</value>
     <comment>The Enter key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
-  </data>
-  <data name="KeyTab" xml:space="preserve">
-    <value>Tab</value>
-    <comment>The Tab key, in a shortcut beside a menu entry. Use the name printed on keyboards in your language.</comment>
-  </data>
-  <data name="KeyEscape" xml:space="preserve">
-    <value>Escape</value>
-    <comment>The Esc key, in a shortcut beside a menu entry.</comment>
   </data>
   <data name="KeyDelete" xml:space="preserve">
     <value>Del</value>
@@ -647,7 +639,7 @@
   </data>
   <data name="SmartViewAll" xml:space="preserve">
     <value>All</value>
-    <comment>The built-in view of every task, in the path above the list.</comment>
+    <comment>The built-in view of every task, as the path above the list would name it. Nothing in the window opens it at the moment, so it isn't seen.</comment>
   </data>
   <data name="SearchResults" xml:space="preserve">
     <value>Search results</value>

@@ -236,8 +236,6 @@ public class ShortcutTests
     [InlineData(Alt, Key.Down, "Alt+↓")]
     [InlineData(None, Key.Delete, "Del")]
     [InlineData(None, Key.Insert, "Insert")]
-    [InlineData(None, Key.Tab, "Tab")]
-    [InlineData(None, Key.Escape, "Escape")]
     [InlineData(HotkeyModifiers.Meta, Key.D, "Win+D")]
     [InlineData(None, Key.Space, "Space")]
     [InlineData(None, Key.F2, "F2")]
@@ -252,6 +250,15 @@ public class ShortcutTests
     [InlineData(Ctrl, Key.NumPad0, "Ctrl+0")]
     public void A_shortcut_is_written_the_way_a_menu_writes_it(HotkeyModifiers modifiers, Key key, string expected)
         => Assert.Equal(expected, new Keystroke(modifiers, key).ToString());
+
+    [Fact]
+    public void No_key_is_bound_that_a_menu_would_name_in_English_whatever_the_language()
+    {
+        // Tab and Escape are written by their names in the code, having no catalogue entries:
+        // nothing's bound to them, so a translator would only be given words nobody sees. Binding
+        // one means giving it an entry first, the way Space and Enter have.
+        Assert.DoesNotContain(Shortcuts.All, s => s.Keystroke.Key is Key.Tab or Key.Escape);
+    }
 
     [Fact]
     public void The_shortcut_printed_for_completing_is_the_bare_key_not_the_second_binding()

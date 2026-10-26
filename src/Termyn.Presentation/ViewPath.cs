@@ -42,8 +42,11 @@ public static class ViewPath
     /// A search runs over the whole account rather than the list that was open, so a path still
     /// naming that list would say the results came from it. And there's nothing above the results
     /// to go back up to — clearing the search box is the way back.
+    ///
+    /// Made each time it's asked for, like the rest of the path, so it's in whatever language the
+    /// window is in then rather than the one it was in when this class was first touched.
     /// </remarks>
-    public static readonly IReadOnlyList<Crumb> SearchResults = [new Crumb(Strings.SearchResults, null)];
+    public static IReadOnlyList<Crumb> SearchResults => [new Crumb(Strings.SearchResults, null)];
 
     /// <summary>
     /// The path written as one line, with where in it each step that leads somewhere sits.
