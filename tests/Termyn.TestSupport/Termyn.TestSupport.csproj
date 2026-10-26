@@ -9,4 +9,11 @@
     <ProjectReference Include="..\..\src\Termyn.Core\Termyn.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The compiler's own parser, for telling what in a project's code is text: a string's
+         escapes, an interpolation's holes and a comment are its to read, and reading them by hand
+         gets one of the three wrong. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+  </ItemGroup>
+
 </Project>

@@ -8,6 +8,10 @@ namespace Termyn.Presentation.Tests;
 /// That the presenter's own text comes out of the catalogue, and survives a machine that isn't set
 /// to English.
 /// </summary>
+/// <remarks>
+/// Most of the wording is asserted where the code that says it is tested. What's here is the
+/// catalogue as a whole: that every entry is read and explained, and that nothing goes round it.
+/// </remarks>
 public class TextCatalogueTests
 {
     [Fact]
@@ -68,4 +72,61 @@ public class TextCatalogueTests
         Assert.Equal("5h ago", SyncStatus.Ago(TimeSpan.FromHours(5)));
         Assert.Equal("2d ago", SyncStatus.Ago(TimeSpan.FromDays(2)));
     }
+
+    // ---- The catalogue as it's written -------------------------------------------------------------
+
+    private static readonly CatalogueSource Source = new("Termyn.Presentation");
+
+    [Fact]
+    public void Every_entry_tells_a_translator_where_it_appears()
+        => Assert.Empty(Source.Bare());
+
+    [Fact]
+    public void Every_placeholder_is_explained()
+        => Assert.Empty(Source.Unexplained());
+
+    [Fact]
+    public void Every_entry_is_used()
+        => Assert.Empty(Source.Unused(Plurals.LanguageEntry));
+
+    [Fact]
+    public void Nothing_said_to_a_person_is_written_into_the_code()
+    {
+        // The sidebar's headings are named in the code for settings to remember a folded one by,
+        // and that name has to stay put whatever language the heading's shown in: the heading's
+        // own words come from the catalogue beside it.
+        var found = Source.InlineProse("Favourites", "Projects", "Labels", "Filters");
+
+        Assert.Empty(found);
+    }
+
+    [Theory]
+    [InlineData("""var s = "Not sent yet";""")]
+    [InlineData("""var s = "Today";""")]
+    [InlineData("""var s = $"{name} (still processing)";""")]
+    [InlineData("""var s = $"{m}m before";""")]
+    [InlineData("""var s = $"{bytes} KB";""")]
+    [InlineData("""var s = $"{day} at {time}";""")]
+    [InlineData("""var s = $"Task: {row.Content}";""")]
+    [InlineData("""var s = $"{(done ? "Ticked off" : "")}";""")]
+    [InlineData("""throw new CaptureRefusedException("That can't be added");""")]
+    public void Text_for_a_person_written_into_the_code_is_seen(string code)
+    {
+        // The check above expects nothing, so one that read nothing would pass it too.
+        Assert.Single(CatalogueSource.InlineProseIn(code));
+    }
+
+    [Theory]
+    [InlineData("""_log?.Warn("Todoist couldn't be reached.");""")]
+    [InlineData("""_log.Info($"Synced {count} items");""")]
+    [InlineData("""throw new ArgumentException("isn't the _Other form of a counted phrase", nameof(name));""")]
+    [InlineData("""[assembly: InternalsVisibleTo("Termyn.Presentation.Tests")]""")]
+    [InlineData("""var s = "item_add";""")]
+    [InlineData("""const string OtherSuffix = "_Other";""")]
+    [InlineData("""var s = "content";""")]
+    [InlineData("""var s = "d MMM yyyy";""")]
+    [InlineData("""var s = $"{when} {file}";""")]
+    [InlineData("""// var s = "Not sent yet";""")]
+    public void Text_that_isnt_for_a_person_is_left_alone(string code)
+        => Assert.Empty(CatalogueSource.InlineProseIn(code));
 }
