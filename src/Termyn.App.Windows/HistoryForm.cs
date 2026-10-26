@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Presentation;
 
 namespace Termyn.App.Windows;
@@ -98,13 +99,7 @@ internal sealed class HistoryForm : Form
         Fill();
     }
 
-    /// <summary>
-    /// Reads the list in.
-    /// </summary>
-    /// <remarks>
-    /// The time in the account's own short form and then the sentence. Seconds are left off: this
-    /// is for finding your way back to something you did, not for reconciling a log.
-    /// </remarks>
+    /// <summary>Reads the list in.</summary>
     private void Fill()
     {
         var entries = _read();
@@ -114,7 +109,7 @@ internal sealed class HistoryForm : Form
         {
             _list.Items.Clear();
             foreach (var entry in entries)
-                _list.Items.Add($"{entry.At.ToLocalTime():HH:mm}   {entry.Said}");
+                _list.Items.Add(Line(entry));
         }
         finally
         {
@@ -124,6 +119,18 @@ internal sealed class HistoryForm : Form
         _list.Visible = entries.Count > 0;
         _empty.Visible = entries.Count == 0;
     }
+
+    /// <summary>
+    /// One entry as the list shows it.
+    /// </summary>
+    /// <remarks>
+    /// The time in the machine's own short form and then the sentence. Seconds are left off: this
+    /// is for finding your way back to something you did, not for reconciling a log.
+    /// </remarks>
+    /// <param name="entry">Something done this session</param>
+    /// <returns>The line, such as "09:30   Completed “Buy milk”"</returns>
+    internal static string Line(HistoryEntry entry)
+        => $"{entry.At.ToLocalTime().ToString("t", CultureInfo.CurrentCulture)}   {entry.Said}";
 
     /// <summary>
     /// Shows what has been done, and lets it be forgotten.

@@ -248,8 +248,8 @@ internal sealed class ReminderForm : Form
     private void Reload()
     {
         _existing.Items.Clear();
-        foreach (var reminder in _presenter.RemindersFor(_itemId))
-            _existing.Items.Add(new ReminderRow(reminder));
+        foreach (var row in _presenter.ReminderRowsFor(_itemId))
+            _existing.Items.Add(row);
 
         if (_existing.Items.Count == 0)
             _existing.Items.Add(Strings.RemindersNone);

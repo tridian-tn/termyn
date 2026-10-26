@@ -183,10 +183,26 @@ public class DayBoxTests
         var was = System.Globalization.CultureInfo.CurrentCulture;
         try
         {
-            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-GB");
 
             Assert.Equal("Tuesday, 4 August 2026 at 16:30", DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
             Assert.Equal("Tuesday, 4 August 2026", DayBoxText.ForDeadline(DayReading.On(new DateOnly(2026, 8, 4)), english: true).Says);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = was;
+        }
+    }
+
+    [Fact]
+    public void A_day_is_described_the_way_the_region_writes_its_long_date()
+    {
+        var was = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+
+            Assert.Equal("Tuesday, August 4, 2026 at 4:30 PM", DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
         }
         finally
         {
@@ -216,7 +232,7 @@ public class DayBoxTests
         var was = System.Globalization.CultureInfo.CurrentCulture;
         try
         {
-            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-GB");
 
             Assert.Equal("Tuesday, 4 August 2026 at 09:00", DayBoxText.ForReminder(DayReading.On(new DateOnly(2026, 8, 4)), english: true).Says);
         }

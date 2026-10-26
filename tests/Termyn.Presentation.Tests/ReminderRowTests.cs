@@ -1,6 +1,7 @@
 using System.Globalization;
 using Termyn.Core.Model;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.Presentation.Tests;
 
@@ -9,8 +10,8 @@ namespace Termyn.Presentation.Tests;
 /// </summary>
 public class ReminderRowTests
 {
-    private static ReminderRow Row(ReminderKind kind, int minutes = 0, string? due = null, string? place = null)
-        => new(new Reminder { Id = "r1", ItemId = "i1", Kind = kind, MinuteOffset = minutes, DueDate = due, LocationName = place });
+    private static ReminderRow Row(ReminderKind kind, int minutes = 0, string? due = null, string? place = null, TimeZoneInfo? zone = null)
+        => new(new Reminder { Id = "r1", ItemId = "i1", Kind = kind, MinuteOffset = minutes, DueDate = due, LocationName = place }, zone ?? TimeZoneInfo.Utc);
 
     [Fact]
     public void One_at_the_due_time_says_so_rather_than_nought_minutes_before()
@@ -43,14 +44,25 @@ public class ReminderRowTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
 
-            Assert.Equal("At Fri 14 Aug, 09:30", Row(ReminderKind.Absolute, due: "2026-08-14T09:30:00").ToString());
+            Assert.Equal("At Fri, 14 Aug 09:30", Row(ReminderKind.Absolute, due: "2026-08-14T09:30:00").ToString());
         }
         finally
         {
             CultureInfo.CurrentCulture = was;
         }
+    }
+
+    [Fact]
+    public void One_set_in_a_fixed_timezone_is_shown_in_the_accounts()
+    {
+        // Todoist sends it as a UTC instant. 13:00 UTC is 09:00 in New York in October, whatever
+        // timezone the machine showing it is in.
+        using var british = new CultureScope("en-GB");
+        var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+
+        Assert.Equal("At Sat, 24 Oct 09:00", Row(ReminderKind.Absolute, due: "2026-10-24T13:00:00Z", zone: newYork).ToString());
     }
 
     [Fact]
@@ -66,14 +78,14 @@ public class ReminderRowTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = new CultureInfo("en-GB");
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
             var row = new ReminderRow(new Reminder
             {
                 Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, DueDate = "2026-10-24T09:00:00", Schedule = "every sat 9am",
-            });
+            }, TimeZoneInfo.Utc);
 
-            // Not "At Sat 24 Oct", which would say it fires once.
-            Assert.Equal("Every sat 9am (next Sat 24 Oct, 09:00)", row.ToString());
+            // Not "At Sat, 24 Oct", which would say it fires once.
+            Assert.Equal("Every sat 9am (next Sat, 24 Oct 09:00)", row.ToString());
         }
         finally
         {
@@ -84,7 +96,7 @@ public class ReminderRowTests
     [Fact]
     public void A_repeating_one_the_server_hasnt_answered_for_reads_as_its_schedule_alone()
     {
-        var row = new ReminderRow(new Reminder { Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, Schedule = "every sat 9am" });
+        var row = new ReminderRow(new Reminder { Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, Schedule = "every sat 9am" }, TimeZoneInfo.Utc);
 
         Assert.Equal("Every sat 9am", row.ToString());
     }

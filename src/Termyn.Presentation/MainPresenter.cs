@@ -484,8 +484,7 @@ public sealed class MainPresenter
         return _engine.PendingCount switch
         {
             0 => question,
-            1 => question + "\n\n" + Strings.SwitchAccountPendingOne,
-            var n => question + "\n\n" + string.Format(CultureInfo.CurrentCulture, Strings.SwitchAccountPendingMany, n),
+            var n => question + "\n\n" + Plurals.Format(Strings.ResourceManager, nameof(Strings.SwitchAccountPending_Other), n),
         };
     }
 
@@ -518,8 +517,7 @@ public sealed class MainPresenter
         return _engine.PendingCount switch
         {
             0 => question,
-            1 => question + "\n\n" + Strings.SignOutPendingOne,
-            var unsent => question + "\n\n" + string.Format(CultureInfo.CurrentCulture, Strings.SignOutPendingMany, unsent),
+            var unsent => question + "\n\n" + Plurals.Format(Strings.ResourceManager, nameof(Strings.SignOutPending_Other), unsent),
         };
     }
 
@@ -1308,10 +1306,10 @@ public sealed class MainPresenter
     /// <returns>A short local date and time, or empty when it hasn't been posted yet</returns>
     private static string Posted(string? postedAt, TimeZoneInfo zone)
     {
-        if (postedAt is null || !DateTimeOffset.TryParse(postedAt, out var when))
+        if (postedAt is null || !DateTimeOffset.TryParse(postedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out var when))
             return string.Empty;
 
-        return TimeZoneInfo.ConvertTime(when, zone).ToString("d MMM yyyy, HH:mm");
+        return DisplayDates.DateAndTime(TimeZoneInfo.ConvertTime(when, zone).DateTime, CultureInfo.CurrentCulture);
     }
 
     /// <summary>
@@ -1998,6 +1996,18 @@ public sealed class MainPresenter
             .OrderBy(r => r.Kind)
             .ThenByDescending(r => r.MinuteOffset)
             .ToList();
+
+    /// <summary>
+    /// The reminders on a task as the reminders dialog lists them, in the same order as
+    /// <see cref="RemindersFor"/>.
+    /// </summary>
+    /// <param name="itemId">The task</param>
+    /// <returns>A row for each reminder, showing a moment in the account's timezone</returns>
+    public IReadOnlyList<ReminderRow> ReminderRowsFor(string itemId)
+    {
+        var zone = _engine.Snapshot().TimeZone;
+        return [.. RemindersFor(itemId).Select(r => new ReminderRow(r, zone))];
+    }
 
     /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
     /// <returns>False when the plan won't take it, so the caller can say why rather than failing later.</returns>
@@ -3013,7 +3023,7 @@ public sealed class MainPresenter
     /// <remarks>
     /// Written in the machine's own culture rather than the invariant one the due column uses:
     /// that column reproduces the server's wording, and this is Termyn's own words about a day.
-    /// Tomorrow is named rather than dated, since that is how anybody would say it.
+    /// Tomorrow is named rather than given its weekday, since that is how anybody would say it.
     /// </remarks>
     /// <param name="day">The day being headed</param>
     /// <param name="today">Today in the account's timezone, for naming tomorrow</param>
@@ -3021,12 +3031,12 @@ public sealed class MainPresenter
     private static TaskRow DayRow(DateOnly day, DateOnly today)
     {
         var named = day == today.AddDays(1)
-            ? "Tomorrow"
+            ? Strings.DayHeadingTomorrow
             : day.ToString("dddd", CultureInfo.CurrentCulture);
 
         return new TaskRow(
             $"day:{day:yyyy-MM-dd}",
-            $"{day.ToString("d MMM", CultureInfo.CurrentCulture)} · {named}",
+            $"{DisplayDates.DayMonth(day, CultureInfo.CurrentCulture)} · {named}",
             Priority.P4,
             string.Empty,
             string.Empty,
@@ -3404,7 +3414,7 @@ public sealed class MainPresenter
             new[]
             {
                 // The days' headings are furniture rather than work, so they aren't counted.
-                Counted == 1 ? "1 task" : $"{Counted} tasks",
+                Plurals.Format(Strings.ResourceManager, nameof(Strings.StatusTasks_Other), Counted),
 
                 // Said while the row is still there, which is the moment it's any use: a task
                 // ticked off by mistake is one keystroke from coming back, and this is where the

@@ -237,6 +237,20 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
+    public void A_reminder_set_in_a_fixed_timezone_is_listed_in_the_accounts()
+    {
+        // 13:00 UTC is 09:00 in New York in October, which is the account's timezone here and not
+        // the machine's.
+        using var british = new CultureScope("en-GB");
+        var store = WithPlan("""{"current":{"plan_name":"pro","reminders":true}}""");
+        store.PutResource("user", "user", """{"id":"u","tz_info":{"timezone":"America/New_York"}}""");
+        store.PutResource("reminders", "m1", """{"id":"m1","item_id":"i1","type":"absolute","due":{"date":"2026-10-24T13:00:00Z","timezone":"America/New_York"}}""");
+        var presenter = NewPresenter(store);
+
+        Assert.Equal("At Sat, 24 Oct 09:00", Assert.Single(presenter.ReminderRowsFor("i1")).ToString());
+    }
+
+    [Fact]
     public void A_reminder_can_be_removed_whatever_the_plan_now_says()
     {
         // A plan that lapsed leaves reminders behind, and being unable to clear them would be a

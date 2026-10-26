@@ -91,27 +91,17 @@ public static class DayBoxText
     /// A day read from the box, written out in full so there's no mistaking which one it is.
     /// </summary>
     /// <remarks>
-    /// In the machine's own language and calendar, as a date shown to somebody should be — unlike
-    /// the box, whose words have to be ones the grammar reads back. Some calendars cover only a
-    /// stretch of years, the Umm al-Qura one Saudi Arabia uses among them, and throw for a day
-    /// outside it; that day is written the invariant way instead, since the box reads on every
-    /// keystroke and an old deadline would otherwise stop its dialog opening at all.
+    /// As the machine's region writes its long date, in its own language and calendar, as a date
+    /// shown to somebody should be — unlike the box, whose words have to be ones the grammar reads
+    /// back. The box reads on every keystroke, so a day the region's calendar can't hold has to be
+    /// written somehow, or an old deadline would stop its dialog opening at all; see
+    /// <see cref="DisplayDates"/>.
     /// </remarks>
     /// <param name="reading">A reading of a day</param>
     /// <returns>The day, with its time when it has one</returns>
     private static string Written(DayReading reading)
     {
-        var day = reading.Day!.Value;
-        string written;
-
-        try
-        {
-            written = day.ToString("dddd, d MMMM yyyy", CultureInfo.CurrentCulture);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            written = day.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture);
-        }
+        var written = DisplayDates.LongDay(reading.Day!.Value, CultureInfo.CurrentCulture);
 
         return reading.Time is { } time ? $"{written} at {time.ToString("t", CultureInfo.CurrentCulture)}" : written;
     }

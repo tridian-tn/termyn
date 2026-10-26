@@ -1492,12 +1492,9 @@ internal sealed class MainForm : Form
 
         var today = _presenter.DueToday;
 
-        var tooltip = today switch
-        {
-            0 => Strings.TrayNothingDue,
-            1 => Strings.TrayOneDue,
-            _ => string.Format(CultureInfo.CurrentCulture, Strings.TrayManyDue, today),
-        };
+        var tooltip = today == 0
+            ? Strings.TrayNothingDue
+            : Plurals.Format(Strings.ResourceManager, nameof(Strings.TrayDue_Other), today);
 
         _shell.Notifier.SetStatus(tooltip, today);
     }
