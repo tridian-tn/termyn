@@ -41,19 +41,11 @@ public sealed class AttachmentTests : IDisposable
     [Fact]
     public void A_size_between_two_whole_units_keeps_a_decimal_place()
     {
-        var was = System.Globalization.CultureInfo.CurrentCulture;
-        try
-        {
-            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-GB");
+        using var culture = new CultureScope("en-GB");
 
-            var row = new CommentRow("n1", "see attached", "12 Aug", new FileAttachment("agenda.pdf", 1536, "application/pdf", "https://x/a", false));
+        var row = new CommentRow("n1", "see attached", "12 Aug", new FileAttachment("agenda.pdf", 1536, "application/pdf", "https://x/a", false));
 
-            Assert.Equal("agenda.pdf (1.5 KB)", row.AttachmentLabel);
-        }
-        finally
-        {
-            System.Globalization.CultureInfo.CurrentCulture = was;
-        }
+        Assert.Equal("agenda.pdf (1.5 KB)", row.AttachmentLabel);
     }
 
     [Fact]
