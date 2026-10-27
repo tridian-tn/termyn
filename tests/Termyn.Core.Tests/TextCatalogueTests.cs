@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Resources;
+using System.Text.Json.Serialization;
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Filters;
@@ -82,12 +83,27 @@ public class TextCatalogueTests
     [InlineData(typeof(Projections))]
     [InlineData(typeof(ItemFields))]
     [InlineData(typeof(ResourceType))]
-    [InlineData(typeof(TodoistPalette))]
-    [InlineData(typeof(SettingsStore))]
     public void Code_that_speaks_protocol_never_reads_a_catalogue(Type type)
     {
         // What a keyword moved into a catalogue looks like from here, however it's worded — the
         // parser comparing what it reads against a lookup that a translation will change.
+        Assert.Empty(ProtocolText.CatalogueReadsIn(type));
+    }
+
+    /// <summary>Every type in the settings code, the colours Todoist names included.</summary>
+    public static TheoryData<Type> SettingsCode =>
+    [
+        .. typeof(SettingsStore).Assembly.GetTypes()
+            .Where(t => t.Namespace == typeof(SettingsStore).Namespace && !t.IsNested && !t.IsEnum),
+    ];
+
+    [Theory]
+    [MemberData(nameof(SettingsCode))]
+    public void The_settings_code_never_reads_a_catalogue(Type type)
+    {
+        // It reads and writes the settings file's keys by name, "view" and "theme" among them, and
+        // those are words a catalogue can hold. The whole namespace rather than a list, so a
+        // migration or a helper added beside the store is held to it without anyone remembering.
         Assert.Empty(ProtocolText.CatalogueReadsIn(type));
     }
 
@@ -137,15 +153,23 @@ public class TextCatalogueTests
     public void Prose_is_told_apart_from_protocol(string text)
         => Assert.False(ProtocolText.IsProtocol(text), $"'{text}' should read as prose");
 
+    /// <summary>
+    /// Words of the grammar, and every settings key that's one lower-case word, taken from the
+    /// settings so a key added later is covered too.
+    /// </summary>
+    public static TheoryData<string> PlainWords =>
+    [
+        "day", "today", "every", "no date",
+        .. ProtocolText.SettingsKeys(typeof(AppSettings), typeof(ViewState)).Where(key => key.All(char.IsAsciiLetterLower)),
+    ];
+
     [Theory]
-    [InlineData("day")]
-    [InlineData("today")]
-    [InlineData("every")]
-    [InlineData("no date")]
-    public void A_plain_word_of_the_grammar_is_left_to_the_check_on_the_code(string word)
+    [MemberData(nameof(PlainWords))]
+    public void A_plain_word_is_left_to_the_check_on_the_code(string word)
     {
-        // The reminder list already says "day" to people. Flagged here, a catalogue couldn't take it
-        // when the presentation text moves — and the parser reading one is caught above anyway.
+        // The reminder list already says "day" to people, and the palette calls a built-in view a
+        // "view". Flagged here, a catalogue couldn't take them — and the parser or the settings
+        // store reading one is caught above anyway.
         Assert.False(ProtocolText.IsProtocol(word));
     }
 
@@ -162,22 +186,29 @@ public class TextCatalogueTests
     [Fact]
     public void A_setting_the_file_never_holds_is_not_a_settings_key()
     {
-        // Worked out from the others and left out of the file, so "cadence" in a catalogue is just
-        // a word. "windowX" is only caught by being a key: the camelCase pattern doesn't take it.
-        Assert.False(ProtocolText.IsProtocol("cadence"));
-        Assert.True(ProtocolText.IsProtocol("windowX"));
+        // Worked out from the others and left out of the file. A type of its own, since each such
+        // property in the app's settings is either one word or caught by the camelCase pattern, so
+        // dropping the rule would pass unseen there.
+        Assert.Equal(
+            ["sync-mode", "theme", "windowX"],
+            ProtocolText.SettingsKeys(typeof(SampleSettings)).Order(StringComparer.Ordinal));
     }
 
-    [Theory]
-    [InlineData("view")]
-    [InlineData("theme")]
-    [InlineData("hotkey")]
-    [InlineData("maximized")]
-    public void A_settings_key_that_is_one_word_is_left_to_the_check_on_the_code(string key)
+    [Fact]
+    public void Only_a_key_that_is_one_lower_case_word_is_left_off_the_list()
     {
-        // The palette calls a built-in view a "view", so a catalogue has to be able to hold the
-        // word. The settings store reading its keys out of one is caught above instead.
-        Assert.False(ProtocolText.IsProtocol(key));
+        // "sync-mode" has no capital either, but it's neither snake_case nor camelCase, so nothing
+        // else would catch it.
+        Assert.Equal(
+            ["sync-mode", "windowX"],
+            ProtocolText.SettingsKeysOnSight(typeof(SampleSettings)).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_settings_key_the_camelCase_pattern_misses_is_still_protocol()
+    {
+        // It ends in a lone capital, so only being on the list catches it.
+        Assert.True(ProtocolText.IsProtocol("windowX"));
     }
 
     [Fact]
@@ -208,6 +239,23 @@ public class TextCatalogueTests
         Assert.Equal("Todoist turned the token away. Reconnect to make changes.", Strings.TokenTurnedAway);
         Assert.Equal("Todoist did not report a result for this change.", Strings.NoResultForChange);
         Assert.Equal("Termyn isn't signed in to Todoist.", Strings.NotSignedIn);
+    }
+
+    /// <summary>
+    /// Settings with one of each kind of key: a single word, camelCase with a lone capital, a name
+    /// of its own with no capital, and a property the file never holds.
+    /// </summary>
+    private sealed class SampleSettings
+    {
+        public string Theme { get; init; } = "";
+
+        public int WindowX { get; init; }
+
+        [JsonPropertyName("sync-mode")]
+        public int SyncMode { get; init; }
+
+        [JsonIgnore]
+        public int ClampedX => WindowX;
     }
 
     /// <summary>A host that can't be got to, which is what a dead link looks like from here.</summary>
