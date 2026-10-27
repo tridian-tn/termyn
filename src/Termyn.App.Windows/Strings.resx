@@ -337,6 +337,42 @@
     <value>Clear</value>
     <comment>Button in the due date dialog that removes the due date.</comment>
   </data>
+  <data name="DueRepeat" xml:space="preserve">
+    <value>Repeat:</value>
+    <comment>Label before the list of repeats in the due date dialog.</comment>
+  </data>
+  <data name="DueRepeatAccessible" xml:space="preserve">
+    <value>Repeat</value>
+    <comment>The repeat list's name as read by a screen reader.</comment>
+  </data>
+  <data name="RepeatNone" xml:space="preserve">
+    <value>Doesn't repeat</value>
+    <comment>In the due date dialog's repeat list: the task is due once.</comment>
+  </data>
+  <data name="RepeatDaily" xml:space="preserve">
+    <value>Every day</value>
+    <comment>In the due date dialog's repeat list.</comment>
+  </data>
+  <data name="RepeatWeekly" xml:space="preserve">
+    <value>Every week on {0}</value>
+    <comment>In the due date dialog's repeat list. {0} is a day of the week in full, such as Saturday.</comment>
+  </data>
+  <data name="RepeatWeekdays" xml:space="preserve">
+    <value>Every weekday (Mon–Fri)</value>
+    <comment>In the due date dialog's repeat list: Monday to Friday each week.</comment>
+  </data>
+  <data name="RepeatMonthly" xml:space="preserve">
+    <value>Every month on day {0}</value>
+    <comment>In the due date dialog's repeat list. {0} is a day of the month as a number, such as 24.</comment>
+  </data>
+  <data name="RepeatYearly" xml:space="preserve">
+    <value>Every year on {0}</value>
+    <comment>In the due date dialog's repeat list. {0} is a day and month, such as 24 Oct.</comment>
+  </data>
+  <data name="RepeatCustom" xml:space="preserve">
+    <value>Custom…</value>
+    <comment>In the due date dialog's repeat list: any other repeat, or one Todoist has that the list can't show.</comment>
+  </data>
   <data name="CommentsAttach" xml:space="preserve">
     <value>Attach a file…</value>
     <comment>Button under the comment box that picks a file to attach.</comment>

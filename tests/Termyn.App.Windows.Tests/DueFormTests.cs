@@ -144,14 +144,102 @@ public class DueFormTests
         Assert.Equal(["Ship it", "When is it due?"], labels[..2]);
     }
 
+    // ---- Repeat --------------------------------------------------------------------------------------
+
+    [WinFormsFact]
+    public void The_repeats_offered_are_built_on_the_day_in_the_box()
+    {
+        // 1 Aug 2026 is a Saturday.
+        using var _ = new CultureScope("en-GB");
+        using var dialog = Due("1 Aug 2026");
+
+        Assert.Equal(
+            ["Doesn't repeat", "Every day", "Every week on Saturday", "Every weekday (Mon–Fri)", "Every month on day 1", "Every year on 1 Aug", "Custom…"],
+            dialog.Repeat.Items.Cast<string>().ToArray());
+        Assert.Equal(0, dialog.Repeat.SelectedIndex);
+    }
+
+    [WinFormsFact]
+    public void Picking_a_repeat_writes_its_words_into_the_box_with_the_time()
+    {
+        using var dialog = Due("1 Aug 2026 16:00");
+
+        dialog.Repeat.SelectedIndex = 2;
+
+        Assert.Equal("every sat at 16:00", dialog.Answer);
+        Assert.Equal(2, dialog.Repeat.SelectedIndex);
+        Assert.False(dialog.TimeOffered);
+    }
+
+    [WinFormsFact]
+    public void A_repeat_off_today_starts_on_the_day_in_the_box()
+    {
+        using var dialog = Due("4 Aug 2026");
+
+        dialog.Repeat.SelectedIndex = 1;
+
+        Assert.Equal("every day starting 4 Aug 2026", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void A_repeat_from_todoist_shows_as_the_entry_that_writes_it()
+    {
+        // Spelt the way Todoist's own scheduler spells it rather than the way the list writes it.
+        using var dialog = Due("every Saturday", due: new DateOnly(2026, 8, 1));
+
+        Assert.Equal("Every week on Saturday", dialog.Repeat.Text);
+        Assert.Equal("every Saturday", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void A_repeat_the_list_has_no_entry_for_shows_as_custom()
+    {
+        using var dialog = Due("every other fri", due: new DateOnly(2026, 8, 7));
+
+        Assert.Equal("Custom…", dialog.Repeat.Text);
+        Assert.Equal("every other fri", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void Doesnt_repeat_puts_the_day_it_was_next_due_back_in_the_box()
+    {
+        using var dialog = Due("every tue at 09:30", due: new DateOnly(2026, 8, 4));
+
+        dialog.Repeat.SelectedIndex = 0;
+
+        Assert.Equal("4 Aug 2026 09:30", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void Custom_starts_the_box_on_a_repeat()
+    {
+        using var dialog = Due("1 Aug 2026");
+
+        dialog.Repeat.SelectedIndex = dialog.Repeat.Items.Count - 1;
+
+        Assert.Equal("every ", dialog.Answer);
+        Assert.Equal("Custom…", dialog.Repeat.Text);
+    }
+
+    [WinFormsFact]
+    public void The_list_is_greyed_for_an_account_that_reads_another_language()
+    {
+        // Its words are English, which such an account doesn't read.
+        using var dialog = DueForm.For("Ship it", string.Empty, Today, text => DayReading.Blank, english: false);
+
+        Assert.False(dialog.Repeat.Enabled);
+    }
+
     /// <summary>The dialog for a task called "Ship it", read with the grammar quick add uses.</summary>
     /// <param name="current">The due date the box opens on</param>
+    /// <param name="due">The day the task is due on now, or null when it has none</param>
     /// <returns>The dialog, which the caller disposes</returns>
-    private static DueForm Due(string current)
+    private static DueForm Due(string current, DateOnly? due = null)
         => DueForm.For(
             "Ship it",
             current,
             Today,
             text => new QuickAddParser(new FixedClock(Today)).ReadDay(text, new DateSettings(TimeZoneInfo.Utc)),
-            english: true);
+            english: true,
+            due);
 }

@@ -3788,7 +3788,7 @@ internal sealed class MainForm : Form
     /// <param name="opened">The due date as the box opens on it</param>
     /// <returns>The words to set the due date to, empty to clear it, or null when cancelled</returns>
     private string? AskDueWithDialog(TaskRow row, string opened)
-        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay, _presenter.DatesInEnglish);
+        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay, _presenter.DatesInEnglish, row.DueOn);
 
     /// <summary>
     /// Asks for the day a task has to be finished by. A property so a test can answer without a
