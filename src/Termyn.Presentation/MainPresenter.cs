@@ -3510,7 +3510,7 @@ public sealed class MainPresenter
             // Both halves of the same answer: what it is called, and whether it is on. The palette
             // has no tick to draw the second one with, so the row carries it and marks itself.
             var state = Presentation.Commands.StateOf(command, context);
-            yield return new PaletteEntry(PaletteKind.Action, state.Label, "action", Command: command, Checked: state.Checked);
+            yield return new PaletteEntry(PaletteKind.Action, state.Label, Strings.PaletteHintAction, Command: command, Checked: state.Checked);
         }
 
         // Built from the sidebar rather than the model, so the palette reaches exactly what the tree
@@ -3520,15 +3520,15 @@ public sealed class MainPresenter
             var entry = node.Kind switch
             {
                 SidebarKind.SmartView when node.View is { } view
-                    => new PaletteEntry(PaletteKind.SmartView, node.Label, "view", ViewSelection.Of(view)),
+                    => new PaletteEntry(PaletteKind.SmartView, node.Label, Strings.PaletteHintView, ViewSelection.Of(view)),
                 SidebarKind.Project
-                    => new PaletteEntry(PaletteKind.Project, node.Label, "project", ViewSelection.OfProject(node.Id)),
+                    => new PaletteEntry(PaletteKind.Project, node.Label, Strings.PaletteHintProject, ViewSelection.OfProject(node.Id)),
                 SidebarKind.Section
-                    => new PaletteEntry(PaletteKind.Section, node.Label, "section", ViewSelection.OfSection(node.Id)),
+                    => new PaletteEntry(PaletteKind.Section, node.Label, Strings.PaletteHintSection, ViewSelection.OfSection(node.Id)),
                 SidebarKind.Label
-                    => new PaletteEntry(PaletteKind.Label, node.Label, "label", ViewSelection.OfLabel(node.Id)),
+                    => new PaletteEntry(PaletteKind.Label, node.Label, Strings.PaletteHintLabel, ViewSelection.OfLabel(node.Id)),
                 SidebarKind.Filter
-                    => new PaletteEntry(PaletteKind.Filter, node.Label, "filter", ViewSelection.OfFilter(node.Id)),
+                    => new PaletteEntry(PaletteKind.Filter, node.Label, Strings.PaletteHintFilter, ViewSelection.OfFilter(node.Id)),
                 _ => null,
             };
 

@@ -650,6 +650,36 @@
     <comment>In the notice over a saved filter Termyn can't read, in place of the filter's query when it has none.</comment>
   </data>
 
+  <!--
+    The command palette's word for what each row is, shown faintly beside the row's name. Typing it
+    finds the row too, so "project" lists every project: each wants to be the one word a person
+    would type to mean that kind of thing.
+  -->
+  <data name="PaletteHintAction" xml:space="preserve">
+    <value>action</value>
+    <comment>In the command palette, beside a command such as New task or Sync now.</comment>
+  </data>
+  <data name="PaletteHintView" xml:space="preserve">
+    <value>view</value>
+    <comment>In the command palette, beside a built-in view such as Today, Upcoming or Inbox.</comment>
+  </data>
+  <data name="PaletteHintProject" xml:space="preserve">
+    <value>project</value>
+    <comment>In the command palette, beside one of the account's projects.</comment>
+  </data>
+  <data name="PaletteHintSection" xml:space="preserve">
+    <value>section</value>
+    <comment>In the command palette, beside a section, one of the headings a project's tasks are grouped under.</comment>
+  </data>
+  <data name="PaletteHintLabel" xml:space="preserve">
+    <value>label</value>
+    <comment>In the command palette, beside one of the account's labels, the tags on tasks.</comment>
+  </data>
+  <data name="PaletteHintFilter" xml:space="preserve">
+    <value>filter</value>
+    <comment>In the command palette, beside one of the account's saved filters.</comment>
+  </data>
+
   <!-- The panel under the list: its heading, and the comments in it. -->
   <data name="PanelTask" xml:space="preserve">
     <value>Task: {0}</value>

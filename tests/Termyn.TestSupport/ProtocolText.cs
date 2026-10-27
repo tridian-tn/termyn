@@ -33,6 +33,10 @@ public static partial class ProtocolText
     /// <remarks>
     /// Plain words of the grammar — "today", "every", "monday", "no date" — aren't here, since the
     /// app can say the same words to a person. They're left to <see cref="CatalogueReadsIn"/>.
+    /// The same goes for a settings key that's one lower-case word, like "view" or "theme": the
+    /// code that reads the keys by name is held to never reading a catalogue instead. The rest of
+    /// the keys stay, though most look machine-made anyway, because "windowX" ends in a lone
+    /// capital the camelCase pattern doesn't take.
     /// Words are compared case and all.
     /// </remarks>
     private static readonly HashSet<string> Words =
@@ -45,7 +49,7 @@ public static partial class ProtocolText
         // names for them, and the settings keys are whatever the settings file is written with.
         .. TodoistPalette.Names,
         .. ResourceType.All,
-        .. SettingsKeys(typeof(AppSettings), typeof(ViewState)),
+        .. SettingsKeysOnSight(typeof(AppSettings), typeof(ViewState)),
     ];
 
     /// <summary>
@@ -192,14 +196,29 @@ public static partial class ProtocolText
         .ToDictionary(c => c.Value);
 
     /// <summary>
-    /// The keys the settings file is written with, as its serialiser names them. Not the properties
+    /// The keys a settings type is written with, as its serialiser names them. Not the properties
     /// it's told to leave out, which are worked out from the others and never reach the file.
     /// </summary>
-    private static IEnumerable<string> SettingsKeys(params Type[] types)
+    /// <param name="types">The types the settings file is serialised from</param>
+    /// <returns>Each key the file holds for them</returns>
+    public static IEnumerable<string> SettingsKeys(params Type[] types)
         => types
             .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always })
             .Select(p => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(p.Name));
+
+    /// <summary>
+    /// The keys a settings type is written with that are protocol on sight: every one but a single
+    /// lower-case word, which reads the same as a word said to a person.
+    /// </summary>
+    /// <param name="types">The types the settings file is serialised from</param>
+    /// <returns>Each key that's never prose</returns>
+    public static IEnumerable<string> SettingsKeysOnSight(params Type[] types)
+        => SettingsKeys(types).Where(key => !OneWord().IsMatch(key));
+
+    /// <summary>One lower-case word and nothing else.</summary>
+    [GeneratedRegex("^[a-z]+$")]
+    private static partial Regex OneWord();
 
     /// <summary>A filter query's keyword and its colon, lower-case, anywhere in the text.</summary>
     [GeneratedRegex(@"(^|[\s(!&|,])(search|due|date|deadline|created|workspace|assigned to|assigned by|added by)( before| after)?:")]

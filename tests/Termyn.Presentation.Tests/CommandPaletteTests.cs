@@ -124,6 +124,25 @@ public class CommandPaletteTests
     }
 
     [Fact]
+    public async Task Each_kind_of_row_carries_the_word_for_it()
+    {
+        // Typing the word finds every row of that kind, so a mistyped hint, or one kind handed
+        // another's, is a place the palette stops reaching.
+        var presenter = await Loaded();
+
+        var hints = presenter.Palette("")
+            .GroupBy(e => e.Kind)
+            .ToDictionary(g => g.Key, g => Assert.Single(g.Select(e => e.Hint).Distinct()));
+
+        Assert.Equal("action", hints[PaletteKind.Action]);
+        Assert.Equal("view", hints[PaletteKind.SmartView]);
+        Assert.Equal("project", hints[PaletteKind.Project]);
+        Assert.Equal("section", hints[PaletteKind.Section]);
+        Assert.Equal("label", hints[PaletteKind.Label]);
+        Assert.Equal("filter", hints[PaletteKind.Filter]);
+    }
+
+    [Fact]
     public async Task Every_action_the_palette_offers_is_listed_once()
     {
         // Spelt out rather than derived: the palette offers some of the app's commands, not all of
