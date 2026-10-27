@@ -26,7 +26,13 @@ public class ShortcutTests
     {
         // The task menu is meant to teach the keyboard. An action reachable only by mouse would
         // show a blank where the shortcut goes and teach nothing.
+        //
+        // Except the Schedule entries, which show the day each one lands on in that place instead,
+        // the way Todoist's own scheduler does. Due date… is the keyboard's way to the same days.
+        var schedule = Menus.Commands([Menus.TaskContext.Single(e => e.Heading == "&Schedule")]);
+
         var missing = Menus.Commands(Menus.TaskContext)
+            .Except(schedule)
             .Where(c => Shortcuts.ShortcutFor(c).Length == 0)
             .ToList();
 

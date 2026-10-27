@@ -34,6 +34,20 @@ public static class DisplayDates
     public static string DayMonth(DateOnly day, CultureInfo culture)
         => Write(culture, f => Brief(f.MonthDayPattern), (pattern, c) => day.ToString(pattern, c));
 
+    /// <summary>A weekday, abbreviated, such as "Mon".</summary>
+    /// <param name="day">The day</param>
+    /// <param name="culture">The culture to write it in, normally the machine's</param>
+    /// <returns>The weekday</returns>
+    public static string Weekday(DateOnly day, CultureInfo culture)
+        => Write(culture, _ => "ddd", (pattern, c) => day.ToString(pattern, c));
+
+    /// <summary>A day and month with its weekday, such as "Mon, 5 Oct".</summary>
+    /// <param name="day">The day</param>
+    /// <param name="culture">The culture to write it in, normally the machine's</param>
+    /// <returns>The weekday where the region writes one, then the day and month</returns>
+    public static string WeekdayDayMonth(DateOnly day, CultureInfo culture)
+        => Write(culture, f => WithWeekday(f.LongDatePattern, Brief(f.MonthDayPattern)), (pattern, c) => day.ToString(pattern, c));
+
     /// <summary>A date and time, such as "5 Oct 2026 09:30".</summary>
     /// <param name="moment">The moment, already in the timezone it's to be read in</param>
     /// <param name="culture">The culture to write it in, normally the machine's</param>

@@ -91,6 +91,24 @@ public static class Projections
     }
 
     /// <summary>
+    /// Reads the day the account calls "this weekend".
+    /// </summary>
+    /// <remarks>
+    /// Todoist's <c>weekend_start_day</c>, which is where its own "This weekend" puts a task — a
+    /// setting of its own rather than anything worked out from where the week starts. Null when the
+    /// account hasn't said, for the same reason <see cref="ToNextWeek"/> is.
+    /// </remarks>
+    /// <param name="user">The user resource, or null when it hasn't been synced</param>
+    /// <returns>The day, or null when there isn't one to give</returns>
+    public static DayOfWeek? ToWeekendStart(JsonObject? user)
+    {
+        if (user is null)
+            return null;
+
+        return Weekday(JsonRead.Int(user, "weekend_start_day"));
+    }
+
+    /// <summary>
     /// Reads what the account says about reading a typed date.
     /// </summary>
     /// <remarks>
@@ -118,6 +136,7 @@ public static class Projections
             },
             Weekday(JsonRead.Int(user, "start_day")),
             ToNextWeek(user),
+            ToWeekendStart(user),
             ToDateLanguage(user),
             user["features"] is JsonObject features && JsonRead.Bool(features, "dateist_inline_disabled"));
     }

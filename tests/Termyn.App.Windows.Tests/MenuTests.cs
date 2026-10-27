@@ -1,5 +1,6 @@
 using Termyn.Core.Model;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -12,12 +13,15 @@ public class MenuTests
     private static TaskRow Row(Priority priority = Priority.P4, bool completed = false, int depth = 0)
         => new("i1", "Write it up", priority, "Work", string.Empty, [], depth, Completed: completed);
 
+    /// <summary>Days for the Schedule entries, as the window always has once the account has synced.</summary>
+    private static readonly ScheduleDays Days = ScheduleDays.From(new DateOnly(2026, 10, 27), DayOfWeek.Saturday, DayOfWeek.Monday);
+
     private static CommandContext OnTask(
         TaskRow? row = null,
         TaskAbilities? can = null,
         bool completed = false,
         int depth = 0)
-        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true));
+        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true), Schedule: Days);
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -74,6 +78,11 @@ public class MenuTests
                 AppCommand.Rename,
                 AppCommand.NewSubtask,
                 AppCommand.Due,
+                AppCommand.DueToday,
+                AppCommand.DueTomorrow,
+                AppCommand.DueWeekend,
+                AppCommand.DueNextWeek,
+                AppCommand.DueNone,
                 AppCommand.Deadline,
                 AppCommand.Priority1,
                 AppCommand.Priority2,
@@ -173,6 +182,35 @@ public class MenuTests
 
         Assert.Contains("Reopen", labels);
         Assert.DoesNotContain("Complete", labels);
+    }
+
+    [WinFormsFact]
+    public void The_Schedule_submenu_sits_directly_under_the_due_date()
+    {
+        using var built = BuildTaskMenu(OnTask());
+
+        var items = built.Menu.Items.Cast<ToolStripItem>().ToList();
+        var schedule = Assert.IsType<ToolStripMenuItem>(items[items.IndexOf(Find(built, "Due date…")) + 1]);
+
+        Assert.Equal("&Schedule", schedule.Text);
+        Assert.Equal(
+            ["Today", "Tomorrow", "This weekend", "Next week", "No date"],
+            schedule.DropDownItems.OfType<ToolStripMenuItem>().Select(i => i.Text).ToArray());
+
+        // No date is ruled off from the four that set one.
+        Assert.IsType<ToolStripSeparator>(schedule.DropDownItems[4]);
+    }
+
+    [WinFormsFact]
+    public void A_Schedule_entry_shows_its_day_where_a_shortcut_would_go()
+    {
+        using var _ = new CultureScope("en-GB");
+        using var built = BuildTaskMenu(OnTask());
+
+        Assert.Equal("Wed", Find(built, "Tomorrow").ShortcutKeyDisplayString);
+
+        Find(built, "Next week").PerformClick();
+        Assert.Equal([AppCommand.DueNextWeek], built.Ran);
     }
 
     [WinFormsFact]
@@ -601,7 +639,8 @@ public class MenuTests
     [WinFormsFact]
     public void Clicking_an_entry_runs_that_entry_and_not_the_last_one_built()
     {
-        using var built = BuildTaskMenu(OnTask());
+        // Due on a day, so No date has one to take away and is lit with the rest.
+        using var built = BuildTaskMenu(OnTask(Row() with { Due = "2 Nov" }));
 
         // Every item, not one: with a single item "runs its own command" and "runs the command the
         // loop finished on" are the same thing, and the bug this guards against would walk past.
@@ -641,9 +680,8 @@ public class MenuTests
     {
         using var built = BuildTaskMenu(OnTask());
 
-        var priorities = built.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.DropDownItems.Count > 0);
+        var priorities = built.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "&Priority");
 
-        Assert.Equal("&Priority", priorities.Text);
         Assert.Equal(4, priorities.DropDownItems.Count);
     }
 

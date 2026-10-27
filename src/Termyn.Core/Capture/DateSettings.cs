@@ -14,6 +14,7 @@ namespace Termyn.Core.Capture;
 /// <param name="DayFirst">Whether a date in figures puts the day before the month, or null when it isn't known</param>
 /// <param name="WeekStart">The day the account's week starts on, or null when it isn't known</param>
 /// <param name="NextWeek">The day the account calls "next week", or null when it isn't known</param>
+/// <param name="WeekendStart">The day the account calls "this weekend", or null when it isn't known</param>
 /// <param name="Language">The language the account reads a typed date in, as Todoist names it — <c>en</c>, <c>de</c>, <c>pt_BR</c> — or null when it isn't known</param>
 /// <param name="InlineDatesOff">Whether the account has turned off reading a date out of a task's title, which the apps call smart date recognition; false when it isn't known</param>
 public sealed record DateSettings(
@@ -21,6 +22,7 @@ public sealed record DateSettings(
     bool? DayFirst = null,
     DayOfWeek? WeekStart = null,
     DayOfWeek? NextWeek = null,
+    DayOfWeek? WeekendStart = null,
     string? Language = null,
     bool InlineDatesOff = false)
 {

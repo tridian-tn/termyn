@@ -148,6 +148,19 @@ public class ProjectionsTests
         => Assert.Null(Projections.ToNextWeek(null));
 
     [Theory]
+    [InlineData("""{"id":"u","weekend_start_day":6}""", DayOfWeek.Saturday)]
+    [InlineData("""{"id":"u","weekend_start_day":7}""", DayOfWeek.Sunday)]
+    [InlineData("""{"id":"u","weekend_start_day":5}""", DayOfWeek.Friday)]
+    [InlineData("""{"id":"u","weekend_start_day":0}""", null)]
+    [InlineData("""{"id":"u"}""", null)]
+    public void Reads_the_day_the_account_calls_the_weekend(string json, DayOfWeek? expected)
+    {
+        // Not Saturday by default, for the reason next week isn't Monday by default.
+        Assert.Equal(expected, Projections.ToWeekendStart(Obj(json)));
+        Assert.Equal(expected, Projections.ToDateSettings(Obj(json)).WeekendStart);
+    }
+
+    [Theory]
     [InlineData("""{"id":"u","date_format":0}""", true)]
     [InlineData("""{"id":"u","date_format":1}""", false)]
     [InlineData("""{"id":"u","date_format":"1"}""", false)]
