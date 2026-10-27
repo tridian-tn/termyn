@@ -183,13 +183,18 @@ internal sealed class RepeatForm : Form
         {
             var unit = (RepeatUnit)Math.Max(0, _unit.SelectedIndex);
             var days = unit is RepeatUnit.Week ? _days.Where(d => d.Checked).Select(d => (DayOfWeek)d.Tag!).ToArray() : [];
+            var start = DateOnly.FromDateTime(_start.Value);
+
+            // Never before the start, which the end field already won't go below; this is the
+            // second line, so words that can't come round never reach Todoist.
+            var until = DateOnly.FromDateTime(_until.Value);
 
             return new RepeatRule(
                 unit,
                 (int)_interval.Value,
                 days.Length > 0 ? days : null,
-                DateOnly.FromDateTime(_start.Value),
-                _endsOn.Checked ? DateOnly.FromDateTime(_until.Value) : null,
+                start,
+                _endsOn.Checked ? (until < start ? start : until) : null,
                 _time.Checked ? TimeOnly.FromDateTime(_time.Value) : null,
                 _fromCompletion.Checked);
         }
@@ -221,6 +226,10 @@ internal sealed class RepeatForm : Form
 
     /// <summary>Counts from completion rather than from the due date, for a test.</summary>
     internal void CountFromCompletion() => _fromCompletion.Checked = true;
+
+    /// <summary>Sets the first day it falls on, for a test.</summary>
+    /// <param name="day">The day</param>
+    internal void StartOn(DateOnly day) => _start.Value = day.ToDateTime(TimeOnly.MinValue);
 
     /// <summary>Sets the last day it can fall on, or none, for a test.</summary>
     /// <param name="day">The day, or null for never</param>
@@ -323,6 +332,9 @@ internal sealed class RepeatForm : Form
             box.Enabled = named;
         }
 
+        // A repeat that ends before it starts never comes round, so the end can't be put there.
+        // Raising the floor moves an end already below it up to meet it.
+        _until.MinDate = _start.Value.Date;
         _until.Enabled = _endsOn.Checked;
         _preview.Text = string.Format(CultureInfo.CurrentCulture, Strings.RepeatPreview, Words);
     }

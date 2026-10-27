@@ -202,6 +202,43 @@ public class DueFormTests
     }
 
     [WinFormsFact]
+    public void A_repeat_picked_on_an_overdue_task_starts_from_today()
+    {
+        // Built on the day the task was due, but not started there: it would be overdue the moment
+        // it was set.
+        using var dialog = Due("1 Jul 2026", due: new DateOnly(2026, 7, 1));
+
+        dialog.Repeat.SelectedIndex = 1;
+
+        Assert.Equal("every day", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void Doesnt_repeat_puts_back_the_day_a_task_was_moved_to_by_hand()
+    {
+        // Due on the 3rd though it repeats on the 24th. The 24th the words read as is theirs, not
+        // the day the task is on.
+        using var dialog = Due("every 24th", due: new DateOnly(2026, 8, 3));
+
+        dialog.Repeat.SelectedIndex = 0;
+
+        Assert.Equal("3 Aug 2026", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void Picking_an_entry_over_the_boxs_own_words_leaves_the_list_whole()
+    {
+        using var dialog = Due("every other fri", due: new DateOnly(2026, 8, 7));
+
+        dialog.Repeat.SelectedIndex = 1;
+
+        // The entry for the old words has gone, and Custom… is still last.
+        Assert.Equal("Every day", dialog.Repeat.Text);
+        Assert.Equal(7, dialog.Repeat.Items.Count);
+        Assert.Equal("Custom…", dialog.Repeat.Items[^1]);
+    }
+
+    [WinFormsFact]
     public void A_repeat_the_list_has_no_entry_for_shows_as_its_own_words()
     {
         // With Custom… still below it, so there's something left to pick to change it.

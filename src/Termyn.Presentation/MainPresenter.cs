@@ -1548,9 +1548,7 @@ public sealed class MainPresenter
         var snapshot = _engine.Snapshot();
         if (snapshot.Items.FirstOrDefault(i => i.Id == id) is not { } item
             || SmartViews.DueOn(item, snapshot.TimeZone) == day)
-        {
             return false;
-        }
 
         var named = Named(id);
         if (!_engine.RescheduleItem(id, day))
@@ -1604,12 +1602,16 @@ public sealed class MainPresenter
         var named = Named(id);
 
         // Todoist ignores a start beside an end on a task that already has a due date, and carries
-        // on from the date it had — tried live, "every day starting 10 Nov ending 20 Nov" on a task
-        // due 13 Nov came out due the 14th. So the words go without their start, and the task is
-        // then moved to it, which keeps the repeat the way the Schedule menu's moves do.
+        // on from the date it had: "every day starting 10 Nov ending 20 Nov" on a task due 13 Nov
+        // comes out due the 14th. So the words go without their start, and the task is then moved
+        // to it, which keeps the repeat the way the Schedule menu's moves do. Only for a start the
+        // words gave — a month or a year read without one gets the next time its day comes round,
+        // and moving the task there would be a move nobody asked for.
         if (reading.Kind is DayReadingKind.Repeat
             && DatesInEnglish
-            && RepeatWords.Read(text, Today) is { Start: { } start, Until: not null } bounded
+            && RepeatWords.Read(text, Today, null, out var started) is { Until: not null } bounded
+            && started
+            && RepeatWords.FirstFrom(bounded, Today) is { } start
             && start != Today)
         {
             var words = RepeatWords.Write(bounded, Today, withStart: false);
@@ -1617,9 +1619,7 @@ public sealed class MainPresenter
             _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.RepeatFrom(words, start, bounded.Time) });
         }
         else
-        {
             _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
-        }
 
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSetText, named, text.Trim()), $"due:{id}");
         Publish();

@@ -133,6 +133,23 @@ public class ItemFieldsTests
     }
 
     [Fact]
+    public void A_repeat_goes_without_a_start_its_words_still_carry()
+    {
+        // Set here and not yet synced, the words still say where they start; sent back beside the
+        // new date, they'd put the task straight back there.
+        var moved = Rescheduled("""{"date":"2026-11-10","string":"every day starting 2026-11-10 until 2026-11-20","is_recurring":true}""");
+
+        Assert.Equal("every day until 2026-11-20", moved["string"]!.ToString());
+        Assert.Equal("2026-11-02", moved["date"]!.ToString());
+    }
+
+    [Fact]
+    public void A_repeat_in_words_that_cannot_be_taken_apart_goes_back_as_it_was()
+        => Assert.Equal(
+            "every other fri",
+            Rescheduled("""{"date":"2026-11-06","string":"every other fri","is_recurring":true}""")["string"]!.ToString());
+
+    [Fact]
     public void A_fixed_time_is_kept_in_its_own_zone_across_a_clock_change()
     {
         // Nine in London is 08:00Z in summer and 09:00Z in winter, and the clocks go back between

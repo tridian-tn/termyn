@@ -86,6 +86,11 @@ public sealed partial class QuickAddParser
         ["december"] = 12, ["dec"] = 12,
     };
 
+    /// <summary>A month by its name, in full or shortened.</summary>
+    /// <param name="word">The word, lower-cased</param>
+    /// <returns>The month as one to twelve, or null when the word doesn't name one</returns>
+    internal static int? MonthNamed(string word) => Months.TryGetValue(word, out var month) ? month : null;
+
     /// <summary>
     /// The words a schedule tends to open with, beyond the <c>every</c> that marks one anywhere.
     /// Only counted when they open a date box: in a capture, "Write daily report" is a title.
@@ -565,7 +570,7 @@ public sealed partial class QuickAddParser
     /// <summary>A weekday by its name, in full or shortened.</summary>
     /// <param name="word">The word, lower-cased, or null when there isn't one</param>
     /// <returns>The day, or null when the word doesn't name one</returns>
-    private static DayOfWeek? Weekday(string? word)
+    internal static DayOfWeek? Weekday(string? word)
     {
         if (word is null)
             return null;
@@ -861,7 +866,7 @@ public sealed partial class QuickAddParser
     /// <param name="english">Whether the account reads a typed date in English, without which "am" and "pm" aren't read</param>
     /// <param name="time">The time, when the word is one</param>
     /// <returns>True when the word is a time</returns>
-    private static bool TryParseTime(string token, bool english, out TimeOnly time)
+    internal static bool TryParseTime(string token, bool english, out TimeOnly time)
     {
         var match = TimePattern().Match(token);
         if (!match.Success)

@@ -19,25 +19,22 @@ namespace Termyn.Core.Capture;
 /// nothing here, so a caller shows them as words it can't take apart rather than guessing at them.
 /// </para>
 /// <para>
-/// What Todoist does with the words was tried against a live account, and three things it does
-/// shape what's written here. Its own idea of where bare words begin isn't always the obvious one —
-/// "every 31st" typed on 27 October began on 30 November — so the start is always written unless
-/// it's today. A year written out after a time is read as another time, which once cleared the date
-/// altogether, so days go in figures, the way Todoist writes them itself. And it keeps the words
-/// without their start, which lives on as the task's due date instead; <see cref="Read"/> takes it
-/// back from there.
+/// Three things Todoist does with the words shape what's written here. Its own idea of where bare
+/// words begin isn't always the obvious one — "every 31st" can skip the 31st that's coming and
+/// begin a month later — so the start is always written unless it's today. A year written out
+/// after a time is read as another time, which can clear the date altogether, so days go in
+/// figures, the way Todoist writes them itself. And it keeps the words without their start, which
+/// lives on as the task's due date instead; <see cref="Read"/> takes it back from there.
+/// </para>
+/// <para>
+/// The day and month names and the times are read by <see cref="QuickAddParser"/>'s own rules, so
+/// words mean the same thing in a repeat as they do in the box around it.
 /// </para>
 /// </remarks>
 public static class RepeatWords
 {
-    private static readonly string[] ShortDays = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-    private static readonly string[] LongDays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-
     private static readonly DayOfWeek[] Workweek =
         [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday];
-
-    private static readonly string[] Months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
     /// <summary>
     /// The words that end the part of a repeat saying how often, and start one of its suffixes.
@@ -57,42 +54,83 @@ public static class RepeatWords
     /// <returns>The words</returns>
     public static string Write(RepeatRule rule, DateOnly today, bool withStart = true)
     {
-        var words = new StringBuilder(rule.FromCompletion ? "every!" : "every");
-
-        if (rule.OnWeekdays)
-        {
-            var days = Ordered(rule.Days);
-            words.Append(' ').Append(days.SequenceEqual(Workweek) ? "weekday" : string.Join(", ", days.Select(d => ShortDays[(int)d])));
-        }
-        else if (rule is { Unit: RepeatUnit.Month, Interval: 1, FromCompletion: false, Start: { } monthly })
-        {
-            words.Append(' ').Append(Ordinal(monthly.Day));
-        }
-        else if (rule is { Unit: RepeatUnit.Year, Interval: 1, FromCompletion: false, Start: { } yearly })
-        {
-            words.Append(' ').Append(yearly.Day.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(Months[yearly.Month - 1]);
-        }
-        else
-        {
-            words.Append(' ');
-            if (rule.Interval > 1)
-                words.Append(rule.Interval.ToString(CultureInfo.InvariantCulture)).Append(' ');
-
-            words.Append(UnitWord(rule.Unit));
-            if (rule.Interval > 1)
-                words.Append('s');
-        }
+        var words = new StringBuilder(rule.FromCompletion ? "every! " : "every ").Append(HowOften(rule));
 
         if (rule.Time is { } time)
             words.Append(" at ").Append(time.ToString("HH:mm", CultureInfo.InvariantCulture));
 
-        if (withStart && rule.Start is { } start && start != today)
+        if (withStart && FirstFrom(rule, today) is { } start && start != today)
             words.Append(" starting ").Append(Date(start));
 
         if (rule.Until is { } until)
             words.Append(" until ").Append(Date(until));
 
         return words.ToString();
+    }
+
+    /// <summary>
+    /// The day a repeat first falls on from today: its start, or the first time it comes round
+    /// after a start that's already gone.
+    /// </summary>
+    /// <remarks>
+    /// A repeat built on an overdue task's day would otherwise start in the past and be overdue the
+    /// moment it was set, which isn't what picking "Every day" on it means. Named days of the week
+    /// need no start at all once theirs has gone, since the words alone begin on the first of them.
+    /// </remarks>
+    /// <param name="rule">The repeat</param>
+    /// <param name="today">Today in the account's timezone</param>
+    /// <returns>The day, or null when the repeat names none</returns>
+    public static DateOnly? FirstFrom(RepeatRule rule, DateOnly today)
+    {
+        if (rule.Start is not { } start || start >= today)
+            return rule.Start;
+
+        if (rule.FromCompletion)
+            return today;
+
+        if (rule.OnWeekdays)
+            return null;
+
+        return rule switch
+        {
+            { Unit: RepeatUnit.Month, Interval: 1 } => NextMonthDay(today, start.Day),
+            { Unit: RepeatUnit.Year, Interval: 1 } => NextYearDay(today, start.Month, start.Day),
+            { Unit: RepeatUnit.Day } => start.AddDays(Steps(today.DayNumber - start.DayNumber, rule.Interval) * rule.Interval),
+            { Unit: RepeatUnit.Week } => start.AddDays(Steps(today.DayNumber - start.DayNumber, 7 * rule.Interval) * 7 * rule.Interval),
+            _ => Counted(start, today, rule.Interval, rule.Unit is RepeatUnit.Month ? 1 : 12),
+        };
+
+        static int Steps(int gone, int each) => (gone + each - 1) / each;
+
+        static DateOnly Counted(DateOnly start, DateOnly today, int interval, int months)
+        {
+            var step = 1;
+            while (start.AddMonths(step * interval * months) < today)
+                step++;
+
+            return start.AddMonths(step * interval * months);
+        }
+    }
+
+    /// <summary>The part of a repeat's words that says how often: "day", "2 weeks", "mon, fri", "24th".</summary>
+    /// <param name="rule">The repeat</param>
+    /// <returns>The words, without the <c>every</c> before them</returns>
+    private static string HowOften(RepeatRule rule)
+    {
+        if (rule.OnWeekdays)
+        {
+            var days = Ordered(rule.Days);
+            return days.SequenceEqual(Workweek) ? "weekday" : string.Join(", ", days.Select(ShortDay));
+        }
+
+        return rule switch
+        {
+            { Unit: RepeatUnit.Month, Interval: 1, FromCompletion: false, Start: { } monthly } => Ordinal(monthly.Day),
+            { Unit: RepeatUnit.Year, Interval: 1, FromCompletion: false, Start: { } yearly }
+                => yearly.Day.ToString(CultureInfo.InvariantCulture) + " " + ShortMonth(yearly.Month),
+            { Interval: > 1 } => rule.Interval.ToString(CultureInfo.InvariantCulture) + " " + UnitWord(rule.Unit) + "s",
+            _ => UnitWord(rule.Unit),
+        };
     }
 
     /// <summary>
@@ -107,7 +145,25 @@ public static class RepeatWords
     /// <param name="due">The day the task is due on now, or null when it isn't known</param>
     /// <returns>The repeat, or null when the words aren't one this can take apart</returns>
     public static RepeatRule? Read(string? text, DateOnly today, DateOnly? due = null)
+        => Read(text, today, due, out _);
+
+    /// <summary>
+    /// Reads words as a repeat, and says whether they named where it starts.
+    /// </summary>
+    /// <remarks>
+    /// A repeat read without a start can still have one: a month or a year gets the next time its
+    /// day comes round, and any repeat gets the due date it falls on. Only a start the words gave is
+    /// one the person typing them asked for.
+    /// </remarks>
+    /// <param name="text">The words</param>
+    /// <param name="today">Today in the account's timezone, which the words are counted from</param>
+    /// <param name="due">The day the task is due on now, or null when it isn't known</param>
+    /// <param name="started">Whether the words said where it starts</param>
+    /// <returns>The repeat, or null when the words aren't one this can take apart</returns>
+    public static RepeatRule? Read(string? text, DateOnly today, DateOnly? due, out bool started)
     {
+        started = false;
+
         var tokens = (text ?? string.Empty)
             .ToLowerInvariant()
             .Replace(",", " ", StringComparison.Ordinal)
@@ -144,7 +200,6 @@ public static class RepeatWords
 
         // The suffixes, in whatever order they come.
         var at = end < 0 ? tokens.Count : end;
-        var started = false;
         while (at < tokens.Count)
         {
             var word = tokens[at];
@@ -203,7 +258,7 @@ public static class RepeatWords
         if (!fromCompletion && core is ["weekday"] or ["workday"])
             return new RepeatRule(RepeatUnit.Week, Weekdays: Workweek);
 
-        if (!fromCompletion && core.Select(DayNamed).ToList() is var named && named.All(d => d is not null))
+        if (!fromCompletion && core.Select(QuickAddParser.Weekday).ToList() is var named && named.All(d => d is not null))
             return new RepeatRule(RepeatUnit.Week, Weekdays: Ordered(named.Select(d => d!.Value)));
 
         // A day of the month, as "24th" or "24", and a day of the year, either way round.
@@ -265,6 +320,14 @@ public static class RepeatWords
     private static List<DayOfWeek> Ordered(IEnumerable<DayOfWeek> days)
         => days.Distinct().OrderBy(d => ((int)d + 6) % 7).ToList();
 
+    /// <summary>A day of the week as Todoist shortens it: "mon".</summary>
+    private static string ShortDay(DayOfWeek day)
+        => CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(day).ToLowerInvariant();
+
+    /// <summary>A month as Todoist shortens it: "jan".</summary>
+    private static string ShortMonth(int month)
+        => CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(month).ToLowerInvariant();
+
     /// <summary>The first day on or after today that's a given day of its month, skipping months too short for it.</summary>
     private static DateOnly NextMonthDay(DateOnly today, int dayOfMonth)
     {
@@ -273,9 +336,7 @@ public static class RepeatWords
         {
             if (dayOfMonth <= DateTime.DaysInMonth(month.Year, month.Month)
                 && new DateOnly(month.Year, month.Month, dayOfMonth) is var day && day >= today)
-            {
                 return day;
-            }
 
             month = month.AddMonths(1);
         }
@@ -307,16 +368,6 @@ public static class RepeatWords
     /// </summary>
     private static string Date(DateOnly day) => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-    /// <summary>A day of the week by its name, in full or shortened.</summary>
-    private static DayOfWeek? DayNamed(string word)
-    {
-        var at = Array.IndexOf(ShortDays, word);
-        if (at < 0)
-            at = Array.IndexOf(LongDays, word);
-
-        return at < 0 ? null : (DayOfWeek)at;
-    }
-
     /// <summary>A day of the month, as "24th" or "24".</summary>
     private static int? MonthDay(string word)
     {
@@ -327,21 +378,13 @@ public static class RepeatWords
             : null;
     }
 
-    /// <summary>A month by its name, in full or shortened, as one to twelve.</summary>
-    private static int? MonthNamed(string word)
-        => word.Length >= 3 && Array.FindIndex(Months, m => word.StartsWith(m, StringComparison.Ordinal)) is var at and >= 0
-           && CultureInfo.InvariantCulture.DateTimeFormat.MonthNames[at].ToLowerInvariant() is var full
-           && (word == Months[at] || word == full)
-            ? at + 1
-            : null;
-
     /// <summary>A day of the year written as "24 oct" or "oct 24".</summary>
     private static (int Month, int Day)? YearDay(string first, string second)
     {
-        if (MonthDay(first) is { } day && MonthNamed(second) is { } month && day <= DateTime.DaysInMonth(2024, month))
+        if (MonthDay(first) is { } day && QuickAddParser.MonthNamed(second) is { } month && day <= DateTime.DaysInMonth(2024, month))
             return (month, day);
 
-        if (MonthNamed(first) is { } before && MonthDay(second) is { } after && after <= DateTime.DaysInMonth(2024, before))
+        if (QuickAddParser.MonthNamed(first) is { } before && MonthDay(second) is { } after && after <= DateTime.DaysInMonth(2024, before))
             return (before, after);
 
         return null;
@@ -352,9 +395,7 @@ public static class RepeatWords
     {
         if (words is [var iso]
             && DateOnly.TryParseExact(iso, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var figures))
-        {
             return figures;
-        }
 
         if (words.Count is < 2 or > 3 || YearDay(words[0], words[1]) is not var (month, day))
             return null;
@@ -369,7 +410,7 @@ public static class RepeatWords
             : null;
     }
 
-    /// <summary>A time written after "at": "09:00", "9:30", "9am", "9:30pm", or "noon".</summary>
+    /// <summary>A time written after "at": "09:00", "9am", "9:30pm", the way the box reads one, or "noon".</summary>
     private static TimeOnly? TimeOf(List<string> words)
     {
         if (words is not [var word])
@@ -378,31 +419,6 @@ public static class RepeatWords
         if (word == "noon")
             return new TimeOnly(12, 0);
 
-        var half = word.EndsWith("am", StringComparison.Ordinal) ? 0 : word.EndsWith("pm", StringComparison.Ordinal) ? 12 : -1;
-        var figures = half >= 0 ? word[..^2] : word;
-        var parts = figures.Split(':');
-
-        if (parts.Length > 2
-            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hour)
-            || (parts.Length == 2 && (parts[1].Length != 2 || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out _))))
-        {
-            return null;
-        }
-
-        var minute = parts.Length == 2 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 0;
-
-        // A bare hour with no colon and no am or pm is a count rather than a time.
-        if (half < 0 && parts.Length == 1)
-            return null;
-
-        if (half >= 0)
-        {
-            if (hour is < 1 or > 12)
-                return null;
-
-            hour = hour % 12 + half;
-        }
-
-        return hour is >= 0 and <= 23 && minute is >= 0 and <= 59 ? new TimeOnly(hour, minute) : null;
+        return QuickAddParser.TryParseTime(word, english: true, out var time) ? time : null;
     }
 }

@@ -284,11 +284,14 @@ internal sealed class DueForm : Form
     private void FollowRepeat()
     {
         var reading = _box.Reading;
-        var rule = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today, _anchor) : null;
+        var started = false;
+        var rule = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today, _anchor, out started) : null;
 
+        // Only a start the words gave: one read into them — the next 24th, say, for a task moved
+        // off its date by hand — isn't the day the task is on, and Doesn't repeat puts the anchor back.
         if (reading is { Kind: DayReadingKind.Day, Day: { } day })
             _anchor = day;
-        else if (rule?.Start is { } start)
+        else if (started && rule?.Start is { } start)
             _anchor = start;
 
         _choosing = true;
@@ -308,11 +311,7 @@ internal sealed class DueForm : Form
 
             labels.Add(Strings.RepeatCustom);
 
-            if (!_repeat.Items.Cast<string>().SequenceEqual(labels))
-            {
-                _repeat.Items.Clear();
-                _repeat.Items.AddRange([.. labels]);
-            }
+            Relabel(labels);
 
             _repeat.SelectedIndex = reading.Kind is not DayReadingKind.Repeat
                 ? 0
@@ -323,6 +322,43 @@ internal sealed class DueForm : Form
         finally
         {
             _choosing = false;
+        }
+    }
+
+    /// <summary>
+    /// Brings the Repeat list's entries into line with the labels, touching only the ones that differ.
+    /// </summary>
+    /// <remarks>
+    /// Not cleared and filled again. This runs while the list is still handling a pick — the pick
+    /// writes the box, and the box changing is what brings it here — and emptying a list in the
+    /// middle of its own selection leaves the native one with nothing under the entry just chosen.
+    /// </remarks>
+    /// <param name="labels">What the list should hold, in order</param>
+    private void Relabel(List<string> labels)
+    {
+        var items = _repeat.Items;
+
+        for (var i = 0; i < labels.Count; i++)
+        {
+            if (i >= items.Count)
+                items.Add(labels[i]);
+            else if (labels[i].Equals(items[i]))
+                continue;
+            else if (i == _repeat.SelectedIndex)
+                Swap(i, labels[i]);
+            else
+                items[i] = labels[i];
+        }
+
+        while (items.Count > labels.Count)
+            items.RemoveAt(items.Count - 1);
+
+        // The entry that's selected is swapped rather than renamed, since a list goes on showing
+        // the old name of the entry it's on until it's told to select again.
+        void Swap(int at, string label)
+        {
+            items.RemoveAt(at);
+            items.Insert(at, label);
         }
     }
 
@@ -338,19 +374,14 @@ internal sealed class DueForm : Form
         // The time goes with it either way: into the repeat's words, or back onto the one day.
         var time = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today, _anchor)?.Time : reading.Time;
 
-        if (index == 0)
-        {
-            if (reading.Kind is DayReadingKind.Repeat)
-                _box.Typed = QuickAddParser.Written(_anchor, time, _english);
-        }
+        // Doesn't repeat on a box already holding one day has nothing to change, and the entry for
+        // the box's own words, above Custom…, is the words already there.
+        if (index == 0 && reading.Kind is DayReadingKind.Repeat)
+            _box.Typed = QuickAddParser.Written(_anchor, time, _english);
         else if (index == _repeat.Items.Count - 1)
-        {
             ChooseCustom();
-        }
         else if (index > 0 && index <= _choices.Length)
-        {
             _box.Typed = RepeatWords.Write(_choices[index - 1] with { Time = time }, _today);
-        }
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Termyn.Core.Filters;
 using Termyn.Core.Model;
 
 namespace Termyn.Presentation;
@@ -121,7 +122,10 @@ public sealed record ScheduleDays(DateOnly Today, DateOnly? Weekend, DateOnly? N
     /// <param name="nextWeek">The day the account calls next week, or null when it hasn't said</param>
     /// <returns>The days</returns>
     public static ScheduleDays From(DateOnly today, DayOfWeek? weekendStart, DayOfWeek? nextWeek)
-        => new(today, After(today, weekendStart), After(today, nextWeek));
+        => new(
+            today,
+            weekendStart is { } weekend ? FilterDay.After(today, weekend) : null,
+            nextWeek is { } week ? FilterDay.After(today, week) : null);
 
     /// <summary>The day a Schedule entry puts a task on, or null when it puts it on none.</summary>
     /// <param name="command">The entry</param>
@@ -134,13 +138,6 @@ public sealed record ScheduleDays(DateOnly Today, DateOnly? Weekend, DateOnly? N
         AppCommand.DueNextWeek => NextWeek,
         _ => null,
     };
-
-    /// <summary>The next time a weekday comes round, never today.</summary>
-    /// <param name="today">Today</param>
-    /// <param name="day">The weekday, or null when it isn't known</param>
-    /// <returns>The day, or null when the weekday isn't known</returns>
-    private static DateOnly? After(DateOnly today, DayOfWeek? day)
-        => day is { } wanted ? today.AddDays(((int)wanted - (int)today.DayOfWeek + 6) % 7 + 1) : null;
 }
 
 /// <summary>

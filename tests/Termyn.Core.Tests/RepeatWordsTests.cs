@@ -4,7 +4,7 @@ namespace Termyn.Core.Tests;
 
 /// <summary>
 /// A repeat written as Todoist's words and read back: only the forms its help on recurring dates
-/// gives, written the way a live account was found to read them.
+/// gives, written the way Todoist reads them rather than the way they look as if it should.
 /// </summary>
 public class RepeatWordsTests
 {
@@ -25,9 +25,9 @@ public class RepeatWordsTests
     [Fact]
     public void Any_other_start_is_written_in_figures()
     {
-        // Always, even where the words alone ought to begin there: "every 31st" sent on 27 October
-        // began on 30 November. And in figures, since "3 Jan 2027" after a time had its year read
-        // as another time.
+        // Always, even where the words alone ought to begin there: Todoist can start "every 31st" a
+        // month after the 31st that's coming. And in figures, since "3 Jan 2027" after a time has
+        // its year read as another time.
         Assert.Equal("every 2 weeks starting 2027-01-03", Write(new RepeatRule(RepeatUnit.Week, 2, Start: new DateOnly(2027, 1, 3))));
         Assert.Equal("every sat starting 2026-10-31", Write(new RepeatRule(RepeatUnit.Week, Weekdays: [DayOfWeek.Saturday], Start: new DateOnly(2026, 10, 31))));
         Assert.Equal("every 31st starting 2026-10-31", Write(new RepeatRule(RepeatUnit.Month, Start: new DateOnly(2026, 10, 31))));
@@ -71,6 +71,24 @@ public class RepeatWordsTests
     public void An_end_is_written_in_figures()
         => Assert.Equal("every day until 2027-08-03", Write(new RepeatRule(RepeatUnit.Day, Until: new DateOnly(2027, 8, 3))));
 
+    [Theory]
+
+    // From 1 October, gone by the 27th: every day and every other day come round today, every
+    // third day tomorrow.
+    [InlineData(RepeatUnit.Day, 1, "2026-10-01", "every day")]
+    [InlineData(RepeatUnit.Day, 2, "2026-10-01", "every 2 days")]
+    [InlineData(RepeatUnit.Day, 3, "2026-10-01", "every 3 days starting 2026-10-28")]
+    [InlineData(RepeatUnit.Week, 2, "2026-10-01", "every 2 weeks starting 2026-10-29")]
+    [InlineData(RepeatUnit.Month, 1, "2026-09-24", "every 24th starting 2026-11-24")]
+    [InlineData(RepeatUnit.Month, 2, "2026-09-15", "every 2 months starting 2026-11-15")]
+    [InlineData(RepeatUnit.Year, 1, "2025-10-01", "every 1 oct starting 2027-10-01")]
+    public void A_start_already_gone_becomes_the_next_time_it_comes_round(RepeatUnit unit, int interval, string start, string words)
+        => Assert.Equal(words, Write(new RepeatRule(unit, interval, Start: DateOnly.Parse(start, System.Globalization.CultureInfo.InvariantCulture))));
+
+    [Fact]
+    public void Named_days_whose_start_has_gone_need_none()
+        => Assert.Equal("every thu", Write(new RepeatRule(RepeatUnit.Week, Weekdays: [DayOfWeek.Thursday], Start: new DateOnly(2026, 10, 1))));
+
     [Fact]
     public void The_start_can_be_left_out_while_still_naming_the_day()
     {
@@ -113,6 +131,11 @@ public class RepeatWordsTests
     [InlineData("everyday until aug 3", "every day until 2027-08-03")]
     [InlineData("everyday from 10 May until 20 May", "every day starting 2027-05-10 until 2027-05-20")]
     [InlineData("every 2 weeks starting 3 Jan 2027", "every 2 weeks starting 2027-01-03")]
+
+    // Read by the box's own rules, so its other spellings count here too.
+    [InlineData("every tues, thurs", "every tue, thu")]
+    [InlineData("every 14 sept", "every 14 sep starting 2027-09-14")]
+    [InlineData("every day at 4:30pm", "every day at 16:30")]
 
     // As Todoist hands them back: "@" for "at", and an end as "ending" in figures.
     [InlineData("every tue, fri @ 09:30", "every tue, fri at 09:30")]
@@ -165,6 +188,16 @@ public class RepeatWordsTests
         // Moved off its days by hand, as Todoist's scheduler allows: Saturdays, due on a Tuesday.
         Assert.Null(RepeatWords.Read("every sat", Today, due: new DateOnly(2026, 11, 3))!.Start);
         Assert.Equal(new DateOnly(2026, 11, 24), RepeatWords.Read("every 24th", Today, due: new DateOnly(2026, 11, 3))!.Start);
+    }
+
+    [Fact]
+    public void Only_a_start_the_words_give_counts_as_given()
+    {
+        RepeatWords.Read("every 24th until 2027-06-01", Today, null, out var invented);
+        RepeatWords.Read("every 24th starting 2026-12-24", Today, null, out var given);
+
+        Assert.False(invented);
+        Assert.True(given);
     }
 
     [Fact]

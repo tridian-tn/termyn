@@ -102,7 +102,12 @@ public static class ItemFields
         if (due?["is_recurring"] is JsonValue recurring && recurring.TryGetValue(out bool repeats) && repeats
             && due["string"] is JsonValue words && words.TryGetValue(out string? text) && text.Length > 0)
         {
-            moved["string"] = text;
+            // Without a start of its own. Todoist keeps the words without one once it has them, but
+            // words set here and not yet synced still say where they start, and sent back beside
+            // the new date they'd put the task straight back there.
+            moved["string"] = RepeatWords.Read(text, day, null, out var started) is { } rule && started
+                ? RepeatWords.Write(rule, day, withStart: false)
+                : text;
             moved["is_recurring"] = true;
 
             if (due["lang"] is JsonValue lang && lang.TryGetValue(out string? language) && language.Length > 0)

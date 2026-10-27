@@ -65,6 +65,19 @@ public sealed record FilterDay(
     public static FilterDay FirstOfMonth { get; } = new(null, 0, null, DayAnchor.FirstOfMonth);
 
     /// <summary>
+    /// The next time a day of the week comes round, never today.
+    /// </summary>
+    /// <remarks>
+    /// How the account's "next week" is reached from today, and its "this weekend" too: putting
+    /// something off until then has to move it, even on the day itself.
+    /// </remarks>
+    /// <param name="today">Today</param>
+    /// <param name="day">The day of the week</param>
+    /// <returns>The day, one to seven days on</returns>
+    public static DateOnly After(DateOnly today, DayOfWeek day)
+        => today.AddDays(((int)day - (int)today.DayOfWeek + 6) % 7 + 1);
+
+    /// <summary>
     /// The day this names, given what today is.
     /// </summary>
     /// <remarks>
@@ -88,9 +101,7 @@ public sealed record FilterDay(
         // Always the next one, never today: putting something off until next week has to move it,
         // and a window from "next week" to a week later would otherwise be this week on that day.
         if (Anchor is DayAnchor.NextWeek)
-            return nextWeek is not { } start
-                ? null
-                : today.AddDays(((int)start - (int)today.DayOfWeek + 6) % 7 + 1).AddDays(DaysFromToday);
+            return nextWeek is not { } start ? null : After(today, start).AddDays(DaysFromToday);
 
         // The coming first, never this month's: "before first day" means the whole of this calendar
         // month, and on the first of it that has to still be true.

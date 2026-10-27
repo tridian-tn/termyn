@@ -202,6 +202,29 @@ public class ScheduleTests
     }
 
     [Fact]
+    public void An_end_with_no_start_of_its_own_goes_as_it_was_typed()
+    {
+        // "every 24th" is read as starting on the next 24th, but that's the reading's day and not
+        // one asked for, so the task isn't moved there.
+        var (engine, presenter) = NewPresenter(Store());
+
+        presenter.SetDueFromText("timed", "every 24th until 2027-06-01");
+
+        Assert.Equal("""{"string":"every 24th until 2027-06-01"}""", JsonNode.Parse(Assert.Single(engine.Outbox).ArgsJson)!["due"]!.ToJsonString());
+    }
+
+    [Fact]
+    public void A_start_and_end_whose_start_has_gone_moves_to_the_next_time_it_comes_round()
+    {
+        var (engine, presenter) = NewPresenter(Store());
+
+        presenter.SetDueFromText("timed", "every 24th starting 2026-09-24 until 2027-06-01");
+
+        var moved = JsonNode.Parse(engine.Outbox.Last().ArgsJson)!["due"]!;
+        Assert.Equal("2026-11-24", moved["date"]!.ToString());
+    }
+
+    [Fact]
     public void A_repeat_with_only_a_start_goes_as_it_was_typed()
     {
         var (engine, presenter) = NewPresenter(Store());

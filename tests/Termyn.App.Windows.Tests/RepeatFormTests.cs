@@ -99,6 +99,19 @@ public class RepeatFormTests
     }
 
     [WinFormsFact]
+    public void An_end_cannot_fall_before_the_start()
+    {
+        // Moving the start past the end brings the end along, rather than leaving words that
+        // never come round.
+        using var dialog = Build();
+
+        dialog.EndOn(new DateOnly(2026, 8, 11));
+        dialog.StartOn(new DateOnly(2026, 8, 18));
+
+        Assert.Equal("every tue starting 2026-08-18 until 2026-08-18", dialog.Words);
+    }
+
+    [WinFormsFact]
     public void A_repeat_it_cannot_take_apart_is_named_rather_than_shown()
     {
         using var _ = new CultureScope("en-GB");
