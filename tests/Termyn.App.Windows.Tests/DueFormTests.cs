@@ -192,11 +192,13 @@ public class DueFormTests
     }
 
     [WinFormsFact]
-    public void A_repeat_the_list_has_no_entry_for_shows_as_custom()
+    public void A_repeat_the_list_has_no_entry_for_shows_as_its_own_words()
     {
+        // With Custom… still below it, so there's something left to pick to change it.
         using var dialog = Due("every other fri", due: new DateOnly(2026, 8, 7));
 
-        Assert.Equal("Custom…", dialog.Repeat.Text);
+        Assert.Equal("every other fri", dialog.Repeat.Text);
+        Assert.Equal("Custom…", dialog.Repeat.Items[^1]);
         Assert.Equal("every other fri", dialog.Answer);
     }
 
@@ -211,14 +213,73 @@ public class DueFormTests
     }
 
     [WinFormsFact]
-    public void Custom_starts_the_box_on_a_repeat()
+    public void Custom_writes_the_repeat_it_builds_into_the_box()
     {
-        using var dialog = Due("1 Aug 2026");
+        using var dialog = Due("1 Aug 2026 16:00");
+
+        (RepeatRule? Rule, DateOnly Day, TimeOnly? Time, string? Unreadable) asked = default;
+        dialog.AskForRepeat = (rule, day, time, unreadable) =>
+        {
+            asked = (rule, day, time, unreadable);
+            return new RepeatRule(RepeatUnit.Week, Weekdays: [DayOfWeek.Monday, DayOfWeek.Friday], Time: time);
+        };
 
         dialog.Repeat.SelectedIndex = dialog.Repeat.Items.Count - 1;
 
-        Assert.Equal("every ", dialog.Answer);
-        Assert.Equal("Custom…", dialog.Repeat.Text);
+        // Opened on the day and time in the box, since it held no repeat to open on.
+        Assert.Equal((null, new DateOnly(2026, 8, 1), new TimeOnly(16, 0), null), asked);
+        Assert.Equal("every mon, fri at 16:00", dialog.Answer);
+        Assert.Equal("every mon, fri at 16:00", dialog.Repeat.Text);
+    }
+
+    [WinFormsFact]
+    public void Custom_opens_on_the_repeat_in_the_box()
+    {
+        using var dialog = Due("every 2 weeks at 09:00", due: new DateOnly(2026, 8, 7));
+
+        RepeatRule? opened = null;
+        dialog.AskForRepeat = (rule, _, _, _) =>
+        {
+            opened = rule;
+            return null;
+        };
+
+        dialog.Repeat.SelectedIndex = dialog.Repeat.Items.Count - 1;
+
+        Assert.Equal("every 2 weeks at 09:00", RepeatWords.Write(opened!, Today));
+    }
+
+    [WinFormsFact]
+    public void Custom_names_a_repeat_it_cannot_take_apart()
+    {
+        using var dialog = Due("every other fri", due: new DateOnly(2026, 8, 7));
+
+        (RepeatRule? Rule, string? Unreadable) asked = default;
+        dialog.AskForRepeat = (rule, _, _, words) =>
+        {
+            asked = (rule, words);
+            return null;
+        };
+
+        dialog.Repeat.SelectedIndex = dialog.Repeat.Items.Count - 1;
+
+        Assert.Equal((null, "every other fri"), asked);
+
+        // Cancelled, so the box keeps its words and the list goes back to them.
+        Assert.Equal("every other fri", dialog.Answer);
+        Assert.Equal("every other fri", dialog.Repeat.Text);
+    }
+
+    [WinFormsFact]
+    public void Cancelling_custom_puts_the_list_back_on_what_the_box_holds()
+    {
+        using var dialog = Due("1 Aug 2026");
+        dialog.AskForRepeat = (_, _, _, _) => null;
+
+        dialog.Repeat.SelectedIndex = dialog.Repeat.Items.Count - 1;
+
+        Assert.Equal("1 Aug 2026", dialog.Answer);
+        Assert.Equal(0, dialog.Repeat.SelectedIndex);
     }
 
     [WinFormsFact]

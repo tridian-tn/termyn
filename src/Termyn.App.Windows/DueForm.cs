@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using Termyn.Core.Capture;
 using Termyn.Presentation;
@@ -25,8 +26,9 @@ namespace Termyn.App.Windows;
 /// <para>
 /// The Repeat list is the same again: picking one writes its words into the box, the way Todoist's
 /// own scheduler offers them, and it shows which one the box holds. A repeat set in Todoist that
-/// isn't one of them shows as Custom, with its words in the box as they've always been. The list
-/// is greyed for an account that reads another language, since the words it writes are English.
+/// isn't one of them shows as Custom, with its words in the box as they've always been, and
+/// Custom… opens <see cref="RepeatForm"/> to build any other. The list is greyed for an account
+/// that reads another language, since the words it writes are English.
 /// </para>
 /// </remarks>
 internal sealed class DueForm : Form
@@ -61,7 +63,7 @@ internal sealed class DueForm : Form
     /// </summary>
     private DateOnly _anchor;
 
-    /// <summary>The choices the Repeat list holds between its first and last entries, for the day they're built on.</summary>
+    /// <summary>The repeats the Repeat list offers after its first entry, for the day they're built on.</summary>
     private RepeatRule[] _choices = [];
 
     private DueForm(string task, string current, DateOnly today, Func<string, DayReading> read, bool english, DateOnly? due)
@@ -69,6 +71,7 @@ internal sealed class DueForm : Form
         _today = today;
         _english = english;
         _anchor = due ?? today;
+        AskForRepeat = (rule, day, time, unreadable) => RepeatForm.Ask(this, rule, day, time, unreadable, today);
 
         Text = Strings.DueTitle;
         Icon = AppIcon.Window;
@@ -272,8 +275,11 @@ internal sealed class DueForm : Form
     /// </summary>
     /// <remarks>
     /// An entry matches when it writes the same words as the box once both are read, so "every
-    /// saturday" typed out shows as the entry that writes "every sat". Anything else that reads as a
-    /// repeat is Custom, and anything that doesn't is no repeat at all.
+    /// saturday" typed out shows as the entry that writes "every sat". Any other repeat gets an
+    /// entry of its own above Custom…, holding its words as Todoist has them, so a repeat set there
+    /// is shown for what it is — and so Custom… is still something to pick rather than the entry
+    /// already picked, which a list doesn't let you pick again. Anything that isn't a repeat is no
+    /// repeat at all.
     /// </remarks>
     private void FollowRepeat()
     {
@@ -290,8 +296,16 @@ internal sealed class DueForm : Form
         {
             _choices = Choices(_anchor);
 
+            var matched = reading.Kind is DayReadingKind.Repeat && rule is not null
+                ? Array.FindIndex(_choices, c => Same(c with { Time = rule.Time }, rule))
+                : -1;
+
             var labels = new List<string> { Strings.RepeatNone };
             labels.AddRange(_choices.Select(Label));
+
+            if (reading.Kind is DayReadingKind.Repeat && matched < 0)
+                labels.Add(_box.Typed.Trim());
+
             labels.Add(Strings.RepeatCustom);
 
             if (!_repeat.Items.Cast<string>().SequenceEqual(labels))
@@ -302,9 +316,9 @@ internal sealed class DueForm : Form
 
             _repeat.SelectedIndex = reading.Kind is not DayReadingKind.Repeat
                 ? 0
-                : rule is not null && Array.FindIndex(_choices, c => Same(c with { Time = rule.Time }, rule)) is var at and >= 0
-                    ? at + 1
-                    : _repeat.Items.Count - 1;
+                : matched >= 0
+                    ? matched + 1
+                    : _repeat.Items.Count - 2;
         }
         finally
         {
@@ -333,23 +347,43 @@ internal sealed class DueForm : Form
         {
             ChooseCustom();
         }
-        else if (index > 0)
+        else if (index > 0 && index <= _choices.Length)
         {
             _box.Typed = RepeatWords.Write(_choices[index - 1] with { Time = time }, _today);
         }
     }
 
     /// <summary>
-    /// Custom from the Repeat list: the box itself, which can say anything Todoist reads. A box
-    /// that doesn't hold a repeat is started on one.
+    /// Asks for a repeat built in parts. A property so a test can answer without a dialog to click;
+    /// the dialog sets it to the real one as it's built.
+    /// </summary>
+    /// <remarks>
+    /// Given the repeat the box holds when it's one that can be taken apart, the day and time to
+    /// build a new one on, and the box's words when they're a repeat that can't be; answers with
+    /// the repeat, or null when it was cancelled.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<RepeatRule?, DateOnly, TimeOnly?, string?, RepeatRule?> AskForRepeat { get; set; }
+
+    /// <summary>
+    /// Custom from the Repeat list: the dialog that builds a repeat in parts, opened on the one in
+    /// the box, and its words written into the box when it's saved.
     /// </summary>
     private void ChooseCustom()
     {
-        if (_box.Reading.Kind is not DayReadingKind.Repeat)
-            _box.Typed = "every ";
+        var reading = _box.Reading;
+        var repeats = reading.Kind is DayReadingKind.Repeat;
+        var rule = repeats ? RepeatWords.Read(_box.Typed, _today) : null;
+        var time = repeats ? rule?.Time : reading.Time;
+        var unreadable = repeats && rule is null ? _box.Typed.Trim() : null;
 
-        _box.Entry.Focus();
-        _box.Entry.SelectionStart = _box.Entry.TextLength;
+        if (AskForRepeat(rule, _anchor, time, unreadable) is { } built)
+            _box.Typed = RepeatWords.Write(built, _today);
+
+        // Again whether or not anything was written: cancelled, the list goes back to what the box
+        // holds, and saved on words the box already had, it never heard the box change.
+        FollowRepeat();
     }
 
     /// <summary>
