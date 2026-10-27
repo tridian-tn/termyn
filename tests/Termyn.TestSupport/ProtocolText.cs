@@ -33,6 +33,7 @@ public static partial class ProtocolText
     /// <remarks>
     /// Plain words of the grammar — "today", "every", "monday", "no date" — aren't here, since the
     /// app can say the same words to a person. They're left to <see cref="CatalogueReadsIn"/>.
+    /// The same goes for a settings key that's one lower-case word, like "view" or "theme".
     /// Words are compared case and all.
     /// </remarks>
     private static readonly HashSet<string> Words =
@@ -192,14 +193,22 @@ public static partial class ProtocolText
         .ToDictionary(c => c.Value);
 
     /// <summary>
-    /// The keys the settings file is written with, as its serialiser names them. Not the properties
-    /// it's told to leave out, which are worked out from the others and never reach the file.
+    /// The keys the settings file is written with, as its serialiser names them, that couldn't be a
+    /// word said to a person. Not the properties it's told to leave out, which are worked out from
+    /// the others and never reach the file.
     /// </summary>
+    /// <remarks>
+    /// A key that's one lower-case word — "view", "theme", "hotkey" — is left off: the palette calls
+    /// a built-in view a "view". The code that reads them by name is held to never reading a
+    /// catalogue instead. The rest stay, though most look machine-made anyway, because "windowX"
+    /// ends in a lone capital the camelCase pattern doesn't take.
+    /// </remarks>
     private static IEnumerable<string> SettingsKeys(params Type[] types)
         => types
             .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always })
-            .Select(p => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(p.Name));
+            .Select(p => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? JsonNamingPolicy.CamelCase.ConvertName(p.Name))
+            .Where(key => key.Any(char.IsUpper));
 
     /// <summary>A filter query's keyword and its colon, lower-case, anywhere in the text.</summary>
     [GeneratedRegex(@"(^|[\s(!&|,])(search|due|date|deadline|created|workspace|assigned to|assigned by|added by)( before| after)?:")]

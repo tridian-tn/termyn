@@ -83,6 +83,7 @@ public class TextCatalogueTests
     [InlineData(typeof(ItemFields))]
     [InlineData(typeof(ResourceType))]
     [InlineData(typeof(TodoistPalette))]
+    [InlineData(typeof(SettingsStore))]
     public void Code_that_speaks_protocol_never_reads_a_catalogue(Type type)
     {
         // What a keyword moved into a catalogue looks like from here, however it's worded — the
@@ -162,9 +163,21 @@ public class TextCatalogueTests
     public void A_setting_the_file_never_holds_is_not_a_settings_key()
     {
         // Worked out from the others and left out of the file, so "cadence" in a catalogue is just
-        // a word.
+        // a word. "windowX" is only caught by being a key: the camelCase pattern doesn't take it.
         Assert.False(ProtocolText.IsProtocol("cadence"));
-        Assert.True(ProtocolText.IsProtocol("theme"));
+        Assert.True(ProtocolText.IsProtocol("windowX"));
+    }
+
+    [Theory]
+    [InlineData("view")]
+    [InlineData("theme")]
+    [InlineData("hotkey")]
+    [InlineData("maximized")]
+    public void A_settings_key_that_is_one_word_is_left_to_the_check_on_the_code(string key)
+    {
+        // The palette calls a built-in view a "view", so a catalogue has to be able to hold the
+        // word. The settings store reading its keys out of one is caught above instead.
+        Assert.False(ProtocolText.IsProtocol(key));
     }
 
     [Fact]
