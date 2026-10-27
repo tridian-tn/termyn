@@ -166,7 +166,7 @@ public class DueFormTests
 
         dialog.Repeat.SelectedIndex = 2;
 
-        Assert.Equal("every sat at 16:00", dialog.Answer);
+        Assert.Equal("every sat at 16:00 starting 2026-08-01", dialog.Answer);
         Assert.Equal(2, dialog.Repeat.SelectedIndex);
         Assert.False(dialog.TimeOffered);
     }
@@ -178,7 +178,7 @@ public class DueFormTests
 
         dialog.Repeat.SelectedIndex = 1;
 
-        Assert.Equal("every day starting 4 Aug 2026", dialog.Answer);
+        Assert.Equal("every day starting 2026-08-04", dialog.Answer);
     }
 
     [WinFormsFact]
@@ -189,6 +189,16 @@ public class DueFormTests
 
         Assert.Equal("Every week on Saturday", dialog.Repeat.Text);
         Assert.Equal("every Saturday", dialog.Answer);
+    }
+
+    [WinFormsFact]
+    public void A_repeat_todoist_kept_without_its_start_still_shows_as_its_entry()
+    {
+        // Sent as "every day starting 2026-08-04", Todoist keeps "every day" and puts the start in
+        // the due date, which is where it's read back from.
+        using var dialog = Due("every day", due: new DateOnly(2026, 8, 4));
+
+        Assert.Equal("Every day", dialog.Repeat.Text);
     }
 
     [WinFormsFact]
@@ -246,7 +256,7 @@ public class DueFormTests
 
         dialog.Repeat.SelectedIndex = dialog.Repeat.Items.Count - 1;
 
-        Assert.Equal("every 2 weeks at 09:00", RepeatWords.Write(opened!, Today));
+        Assert.Equal("every 2 weeks at 09:00 starting 2026-08-07", RepeatWords.Write(opened!, Today));
     }
 
     [WinFormsFact]

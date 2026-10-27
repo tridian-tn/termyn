@@ -112,6 +112,22 @@ public static class ItemFields
         return moved;
     }
 
+    /// <summary>
+    /// A repeat's <c>due</c> set to start on a given day: the words that make it a repeat, and the
+    /// day as the occurrence it's on.
+    /// </summary>
+    /// <param name="words">The repeat's words, as the server was last sent them</param>
+    /// <param name="day">The day its first occurrence falls on</param>
+    /// <param name="time">The time it's due at, or null for the whole day</param>
+    /// <returns>The <c>due</c> to send</returns>
+    public static JsonObject RepeatFrom(string words, DateOnly day, TimeOnly? time)
+    {
+        var due = Due(day, time)!;
+        due["string"] = words;
+        due["is_recurring"] = true;
+        return due;
+    }
+
     /// <summary>A due's date written for another day, keeping whatever time it had.</summary>
     /// <param name="stamp">The date as the server wrote it, or null when there isn't one</param>
     /// <param name="day">The day to move it to</param>

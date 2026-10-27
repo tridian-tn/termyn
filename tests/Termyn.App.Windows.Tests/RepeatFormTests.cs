@@ -23,8 +23,8 @@ public class RepeatFormTests
     {
         using var dialog = Build(time: new TimeOnly(9, 30));
 
-        Assert.Equal("every tue at 09:30", dialog.Words);
-        Assert.Equal("Todoist will read this as \"every tue at 09:30\".", dialog.Preview);
+        Assert.Equal("every tue at 09:30 starting 2026-08-04", dialog.Words);
+        Assert.Equal("Todoist will read this as \"every tue at 09:30 starting 2026-08-04\".", dialog.Preview);
         Assert.Equal(string.Empty, dialog.Unreadable);
     }
 
@@ -34,7 +34,7 @@ public class RepeatFormTests
         var rule = RepeatWords.Read("every 3 months at 08:00 until 1 Jun 2027", Today)!;
         using var dialog = Build(rule);
 
-        Assert.Equal("every 3 months at 08:00 starting 4 Aug 2026 until 1 Jun 2027", dialog.Words);
+        Assert.Equal("every 3 months at 08:00 starting 2026-08-04 until 2027-06-01", dialog.Words);
         Assert.Equal(3, dialog.Interval.Value);
         Assert.Equal("months", dialog.Unit.Text);
     }
@@ -46,10 +46,8 @@ public class RepeatFormTests
 
         dialog.Tick(DayOfWeek.Friday, true);
 
-        // Today's a Friday, where "every tue, fri" on its own would begin, so the start goes in to
-        // keep it on the task's Tuesday.
         Assert.True(dialog.DaysOffered);
-        Assert.Equal("every tue, fri starting 4 Aug 2026", dialog.Words);
+        Assert.Equal("every tue, fri starting 2026-08-04", dialog.Words);
     }
 
     [WinFormsFact]
@@ -61,7 +59,7 @@ public class RepeatFormTests
         dialog.Interval.Value = 2;
 
         Assert.False(dialog.DaysOffered);
-        Assert.Equal("every 2 weeks starting 4 Aug 2026", dialog.Words);
+        Assert.Equal("every 2 weeks starting 2026-08-04", dialog.Words);
         Assert.Equal("weeks", dialog.Unit.Text);
     }
 
@@ -85,7 +83,7 @@ public class RepeatFormTests
 
         dialog.Unit.SelectedIndex = (int)RepeatUnit.Month;
 
-        Assert.Equal("every 4th", dialog.Words);
+        Assert.Equal("every 4th starting 2026-08-04", dialog.Words);
     }
 
     [WinFormsFact]
@@ -94,10 +92,10 @@ public class RepeatFormTests
         using var dialog = Build();
 
         dialog.EndOn(new DateOnly(2026, 12, 31));
-        Assert.Equal("every tue until 31 Dec 2026", dialog.Words);
+        Assert.Equal("every tue starting 2026-08-04 until 2026-12-31", dialog.Words);
 
         dialog.EndOn(null);
-        Assert.Equal("every tue", dialog.Words);
+        Assert.Equal("every tue starting 2026-08-04", dialog.Words);
     }
 
     [WinFormsFact]
@@ -107,6 +105,6 @@ public class RepeatFormTests
         using var dialog = Build(unreadable: "every other fri");
 
         Assert.Equal("This task repeats \"every other fri\", which can't be shown here. Saving replaces it.", dialog.Unreadable);
-        Assert.Equal("every tue", dialog.Words);
+        Assert.Equal("every tue starting 2026-08-04", dialog.Words);
     }
 }

@@ -284,7 +284,7 @@ internal sealed class DueForm : Form
     private void FollowRepeat()
     {
         var reading = _box.Reading;
-        var rule = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today) : null;
+        var rule = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today, _anchor) : null;
 
         if (reading is { Kind: DayReadingKind.Day, Day: { } day })
             _anchor = day;
@@ -336,7 +336,7 @@ internal sealed class DueForm : Form
         var reading = _box.Reading;
 
         // The time goes with it either way: into the repeat's words, or back onto the one day.
-        var time = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today)?.Time : reading.Time;
+        var time = reading.Kind is DayReadingKind.Repeat ? RepeatWords.Read(_box.Typed, _today, _anchor)?.Time : reading.Time;
 
         if (index == 0)
         {
@@ -374,7 +374,7 @@ internal sealed class DueForm : Form
     {
         var reading = _box.Reading;
         var repeats = reading.Kind is DayReadingKind.Repeat;
-        var rule = repeats ? RepeatWords.Read(_box.Typed, _today) : null;
+        var rule = repeats ? RepeatWords.Read(_box.Typed, _today, _anchor) : null;
         var time = repeats ? rule?.Time : reading.Time;
         var unreadable = repeats && rule is null ? _box.Typed.Trim() : null;
 

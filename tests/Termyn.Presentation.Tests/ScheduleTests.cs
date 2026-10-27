@@ -182,6 +182,35 @@ public class ScheduleTests
         Assert.Contains("2 Nov", Assert.Single(presenter.History.Recent()).Said);
     }
 
+    [Fact]
+    public void A_repeat_with_a_start_and_an_end_is_sent_then_moved_to_its_start()
+    {
+        // Todoist ignores the start beside an end on a task that already has a due date, so the
+        // words go without it and the task is moved there after.
+        var (engine, presenter) = NewPresenter(Store());
+
+        presenter.SetDueFromText("timed", "every day at 09:00 starting 2026-11-10 until 2026-11-20");
+
+        var sent = engine.Outbox.Select(c => JsonNode.Parse(c.ArgsJson)!["due"]!).ToList();
+        Assert.Equal(2, sent.Count);
+        Assert.Equal("""{"string":"every day at 09:00 until 2026-11-20"}""", sent[0].ToJsonString());
+        Assert.Equal("""{"date":"2026-11-10T09:00:00","string":"every day at 09:00 until 2026-11-20","is_recurring":true}""", sent[1].ToJsonString());
+
+        var row = presenter.Rows.Single(r => r.Id == "timed");
+        Assert.True(row.IsRecurring);
+        Assert.Equal(new DateOnly(2026, 11, 10), row.DueOn);
+    }
+
+    [Fact]
+    public void A_repeat_with_only_a_start_goes_as_it_was_typed()
+    {
+        var (engine, presenter) = NewPresenter(Store());
+
+        presenter.SetDueFromText("timed", "every day starting 2026-11-10");
+
+        Assert.Equal("""{"string":"every day starting 2026-11-10"}""", JsonNode.Parse(Assert.Single(engine.Outbox).ArgsJson)!["due"]!.ToJsonString());
+    }
+
     private static InMemorySnapshotStore Store()
     {
         var store = new InMemorySnapshotStore();

@@ -1602,7 +1602,24 @@ public sealed class MainPresenter
         // until it answers: without it a task set to "daily 9am" looks ordinary to the close that
         // follows, and gets ticked off instead of advanced.
         var named = Named(id);
-        _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
+
+        // Todoist ignores a start beside an end on a task that already has a due date, and carries
+        // on from the date it had — tried live, "every day starting 10 Nov ending 20 Nov" on a task
+        // due 13 Nov came out due the 14th. So the words go without their start, and the task is
+        // then moved to it, which keeps the repeat the way the Schedule menu's moves do.
+        if (reading.Kind is DayReadingKind.Repeat
+            && DatesInEnglish
+            && RepeatWords.Read(text, Today) is { Start: { } start, Until: not null } bounded
+            && start != Today)
+        {
+            var words = RepeatWords.Write(bounded, Today, withStart: false);
+            _engine.SetItemDueString(id, words, true);
+            _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.RepeatFrom(words, start, bounded.Time) });
+        }
+        else
+        {
+            _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
+        }
 
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSetText, named, text.Trim()), $"due:{id}");
         Publish();

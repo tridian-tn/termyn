@@ -18,6 +18,15 @@ namespace Termyn.Core.Capture;
 /// doesn't — "every other fri", "every last workday", a repeat in German — and those read as
 /// nothing here, so a caller shows them as words it can't take apart rather than guessing at them.
 /// </para>
+/// <para>
+/// What Todoist does with the words was tried against a live account, and three things it does
+/// shape what's written here. Its own idea of where bare words begin isn't always the obvious one —
+/// "every 31st" typed on 27 October began on 30 November — so the start is always written unless
+/// it's today. A year written out after a time is read as another time, which once cleared the date
+/// altogether, so days go in figures, the way Todoist writes them itself. And it keeps the words
+/// without their start, which lives on as the task's due date instead; <see cref="Read"/> takes it
+/// back from there.
+/// </para>
 /// </remarks>
 public static class RepeatWords
 {
@@ -30,39 +39,38 @@ public static class RepeatWords
 
     private static readonly string[] Months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
-    /// <summary>The words that end the part of a repeat saying how often, and start one of its suffixes.</summary>
-    private static readonly string[] Suffixes = ["at", "starting", "from", "until", "ending"];
+    /// <summary>
+    /// The words that end the part of a repeat saying how often, and start one of its suffixes.
+    /// "@" is how Todoist itself sometimes keeps "at".
+    /// </summary>
+    private static readonly string[] Suffixes = ["at", "@", "starting", "from", "until", "ending"];
 
     /// <summary>
     /// Writes a repeat as the words Todoist reads.
     /// </summary>
-    /// <remarks>
-    /// The start is written only where the words alone would begin somewhere else: "every sat"
-    /// already starts on the coming Saturday, and saying so again only makes the words longer.
-    /// </remarks>
     /// <param name="rule">The repeat</param>
-    /// <param name="today">Today in the account's timezone, which the words are counted from</param>
+    /// <param name="today">Today in the account's timezone, which a repeat with no start begins on</param>
+    /// <param name="withStart">
+    /// Whether to say where it starts. Left out for words sent on their own ahead of the day they
+    /// start, which Todoist ignores beside an end on a task that already has a due date
+    /// </param>
     /// <returns>The words</returns>
-    public static string Write(RepeatRule rule, DateOnly today)
+    public static string Write(RepeatRule rule, DateOnly today, bool withStart = true)
     {
         var words = new StringBuilder(rule.FromCompletion ? "every!" : "every");
-        DateOnly natural;
 
         if (rule.OnWeekdays)
         {
             var days = Ordered(rule.Days);
             words.Append(' ').Append(days.SequenceEqual(Workweek) ? "weekday" : string.Join(", ", days.Select(d => ShortDays[(int)d])));
-            natural = NextOn(today, days);
         }
         else if (rule is { Unit: RepeatUnit.Month, Interval: 1, FromCompletion: false, Start: { } monthly })
         {
             words.Append(' ').Append(Ordinal(monthly.Day));
-            natural = NextMonthDay(today, monthly.Day);
         }
         else if (rule is { Unit: RepeatUnit.Year, Interval: 1, FromCompletion: false, Start: { } yearly })
         {
             words.Append(' ').Append(yearly.Day.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(Months[yearly.Month - 1]);
-            natural = NextYearDay(today, yearly.Month, yearly.Day);
         }
         else
         {
@@ -73,14 +81,12 @@ public static class RepeatWords
             words.Append(UnitWord(rule.Unit));
             if (rule.Interval > 1)
                 words.Append('s');
-
-            natural = today;
         }
 
         if (rule.Time is { } time)
             words.Append(" at ").Append(time.ToString("HH:mm", CultureInfo.InvariantCulture));
 
-        if (rule.Start is { } start && start != natural)
+        if (withStart && rule.Start is { } start && start != today)
             words.Append(" starting ").Append(Date(start));
 
         if (rule.Until is { } until)
@@ -92,10 +98,15 @@ public static class RepeatWords
     /// <summary>
     /// Reads words as a repeat, if they're one of the forms <see cref="Write"/> writes.
     /// </summary>
+    /// <remarks>
+    /// Words that don't say where they start take the task's due date for it when it's a day they
+    /// fall on, since that's where Todoist keeps the start once it has the words.
+    /// </remarks>
     /// <param name="text">The words</param>
     /// <param name="today">Today in the account's timezone, which the words are counted from</param>
+    /// <param name="due">The day the task is due on now, or null when it isn't known</param>
     /// <returns>The repeat, or null when the words aren't one this can take apart</returns>
-    public static RepeatRule? Read(string? text, DateOnly today)
+    public static RepeatRule? Read(string? text, DateOnly today, DateOnly? due = null)
     {
         var tokens = (text ?? string.Empty)
             .ToLowerInvariant()
@@ -133,6 +144,7 @@ public static class RepeatWords
 
         // The suffixes, in whatever order they come.
         var at = end < 0 ? tokens.Count : end;
+        var started = false;
         while (at < tokens.Count)
         {
             var word = tokens[at];
@@ -142,11 +154,12 @@ public static class RepeatWords
 
             switch (word)
             {
-                case "at" when TimeOf(part) is { } time:
+                case "at" or "@" when TimeOf(part) is { } time:
                     rule = rule with { Time = time };
                     break;
                 case "starting" or "from" when DayOf(part, today) is { } start:
                     rule = rule with { Start = start };
+                    started = true;
                     break;
                 case "until" or "ending" when DayOf(part, today) is { } until:
                     rule = rule with { Until = until };
@@ -156,7 +169,24 @@ public static class RepeatWords
             }
         }
 
-        return rule;
+        return !started && due is { } day && FallsOn(rule, day) ? rule with { Start = day } : rule;
+    }
+
+    /// <summary>Whether a day is one a repeat can fall on, so it can be the one it starts from.</summary>
+    /// <param name="rule">The repeat, read without a start of its own</param>
+    /// <param name="day">The day</param>
+    /// <returns>True when the repeat can fall on it</returns>
+    private static bool FallsOn(RepeatRule rule, DateOnly day)
+    {
+        if (rule.OnWeekdays)
+            return rule.Days.Contains(day.DayOfWeek);
+
+        return rule switch
+        {
+            { Unit: RepeatUnit.Month, Interval: 1, FromCompletion: false, Start: { } monthly } => monthly.Day == day.Day,
+            { Unit: RepeatUnit.Year, Interval: 1, FromCompletion: false, Start: { } yearly } => yearly.Month == day.Month && yearly.Day == day.Day,
+            _ => true,
+        };
     }
 
     /// <summary>The part of a repeat that says how often, read as a repeat with nothing else said.</summary>
@@ -174,7 +204,7 @@ public static class RepeatWords
             return new RepeatRule(RepeatUnit.Week, Weekdays: Workweek);
 
         if (!fromCompletion && core.Select(DayNamed).ToList() is var named && named.All(d => d is not null))
-            return new RepeatRule(RepeatUnit.Week, Weekdays: Ordered(named.Select(d => d!.Value)), Start: NextOn(today, named.Select(d => d!.Value)));
+            return new RepeatRule(RepeatUnit.Week, Weekdays: Ordered(named.Select(d => d!.Value)));
 
         // A day of the month, as "24th" or "24", and a day of the year, either way round.
         if (!fromCompletion && core.Count == 1 && MonthDay(core[0]) is { } dayOfMonth)
@@ -235,17 +265,6 @@ public static class RepeatWords
     private static List<DayOfWeek> Ordered(IEnumerable<DayOfWeek> days)
         => days.Distinct().OrderBy(d => ((int)d + 6) % 7).ToList();
 
-    /// <summary>The first of some days of the week on or after today.</summary>
-    private static DateOnly NextOn(DateOnly today, IEnumerable<DayOfWeek> days)
-    {
-        var wanted = days.ToHashSet();
-        var day = today;
-        while (!wanted.Contains(day.DayOfWeek))
-            day = day.AddDays(1);
-
-        return day;
-    }
-
     /// <summary>The first day on or after today that's a given day of its month, skipping months too short for it.</summary>
     private static DateOnly NextMonthDay(DateOnly today, int dayOfMonth)
     {
@@ -282,8 +301,11 @@ public static class RepeatWords
         return day.ToString(CultureInfo.InvariantCulture) + suffix;
     }
 
-    /// <summary>A day written for Todoist to read, with its year so it can't be taken for next year's.</summary>
-    private static string Date(DateOnly day) => QuickAddParser.Written(day, null, english: true);
+    /// <summary>
+    /// A day written for Todoist to read, in figures as it writes them itself. Not "3 Nov 2026",
+    /// whose year after a time is read as another time.
+    /// </summary>
+    private static string Date(DateOnly day) => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     /// <summary>A day of the week by its name, in full or shortened.</summary>
     private static DayOfWeek? DayNamed(string word)
