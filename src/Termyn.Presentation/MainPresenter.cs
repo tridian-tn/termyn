@@ -1533,6 +1533,46 @@ public sealed class MainPresenter
     }
 
     /// <summary>
+    /// Moves a task to another day, keeping the time it's due at and any repeat it's on.
+    /// </summary>
+    /// <remarks>
+    /// What the Schedule menu does, and what Todoist's own quick days do. Not <see cref="SetDue"/>,
+    /// which replaces the due date whole: a repeat moved that way would stop repeating, and a task
+    /// due at nine would lose the nine.
+    /// </remarks>
+    /// <param name="id">The task</param>
+    /// <param name="day">The day it's to be due</param>
+    /// <returns>False when it's already due that day or isn't there, so nothing was written</returns>
+    public bool Reschedule(string id, DateOnly day)
+    {
+        var snapshot = _engine.Snapshot();
+        if (snapshot.Items.FirstOrDefault(i => i.Id == id) is not { } item
+            || SmartViews.DueOn(item, snapshot.TimeZone) == day)
+            return false;
+
+        var named = Named(id);
+        if (!_engine.RescheduleItem(id, day))
+            return false;
+
+        History.Note(
+            string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture)),
+            $"due:{id}");
+
+        Publish();
+        return true;
+    }
+
+    /// <summary>The days the Schedule menu's entries put a task on, by the account's own settings.</summary>
+    public ScheduleDays ScheduleDays
+    {
+        get
+        {
+            var settings = _engine.DateSettings;
+            return ScheduleDays.From(Today, settings.WeekendStart, settings.NextWeek);
+        }
+    }
+
+    /// <summary>
     /// Sets a task's due date from whatever the user typed, clearing it when that is nothing.
     /// </summary>
     /// <remarks>
@@ -1560,7 +1600,26 @@ public sealed class MainPresenter
         // until it answers: without it a task set to "daily 9am" looks ordinary to the close that
         // follows, and gets ticked off instead of advanced.
         var named = Named(id);
-        _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
+
+        // Todoist ignores a start beside an end on a task that already has a due date, and carries
+        // on from the date it had: "every day starting 10 Nov ending 20 Nov" on a task due 13 Nov
+        // comes out due the 14th. So the words go without their start, and the task is then moved
+        // to it, which keeps the repeat the way the Schedule menu's moves do. Only for a start the
+        // words gave — a month or a year read without one gets the next time its day comes round,
+        // and moving the task there would be a move nobody asked for.
+        if (reading.Kind is DayReadingKind.Repeat
+            && DatesInEnglish
+            && RepeatWords.Read(text, Today, null, out var started) is { Until: not null } bounded
+            && started
+            && RepeatWords.FirstFrom(bounded, Today) is { } start
+            && start != Today)
+        {
+            var words = RepeatWords.Write(bounded, Today, withStart: false);
+            _engine.SetItemDueString(id, words, true);
+            _engine.UpdateItem(id, new JsonObject { ["due"] = ItemFields.RepeatFrom(words, start, bounded.Time) });
+        }
+        else
+            _engine.SetItemDueString(id, text, reading.Kind is DayReadingKind.Repeat);
 
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSetText, named, text.Trim()), $"due:{id}");
         Publish();

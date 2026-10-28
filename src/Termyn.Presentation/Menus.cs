@@ -52,8 +52,18 @@ public static class Menus
 
         MenuEntry.AfterRule(AppCommand.Due),
 
-        // Directly under the due date, since the two are asked the same way and are told apart by
-        // sitting together rather than by their names.
+        // The days Todoist's own scheduler offers at a click, under the entry that asks for any
+        // day, so the quick way and the full one sit together.
+        MenuEntry.Group(
+            Strings.MenuSchedule,
+            MenuEntry.Of(AppCommand.DueToday),
+            MenuEntry.Of(AppCommand.DueTomorrow),
+            MenuEntry.Of(AppCommand.DueWeekend),
+            MenuEntry.Of(AppCommand.DueNextWeek),
+            MenuEntry.AfterRule(AppCommand.DueNone)),
+
+        // Next to the due date, since the two are asked the same way and are told apart by sitting
+        // together rather than by their names.
         MenuEntry.Of(AppCommand.Deadline),
         MenuEntry.Group(
             Strings.MenuPriority,

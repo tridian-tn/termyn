@@ -69,6 +69,115 @@ public static class ItemFields
     }
 
     /// <summary>
+    /// A task's <c>due</c> moved to another day, with everything else about it left as it was.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What Todoist's own Reschedule does, and what its "Tomorrow" and "Next week" do: the day
+    /// changes and nothing else does. A time stays on the new day, and a repeat stays a repeat — the
+    /// date on a recurring due is the occurrence it's on, so moving that is moving this one, and the
+    /// words go back with it so the server doesn't take a bare date as the end of the repeat.
+    /// </para>
+    /// <para>
+    /// A one-off goes without its words. They're whatever was typed when it was set, and "tomorrow"
+    /// sent back today would have the server read a different day from the one asked for.
+    /// </para>
+    /// <para>
+    /// A due with a fixed timezone is a UTC instant, and its time is the time in that zone rather
+    /// than in UTC, so it's moved there: in UTC the day can be one out either side of midnight.
+    /// </para>
+    /// </remarks>
+    /// <param name="due">The task's <c>due</c> as it stands, or null when it has none</param>
+    /// <param name="day">The day to move it to, in the account's timezone</param>
+    /// <param name="zone">The account's timezone, for a fixed one that can't be found</param>
+    /// <returns>The <c>due</c> to send</returns>
+    public static JsonObject Rescheduled(JsonObject? due, DateOnly day, TimeZoneInfo zone)
+    {
+        var stamp = due?["date"] is JsonValue value && value.TryGetValue(out string? held) ? held : null;
+        var moved = new JsonObject { ["date"] = MovedStamp(stamp, day, Zone(due, zone)) };
+
+        if (due?["timezone"] is JsonValue fixedZone && fixedZone.TryGetValue(out string? zoneName) && zoneName.Length > 0)
+            moved["timezone"] = zoneName;
+
+        if (due?["is_recurring"] is JsonValue recurring && recurring.TryGetValue(out bool repeats) && repeats
+            && due["string"] is JsonValue words && words.TryGetValue(out string? text) && text.Length > 0)
+        {
+            // Without a start of its own. Todoist keeps the words without one once it has them, but
+            // words set here and not yet synced still say where they start, and sent back beside
+            // the new date they'd put the task straight back there.
+            moved["string"] = RepeatWords.Read(text, day, null, out var started) is { } rule && started
+                ? RepeatWords.Write(rule, day, withStart: false)
+                : text;
+            moved["is_recurring"] = true;
+
+            if (due["lang"] is JsonValue lang && lang.TryGetValue(out string? language) && language.Length > 0)
+                moved["lang"] = language;
+        }
+
+        return moved;
+    }
+
+    /// <summary>
+    /// A repeat's <c>due</c> set to start on a given day: the words that make it a repeat, and the
+    /// day as the occurrence it's on.
+    /// </summary>
+    /// <param name="words">The repeat's words, as the server was last sent them</param>
+    /// <param name="day">The day its first occurrence falls on</param>
+    /// <param name="time">The time it's due at, or null for the whole day</param>
+    /// <returns>The <c>due</c> to send</returns>
+    public static JsonObject RepeatFrom(string words, DateOnly day, TimeOnly? time)
+    {
+        var due = Due(day, time)!;
+        due["string"] = words;
+        due["is_recurring"] = true;
+        return due;
+    }
+
+    /// <summary>A due's date written for another day, keeping whatever time it had.</summary>
+    /// <param name="stamp">The date as the server wrote it, or null when there isn't one</param>
+    /// <param name="day">The day to move it to</param>
+    /// <param name="zone">The zone a fixed time is read in</param>
+    /// <returns>The new date, in the form the old one was in</returns>
+    private static string MovedStamp(string? stamp, DateOnly day, TimeZoneInfo zone)
+    {
+        var whole = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        if (stamp is null || !stamp.Contains('T'))
+            return whole;
+
+        if (stamp.EndsWith('Z'))
+        {
+            if (!DateTimeOffset.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant))
+                return whole;
+
+            var time = TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, zone).DateTime);
+            var local = DateTime.SpecifyKind(day.ToDateTime(time), DateTimeKind.Unspecified);
+
+            // An hour the clocks skip on the new day doesn't exist to convert, so it's the hour after.
+            if (zone.IsInvalidTime(local))
+                local = local.AddHours(1);
+
+            return TimeZoneInfo.ConvertTimeToUtc(local, zone).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+        }
+
+        return DateTime.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out var floating)
+            ? day.ToDateTime(TimeOnly.FromDateTime(floating)).ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture)
+            : whole;
+    }
+
+    /// <summary>The zone a due's time is kept in: its own fixed one if it has one, or the account's.</summary>
+    /// <param name="due">The task's <c>due</c>, or null</param>
+    /// <param name="account">The account's timezone</param>
+    /// <returns>The zone</returns>
+    private static TimeZoneInfo Zone(JsonObject? due, TimeZoneInfo account)
+    {
+        if (due?["timezone"] is not JsonValue value || !value.TryGetValue(out string? name) || name.Length == 0)
+            return account;
+
+        return TimeZoneInfo.TryFindSystemTimeZoneById(name, out var found) ? found : account;
+    }
+
+    /// <summary>
     /// Builds a <c>deadline</c> object, or <c>null</c> to clear the one a task has.
     /// </summary>
     /// <remarks>

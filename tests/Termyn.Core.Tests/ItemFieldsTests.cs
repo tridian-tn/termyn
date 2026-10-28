@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.TestSupport;
@@ -86,5 +87,84 @@ public class ItemFieldsTests
 
         Assert.Equal(new[] { "content", "due", "priority", "project_id" }, fields.Select(kv => kv.Key).OrderBy(k => k).ToArray());
         Assert.Equal("A", fields["content"]!.ToString());
+    }
+
+    // ---- Rescheduling ----------------------------------------------------------------------------
+
+    private static readonly DateOnly Moved = new(2026, 11, 2);
+
+    private static JsonObject Rescheduled(string? due, string zone = "UTC")
+        => ItemFields.Rescheduled(
+            due is null ? null : JsonNode.Parse(due)!.AsObject(),
+            Moved,
+            TimeZoneInfo.FindSystemTimeZoneById(zone));
+
+    [Fact]
+    public void A_task_with_no_due_date_is_moved_onto_the_whole_day()
+        => Assert.Equal("""{"date":"2026-11-02"}""", Rescheduled(null).ToJsonString());
+
+    [Fact]
+    public void A_whole_day_stays_a_whole_day()
+        => Assert.Equal("""{"date":"2026-11-02"}""", Rescheduled("""{"date":"2026-10-27","string":"tomorrow","is_recurring":false}""").ToJsonString());
+
+    [Fact]
+    public void A_time_goes_with_the_task_to_its_new_day()
+        => Assert.Equal("2026-11-02T16:30:00", Rescheduled("""{"date":"2026-10-27T16:30:00","is_recurring":false}""")["date"]!.ToString());
+
+    [Fact]
+    public void A_one_off_goes_without_the_words_it_was_set_with()
+    {
+        // "tomorrow" sent back today would have the server read a different day from the one asked for.
+        var moved = Rescheduled("""{"date":"2026-10-27","string":"tomorrow","lang":"en","is_recurring":false}""");
+
+        Assert.Null(moved["string"]);
+        Assert.Null(moved["lang"]);
+    }
+
+    [Fact]
+    public void A_repeat_keeps_its_words_so_it_goes_on_repeating()
+    {
+        var moved = Rescheduled("""{"date":"2026-10-26T09:00:00","string":"every monday 9am","lang":"en","is_recurring":true}""");
+
+        Assert.Equal("2026-11-02T09:00:00", moved["date"]!.ToString());
+        Assert.Equal("every monday 9am", moved["string"]!.ToString());
+        Assert.Equal("en", moved["lang"]!.ToString());
+        Assert.True(moved["is_recurring"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void A_repeat_goes_without_a_start_its_words_still_carry()
+    {
+        // Set here and not yet synced, the words still say where they start; sent back beside the
+        // new date, they'd put the task straight back there.
+        var moved = Rescheduled("""{"date":"2026-11-10","string":"every day starting 2026-11-10 until 2026-11-20","is_recurring":true}""");
+
+        Assert.Equal("every day until 2026-11-20", moved["string"]!.ToString());
+        Assert.Equal("2026-11-02", moved["date"]!.ToString());
+    }
+
+    [Fact]
+    public void A_repeat_in_words_that_cannot_be_taken_apart_goes_back_as_it_was()
+        => Assert.Equal(
+            "every other fri",
+            Rescheduled("""{"date":"2026-11-06","string":"every other fri","is_recurring":true}""")["string"]!.ToString());
+
+    [Fact]
+    public void A_fixed_time_is_kept_in_its_own_zone_across_a_clock_change()
+    {
+        // Nine in London is 08:00Z in summer and 09:00Z in winter, and the clocks go back between
+        // the two days. Keeping the UTC time would move the task to ten.
+        var moved = Rescheduled("""{"date":"2026-10-24T08:00:00Z","timezone":"Europe/London","is_recurring":false}""", zone: "Pacific/Auckland");
+
+        Assert.Equal("2026-11-02T09:00:00Z", moved["date"]!.ToString());
+        Assert.Equal("Europe/London", moved["timezone"]!.ToString());
+    }
+
+    [Fact]
+    public void A_fixed_time_whose_zone_is_unknown_is_kept_in_the_accounts()
+    {
+        var moved = Rescheduled("""{"date":"2026-10-24T08:00:00Z","timezone":"Nowhere/Special","is_recurring":false}""", zone: "Europe/London");
+
+        Assert.Equal("2026-11-02T09:00:00Z", moved["date"]!.ToString());
     }
 }

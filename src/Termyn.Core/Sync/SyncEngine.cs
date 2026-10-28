@@ -831,6 +831,33 @@ public sealed class SyncEngine
             .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
+    /// Moves a task's due date to another day, keeping its time and any repeat, and queues an
+    /// <c>item_update</c>.
+    /// </summary>
+    /// <remarks>
+    /// Built from the <c>due</c> held here rather than from a reading of it, since the parts that
+    /// have to survive the move — the repeat's words, its language, a fixed timezone — are only
+    /// there. <see cref="ItemFields.Rescheduled"/> says what's kept and why.
+    /// </remarks>
+    /// <param name="id">The task</param>
+    /// <param name="day">The day it's to be due, in the account's timezone</param>
+    /// <returns>False when the task isn't held here, so nothing was queued</returns>
+    public bool RescheduleItem(string id, DateOnly day)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+
+            if (Model.Get(ResourceType.Items, id) is not { } existing)
+                return false;
+
+            var zone = Projections.ToTimeZone(Model.Get(ResourceType.User, ResourceType.User));
+            UpdateItem(id, new JsonObject { ["due"] = ItemFields.Rescheduled(existing["due"] as JsonObject, day, zone) });
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Sets a task's due date from words for the server to resolve, and queues an
     /// <c>item_update</c>. Only the string goes on the wire, but the local copy keeps the date and
     /// the recurrence flag it already had: <c>due</c> is one object, and replacing it wholesale

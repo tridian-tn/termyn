@@ -170,4 +170,51 @@ public class DueCommandTests
         Assert.False(window.RunOnTask(AppCommand.Due, "vanished"));
         Assert.False(asked);
     }
+
+    // ---- The Schedule menu -------------------------------------------------------------------------
+
+    [WinFormsFact]
+    public void Tomorrow_moves_the_task_to_tomorrow_and_keeps_its_time()
+    {
+        using var window = TestWindow.Build("due-tomorrow.json", Account(), out _, out var presenter);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.True(window.RunOnTask(AppCommand.DueTomorrow, "b"));
+
+        var row = presenter.Rows.Single(r => r.Id == "b");
+        Assert.Equal(presenter.Today.AddDays(1), row.DueOn);
+        Assert.EndsWith("16:00", presenter.DueWritten("b"));
+    }
+
+    [WinFormsFact]
+    public void Today_keeps_a_repeat_repeating()
+    {
+        using var window = TestWindow.Build("due-today-repeat.json", Account(), out _, out var presenter);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.True(window.RunOnTask(AppCommand.DueToday, "r"));
+
+        var row = presenter.Rows.Single(r => r.Id == "r");
+        Assert.Equal(presenter.Today, row.DueOn);
+        Assert.True(row.IsRecurring);
+    }
+
+    [WinFormsFact]
+    public void No_date_takes_the_due_date_away()
+    {
+        using var window = TestWindow.Build("due-none.json", Account(), out _, out var presenter);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.True(window.RunOnTask(AppCommand.DueNone, "b"));
+        Assert.Null(presenter.Rows.Single(r => r.Id == "b").DueOn);
+    }
+
+    [WinFormsFact]
+    public void No_date_on_a_task_with_none_writes_nothing()
+    {
+        using var window = TestWindow.Build("due-none-already.json", Account(), out _, out var presenter);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.False(window.RunOnTask(AppCommand.DueNone, "a"));
+    }
 }

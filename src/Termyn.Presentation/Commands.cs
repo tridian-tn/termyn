@@ -1,3 +1,5 @@
+using System.Globalization;
+using Termyn.Core.Filters;
 using Termyn.Core.Model;
 
 namespace Termyn.Presentation;
@@ -17,6 +19,11 @@ public enum AppCommand
     Rename,
     NewSubtask,
     Due,
+    DueToday,
+    DueTomorrow,
+    DueWeekend,
+    DueNextWeek,
+    DueNone,
     Deadline,
     Priority1,
     Priority2,
@@ -94,6 +101,46 @@ public sealed record TaskAbilities(
 }
 
 /// <summary>
+/// The days the Schedule menu's entries put a task on, worked out from today and the account.
+/// </summary>
+/// <remarks>
+/// "This weekend" and "Next week" are the account's own settings rather than anything this client
+/// decides, and each is always ahead of today: on the day itself, putting something off until then
+/// has to move it. Todoist reads the same words the same way, so the menu and a typed "next week"
+/// can't land on different days.
+/// </remarks>
+/// <param name="Today">Today in the account's timezone</param>
+/// <param name="Weekend">The day "This weekend" puts a task on, or null when the account hasn't said</param>
+/// <param name="NextWeek">The day "Next week" puts a task on, or null when the account hasn't said</param>
+public sealed record ScheduleDays(DateOnly Today, DateOnly? Weekend, DateOnly? NextWeek)
+{
+    /// <summary>
+    /// Works the days out from the account's settings.
+    /// </summary>
+    /// <param name="today">Today in the account's timezone</param>
+    /// <param name="weekendStart">The day the account says a weekend starts, or null when it hasn't said</param>
+    /// <param name="nextWeek">The day the account calls next week, or null when it hasn't said</param>
+    /// <returns>The days</returns>
+    public static ScheduleDays From(DateOnly today, DayOfWeek? weekendStart, DayOfWeek? nextWeek)
+        => new(
+            today,
+            weekendStart is { } weekend ? FilterDay.After(today, weekend) : null,
+            nextWeek is { } week ? FilterDay.After(today, week) : null);
+
+    /// <summary>The day a Schedule entry puts a task on, or null when it puts it on none.</summary>
+    /// <param name="command">The entry</param>
+    /// <returns>The day</returns>
+    public DateOnly? For(AppCommand command) => command switch
+    {
+        AppCommand.DueToday => Today,
+        AppCommand.DueTomorrow => Today.AddDays(1),
+        AppCommand.DueWeekend => Weekend,
+        AppCommand.DueNextWeek => NextWeek,
+        _ => null,
+    };
+}
+
+/// <summary>
 /// What the app has in hand when a menu opens. Everything a command's label or availability can
 /// turn on, gathered once so a menu of thirty entries asks thirty questions of one snapshot rather
 /// than of the model.
@@ -115,6 +162,7 @@ public sealed record TaskAbilities(
 /// <param name="ReconnectNeeded">
 /// Whether Todoist has turned the token away, which greys everything that would change the account
 /// </param>
+/// <param name="Schedule">The days the Schedule menu's entries land on, or null when they aren't known</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -130,7 +178,8 @@ public sealed record CommandContext(
     bool CanCollapseAll = false,
     TaskAbilities? SelectionAbilities = null,
     string? NewTaskText = null,
-    bool ReconnectNeeded = false)
+    bool ReconnectNeeded = false,
+    ScheduleDays? Schedule = null)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -166,7 +215,11 @@ public sealed record CommandContext(
 /// <param name="Label">What to call it, which some commands change with the thing they act on</param>
 /// <param name="Enabled">False when running it now would do nothing</param>
 /// <param name="Checked">Whether it is currently on, for the surface to show however it can</param>
-public sealed record CommandState(string Label, bool Enabled, bool Checked = false);
+/// <param name="Hint">
+/// A word or two beside the label saying where it would take you, such as the day a Schedule entry
+/// lands on, or null when it has none. A menu shows it where a shortcut would go
+/// </param>
+public sealed record CommandState(string Label, bool Enabled, bool Checked = false, string? Hint = null);
 
 /// <summary>
 /// The one place that says what each command is called and whether it can be run.
@@ -242,6 +295,16 @@ public static class Commands
             AppCommand.Rename => Task(Strings.CommandRename),
 
             AppCommand.Due => Task(Strings.CommandDue),
+            // Ticked on the day the task is already due, the way Priority ticks the one it has, and
+            // greyed where the account hasn't said which day the entry means.
+            AppCommand.DueToday => Scheduled(Strings.CommandDueToday),
+            AppCommand.DueTomorrow => Scheduled(Strings.CommandDueTomorrow),
+            AppCommand.DueWeekend => Scheduled(Strings.CommandDueWeekend),
+            AppCommand.DueNextWeek => Scheduled(Strings.CommandDueNextWeek),
+
+            // Greyed on a task with no due date to take away.
+            AppCommand.DueNone => new CommandState(Strings.CommandDueNone, task is { Due.Length: > 0 }),
+
             AppCommand.Deadline => Task(Strings.CommandDeadline),
             AppCommand.Labels => Task(Strings.CommandLabels),
 
@@ -385,6 +448,22 @@ public static class Commands
         CommandState Task(string label) => new(label, task is not null);
 
         CommandState Always(string label) => new(label, true);
+
+        // The day beside the label, the way Todoist's scheduler shows it: the weekday alone for the
+        // next two days, and the date with it further out, where the weekday alone could be either
+        // of two.
+        CommandState Scheduled(string label)
+        {
+            if (context.Schedule?.For(command) is not { } day)
+                return new(label, false);
+
+            var near = day <= context.Schedule.Today.AddDays(1);
+            var hint = near
+                ? DisplayDates.Weekday(day, CultureInfo.CurrentCulture)
+                : DisplayDates.WeekdayDayMonth(day, CultureInfo.CurrentCulture);
+
+            return new(label, task is not null, task?.DueOn == day, hint);
+        }
 
         // The panel has something in it that can be scaled: the description, either way round. The
         // comments it also shows are drawn rather than set in text, so there is nothing to scale.

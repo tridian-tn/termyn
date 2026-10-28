@@ -112,6 +112,30 @@
     <value>Deadline…</value>
     <comment>Opens the box for setting the selected task's deadline, the day it has to be finished by. Not the same thing as its due date.</comment>
   </data>
+  <data name="MenuSchedule" xml:space="preserve">
+    <value>&amp;Schedule</value>
+    <comment>A submenu inside the Task menu and the right-click menu, holding quick choices for the selected task's due date. Todoist's own right-click menu uses the same word. Its letter only has to differ from the other entries in those two menus.</comment>
+  </data>
+  <data name="CommandDueToday" xml:space="preserve">
+    <value>Today</value>
+    <comment>In the Schedule submenu: makes the selected task due today. Todoist's own wording.</comment>
+  </data>
+  <data name="CommandDueTomorrow" xml:space="preserve">
+    <value>Tomorrow</value>
+    <comment>In the Schedule submenu: makes the selected task due tomorrow. Todoist's own wording.</comment>
+  </data>
+  <data name="CommandDueWeekend" xml:space="preserve">
+    <value>This weekend</value>
+    <comment>In the Schedule submenu: makes the selected task due on the coming weekend, on the day the Todoist account says a weekend starts. Todoist's own wording.</comment>
+  </data>
+  <data name="CommandDueNextWeek" xml:space="preserve">
+    <value>Next week</value>
+    <comment>In the Schedule submenu: makes the selected task due next week, on the day the Todoist account says next week means. Todoist's own wording.</comment>
+  </data>
+  <data name="CommandDueNone" xml:space="preserve">
+    <value>No date</value>
+    <comment>In the Schedule submenu: takes the selected task's due date away. Todoist's own wording.</comment>
+  </data>
   <data name="CommandPriority1" xml:space="preserve">
     <value>Priority 1 — urgent</value>
     <comment>The number is Todoist's own, highest first, and should stay as it is.</comment>

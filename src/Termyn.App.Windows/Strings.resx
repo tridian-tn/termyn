@@ -337,6 +337,130 @@
     <value>Clear</value>
     <comment>Button in the due date dialog that removes the due date.</comment>
   </data>
+  <data name="DueRepeat" xml:space="preserve">
+    <value>Repeat:</value>
+    <comment>Label before the list of repeats in the due date dialog.</comment>
+  </data>
+  <data name="DueRepeatAccessible" xml:space="preserve">
+    <value>Repeat</value>
+    <comment>The repeat list's name as read by a screen reader.</comment>
+  </data>
+  <data name="RepeatNone" xml:space="preserve">
+    <value>Doesn't repeat</value>
+    <comment>In the due date dialog's repeat list: the task is due once.</comment>
+  </data>
+  <data name="RepeatDaily" xml:space="preserve">
+    <value>Every day</value>
+    <comment>In the due date dialog's repeat list.</comment>
+  </data>
+  <data name="RepeatWeekly" xml:space="preserve">
+    <value>Every week on {0}</value>
+    <comment>In the due date dialog's repeat list. {0} is a day of the week in full, such as Saturday.</comment>
+  </data>
+  <data name="RepeatWeekdays" xml:space="preserve">
+    <value>Every weekday (Mon–Fri)</value>
+    <comment>In the due date dialog's repeat list: Monday to Friday each week.</comment>
+  </data>
+  <data name="RepeatMonthly" xml:space="preserve">
+    <value>Every month on day {0}</value>
+    <comment>In the due date dialog's repeat list. {0} is a day of the month as a number, such as 24.</comment>
+  </data>
+  <data name="RepeatYearly" xml:space="preserve">
+    <value>Every year on {0}</value>
+    <comment>In the due date dialog's repeat list. {0} is a day and month, such as 24 Oct.</comment>
+  </data>
+  <data name="RepeatCustom" xml:space="preserve">
+    <value>Custom…</value>
+    <comment>In the due date dialog's repeat list: any other repeat, or one Todoist has that the list can't show.</comment>
+  </data>
+  <data name="RepeatTitle" xml:space="preserve">
+    <value>Custom repeat</value>
+    <comment>Title bar of the dialog for building a repeat, opened from Custom… in the due date dialog.</comment>
+  </data>
+  <data name="RepeatFromDue" xml:space="preserve">
+    <value>From the due date</value>
+    <comment>In the custom repeat dialog: the next one is counted from the day it was due.</comment>
+  </data>
+  <data name="RepeatFromCompletion" xml:space="preserve">
+    <value>From when it's completed</value>
+    <comment>In the custom repeat dialog: the next one is counted from the day it's ticked off.</comment>
+  </data>
+  <data name="RepeatEvery" xml:space="preserve">
+    <value>Every</value>
+    <comment>In the custom repeat dialog, before a number and a unit: "Every 2 weeks".</comment>
+  </data>
+  <data name="RepeatEveryAccessible" xml:space="preserve">
+    <value>How many</value>
+    <comment>The custom repeat dialog's number box, as read by a screen reader.</comment>
+  </data>
+  <data name="RepeatUnitAccessible" xml:space="preserve">
+    <value>Unit</value>
+    <comment>The custom repeat dialog's list of days, weeks, months and years, as read by a screen reader.</comment>
+  </data>
+  <data name="RepeatDay" xml:space="preserve">
+    <value>day</value>
+    <comment>In the custom repeat dialog, after "Every 1".</comment>
+  </data>
+  <data name="RepeatDays" xml:space="preserve">
+    <value>days</value>
+    <comment>In the custom repeat dialog, after "Every" and a number above one.</comment>
+  </data>
+  <data name="RepeatWeek" xml:space="preserve">
+    <value>week</value>
+    <comment>In the custom repeat dialog, after "Every 1".</comment>
+  </data>
+  <data name="RepeatWeeks" xml:space="preserve">
+    <value>weeks</value>
+    <comment>In the custom repeat dialog, after "Every" and a number above one.</comment>
+  </data>
+  <data name="RepeatMonth" xml:space="preserve">
+    <value>month</value>
+    <comment>In the custom repeat dialog, after "Every 1".</comment>
+  </data>
+  <data name="RepeatMonths" xml:space="preserve">
+    <value>months</value>
+    <comment>In the custom repeat dialog, after "Every" and a number above one.</comment>
+  </data>
+  <data name="RepeatYear" xml:space="preserve">
+    <value>year</value>
+    <comment>In the custom repeat dialog, after "Every 1".</comment>
+  </data>
+  <data name="RepeatYears" xml:space="preserve">
+    <value>years</value>
+    <comment>In the custom repeat dialog, after "Every" and a number above one.</comment>
+  </data>
+  <data name="RepeatStarts" xml:space="preserve">
+    <value>Starts:</value>
+    <comment>In the custom repeat dialog, before the first day it falls on.</comment>
+  </data>
+  <data name="RepeatStartsAccessible" xml:space="preserve">
+    <value>Start date</value>
+    <comment>The custom repeat dialog's start date, as read by a screen reader.</comment>
+  </data>
+  <data name="RepeatEnds" xml:space="preserve">
+    <value>Ends:</value>
+    <comment>In the custom repeat dialog, before the choice of never or on a date.</comment>
+  </data>
+  <data name="RepeatNever" xml:space="preserve">
+    <value>Never</value>
+    <comment>In the custom repeat dialog: the repeat goes on for ever.</comment>
+  </data>
+  <data name="RepeatEndsOn" xml:space="preserve">
+    <value>On</value>
+    <comment>In the custom repeat dialog, before the last day it can fall on.</comment>
+  </data>
+  <data name="RepeatEndsAccessible" xml:space="preserve">
+    <value>End date</value>
+    <comment>The custom repeat dialog's end date, as read by a screen reader.</comment>
+  </data>
+  <data name="RepeatPreview" xml:space="preserve">
+    <value>Todoist will read this as "{0}".</value>
+    <comment>In the custom repeat dialog: the words that will be sent. {0} is Todoist's own English, such as "every mon, fri at 09:00", and isn't translated.</comment>
+  </data>
+  <data name="RepeatUnreadable" xml:space="preserve">
+    <value>This task repeats "{0}", which can't be shown here. Saving replaces it.</value>
+    <comment>In the custom repeat dialog, when the task's repeat was set in Todoist in words this dialog can't take apart. {0} is those words.</comment>
+  </data>
   <data name="CommentsAttach" xml:space="preserve">
     <value>Attach a file…</value>
     <comment>Button under the comment box that picks a file to attach.</comment>

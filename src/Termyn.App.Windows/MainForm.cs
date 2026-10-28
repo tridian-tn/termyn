@@ -2930,7 +2930,8 @@ internal sealed class MainForm : Form
         _presenter.CanCollapseAll,
         _presenter.SelectionAbilitiesFor(selection),
         NewTaskText(selection),
-        _presenter.ReconnectNeeded);
+        _presenter.ReconnectNeeded,
+        _presenter.ScheduleDays);
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
     /// <param name="selection">The row, or null for none</param>
@@ -2997,7 +2998,10 @@ internal sealed class MainForm : Form
                 // Written on, not bound to. Setting ShortcutKeys would register the keystroke on
                 // the strip as well as the control it belongs to, and which of the two answered
                 // would stop being ours to say.
-                ShortcutKeyDisplayString = shortcut(entry.Command),
+                //
+                // A hint takes the same place, since nothing that has one has a shortcut: it's the
+                // column Todoist's scheduler puts the day in, too.
+                ShortcutKeyDisplayString = state.Hint ?? shortcut(entry.Command),
             };
 
             item.Click += (_, _) => run(entry.Command);
@@ -3430,6 +3434,25 @@ internal sealed class MainForm : Form
                 Guarded(() => wrote = PromptForDue(id));
                 return wrote;
 
+            case AppCommand.DueToday:
+            case AppCommand.DueTomorrow:
+            case AppCommand.DueWeekend:
+            case AppCommand.DueNextWeek:
+                Guarded(() => wrote = _presenter.ScheduleDays.For(command) is { } day && _presenter.Reschedule(id, day));
+                return wrote;
+
+            // Nothing to write on a task with no due date, which the menu greys it for.
+            case AppCommand.DueNone:
+                Guarded(() =>
+                {
+                    if (_presenter.DueWritten(id).Length == 0)
+                        return;
+
+                    _presenter.SetDue(id, null);
+                    wrote = true;
+                });
+                return wrote;
+
             case AppCommand.Deadline:
                 Guarded(() => wrote = PromptForDeadline(id));
                 return wrote;
@@ -3765,7 +3788,7 @@ internal sealed class MainForm : Form
     /// <param name="opened">The due date as the box opens on it</param>
     /// <returns>The words to set the due date to, empty to clear it, or null when cancelled</returns>
     private string? AskDueWithDialog(TaskRow row, string opened)
-        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay, _presenter.DatesInEnglish);
+        => DueForm.Ask(this, row.Content, opened, _presenter.Today, _presenter.ReadDay, _presenter.DatesInEnglish, row.DueOn);
 
     /// <summary>
     /// Asks for the day a task has to be finished by. A property so a test can answer without a
