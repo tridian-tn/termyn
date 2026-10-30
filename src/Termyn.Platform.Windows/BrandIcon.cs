@@ -22,12 +22,37 @@ public static class BrandIcon
     /// <summary>The sizes Windows asks for, smallest first. 256 is the one Explorer shows large.</summary>
     public static readonly IReadOnlyList<int> IconSizes = [16, 20, 24, 32, 40, 48, 64, 128, MaxSize];
 
+    /// <summary>What the badge says in place of a count over 99.</summary>
+    private const string Overflow = "99+";
+
+    /// <summary>The family the count is drawn in where it's installed, which has a real bold face.</summary>
+    private const string BadgeFamilyName = "Segoe UI";
+
+    /// <summary>
+    /// The family the count is drawn in: Segoe UI, which every Windows Termyn runs on has, or the
+    /// generic sans serif if it's somehow missing.
+    /// </summary>
+    /// <remarks>Looked up once and kept, since the tray redraws the badge every time the count moves.</remarks>
+    private static readonly FontFamily BadgeFamily = InstalledFonts.Has(BadgeFamilyName)
+        ? new FontFamily(BadgeFamilyName)
+        : FontFamily.GenericSansSerif;
+
     /// <summary>
     /// Draws the mark at one size, optionally badged with a count instead of the tick.
     /// </summary>
     /// <param name="size">Edge length in pixels.</param>
     /// <param name="badge">Tasks due today. Zero draws the tick, which is the mark proper.</param>
-    public static Bitmap Draw(int size, int badge = 0)
+    public static Bitmap Draw(int size, int badge = 0) => Draw(size, badge, BadgeFamily);
+
+    /// <summary>
+    /// Draws the mark at one size, with the count in a family of the caller's choosing.
+    /// </summary>
+    /// <remarks>So the fallback family can be drawn on a machine that has Segoe UI.</remarks>
+    /// <param name="size">Edge length in pixels</param>
+    /// <param name="badge">Tasks due today; zero draws the tick</param>
+    /// <param name="family">The family the count is drawn in</param>
+    /// <returns>The mark, which the caller owns</returns>
+    internal static Bitmap Draw(int size, int badge, FontFamily family)
     {
         // Checked here rather than left to Bitmap, which answers a zero or a negative with a bare
         // "Parameter is not valid" that says nothing about which size was asked for.
@@ -38,7 +63,6 @@ public static class BrandIcon
 
         using var g = Graphics.FromImage(bitmap);
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         g.Clear(Color.Transparent);
 
         var slate = ToColor(ThemePalette.Dark.Background);
@@ -53,7 +77,7 @@ public static class BrandIcon
         }
 
         if (badge > 0)
-            DrawBadge(g, tile, size, badge, amber);
+            DrawBadge(g, tile, size, badge, amber, family);
         else
             DrawCheckbox(g, size, amber);
 
@@ -134,16 +158,79 @@ public static class BrandIcon
             writer.Write(png);
     }
 
-    private static void DrawBadge(Graphics g, Rectangle tile, int size, int badge, Color amber)
+    private static void DrawBadge(Graphics g, Rectangle tile, int size, int badge, Color amber, FontFamily family)
     {
         // Over 99 stops being a number worth reading and becomes "a lot".
-        var text = badge > 99 ? "99+" : badge.ToString();
-        var points = text.Length >= 3 ? size * 0.42f : size * 0.62f;
+        var text = badge > 99 ? Overflow : badge.ToString();
 
-        using var font = new Font(SystemFonts.DefaultFont.FontFamily, points, FontStyle.Bold, GraphicsUnit.Pixel);
+        // Drawn as a path and placed by its ink, not by DrawString into the tile: DrawString pads
+        // the text and centres the advance box, so two digits at sixteen pixels wrap onto a second
+        // line, and at every size the digits sit right of centre.
+        using var path = new GraphicsPath();
+        path.AddString(text, family, (int)FontStyle.Bold, 100f, PointF.Empty, StringFormat.GenericTypographic);
+        var ink = path.GetBounds();
+
+        // A family with no outline for the digits leaves nothing to scale, and dividing by its
+        // empty bounds would hand the transform an infinite scale. The bare tile is the better miss.
+        if (ink.Width <= 0 || ink.Height <= 0) return;
+
+        // As tall as the tile allows, unless that makes it wider than the tile's inside — which is
+        // what shrinks "99+", and two wide digits at the small end.
+        var scale = Math.Min(size * 0.5f / ink.Height, size * 0.8f / ink.Width);
+        var width = ink.Width * scale;
+
+        // Across, the box is centred and then nudged halfway toward centring the ink's mass. A
+        // centred box alone leaves a "1" looking right of centre, since its flag widens the box to
+        // the left of the stem the eye reads; centring the mass alone swings "10" too far the other
+        // way, the "1" being so light. Not for "99+": the "+" is light enough that any nudge leans
+        // the count against the tile's edge, and it fills the tile's width anyway.
+        // Down, the box: every digit shares the baseline and the cap height, so that's centred.
+        var centred = (tile.Width - width) / 2f;
+        var balanced = (tile.Width / 2f) - ((MassCentre(path) - ink.X) * scale);
+        var left = text == Overflow ? centred : (centred + balanced) / 2f;
+        var top = (tile.Height - (ink.Height * scale)) / 2f;
+
+        // Placed exactly rather than snapped to the pixel grid: snapping is sharper, but it moves
+        // the count by up to half a pixel, which at twenty pixels is enough to see.
+        using var matrix = new Matrix();
+        matrix.Translate(left, top);
+        matrix.Scale(scale, scale);
+        matrix.Translate(-ink.X, -ink.Y);
+        path.Transform(matrix);
+
         using var brush = new SolidBrush(amber);
-        using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        g.DrawString(text, font, brush, tile, format);
+        g.FillPath(brush, path);
+
+        // Only Segoe UI is trusted to have a real bold. GDI+ says Microsoft Sans Serif, the generic
+        // fallback, has one too, but its bold stem is barely heavier than its regular, and DrawString's
+        // fake emboldening doesn't reach a path. So anything else gets its outline thickened by hand,
+        // to about Segoe UI Bold's weight.
+        if (family.Name != BadgeFamilyName)
+        {
+            using var pen = new Pen(amber, ink.Height * scale * 0.06f) { LineJoin = LineJoin.Round };
+            g.DrawPath(pen, path);
+        }
+    }
+
+    /// <summary>
+    /// Where a path's ink balances side to side, from the area it fills.
+    /// </summary>
+    /// <param name="path">The count's outline, at the size it was laid out at</param>
+    /// <returns>The x coordinate of the ink's centre of mass</returns>
+    private static float MassCentre(GraphicsPath path)
+    {
+        using var region = new Region(path);
+        using var identity = new Matrix();
+
+        float area = 0, moment = 0;
+        foreach (var scan in region.GetRegionScans(identity))
+        {
+            var filled = scan.Width * scan.Height;
+            area += filled;
+            moment += filled * (scan.X + (scan.Width / 2f));
+        }
+
+        return moment / area;
     }
 
     private static void DrawCheckbox(Graphics g, int size, Color amber)

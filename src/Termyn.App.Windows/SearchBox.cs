@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using Termyn.Platform.Windows;
 
 namespace Termyn.App.Windows;
 
@@ -215,27 +216,12 @@ internal sealed class SearchBox : TextBox
     /// <summary>Gives the cross its glyph, and the font that glyph lives in.</summary>
     private static void Dress(Label reset)
     {
-        var installed = IconFonts.FirstOrDefault(Installed);
+        var installed = IconFonts.FirstOrDefault(InstalledFonts.Has);
 
         reset.Text = installed is null ? PlainGlyph : IconGlyph;
 
         if (installed is not null)
             reset.Font = new Font(installed, 9f);
-    }
-
-    /// <summary>Whether a font family of that name is on this machine.</summary>
-    private static bool Installed(string family)
-    {
-        try
-        {
-            using var found = new FontFamily(family);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            // What a name nothing answers to gives back, which is the question being asked.
-            return false;
-        }
     }
 
     /// <summary>

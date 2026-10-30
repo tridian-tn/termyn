@@ -197,6 +197,72 @@ public class BrandIconTests
         Assert.True(Differences(ninetyNine, hundred) > 0);      // 99 is still a number
     }
 
+    [Theory]
+    [InlineData(16, 1)]
+    [InlineData(16, 7)]
+    [InlineData(16, 10)]
+    [InlineData(16, 42)]
+    [InlineData(20, 10)]
+    [InlineData(24, 10)]
+    [InlineData(24, 42)]
+    [InlineData(32, 1)]
+    [InlineData(32, 10)]
+    [InlineData(32, 42)]
+    [InlineData(32, 88)]
+    public void A_count_balances_on_one_line_in_the_middle_of_the_tile(int size, int badge)
+    {
+        using var bitmap = BrandIcon.Draw(size, badge);
+        AssertLevelOnOneLine(bitmap, size);
+
+        // Halfway between centring the box and centring the ink, so neither is out by a pixel. The
+        // box alone leaves a "1"'s stem right of centre, its flag widening the box to the left; the
+        // ink alone drags "10" against the left edge, the "1" being so light.
+        var (left, _, right, _) = InkBounds(bitmap);
+        Assert.InRange((size - 2 - right) - (left - 1), -1, 1);
+
+        var middle = (size - 1) / 2.0;
+        Assert.InRange(InkCentre(bitmap), middle - 1, middle + 1);
+    }
+
+    [Theory]
+    [InlineData(16)]
+    [InlineData(20)]
+    [InlineData(24)]
+    [InlineData(32)]
+    public void An_overflowing_count_sits_on_one_line_in_the_middle_of_the_tile(int size)
+    {
+        // Centred by its box: the "+" is too light to balance against without the count leaning
+        // into the tile's edge.
+        using var bitmap = BrandIcon.Draw(size, 100);
+        AssertLevelOnOneLine(bitmap, size);
+
+        var (left, _, right, _) = InkBounds(bitmap);
+        Assert.InRange((size - 2 - right) - (left - 1), -1, 1);
+    }
+
+    [Fact]
+    public void A_count_is_drawn_bold()
+    {
+        // A "1" sixteen pixels tall has a stem about 3.3px wide in Segoe UI Bold, and 1.8px in
+        // its regular weight, which smears into the tile at the small end.
+        using var bitmap = BrandIcon.Draw(32, 1);
+
+        var stem = StemWidth(bitmap);
+        Assert.True(stem >= 2.8, $"the stem is {stem:F2}px wide");
+    }
+
+    [Fact]
+    public void A_count_in_the_fallback_family_is_still_bold()
+    {
+        // Microsoft Sans Serif's bold stem is about 2.3px at this height, which is barely heavier
+        // than its regular; the badge thickens it to make up the difference.
+        using var fallback = FontFamily.GenericSansSerif;
+        using var bitmap = BrandIcon.Draw(32, 1, fallback);
+
+        var stem = StemWidth(bitmap);
+        Assert.True(stem >= 2.8, $"the stem is {stem:F2}px wide");
+    }
+
     [Fact]
     public void A_count_below_one_is_the_plain_mark()
     {
@@ -287,6 +353,105 @@ public class BrandIconTests
                 if (a.GetPixel(x, y) != b.GetPixel(x, y))
                     differing++;
         return differing;
+    }
+
+    /// <summary>
+    /// The smallest box holding every pixel the accent has visibly been drawn into.
+    /// </summary>
+    /// <remarks>
+    /// Faint edge pixels count too. A half-strength cut-off drops the anti-aliased tops of round
+    /// digits but not the flat baseline beneath them, and reads a centred count as sitting low.
+    /// </remarks>
+    /// <param name="bitmap">A badged mark</param>
+    /// <returns>The box's edges, inclusive</returns>
+    private static (int Left, int Top, int Right, int Bottom) InkBounds(Bitmap bitmap)
+    {
+        var threshold = ThemePalette.Dark.Background.R + 32;
+
+        int left = int.MaxValue, top = int.MaxValue, right = -1, bottom = -1;
+        for (var x = 0; x < bitmap.Width; x++)
+        {
+            for (var y = 0; y < bitmap.Height; y++)
+            {
+                var p = bitmap.GetPixel(x, y);
+                if (p.A < 255 || p.R < threshold) continue;
+
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        }
+
+        Assert.True(right >= 0, "the badge drew no count");
+        return (left, top, right, bottom);
+    }
+
+    /// <summary>
+    /// Where the count's ink balances side to side, each pixel weighted by how much accent it holds.
+    /// </summary>
+    /// <param name="bitmap">A badged mark</param>
+    /// <returns>The balancing column, in pixels from the left</returns>
+    private static double InkCentre(Bitmap bitmap)
+    {
+        var slate = ThemePalette.Dark.Background.R;
+
+        double weight = 0, moment = 0;
+        for (var x = 0; x < bitmap.Width; x++)
+        {
+            for (var y = 0; y < bitmap.Height; y++)
+            {
+                var p = bitmap.GetPixel(x, y);
+                if (p.A < 255 || p.R <= slate) continue;
+
+                weight += p.R - slate;
+                moment += (p.R - slate) * x;
+            }
+        }
+
+        Assert.True(weight > 0, "the badge drew no count");
+        return moment / weight;
+    }
+
+    /// <summary>
+    /// How wide a "1"'s stem is, in pixels, from how much accent the row 60% of the way down holds.
+    /// </summary>
+    /// <remarks>Partly covered pixels count for their part, so it's finer than a pixel count.</remarks>
+    /// <param name="bitmap">A mark badged with a 1</param>
+    /// <returns>The stem's width, in pixels</returns>
+    private static double StemWidth(Bitmap bitmap)
+    {
+        var slate = ThemePalette.Dark.Background.R;
+        var accent = ThemePalette.Dark.Accent.R;
+
+        var (_, top, _, bottom) = InkBounds(bitmap);
+        var row = top + (int)((bottom - top) * 0.6);
+
+        double width = 0;
+        for (var x = 0; x < bitmap.Width; x++)
+        {
+            var p = bitmap.GetPixel(x, row);
+            if (p.A == 255) width += Math.Clamp((p.R - slate) / (double)(accent - slate), 0, 1);
+        }
+
+        return width;
+    }
+
+    /// <summary>
+    /// Checks a badged mark's count is centred top to bottom, and short enough to be one line.
+    /// </summary>
+    /// <param name="bitmap">A badged mark</param>
+    /// <param name="size">The mark's edge length</param>
+    private static void AssertLevelOnOneLine(Bitmap bitmap, int size)
+    {
+        var (_, top, _, bottom) = InkBounds(bitmap);
+
+        // The tile is solid from 1 to size - 2; its outermost pixels are its anti-aliased edge. A
+        // pixel either way is the count's own edge landing unevenly on the grid.
+        Assert.InRange((size - 2 - bottom) - (top - 1), -1, 1);
+
+        // Wrapped onto two lines, the digits fill the tile top to bottom.
+        Assert.True(bottom - top + 1 <= size * 0.6, $"the count is {bottom - top + 1}px tall in a {size}px tile");
     }
 
     private static string Temp()
