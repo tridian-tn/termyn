@@ -207,6 +207,18 @@ public class CheckboxTests
     }
 
     [WinFormsFact]
+    public void The_box_grows_with_the_display_it_is_on()
+    {
+        // It was a fixed thirteen pixels, which on a screen at 200% sat small beside words twice
+        // the size, in a row twice the height.
+        var at100 = OutlineView.Checkbox(new Rectangle(0, 0, 20, 18));
+        var at200 = OutlineView.Checkbox(new Rectangle(0, 0, 40, 36), 192);
+
+        Assert.Equal(at100.Width * 2, at200.Width);
+        Assert.Equal(at100.Height * 2, at200.Height);
+    }
+
+    [WinFormsFact]
     public void A_finished_task_is_drawn_with_a_tick_in_it_and_an_unfinished_one_without()
     {
         // The one thing about the drawing that can be held: which of the two it drew. Rendered to

@@ -195,9 +195,13 @@ internal sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _tickedIdle;
 
     /// <summary>The panel size as the user last left it, which is what gets saved.</summary>
+    /// <remarks>
+    /// At 100%, like the other sizes saved with it, and scaled to the window's display as it's put
+    /// back. Kept in the display's pixels they came back a size apart on a screen of another scale.
+    /// </remarks>
     private int _descriptionHeight;
 
-    /// <summary>The outline's column widths as they were saved, until the window lays them out.</summary>
+    /// <summary>The outline's column widths as they were saved, at 100%, until the window lays them out.</summary>
     private readonly Dictionary<TaskColumn, int> _savedColumns = [];
 
     /// <summary>
@@ -330,7 +334,7 @@ internal sealed class MainForm : Form
             ShowLines = false,
             ShowRootLines = false,
             FullRowSelect = true,
-            Indent = 14,
+            Indent = SidebarIndent,
             BorderStyle = BorderStyle.None,
 
             // Only the text, so the tree goes on drawing the row's background, its selection and
@@ -1256,7 +1260,10 @@ internal sealed class MainForm : Form
         // Only remembered here. The splitters are set once the window has a size to divide, which
         // is not yet: before it is parented a SplitContainer clamps every distance it is given
         // against its own default and quietly sticks there.
-        _descriptionHeight = state.DescriptionHeight ?? StartupLayout.Scaled(StartupLayout.DescriptionHeight, dpi);
+        //
+        // At 100%. A figure saved before they were is taken as one too: what scale it was saved at
+        // can't be known, and 100% is the commonest answer.
+        _descriptionHeight = state.DescriptionHeight ?? StartupLayout.DescriptionHeight;
 
         // _adjustingPanels is still true here, so the layout this sets off doesn't record the
         // container's unparented default over what has just been read.
@@ -1310,6 +1317,11 @@ internal sealed class MainForm : Form
         _presenter.RestoreCollapsed(state.CollapsedTasks);
     }
 
+    /// <summary>A size in the window's display pixels as it would be at 100%, which is how sizes are saved.</summary>
+    /// <param name="pixels">The size on the window's display</param>
+    /// <returns>The size at 100%</returns>
+    private int AtHundred(int pixels) => (int)Math.Round(pixels * 96.0 / DeviceDpi);
+
     /// <summary>A size at 100% as it is at the window's display scale.</summary>
     /// <param name="logical">The size at 100%</param>
     /// <returns>The size in the display's pixels</returns>
@@ -1351,6 +1363,7 @@ internal sealed class MainForm : Form
         base.OnHandleCreated(e);
         PadSearch();
         SizeStrips(DeviceDpi);
+        _sidebar.Indent = StartupLayout.Scaled(SidebarIndent, DeviceDpi);
     }
 
     /// <summary>Sizes the same again for a screen of another scale.</summary>
@@ -1359,7 +1372,14 @@ internal sealed class MainForm : Form
         base.OnDpiChanged(e);
         PadSearch();
         SizeStrips(e.DeviceDpiNew);
+        _sidebar.Indent = StartupLayout.Scaled(SidebarIndent, e.DeviceDpiNew);
     }
+
+    /// <summary>
+    /// How far in each level of the sidebar sits at 100%. The tree takes it in pixels, so it's
+    /// scaled for the screen the window's on rather than left a 100% screen's width everywhere.
+    /// </summary>
+    private const int SidebarIndent = 14;
 
     private ViewState CurrentViewState()
     {
@@ -1372,8 +1392,8 @@ internal sealed class MainForm : Form
             SelectedKey = _sidebarKey,
             CollapsedKeys = CollapsedKeys().ToList(),
             CollapsedTasks = _presenter.CollapsedTasks,
-            ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => c.Value),
-            SidebarWidth = _split.SplitterDistance,
+            ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => AtHundred(c.Value)),
+            SidebarWidth = AtHundred(_split.SplitterDistance),
             ShowDescription = !_detail.Panel2Collapsed,
             DescriptionHeight = _descriptionHeight,
             WindowX = bounds.X,
@@ -1950,8 +1970,11 @@ internal sealed class MainForm : Form
         MarkSidebarSelection();
     }
 
-    /// <summary>How much room the dot takes from the text, beside the dot's own width.</summary>
+    /// <summary>How much room the dot takes from the text, beside the dot's own width, at 100%.</summary>
     private const int DotGap = 4;
+
+    /// <summary>The largest a sidebar row's dot is drawn, at 100%.</summary>
+    private const int DotSize = 8;
 
     /// <summary>
     /// How far in from the text's own left edge the dot starts.
@@ -1986,7 +2009,7 @@ internal sealed class MainForm : Form
 
         if (node.SitsInDotColumn)
         {
-            var size = Math.Min(8, bounds.Height - 6);
+            var size = Math.Min(_sidebar.LogicalToDeviceUnits(DotSize), bounds.Height - _sidebar.LogicalToDeviceUnits(6));
             var lead = _sidebar.LogicalToDeviceUnits(DotLead);
 
             if (size > 0 && node.Colour is { } colour)
@@ -1999,7 +2022,7 @@ internal sealed class MainForm : Form
 
             // The text keeps its full width rather than losing the dot's room: the row's background
             // is already drawn, and a name shortened by a dot would be the wrong thing to trim.
-            taken = lead + Math.Max(0, size) + DotGap;
+            taken = lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
         }
 
         TextRenderer.DrawText(
@@ -3095,7 +3118,7 @@ internal sealed class MainForm : Form
         // Clamped against what the container can actually take, not against a figure of ours. The
         // sidebar splitter can be dragged until the outline is its own minimum width, and asking a
         // panel for more room than exists throws rather than settling for what there is.
-        Restore(_detail, _detail.Height, _descriptionHeight, 60);
+        Restore(_detail, _detail.Height, AtScale(_descriptionHeight), AtScale(60));
 
         static void Restore(SplitContainer split, int across, int wanted, int preferred)
         {
@@ -3129,7 +3152,7 @@ internal sealed class MainForm : Form
             return;
 
         if (!_detail.Panel2Collapsed)
-            _descriptionHeight = _detail.Panel2.Height;
+            _descriptionHeight = AtHundred(_detail.Panel2.Height);
     }
 
     // ---- Commands ------------------------------------------------------------------------------
@@ -4278,13 +4301,13 @@ internal sealed class MainForm : Form
             // it clamps the distance against the container's default width and silently sticks there.
             var least = AtScale(StartupLayout.SidebarLeast);
             _split.SplitterDistance = Math.Clamp(
-                _settings.View.SidebarWidth ?? AtScale(StartupLayout.SidebarWidth),
+                AtScale(_settings.View.SidebarWidth ?? StartupLayout.SidebarWidth),
                 least,
                 Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
             ApplyPanelSizes();
 
             // After the sidebar, whose width decides what the outline is left with.
-            _outline.LayColumns(_savedColumns);
+            _outline.LayColumns(_savedColumns.ToDictionary(c => c.Key, c => AtScale(c.Value)));
         });
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
