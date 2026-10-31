@@ -219,7 +219,7 @@ public class DayBoxTests
         {
             System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
 
-            Assert.Equal("Tuesday, August 4, 2026 at 4:30 PM", DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
+            Assert.Equal(Meridiem.AsWritten("Tuesday, August 4, 2026 at 4:30 PM", System.Globalization.CultureInfo.CurrentCulture), DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
         }
         finally
         {

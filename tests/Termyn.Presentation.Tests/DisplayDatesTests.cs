@@ -1,5 +1,6 @@
 using System.Globalization;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.Presentation.Tests;
 
@@ -11,7 +12,8 @@ namespace Termyn.Presentation.Tests;
 /// whatever the machine running the tests has changed in its region settings. The English ones are
 /// checked word for word. The others are checked against the pattern they should come out in,
 /// since what's in question is the order, and a region's abbreviations are its own data — German's
-/// "Okt." and "Mo" — which can change from one version of ICU to the next.
+/// "Okt." and "Mo" — which can change from one version of ICU to the next. Word for word bar one
+/// thing: the space before AM or PM, which <see cref="Meridiem"/> takes from the machine.
 /// </remarks>
 public class DisplayDatesTests
 {
@@ -31,13 +33,19 @@ public class DisplayDatesTests
     [InlineData("en-US", "Oct 5, 2026 9:30 AM")]
     [InlineData("ja-JP", "2026年10月5日 9:30")]
     public void A_date_and_time_follow_the_regions_order(string culture, string expected)
-        => Assert.Equal(expected, DisplayDates.DateAndTime(Moment, CultureInfo.GetCultureInfo(culture)));
+    {
+        var region = CultureInfo.GetCultureInfo(culture);
+        Assert.Equal(Meridiem.AsWritten(expected, region), DisplayDates.DateAndTime(Moment, region));
+    }
 
     [Theory]
     [InlineData("en-GB", "Mon, 5 Oct 09:30")]
     [InlineData("en-US", "Mon, Oct 5 9:30 AM")]
     public void A_weekday_goes_where_the_regions_long_date_puts_it(string culture, string expected)
-        => Assert.Equal(expected, DisplayDates.WeekdayAndTime(Moment, CultureInfo.GetCultureInfo(culture)));
+    {
+        var region = CultureInfo.GetCultureInfo(culture);
+        Assert.Equal(Meridiem.AsWritten(expected, region), DisplayDates.WeekdayAndTime(Moment, region));
+    }
 
     [Fact]
     public void German_puts_its_full_stop_after_the_day()

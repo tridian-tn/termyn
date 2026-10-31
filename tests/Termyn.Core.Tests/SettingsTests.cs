@@ -538,19 +538,18 @@ public class SettingsStoreTests : IDisposable
     [Fact]
     public void A_save_that_cannot_be_written_says_so_and_leaves_no_temp_file()
     {
+        // A directory where the file should be, rather than a read-only file. Marking the file
+        // read-only stops Windows replacing it and not macOS or Linux, where a rename over a file
+        // asks the directory and not the file. A directory in the way refuses the move on every
+        // one of them, after the temp file has been written, which is the case this is about.
         var store = new SettingsStore(Config);
         Assert.True(store.Save(new AppSettings()));
-        File.SetAttributes(Config, FileAttributes.ReadOnly);
+        File.Delete(Config);
+        Directory.CreateDirectory(Config);
+        File.WriteAllText(Path.Combine(Config, "occupied.txt"), "in the way");
 
-        try
-        {
-            Assert.False(store.Save(new AppSettings { Hotkey = "Ctrl+Shift+Q" }));
-            Assert.False(File.Exists(Config + ".tmp"));
-        }
-        finally
-        {
-            File.SetAttributes(Config, FileAttributes.Normal);
-        }
+        Assert.False(store.Save(new AppSettings { Hotkey = "Ctrl+Shift+Q" }));
+        Assert.False(File.Exists(Config + ".tmp"));
     }
 
     [Fact]

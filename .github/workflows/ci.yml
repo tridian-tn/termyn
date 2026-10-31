@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-test:
-    name: build & test
+    name: build & test (Windows)
     runs-on: windows-latest
 
     steps:
@@ -32,10 +32,16 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.slnx -c Release --no-build
 
-  package:
-    name: package
-    runs-on: windows-latest
-    needs: build-test
+  # The projects below the UI, on a Mac. They target plain net10.0 so a native macOS client can be
+  # built on them, and this is what says they still build and pass there, on Apple Silicon and
+  # with the ICU region data macOS brings rather than Windows'. Termyn.Portable.slnf leaves out the
+  # Windows projects: they target net10.0-windows, and their tests need a Windows desktop.
+  #
+  # Not something the packaging waits on. Mac support is still being built, and the Windows
+  # release doesn't ship anything this job builds that the job above hasn't already tested.
+  build-test-macos:
+    name: build & test (macOS, portable)
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
@@ -46,8 +52,33 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # -SkipTests because the job above has just run the suite, and running it twice adds minutes
-      # for nothing. -RequireInstaller because the script falls back to the zip alone when Inno Setup
+      - name: Restore
+        run: dotnet restore Termyn.Portable.slnf
+
+      - name: Build
+        run: dotnet build Termyn.Portable.slnf -c Release --no-restore
+
+      - name: Test
+        run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
+
+  # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
+  # only made every run a minute longer. The release job waits on both, so nothing is attached to a
+  # release unless the suite passed too.
+  package:
+    name: package
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # -SkipTests because the build & test job runs the suite beside this one, and running it twice
+      # adds minutes for nothing. -RequireInstaller because the script falls back to the zip alone when Inno Setup
       # is missing, which is right on a laptop and wrong here: half a release, announced in a warning
       # nobody reads, is worse than a failure.
       #
@@ -84,7 +115,7 @@ jobs:
   release:
     name: release
     runs-on: windows-latest
-    needs: package
+    needs: [ build-test, package ]
     if: startsWith(github.ref, 'refs/tags/v')
 
     # Only this job, and only on a tag. The packaging above runs on every pull request, including
