@@ -291,10 +291,9 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         };
     }
 
-    public void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys)
+    /// <summary>Replaces the stored set of deletions waiting on a local write, inside a sync's transaction.</summary>
+    private void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys, SqliteTransaction tx)
     {
-        using var tx = _conn.BeginTransaction();
-
         using (var clear = _conn.CreateCommand())
         {
             clear.Transaction = tx;
@@ -311,11 +310,9 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             cmd.Parameters.AddWithValue("$id", key.Id);
             cmd.ExecuteNonQuery();
         }
-
-        tx.Commit();
     }
 
-    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken)
+    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null)
     {
         using var tx = _conn.BeginTransaction();
         foreach (var u in upserts)
@@ -323,6 +320,8 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         foreach (var d in deletes)
             DeleteResource(d.Type, d.Id, tx);
         SetSyncToken(syncToken, tx);
+        if (deferredDeletes is not null)
+            SaveDeferredDeletes(deferredDeletes, tx);
         tx.Commit();
     }
 

@@ -170,6 +170,35 @@ public class SqliteSnapshotStoreTests
     }
 
     [Fact]
+    public void SaveSync_writes_the_deletions_still_waiting_with_the_token()
+    {
+        // Saved apart, a crash between the two left the token past a tombstone nothing remembered.
+        var path = TempDbPath();
+        try
+        {
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                store.SaveSync([], [], "token-1", [new ResourceKey("items", "a"), new ResourceKey("labels", "b")]);
+                store.SaveSync([], [], "token-2", [new ResourceKey("items", "a")]);
+
+                // Not saying leaves them as they were.
+                store.SaveSync([], [], "token-3");
+            }
+
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                var snapshot = store.Load();
+                Assert.Equal("token-3", snapshot.SyncToken);
+                Assert.Equal([new ResourceKey("items", "a")], snapshot.DeferredDeletes);
+            }
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
     public void Rename_and_delete_resources_round_trip()
     {
         var path = TempDbPath();

@@ -3581,13 +3581,11 @@ public sealed class SyncEngine
                 deletes.Add(deferred);
         }
 
+        // The token moves past these tombstones, so the server will never resend them: they have to
+        // survive a restart, and go in with the token so a crash can't land between the two.
         var token = response.SyncToken ?? Model.SyncToken;
         Model.SyncToken = token;
-        _store.SaveSync(upserts, deletes, token);
-
-        // The token has moved past these tombstones, so the server will never resend them: they have
-        // to survive a restart or the deleted resource would come back permanently.
-        _store.SaveDeferredDeletes(_deferredDeletes);
+        _store.SaveSync(upserts, deletes, token, _deferredDeletes);
     }
 
     private void CascadeCancel(OutboxCommand createCommand)

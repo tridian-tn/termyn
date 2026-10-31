@@ -25,8 +25,22 @@ public interface ISnapshotStore : IDisposable
 {
     StoredSnapshot Load();
 
-    /// <summary>Applies a batch of reconciled server changes and the new sync token atomically.</summary>
-    void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken);
+    /// <summary>
+    /// Applies a batch of reconciled server changes, the new sync token and the deletions still
+    /// waiting on a local write, atomically.
+    /// </summary>
+    /// <remarks>
+    /// The waiting deletions go in the same transaction as the token because the token moving past
+    /// a tombstone is what makes it unrepeatable: saved apart, a crash between the two lost the
+    /// deletion for good and the resource came back.
+    /// </remarks>
+    /// <param name="upserts">Resources to write</param>
+    /// <param name="deletes">Resources to remove</param>
+    /// <param name="syncToken">Where the next sync starts from</param>
+    /// <param name="deferredDeletes">
+    /// Every deletion still waiting, replacing what was stored; null leaves the stored set alone
+    /// </param>
+    void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null);
 
     /// <summary>
     /// Commits an optimistic local mutation and its queued command together, so a crash can never
@@ -40,12 +54,6 @@ public interface ISnapshotStore : IDisposable
 
     void UpdateCommand(OutboxCommand command);
     void DeleteCommands(IReadOnlyList<string> uuids);
-
-    /// <summary>
-    /// Records the deletions still waiting on a local write. They must outlive a restart: the sync
-    /// token has already advanced past the tombstone, so the server will never resend it.
-    /// </summary>
-    void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys);
 
     /// <summary>Erases all cached data: resources, outbox, withheld deletions and the sync token.</summary>
     void Purge();
