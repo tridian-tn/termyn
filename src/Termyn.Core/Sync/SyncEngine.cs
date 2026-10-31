@@ -3646,9 +3646,20 @@ public sealed class SyncEngine
                 continue;
             }
 
-            // An un-acked edit of our own owns this resource until it lands.
-            if (pendingKeys.Contains(key))
+            // An un-acked write of our own owns what it wrote until it lands. The server's copy still
+            // matters, because the token moves past it either way: it goes into the write's prior,
+            // so a write that fails puts back what the server has now rather than what it had then,
+            // and whatever the write didn't touch is taken as it comes.
+            if (held)
+            {
+                if (TakeServerCopy(key, change.Json) is { } merged)
+                {
+                    Model.Upsert(change.ResourceType, change.Id, merged);
+                    upserts.Add(new StoredResource(change.ResourceType, change.Id, merged.ToJsonString()));
+                }
+
                 continue;
+            }
 
             if (change.IsDeleted)
             {
@@ -3659,16 +3670,6 @@ public sealed class SyncEngine
             else
             {
                 var clone = change.Json.DeepClone().AsObject();
-
-                // A pending reorder only owns the position, so take everything else the server sends
-                // rather than dropping the change — the token advances past it either way. Which
-                // field the position lives in comes with the key, since the three kinds disagree.
-                if (reorderedKeys.TryGetValue(key, out var placedIn)
-                    && Model.Get(change.ResourceType, change.Id)?[placedIn] is { } localOrder)
-                {
-                    clone[placedIn] = localOrder.DeepClone();
-                }
-
                 Model.Upsert(change.ResourceType, change.Id, clone);
                 upserts.Add(new StoredResource(change.ResourceType, change.Id, clone.ToJsonString()));
             }
@@ -3716,6 +3717,156 @@ public sealed class SyncEngine
         var token = response.SyncToken ?? Model.SyncToken;
         Model.SyncToken = token;
         _store.SaveSync(upserts, deletes, token, _deferredDeletes);
+    }
+
+    /// <summary>
+    /// Takes the server's copy of a resource that queued writes own: into their priors, and onto
+    /// the local copy wherever none of them wrote.
+    /// </summary>
+    /// <remarks>
+    /// Dropped, as it was, the server's change was lost for good once the token moved past it, and a
+    /// write that then failed rolled back to the state before it, stale since. Now each write's prior
+    /// gets the server's values for every field nothing queued before it wrote, which keeps the
+    /// chain <see cref="PassOn"/> relies on: the earliest write of a field holds the server's value,
+    /// and each later one what the write before it put there.
+    ///
+    /// The local copy keeps every field a queued write wrote, so what the user did stays on screen,
+    /// and takes the rest from the server, the way a pending reorder always took all but its
+    /// position. Not when a queued write owns the whole resource, a delete say: there's no local copy
+    /// to put it on, and its prior is what comes back if the delete fails.
+    /// </remarks>
+    /// <param name="key">The resource</param>
+    /// <param name="server">The server's copy of it</param>
+    /// <returns>What the local copy becomes, or null to leave it as it is</returns>
+    private JsonObject? TakeServerCopy(ResourceKey key, JsonObject server)
+    {
+        var written = new HashSet<string>(StringComparer.Ordinal);
+        var whole = false;
+        var onlyReorders = true;
+
+        foreach (var cmd in _outbox.Where(c => c.State == OutboxState.Pending).OrderBy(c => c.Seq))
+        {
+            if (!Owns(cmd, key, out var fields))
+                continue;
+
+            if (!whole)
+                FoldIntoPrior(cmd, key, server, written, fields);
+
+            if (fields is null)
+                whole = true;
+            else
+                written.UnionWith(fields);
+
+            onlyReorders &= Reorder.For(cmd.Type) is not null;
+        }
+
+        if (whole)
+            return null;
+
+        // Not held here and owned only by a reorder, which never needed a local copy to take the
+        // server's: as before, it's taken whole. Owned by anything else, it stays as it was.
+        if (Model.Get(key.Type, key.Id) is not { } current)
+            return onlyReorders ? server.DeepClone().AsObject() : null;
+
+        var merged = server.DeepClone().AsObject();
+        foreach (var field in written)
+            if (current.TryGetPropertyValue(field, out var mine))
+                merged[field] = mine?.DeepClone();
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Whether a queued write owns a resource until it lands, and which of its fields.
+    /// </summary>
+    /// <remarks>
+    /// The same writes <see cref="PendingResourceKeys"/> and <see cref="PendingReorderKeys"/> name.
+    /// A create isn't among them: the server never sends anything under the id it was given here.
+    /// </remarks>
+    /// <param name="cmd">A pending write</param>
+    /// <param name="key">The resource</param>
+    /// <param name="fields">The fields it wrote, or null when it owns the whole resource</param>
+    private bool Owns(OutboxCommand cmd, ResourceKey key, out IReadOnlyList<string>? fields)
+    {
+        fields = null;
+
+        if (cmd.TempId is not null)
+            return false;
+
+        var args = ParseArgs(cmd);
+
+        if (Reorder.For(cmd.Type) is { } kind)
+        {
+            fields = [kind.Order];
+            return kind.Resource == key.Type && NestedIds(args).Contains(key.Id);
+        }
+
+        if (cmd.PriorJson is null || args["id"] is not JsonValue id || ResourceTypeFor(cmd) != key.Type)
+            return false;
+
+        var named = id.ToString() == key.Id;
+        if (!named && !(cmd.Type is "item_move" or "item_close" && CarriedBy(id.ToString(), cmd.PriorJson).Contains(key.Id)))
+            return false;
+
+        fields = cmd.Type switch
+        {
+            "item_move" => named ? MovedFields : CarriedFields,
+            "item_close" or "item_uncomplete" => ["checked"],
+            _ when WritesNamedFields(cmd) => args.Select(a => a.Key).Where(k => k != "id").ToList(),
+            _ => null,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the server's copy of a resource into what a queued write recorded of it, leaving the
+    /// fields an earlier queued write wrote.
+    /// </summary>
+    /// <param name="cmd">The queued write</param>
+    /// <param name="key">The resource</param>
+    /// <param name="server">The server's copy of it</param>
+    /// <param name="writtenBefore">The fields written by queued writes before this one</param>
+    /// <param name="fields">The fields this one wrote, or null for the whole resource</param>
+    private void FoldIntoPrior(OutboxCommand cmd, ResourceKey key, JsonObject server, HashSet<string> writtenBefore, IReadOnlyList<string>? fields)
+    {
+        if (cmd.PriorJson is null || TryParseNode(cmd.PriorJson) is not { } node)
+            return;
+
+        var changed = false;
+
+        foreach (var entry in PriorEntries(node))
+        {
+            // A cascading delete wraps each resource with its type, since one can span several.
+            var prior = entry["resource"] is JsonObject inner
+                ? entry["type"]?.ToString() == key.Type ? inner : null
+                : entry;
+
+            if (prior?["id"]?.ToString() != key.Id)
+                continue;
+
+            foreach (var (field, value) in server)
+                if (!writtenBefore.Contains(field))
+                    prior[field] = value?.DeepClone();
+
+            // One this write wrote that the server doesn't have was added by the write, and rolling
+            // it back takes it off again (Rewound).
+            foreach (var field in fields ?? [])
+                if (!writtenBefore.Contains(field) && !server.ContainsKey(field))
+                    prior.Remove(field);
+
+            changed = true;
+        }
+
+        if (!changed)
+            return;
+
+        cmd.PriorJson = node.ToJsonString();
+        _store.UpdateCommand(cmd);
+
+        // A delete that's landed is undone by making the task again from what was recorded, and
+        // that should be the task as the server last had it too.
+        if (_undoable.TryGetValue(cmd.Uuid, out var undo) && undo.PriorJson is not null)
+            _undoable[cmd.Uuid] = undo with { PriorJson = cmd.PriorJson };
     }
 
     private void CascadeCancel(OutboxCommand createCommand)
