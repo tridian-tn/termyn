@@ -160,7 +160,7 @@ internal static class Program
         var presenter = new MainPresenter(
             engine,
             new QuickAddParser(new SystemClock()),
-            fetcher: new AttachmentFetcher(api, secrets, attachments),
+            fetcher: new AttachmentFetcher(api, secrets, attachments, new ZoneIdentifierMarker(log)),
             history: history,
             log: log);
         var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);

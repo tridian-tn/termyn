@@ -183,6 +183,7 @@ public sealed class AttachmentFetcherTests : IDisposable
     public async Task Calling_a_download_off_leaves_no_half_file()
     {
         using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
         _api.TransferThrow = new OperationCanceledException(cancelled.Token);
 
         var fetcher = Fetcher();
@@ -190,6 +191,197 @@ public sealed class AttachmentFetcherTests : IDisposable
 
         Assert.Equal(FetchOutcome.Cancelled, result.Outcome);
         Assert.False(fetcher.IsHeld(File()));
+    }
+
+    [Fact]
+    public async Task A_download_that_times_out_is_said_rather_than_taken_for_being_called_off()
+    {
+        // The client's own deadline cancels the read, and the cancellation looks like the user's
+        // own. Taken for it, a stalled download simply stopped with nothing said.
+        _api.TransferThrow = new TaskCanceledException("the deadline passed");
+
+        var fetcher = Fetcher();
+        var result = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Offline, result.Outcome);
+        Assert.Contains("agenda.pdf", result.Message);
+        Assert.False(fetcher.IsHeld(File()));
+    }
+
+    [Fact]
+    public async Task A_save_that_times_out_is_said_as_well()
+    {
+        _api.TransferThrow = new TaskCanceledException("the deadline passed");
+
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Offline, result.Outcome);
+        Assert.Empty(Directory.GetFileSystemEntries(_downloads));
+    }
+
+    [Fact]
+    public async Task A_cache_folder_that_cannot_be_made_is_an_answer_rather_than_a_crash()
+    {
+        // A file where the cache's folder should be. Opened outside the try, this came out of the
+        // fetch as an exception, and the window waits on it from a handler nothing else watches.
+        Directory.CreateDirectory(Path.GetDirectoryName(_directory)!);
+        await System.IO.File.WriteAllBytesAsync(_directory, [0], TestContext.Current.CancellationToken);
+
+        try
+        {
+            var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+            Assert.Equal(FetchOutcome.Failed, result.Outcome);
+            Assert.Contains("agenda.pdf", result.Message);
+        }
+        finally
+        {
+            System.IO.File.Delete(_directory);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Unexpected))]
+    public async Task Whatever_the_transfer_throws_comes_back_as_an_answer(Exception thrown)
+    {
+        // A url the client can't use throws whatever HttpClient makes of it, none of which a
+        // transfer is otherwise expected to throw.
+        _api.TransferThrow = thrown;
+
+        var fetcher = Fetcher();
+        var fetched = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+        var saved = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Failed, fetched.Outcome);
+        Assert.Equal(FetchOutcome.Failed, saved.Outcome);
+        Assert.Contains("agenda.pdf", fetched.Message);
+        Assert.Empty(Directory.GetFiles(_directory));
+        Assert.Empty(Directory.GetFileSystemEntries(_downloads));
+    }
+
+    public static TheoryData<Exception> Unexpected() =>
+    [
+        new InvalidOperationException("An invalid request URI was provided."),
+        new UriFormatException("Invalid URI: The format of the URI could not be determined."),
+        new NotSupportedException("The 'ftp' scheme is not supported."),
+        new ArgumentException("Only 'http' and 'https' schemes are allowed."),
+    ];
+
+    // ---- Holding a download to its size ----------------------------------------------------------
+
+    [Fact]
+    public async Task A_download_running_well_past_its_size_is_stopped_and_leaves_nothing()
+    {
+        // The comment says eight bytes. A server that keeps sending is stopped well short of
+        // filling the disk, and nothing half-written is left to look like the file.
+        _api.FileBytes = new byte[200 * 1024];
+
+        var fetcher = Fetcher();
+        var result = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Failed, result.Outcome);
+        Assert.Contains("larger than Todoist said", result.Message);
+        Assert.False(fetcher.IsHeld(File()));
+        Assert.Empty(Directory.GetFiles(_directory));
+    }
+
+    [Fact]
+    public async Task A_save_running_well_past_its_size_leaves_nothing_in_the_folder()
+    {
+        _api.FileBytes = new byte[200 * 1024];
+
+        var result = await Fetcher().SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Failed, result.Outcome);
+        Assert.Empty(Directory.GetFileSystemEntries(_downloads));
+    }
+
+    [Fact]
+    public async Task A_download_a_little_over_its_size_is_still_taken()
+    {
+        // A size that's been rounded somewhere isn't a reason to refuse the file.
+        _api.FileBytes = new byte[12];
+
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+    }
+
+    [Theory]
+    [InlineData(8L, 8L + (64 * 1024))]
+    [InlineData(10L * 1024 * 1024, 11L * 1024 * 1024)]
+    [InlineData(0L, 1024L * 1024 * 1024)]
+    [InlineData(-1L, 1024L * 1024 * 1024)]
+    [InlineData(50L * 1024 * 1024 * 1024, 1024L * 1024 * 1024)]
+    public void What_a_download_may_come_to_follows_its_size_up_to_a_ceiling(long claimed, long allowed)
+        => Assert.Equal(allowed, AttachmentFetcher.Allowance(claimed));
+
+    // ---- Marking what's downloaded ---------------------------------------------------------------
+
+    [Fact]
+    public async Task A_fetched_file_is_marked_as_downloaded_from_where_it_came()
+    {
+        var marker = new Marker();
+        var fetcher = new AttachmentFetcher(_api, _secrets, new AttachmentCache(_directory), marker);
+
+        var result = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal([(result.Path!, "https://files.example/a")], marker.Marked);
+    }
+
+    [Fact]
+    public async Task A_saved_copy_is_marked_whether_it_was_downloaded_or_copied_out_of_the_cache()
+    {
+        // A copy read out of the cache is a new file, and the cached one's mark doesn't come with it.
+        var marker = new Marker();
+        var fetcher = new AttachmentFetcher(_api, _secrets, new AttachmentCache(_directory), marker);
+
+        var downloaded = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+        var copied = await fetcher.SaveAsync(File(), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Contains((downloaded.Path!, "https://files.example/a"), marker.Marked);
+        Assert.Contains((copied.Path!, "https://files.example/a"), marker.Marked);
+    }
+
+    [Fact]
+    public async Task A_marker_that_throws_does_not_cost_the_file()
+    {
+        var fetcher = new AttachmentFetcher(_api, _secrets, new AttachmentCache(_directory), new Marker { Throws = true });
+
+        var result = await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.True(System.IO.File.Exists(result.Path));
+    }
+
+    [Fact]
+    public async Task Nothing_is_marked_when_the_download_fails()
+    {
+        var marker = new Marker();
+        _api.TransferThrow = new TodoistNetworkException("offline");
+
+        await new AttachmentFetcher(_api, _secrets, new AttachmentCache(_directory), marker)
+            .FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Empty(marker.Marked);
+    }
+
+    /// <summary>Notes every file it's asked to mark.</summary>
+    private sealed class Marker : Termyn.Core.Platform.IDownloadMarker
+    {
+        public List<(string Path, string? Source)> Marked { get; } = [];
+
+        public bool Throws { get; init; }
+
+        public void Mark(string path, string? sourceUrl)
+        {
+            if (Throws)
+                throw new IOException("no streams here");
+
+            lock (Marked)
+                Marked.Add((path, sourceUrl));
+        }
     }
 
     // ---- Keeping the cache in bounds --------------------------------------------------------------
@@ -364,6 +556,7 @@ public sealed class AttachmentFetcherTests : IDisposable
     public async Task A_download_called_off_part_way_leaves_nothing_in_the_folder()
     {
         using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
         _api.TransferThrow = new OperationCanceledException(cancelled.Token);
 
         var result = await Fetcher().SaveAsync(File(), _downloads, ct: cancelled.Token);

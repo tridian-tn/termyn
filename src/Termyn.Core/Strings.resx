@@ -60,6 +60,15 @@
     <value>Todoist returned HTTP {0}.</value>
     <comment>{0} is the HTTP status code of an answer the client didn't expect.</comment>
   </data>
+  <!-- What fetching a comment's file says when it goes wrong in a way the client didn't report. -->
+  <data name="AttachmentLargerThanSaid" xml:space="preserve">
+    <value>{0} was larger than Todoist said it would be, so the download was stopped.</value>
+    <comment>Shown when an attachment's download ran past the size its comment gives. {0} is the file's name.</comment>
+  </data>
+  <data name="AttachmentNotFetched" xml:space="preserve">
+    <value>{0} couldn't be downloaded.</value>
+    <comment>Shown when an attachment's download failed for a reason there's nothing more to say about. {0} is the file's name.</comment>
+  </data>
   <data name="TokenTurnedAway" xml:space="preserve">
     <value>Todoist turned the token away. Reconnect to make changes.</value>
   </data>
