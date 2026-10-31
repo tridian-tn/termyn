@@ -80,4 +80,32 @@ public class SidebarHeadingTests
 
         Assert.Equal(expected, MainForm.Widened(offered, width).Width);
     }
+
+    [WinFormsFact]
+    public void The_headings_follow_the_sidebar_to_a_new_font()
+    {
+        // Made once when the window was built, the bold font stayed that size on a screen of
+        // another scale while every row beneath it grew.
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-sidebar-heading-font.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(Termyn.Presentation.ViewSelection.OfProject("p1"));
+        var sidebar = TestWindow.Find<SidebarTree>(window);
+
+        window.Font = new Font(window.Font.FontFamily, window.Font.Size * 1.5f);
+
+        var headings = sidebar.Nodes
+            .Cast<TreeNode>()
+            .Where(n => n.Tag is Termyn.Presentation.SidebarNode { Kind: Termyn.Presentation.SidebarKind.Header })
+            .ToList();
+
+        Assert.NotEmpty(headings);
+        Assert.All(headings, h =>
+        {
+            Assert.Equal(sidebar.Font.Size, h.NodeFont!.Size);
+            Assert.True(h.NodeFont.Bold);
+        });
+    }
 }

@@ -607,6 +607,10 @@ internal sealed class MainForm : Form
 
         _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
 
+        // Raised for a font of the tree's own and for one it takes from the window, so a new scale
+        // and a new font both come through here.
+        _sidebar.FontChanged += (_, _) => RebuildHeaderFont();
+
         RestoreViewState(_settings.View);
 
         // Only the colours here. Loading publishes and renders a moment later anyway, and rendering
@@ -1602,8 +1606,12 @@ internal sealed class MainForm : Form
         // are what has to be compared. Rebuilding a tree that already matches is what made clicking
         // a row jump the scroll — clearing the nodes drops the view to the top, and the selection
         // that follows scrolls back down to the row that was clicked.
+        // Read once. A sync can publish from its own thread between two reads, and the tree would
+        // then be built from a different list than the one compared and remembered.
+        var sidebar = _presenter.Sidebar;
+
         if (_renderedSidebar is { } rendered
-            && (ReferenceEquals(rendered, _presenter.Sidebar) || rendered.SequenceEqual(_presenter.Sidebar)))
+            && (ReferenceEquals(rendered, sidebar) || rendered.SequenceEqual(sidebar)))
         {
             return;
         }
@@ -1613,7 +1621,7 @@ internal sealed class MainForm : Form
         var top = SidebarKeyOf(_sidebar.TopNode);
         var selected = SidebarKeyOf(_sidebar.SelectedNode);
 
-        _renderedSidebar = _presenter.Sidebar;
+        _renderedSidebar = sidebar;
         _syncingSidebar = true;
         try
         {
@@ -1627,7 +1635,7 @@ internal sealed class MainForm : Form
 
             // The presenter hands back a flattened tree; rebuild the nesting from each row's depth.
             var parents = new Dictionary<int, TreeNode>();
-            foreach (var node in _presenter.Sidebar)
+            foreach (var node in sidebar)
             {
                 var label = node.Count > 0 ? $"{node.Label}  ({node.Count})" : node.Label;
                 var tree = new TreeNode(label) { Tag = node };
@@ -1685,6 +1693,28 @@ internal sealed class MainForm : Form
     }
 
     private static string? SidebarKeyOf(TreeNode? node) => (node?.Tag as SidebarNode)?.Key;
+
+    /// <summary>
+    /// Makes the headings' bold font again from the tree's own, once that has changed.
+    /// </summary>
+    /// <remarks>
+    /// Made once, the headings stayed at the size the window opened at: on a screen of another
+    /// scale they were a size apart from every row under them.
+    /// </remarks>
+    private void RebuildHeaderFont()
+    {
+        var was = _headerFont;
+        _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
+
+        foreach (var node in Flatten(_sidebar.Nodes))
+        {
+            if (node.Tag is SidebarNode { Kind: SidebarKind.Header })
+                node.NodeFont = _headerFont;
+        }
+
+        // Only once nothing in the tree is drawn with it.
+        was?.Dispose();
+    }
 
     private HashSet<string> CollapsedKeys()
     {
