@@ -131,6 +131,42 @@ public class TodoistApiClientTests
         Assert.Null(status.Error);
     }
 
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"i1":"ok","i2":"ok"}""")]
+    public async Task A_verdict_that_names_no_error_is_a_success(string verdict)
+    {
+        // Read as a refusal, a write the server took was rolled back here and the two disagreed.
+        var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":""" + verdict + "}}");
+
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
+
+        Assert.True(result.SyncStatus["u"].Ok);
+    }
+
+    [Fact]
+    public async Task A_verdict_per_thing_with_an_error_among_them_is_a_refusal()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":{"i1":"ok","i2":{"error_code":22,"error":"Item not found","http_code":404}}}}""");
+
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
+
+        var status = result.SyncStatus["u"];
+        Assert.False(status.Ok);
+        Assert.Equal("Item not found", status.Error);
+        Assert.Equal(404, status.HttpCode);
+    }
+
+    [Fact]
+    public async Task A_refusal_says_what_status_the_server_gave_it()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":{"error_code":42,"error":"Service unavailable","http_code":503}}}""");
+
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
+
+        Assert.Equal(503, result.SyncStatus["u"].HttpCode);
+    }
+
     [Fact]
     public async Task Coerces_numeric_resource_ids_to_strings()
     {

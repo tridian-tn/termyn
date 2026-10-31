@@ -11,7 +11,11 @@ public sealed record Command(string Type, string Uuid, string? TempId, JsonObjec
 public sealed record ResourceChange(string ResourceType, string Id, bool IsDeleted, JsonObject Json);
 
 /// <summary>Per-command outcome from a sync write.</summary>
-public sealed record CommandResult(bool Ok, string? ErrorCode, string? Error);
+/// <param name="HttpCode">
+/// The status the server gave the refusal, when it said. It tells a refusal worth trying again (a
+/// 429 or a 5xx) from one that will never succeed
+/// </param>
+public sealed record CommandResult(bool Ok, string? ErrorCode, string? Error, int? HttpCode = null);
 
 /// <summary>
 /// What to fetch from the completed-items endpoint. The window is required by the API and capped at

@@ -427,14 +427,7 @@ public sealed class TodoistApiClient : ITodoistApi
         if (root["sync_status"] is JsonObject ss)
         {
             foreach (var kv in ss)
-            {
-                status[kv.Key] = kv.Value switch
-                {
-                    JsonValue v when v.ToString() == "ok" => new CommandResult(true, null, null),
-                    JsonObject err => new CommandResult(false, err["error_code"]?.ToString(), err["error"]?.ToString()),
-                    _ => new CommandResult(false, null, kv.Value?.ToString()),
-                };
-            }
+                status[kv.Key] = ReadStatus(kv.Value);
         }
 
         var tempMap = new Dictionary<string, string>();
@@ -452,6 +445,41 @@ public sealed class TodoistApiClient : ITodoistApi
             SyncStatus = status,
             TempIdMapping = tempMap,
         };
+    }
+
+    /// <summary>
+    /// One command's verdict from <c>sync_status</c>.
+    /// </summary>
+    /// <remarks>
+    /// Usually <c>"ok"</c> or an error object. A command that acts on several things at once can
+    /// answer with an object of verdicts, one per thing, and that's a success unless one of them is
+    /// an error. An object naming no error at all is read the same way: refusing a write the server
+    /// took would roll it back here and leave the two disagreeing.
+    /// </remarks>
+    private static CommandResult ReadStatus(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonValue v when v.ToString() == "ok":
+                return new CommandResult(true, null, null);
+
+            case JsonObject err when IsError(err):
+                return new CommandResult(false, err["error_code"]?.ToString(), err["error"]?.ToString(), HttpCode(err));
+
+            case JsonObject each:
+                foreach (var (_, inner) in each)
+                    if (inner is JsonObject error && IsError(error))
+                        return ReadStatus(error);
+                return new CommandResult(true, null, null);
+
+            default:
+                return new CommandResult(false, null, node?.ToString());
+        }
+
+        static bool IsError(JsonObject o) => o.ContainsKey("error") || o.ContainsKey("error_code");
+
+        static int? HttpCode(JsonObject o)
+            => o["http_code"] is JsonValue code && code.TryGetValue(out int value) ? value : null;
     }
 
     // Flags have been represented as both JSON booleans and 0/1 integers; accept either.
