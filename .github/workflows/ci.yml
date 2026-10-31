@@ -61,10 +61,12 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
 
+  # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
+  # only made every run a minute longer. The release job waits on both, so nothing is attached to a
+  # release unless the suite passed too.
   package:
     name: package
     runs-on: windows-latest
-    needs: build-test
 
     steps:
       - name: Checkout
@@ -75,8 +77,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # -SkipTests because the job above has just run the suite, and running it twice adds minutes
-      # for nothing. -RequireInstaller because the script falls back to the zip alone when Inno Setup
+      # -SkipTests because the build & test job runs the suite beside this one, and running it twice
+      # adds minutes for nothing. -RequireInstaller because the script falls back to the zip alone when Inno Setup
       # is missing, which is right on a laptop and wrong here: half a release, announced in a warning
       # nobody reads, is worse than a failure.
       #
@@ -113,7 +115,7 @@ jobs:
   release:
     name: release
     runs-on: windows-latest
-    needs: package
+    needs: [ build-test, package ]
     if: startsWith(github.ref, 'refs/tags/v')
 
     # Only this job, and only on a tag. The packaging above runs on every pull request, including
