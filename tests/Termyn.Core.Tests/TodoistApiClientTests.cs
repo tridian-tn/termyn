@@ -95,6 +95,35 @@ public class TodoistApiClientTests
     }
 
     [Fact]
+    public async Task An_upload_the_server_takes_a_while_to_store_still_lands()
+    {
+        // The stall timer used to run on past the last byte, so a server taking longer to store the
+        // file than the wait for a block cut off an upload that had gone through.
+        var client = new TodoistApiClient(
+            new HttpClient(new SlowToAnswerHandler(TimeSpan.FromMilliseconds(750))),
+            deadline: TimeSpan.FromSeconds(5),
+            idle: TimeSpan.FromMilliseconds(250));
+
+        using var file = new MemoryStream([1, 2, 3]);
+        var attachment = await client.UploadAsync("tok", file, "a.bin", TestContext.Current.CancellationToken);
+
+        Assert.Equal("https://files.todoist.com/a", attachment["file_url"]!.ToString());
+    }
+
+    /// <summary>Reads the whole request, then takes its time over the answer, as storing a file does.</summary>
+    private sealed class SlowToAnswerHandler(TimeSpan thinking) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content is not null)
+                await request.Content.CopyToAsync(Stream.Null, cancellationToken);
+
+            await Task.Delay(thinking, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"file_url":"https://files.todoist.com/a"}""") };
+        }
+    }
+
+    [Fact]
     public async Task An_upload_whose_answer_never_comes_times_out()
     {
         var client = new TodoistApiClient(new HttpClient(new SilentHandler()), idle: TimeSpan.FromMilliseconds(250));

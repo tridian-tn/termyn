@@ -310,7 +310,7 @@ public sealed class TodoistApiClient : ITodoistApi
             // Two parts, and the names matter: the bytes go under "file", and the name Todoist should
             // store it as goes under "file_name" as a field of its own. Putting the bytes under
             // "file_name" reads as a form with no file part in it at all.
-            var file = new StreamContent(new ReadWatcher(content, stall.Moved));
+            var file = new StreamContent(new ReadWatcher(content, stall.Moved, () => stall.Allow(_deadline)));
             file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             form.Add(file, "file", fileName);
             form.Add(new StringContent(fileName), "file_name");
@@ -443,11 +443,18 @@ public sealed class TodoistApiClient : ITodoistApi
         public CancellationToken Token => _source.Token;
 
         /// <summary>Something moved, so the wait starts again.</summary>
-        public void Moved()
+        public void Moved() => Allow(_idle);
+
+        /// <summary>
+        /// Gives the next stretch longer than the usual wait: an upload whose last byte has gone is
+        /// waiting on the server to store the file, which says nothing about the connection.
+        /// </summary>
+        /// <param name="wait">How long to allow from now</param>
+        public void Allow(TimeSpan wait)
         {
             try
             {
-                _source.CancelAfter(_idle);
+                _source.CancelAfter(wait);
             }
             catch (ObjectDisposedException)
             {
@@ -465,7 +472,7 @@ public sealed class TodoistApiClient : ITodoistApi
     /// Seekable when the file is, so the request still says how long it is rather than going
     /// chunked. Disposes the file with it, as the content it stands in for did.
     /// </remarks>
-    private sealed class ReadWatcher(Stream inner, Action moved) : Stream
+    private sealed class ReadWatcher(Stream inner, Action moved, Action ended) : Stream
     {
         public override bool CanRead => inner.CanRead;
         public override bool CanSeek => inner.CanSeek;
@@ -501,10 +508,17 @@ public sealed class TodoistApiClient : ITodoistApi
             base.Dispose(disposing);
         }
 
-        /// <summary>Puts the stall off. The end of the file counts too: the wait for an answer starts there.</summary>
+        /// <summary>
+        /// Puts the stall off. At the end of the file the wait for an answer starts, and that gets the
+        /// request's whole deadline: storing a large file can take Todoist longer than a stall.
+        /// </summary>
         private int Saw(int read)
         {
-            moved();
+            if (read == 0)
+                ended();
+            else
+                moved();
+
             return read;
         }
     }
