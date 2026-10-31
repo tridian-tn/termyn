@@ -6,7 +6,8 @@ using Termyn.Presentation;
 namespace Termyn.App.Mac;
 
 /// <summary>
-/// One task: its circle, its name, and a line under it saying when, where and with what labels.
+/// One task: its circle, its name, and a line under it saying when, where and with what labels —
+/// or, in the table, its circle and name on one line, with the rest in columns of their own.
 /// </summary>
 /// <remarks>
 /// Colour on the second line is Todoist's, and only where it means something: an overdue date in
@@ -17,15 +18,28 @@ namespace Termyn.App.Mac;
 /// The circle is a button, so clicking it ticks the task off without taking the selection with it,
 /// the way the Windows box doesn't. The name is a label until it's renamed, when it becomes the
 /// field it's edited in, where it stands — as Finder renames a file.
+///
+/// A task with sub-tasks has a disclosure triangle in front of its circle, in the list and the
+/// table both: a task folded in one would otherwise be folded out of reach in the other. The room
+/// for the triangle is kept on every row, so the circles line up whether a task has sub-tasks or not,
+/// as the Windows outline keeps its expander's gutter.
 /// </remarks>
 internal sealed class TaskCell : NSTableCellView
 {
     private const int IndentPerLevel = 22;
 
+    /// <summary>Less in the table, whose rows are a line apiece and whose column is narrower.</summary>
+    private const int CompactIndentPerLevel = 16;
+
+    private const int DisclosureWidth = 16;
+
+    private readonly NSButton _disclosure = new() { Title = string.Empty, BezelStyle = NSBezelStyle.Disclosure };
+
     private readonly NSButton _circle = new() { Bordered = false, Title = string.Empty, ImagePosition = NSCellImagePosition.ImageOnly };
     private readonly NSTextField _title = NSTextField.CreateLabel(string.Empty);
     private readonly NSTextField _detail = NSTextField.CreateLabel(string.Empty);
     private readonly NSLayoutConstraint _indent;
+    private readonly bool _compact;
 
     private TaskRow? _row;
     private IReadOnlyDictionary<string, Rgb> _labelColours = new Dictionary<string, Rgb>();
@@ -34,9 +48,20 @@ internal sealed class TaskCell : NSTableCellView
     /// <summary>Where a rename that's open reports back to, or null when there's none.</summary>
     private Action<string?>? _renamed;
 
-    public TaskCell(string identifier)
+    /// <param name="identifier">What the table reuses it by</param>
+    /// <param name="compact">One line, for the table's Task column, rather than two</param>
+    public TaskCell(string identifier, bool compact = false)
     {
         Identifier = identifier;
+        _compact = compact;
+
+        // On is open, which is the way the triangle points down.
+        _disclosure.SetButtonType(NSButtonType.PushOnPushOff);
+        _disclosure.Activated += (_, _) =>
+        {
+            if (_row is { } row)
+                Fold?.Invoke(row.Id, _disclosure.State == NSCellStateValue.Off);
+        };
 
         _circle.SetButtonType(NSButtonType.MomentaryChange);
         _circle.Activated += (_, _) =>
@@ -45,7 +70,9 @@ internal sealed class TaskCell : NSTableCellView
                 Toggle?.Invoke(row.Id);
         };
 
-        _circle.SymbolConfiguration = NSImageSymbolConfiguration.Create(NSFontTextStyle.Body.GetConstant()!, NSImageSymbolScale.Large);
+        _circle.SymbolConfiguration = NSImageSymbolConfiguration.Create(
+            NSFontTextStyle.Body.GetConstant()!,
+            compact ? NSImageSymbolScale.Medium : NSImageSymbolScale.Large);
         _circle.SetContentHuggingPriorityForOrientation(750, NSLayoutConstraintOrientation.Horizontal);
 
         _title.Font = Font(NSFontTextStyle.Body);
@@ -56,29 +83,37 @@ internal sealed class TaskCell : NSTableCellView
         _detail.LineBreakMode = NSLineBreakMode.TruncatingTail;
         _detail.SetContentCompressionResistancePriority(250, NSLayoutConstraintOrientation.Horizontal);
 
+        // Side by side in the table, where the second line carries only the conversation's mark.
         var words = NSStackView.FromViews([_title, _detail]);
-        words.Orientation = NSUserInterfaceLayoutOrientation.Vertical;
-        words.Alignment = NSLayoutAttribute.Leading;
-        words.Spacing = 2;
+        words.Orientation = compact ? NSUserInterfaceLayoutOrientation.Horizontal : NSUserInterfaceLayoutOrientation.Vertical;
+        words.Alignment = compact ? NSLayoutAttribute.FirstBaseline : NSLayoutAttribute.Leading;
+        words.Spacing = compact ? 6 : 2;
 
-        foreach (var view in new NSView[] { _circle, words })
+        foreach (var view in new NSView[] { _disclosure, _circle, words })
         {
             view.TranslatesAutoresizingMaskIntoConstraints = false;
             AddSubview(view);
         }
 
         TextField = _title;
-        _indent = _circle.LeadingAnchor.ConstraintEqualTo(LeadingAnchor, 4);
+        _indent = _disclosure.LeadingAnchor.ConstraintEqualTo(LeadingAnchor, 4);
 
         NSLayoutConstraint.ActivateConstraints(
         [
             _indent,
+            _disclosure.WidthAnchor.ConstraintEqualTo(DisclosureWidth),
+            _disclosure.CenterYAnchor.ConstraintEqualTo(_circle.CenterYAnchor),
+            _circle.LeadingAnchor.ConstraintEqualTo(_disclosure.TrailingAnchor, 2),
             _circle.CenterYAnchor.ConstraintEqualTo(_title.CenterYAnchor),
-            words.LeadingAnchor.ConstraintEqualTo(_circle.TrailingAnchor, 8),
+            words.LeadingAnchor.ConstraintEqualTo(_circle.TrailingAnchor, compact ? 6 : 8),
             words.TrailingAnchor.ConstraintLessThanOrEqualTo(TrailingAnchor, -8),
-            words.TopAnchor.ConstraintEqualTo(TopAnchor, 6),
-            words.BottomAnchor.ConstraintEqualTo(BottomAnchor, -6),
         ]);
+
+        // The table's rows are a set height, which the words sit in the middle of; the list's grow
+        // to fit them.
+        NSLayoutConstraint.ActivateConstraints(compact
+            ? [words.CenterYAnchor.ConstraintEqualTo(CenterYAnchor)]
+            : [words.TopAnchor.ConstraintEqualTo(TopAnchor, 6), words.BottomAnchor.ConstraintEqualTo(BottomAnchor, -6)]);
     }
 
     /// <summary>A day's heading in Upcoming, as a floating group row.</summary>
@@ -104,12 +139,15 @@ internal sealed class TaskCell : NSTableCellView
     /// <summary>What clicking the circle does, given the task's id.</summary>
     public Action<string>? Toggle { get; set; }
 
+    /// <summary>What clicking the triangle does, given the task's id and whether to fold it away.</summary>
+    public Action<string, bool>? Fold { get; set; }
+
     public void Show(TaskRow row, IReadOnlyDictionary<string, Rgb> labelColours, DateOnly today)
     {
         _row = row;
         _labelColours = labelColours;
         _today = today;
-        _indent.Constant = 4 + (IndentPerLevel * row.Depth);
+        _indent.Constant = 4 + ((_compact ? CompactIndentPerLevel : IndentPerLevel) * row.Depth);
         Draw();
     }
 
@@ -132,6 +170,10 @@ internal sealed class TaskCell : NSTableCellView
             return;
 
         var done = OutlineCells.DrawnDone(row);
+
+        _disclosure.Hidden = !row.HasChildren;
+        _disclosure.State = row.Collapsed ? NSCellStateValue.Off : NSCellStateValue.On;
+        _disclosure.ToolTip = row.Collapsed ? Strings.ShowSubtasks : Strings.HideSubtasks;
 
         // What VoiceOver says for the circle is the symbol's own description: done, or the
         // priority, in the words the Priority menu uses. A task with no priority says nothing.
@@ -212,7 +254,10 @@ internal sealed class TaskCell : NSTableCellView
         public override void EditingEnded(NSNotification notification) => cell.EndRename(cell._title.StringValue);
     }
 
-    /// <summary>The line under the name: when, which project, which labels, and any conversation.</summary>
+    /// <summary>
+    /// The line under the name: when, which project, which labels, and any conversation. In the table
+    /// the rest have columns of their own, and only the conversation's mark is left to go here.
+    /// </summary>
     private NSAttributedString Detail(TaskRow row, bool done)
     {
         var line = new NSMutableAttributedString();
@@ -228,13 +273,13 @@ internal sealed class TaskCell : NSTableCellView
             line.Append(Run(text, colour));
         }
 
-        if (OutlineCells.CellOf(row, TaskColumn.Due) is { Length: > 0 } due)
+        if (!_compact && OutlineCells.CellOf(row, TaskColumn.Due) is { Length: > 0 } due)
         {
             var overdue = !Selected && !done && row.DueOn is { } on && on < _today;
             Add(due, overdue ? NSColor.SystemRed : quiet);
         }
 
-        if (row.Project.Length > 0)
+        if (!_compact && row.Project.Length > 0)
         {
             if (line.Length > 0)
                 line.Append(Run("   ", null));
@@ -243,8 +288,11 @@ internal sealed class TaskCell : NSTableCellView
             line.Append(Run(row.Project, quiet));
         }
 
-        foreach (var (text, colour) in OutlineCells.LabelRuns(row, Selected, _labelColours))
-            Add(text, colour is { } c ? Palette.Of(c) : quiet);
+        if (!_compact)
+        {
+            foreach (var (text, colour) in OutlineCells.LabelRuns(row, Selected, _labelColours))
+                Add(text, colour is { } c ? Palette.Of(c) : quiet);
+        }
 
         if (row.CommentCount > 0)
         {
