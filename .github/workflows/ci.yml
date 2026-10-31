@@ -33,14 +33,13 @@ jobs:
         run: dotnet test --solution Termyn.slnx -c Release --no-build
 
   # The projects below the UI, away from Windows. They target plain net10.0 so a native macOS client
-  # can be built on them, and this is what says they still build and pass there: on Apple Silicon
-  # and on Intel, with the ICU region data macOS brings rather than Windows', and on Linux, whose
-  # file system is case-sensitive and whose ICU is another build again. Termyn.Portable.slnf leaves
-  # out the Windows projects: they target net10.0-windows, and their tests need a Windows desktop.
+  # can be built on them, and this is what says they still build and pass there: on a Mac, with the
+  # ICU region data macOS brings rather than Windows', and on Linux, whose file system is
+  # case-sensitive and whose ICU is another build again. Termyn.Portable.slnf leaves out the
+  # Windows projects: they target net10.0-windows, and their tests need a Windows desktop.
   #
-  # The Apple Silicon leg keeps the name this job had before it was a matrix, so a required check
-  # that names it still finds it. Intel is macos-15-intel, the last macOS image GitHub offers on
-  # that architecture; it goes when that image is retired, and this leg goes with it.
+  # The Mac leg keeps the name this job had before it was a matrix, so a required check that names
+  # it still finds it.
   #
   # Not something the packaging waits on. Mac support is still being built, and the Windows
   # release doesn't ship anything this job builds that the job above hasn't already tested.
@@ -55,8 +54,6 @@ jobs:
         include:
           - name: macOS
             runner: macos-latest
-          - name: macOS Intel
-            runner: macos-15-intel
           - name: Linux
             runner: ubuntu-latest
 
@@ -78,13 +75,9 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
 
-  # The native Mac app, built for Apple Silicon and for Intel. It has no tests of its own yet, and
-  # the code below it is tested by the job above. Its own job because it needs the macOS workload
-  # and Xcode, which the portable projects don't, and installing the workload is most of what this
-  # job spends.
-  #
-  # Both architectures build on the Apple Silicon runner: the workload cross-compiles, and the
-  # Intel image's Xcode lags the newest one. The Apple Silicon leg keeps the job's old name.
+  # The native Mac app, built for Apple Silicon. It has no tests of its own yet, and the code below
+  # it is tested by the job above. Its own job because it needs the macOS workload and Xcode, which
+  # the portable projects don't, and installing the workload is most of what this job spends.
   #
   # The projects build with ValidateXcodeVersion off, since a workload names one exact Xcode and
   # the runner image's default moves on its own schedule.
@@ -96,27 +89,15 @@ jobs:
   # still compiles every project and makes the .app, which is what this job is here to say. Back to
   # Release once the image carries an Xcode the workload accepts.
   #
-  # On a v* tag it also packages the app, stamped with the tag, for the release job to attach. Those
-  # are the same Debug builds, for the reason above, and unsigned: Gatekeeper refuses them until
-  # they're opened from the context menu. Not done on other runs, where nothing would use it.
+  # On a v* tag it also packages the app, stamped with the tag, for the release job to attach. That
+  # is the same Debug build, for the reason above, and unsigned: Gatekeeper refuses it until it's
+  # opened from the context menu. Not done on other runs, where nothing would use it.
   build-mac-app:
-    name: build (macOS app${{ matrix.suffix }})
+    name: build (macOS app)
     runs-on: macos-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rid: osx-arm64
-            arch: arm64
-            suffix: ''
-          - rid: osx-x64
-            arch: x64
-            suffix: ', Intel'
-
     env:
-      RID: ${{ matrix.rid }}
-      ARCH: ${{ matrix.arch }}
+      RID: osx-arm64
 
     steps:
       - name: Checkout
@@ -163,18 +144,18 @@ jobs:
             exit 1
           fi
           mkdir -p artifacts
-          ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/Termyn-$version-macos-$ARCH.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/Termyn-$version-macos-arm64.zip"
 
       - name: Keep it
         if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
         uses: actions/upload-artifact@v7
         with:
-          name: termyn-mac-${{ matrix.arch }}
+          name: termyn-mac
           if-no-files-found: error
-          path: artifacts/*-macos-${{ matrix.arch }}.zip
+          path: artifacts/*-macos-arm64.zip
 
   # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
-  # only made every run a minute longer. The release job waits on both, and on the Mac builds, so
+  # only made every run a minute longer. The release job waits on both, and on the Mac build, so
   # nothing is attached to a release unless the suite passed too.
   package:
     name: package
@@ -227,7 +208,7 @@ jobs:
   release:
     name: release
     runs-on: windows-latest
-    # The Mac builds too, so a tag gives one release with every platform in it, or none: a draft
+    # The Mac build too, so a tag gives one release with every platform in it, or none: a draft
     # missing the Mac app would read as a release that has one.
     needs: [ build-test, package, build-mac-app ]
     if: startsWith(github.ref, 'refs/tags/v')
@@ -255,7 +236,7 @@ jobs:
         run: |
           # Off the environment, not templated into the script — same reasoning as the packaging job.
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $missing = @('setup.exe', 'portable.zip', 'macos-arm64.zip', 'macos-x64.zip') |
+          $missing = @('setup.exe', 'portable.zip', 'macos-arm64.zip') |
             ForEach-Object { Join-Path 'artifacts' "Termyn-$version-$_" } |
             Where-Object { -not (Test-Path $_) }
 
@@ -294,4 +275,4 @@ jobs:
             gh release create $tag --draft --title "Termyn $tag" --generate-notes
           }
 
-          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip, artifacts/*-macos-*.zip) --clobber
+          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip, artifacts/*-macos-arm64.zip) --clobber
