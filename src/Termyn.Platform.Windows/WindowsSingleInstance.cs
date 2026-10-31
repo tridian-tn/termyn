@@ -20,7 +20,13 @@ namespace Termyn.Platform.Windows;
 /// one account on a multi-session host each get their own Termyn, against one cache.
 /// </para>
 /// <para>
-/// The pipe namespace is machine-wide whatever we do, so the pipe is opened
+/// The pipe namespace is machine-wide, so the pipe's name carries the session as well as the user.
+/// Without it the same user signed in at the console and over Remote Desktop had two instances —
+/// one per session, as above — fighting over one pipe, and a launch in one session brought the
+/// window forward in the other.
+/// </para>
+/// <para>
+/// Whatever it's called, the pipe is opened
 /// <see cref="PipeOptions.CurrentUserOnly"/> at both ends — that ACLs the server to this user and
 /// makes the client check the owner before writing, so a name squatted by another account is refused
 /// rather than talked to.
@@ -64,15 +70,17 @@ public sealed class WindowsSingleInstance : ISingleInstance
     /// How long the listener waits after a failure. Only shortened by tests, which would otherwise
     /// take ten seconds to watch it give up.
     /// </param>
-    public WindowsSingleInstance(string? scope = null, TimeSpan? retryDelay = null)
+    /// <param name="session">The logon session the pipe belongs to; defaults to this process's.</param>
+    public WindowsSingleInstance(string? scope = null, TimeSpan? retryDelay = null, int? session = null)
     {
         _retryDelay = retryDelay ?? TimeSpan.FromSeconds(1);
 
         var user = scope ?? CurrentUserSid();
         var tag = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(user)))[..16];
 
+        // The mutex is already per session by its namespace; the pipe has to say so in its name.
         _mutexName = $@"Local\Termyn-{tag}";
-        _pipeName = $"Termyn-{tag}";
+        _pipeName = $"Termyn-{tag}-{session ?? CurrentSession()}";
     }
 
     /// <inheritdoc />
@@ -245,6 +253,12 @@ public sealed class WindowsSingleInstance : ISingleInstance
             _held.Dispose();
             _held = null;
         }
+    }
+
+    private static int CurrentSession()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        return process.SessionId;
     }
 
     private static string CurrentUserSid()

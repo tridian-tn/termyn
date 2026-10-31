@@ -653,6 +653,27 @@ public class SingleInstanceTests
     }
 
     [Fact]
+    public void The_same_user_in_another_session_gets_a_pipe_of_their_own()
+    {
+        // The mutex is per session, so the console and a Remote Desktop session each hold an
+        // instance. One pipe name between them sent a launch in one session to the window in the
+        // other.
+        using var console = new WindowsSingleInstance("S-1-5-21-1-2-3-1001", session: 1);
+        using var remote = new WindowsSingleInstance("S-1-5-21-1-2-3-1001", session: 2);
+
+        Assert.NotEqual(console.PipeName, remote.PipeName);
+    }
+
+    [Fact]
+    public void The_default_pipe_is_this_session_s()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        using var mine = new WindowsSingleInstance(Scope());
+
+        Assert.EndsWith($"-{process.SessionId}", mine.PipeName, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_signal_that_arrives_before_anyone_is_listening_is_kept()
     {
         // The listener starts as soon as the instance is acquired, but the window that handles
