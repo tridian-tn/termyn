@@ -428,8 +428,8 @@ internal sealed class MainForm : Form
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
         // worse, nowhere to type one.
         _comments = new CommentsView { Dock = DockStyle.Fill };
-        _comments.Posted += OnCommentPosted;
-        _comments.Edited += OnCommentEdited;
+        _comments.Post = OnCommentPosted;
+        _comments.Edit = OnCommentEdited;
         _comments.Deleted += OnCommentDeleted;
         _comments.OpenRequested += OnAttachmentOpened;
         _comments.DownloadRequested += OnAttachmentDownloaded;
@@ -2437,17 +2437,33 @@ internal sealed class MainForm : Form
         _comments.Invalidate();
     }
 
-    private void OnCommentPosted(string text) => Guarded(() =>
-    {
-        if (_presenter.AddComment(CommentsOwner, text))
-            RefreshComments();
-    });
+    private bool OnCommentPosted(string text) => SendComment(() => _presenter.AddComment(CommentsOwner, text));
 
-    private void OnCommentEdited(string id, string text) => Guarded(() =>
+    private bool OnCommentEdited(string id, string text) => SendComment(() => _presenter.EditComment(id, text));
+
+    /// <summary>Posts or rewrites a comment, saying so when it couldn't be.</summary>
+    /// <param name="send">The write, answering whether it was made</param>
+    /// <returns>True when it was, which is what lets the box empty</returns>
+    private bool SendComment(Func<bool> send)
     {
-        if (_presenter.EditComment(id, text))
+        try
+        {
+            if (!send())
+            {
+                // Turned down without an exception: what it was on has gone from the account.
+                _status.Text = Strings.CommentNotSent;
+                return false;
+            }
+
             RefreshComments();
-    });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+            return false;
+        }
+    }
 
     /// <summary>
     /// Deletes a comment, having asked first.

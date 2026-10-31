@@ -501,6 +501,10 @@
     <value>Editing — Ctrl+Enter to save, Esc to cancel</value>
     <comment>Hint beside the comment box while changing an existing comment.</comment>
   </data>
+  <data name="CommentNotSent" xml:space="preserve">
+    <value>The comment couldn't be saved, as what it was on has gone. What you typed is still in the box.</value>
+    <comment>Status bar when posting or editing a comment is turned down because its task, project or comment is no longer there.</comment>
+  </data>
   <data name="LabelsTitle" xml:space="preserve">
     <value>Labels</value>
     <comment>Title bar of the dialog for choosing a task's labels.</comment>

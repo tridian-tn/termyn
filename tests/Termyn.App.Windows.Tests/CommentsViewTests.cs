@@ -254,6 +254,47 @@ public class CommentsViewTests
     }
 
     [WinFormsFact]
+    public void A_comment_that_couldnt_be_posted_leaves_the_words_in_the_box()
+    {
+        // Emptied before the window had said whether it went, the box lost the typing whenever it
+        // didn't.
+        using var view = Realised();
+        var compose = ComposeArea(view).Controls.OfType<TextBox>().Single();
+        var posted = new List<string>();
+        var works = false;
+        view.Post = text =>
+        {
+            posted.Add(text);
+            return works;
+        };
+
+        view.Send("here it is");
+        Assert.Equal("here it is", compose.Text);
+
+        works = true;
+        view.Send("here it is");
+        Assert.Equal(string.Empty, compose.Text);
+        Assert.Equal(["here it is", "here it is"], posted);
+    }
+
+    [WinFormsFact]
+    public void Delete_does_nothing_in_a_conversation_that_cannot_be_written_to()
+    {
+        // The menu greys Delete there, and the key mustn't be a way round it.
+        using var view = Realised(Comment("n1", "first"));
+        var deleted = new List<string>();
+        view.Deleted += deleted.Add;
+        view.CanComment = false;
+
+        view.PressInList(Keys.Delete);
+        Assert.Empty(deleted);
+
+        view.CanComment = true;
+        view.PressInList(Keys.Delete);
+        Assert.Equal(["n1"], deleted);
+    }
+
+    [WinFormsFact]
     public void A_comment_with_a_file_offers_to_download_it()
     {
         using var view = Realised(WithFile("n1"));

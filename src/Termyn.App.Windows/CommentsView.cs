@@ -129,11 +129,21 @@ internal sealed class CommentsView : UserControl
         ApplyTheme();
     }
 
-    /// <summary>Raised when a new comment is posted, with what it says.</summary>
-    public event Action<string>? Posted;
+    /// <summary>
+    /// Posts a new comment, given what it says, and answers whether it was.
+    /// </summary>
+    /// <remarks>
+    /// Asked rather than told, so the box is only emptied once the comment has really gone: a
+    /// comment that couldn't be posted would otherwise take the typing with it.
+    /// </remarks>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Func<string, bool>? Post { get; set; }
 
-    /// <summary>Raised when an existing comment is rewritten, with its id and its new text.</summary>
-    public event Action<string, string>? Edited;
+    /// <summary>Rewrites a comment, given its id and its new text, and answers whether it was.</summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public Func<string, string, bool>? Edit { get; set; }
 
     /// <summary>Raised when a comment is to be removed, with its id.</summary>
     public event Action<string>? Deleted;
@@ -523,7 +533,9 @@ internal sealed class CommentsView : UserControl
     {
         switch (e.KeyCode)
         {
-            case Keys.Delete when SelectedId is { } id:
+            // Only where the menu would offer it: a conversation that can't be written to can't be
+            // deleted from either.
+            case Keys.Delete when CanComment && SelectedId is { } id:
                 e.Handled = e.SuppressKeyPress = true;
                 Deleted?.Invoke(id);
                 break;
@@ -560,8 +572,9 @@ internal sealed class CommentsView : UserControl
     /// Sends what is in the box — as an edit when one is open, otherwise as a new comment.
     /// </summary>
     /// <remarks>
-    /// Emptied and re-aimed before the event rather than after, because handling it republishes the
-    /// list, and a box still holding the text would post it twice on the next Ctrl+Enter.
+    /// Emptied only once the window says it went. Emptied first, a comment that couldn't be posted
+    /// lost what was typed; held on to, the box is still aimed where it was, so a second Ctrl+Enter
+    /// tries the same thing again rather than posting it twice.
     /// </remarks>
     private void Commit()
     {
@@ -570,11 +583,25 @@ internal sealed class CommentsView : UserControl
             return;
 
         var editing = _editing;
-        CancelEdit();
+        var sent = editing is null
+            ? Post?.Invoke(text) ?? false
+            : Edit?.Invoke(editing, text) ?? false;
 
-        if (editing is null)
-            Posted?.Invoke(text);
-        else
-            Edited?.Invoke(editing, text);
+        // The edit being sent can have been cancelled meanwhile, its comment gone from the list the
+        // send republished; the box has nothing left to hold then either.
+        if (sent && _editing == editing)
+            CancelEdit();
     }
+
+    /// <summary>Types into the box and presses Ctrl+Enter, for a test with no keyboard.</summary>
+    /// <param name="text">What to type</param>
+    internal void Send(string text)
+    {
+        _compose.Text = text;
+        Commit();
+    }
+
+    /// <summary>Presses a key on the list, for a test with no keyboard.</summary>
+    /// <param name="key">The key</param>
+    internal void PressInList(Keys key) => OnListKeyDown(_list, new KeyEventArgs(key));
 }
