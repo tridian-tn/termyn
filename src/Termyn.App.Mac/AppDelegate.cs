@@ -23,9 +23,9 @@ namespace Termyn.App.Mac;
 [Register("AppDelegate")]
 public sealed class AppDelegate : NSApplicationDelegate
 {
-    // Deliberately no MaxResponseContentBufferSize, and only half a timeout, for the reasons given
-    // where the Windows app makes the same client.
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // Built the way the Windows app builds it, so both get the same bounds: none on the client,
+    // whose overall timeout would cut off a large transfer, and the API client's own on each call.
+    private readonly HttpClient _http = TodoistHttp.CreateClient();
 
     private SettingsStore? _settingsStore;
     private AppSettings _settings = new();
@@ -54,11 +54,14 @@ public sealed class AppDelegate : NSApplicationDelegate
         ISecretStore secrets = new KeychainSecretStore();
 
         _store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
-        if (_store.Rebuilt)
-            _log.Warn("The cache couldn't be read and was started again from nothing. Anything queued went with it.");
 
         _engine = new SyncEngine(api, _store, secrets, log: _log);
         _engine.Load();
+
+        // After the load rather than before it: a damaged page is often only found by reading it,
+        // and the store rebuilds itself there too.
+        if (_store.Rebuilt)
+            _log.Warn("The cache couldn't be read and was started again from nothing. Anything queued went with it.");
 
         // As on Windows, the cache decides what having no token means: with nothing held it's a
         // first start; over an account it's a token Todoist turned away, and the window opens on
@@ -93,7 +96,15 @@ public sealed class AppDelegate : NSApplicationDelegate
         // The loop waits for a sync in flight, but only so long: quitting shouldn't hang on a slow
         // network.
         _scheduler?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _store?.Dispose();
+
+        // The loop's wait says nothing about the first sync, which the window started. One still
+        // writing to the cache keeps it open: the process closes it on the way out, which is safer
+        // than closing it under the write.
+        if (_presenter is null || _presenter.WaitForSyncs(TimeSpan.FromSeconds(5)))
+            _store?.Dispose();
+        else
+            _log.Warn("A sync was still running at quit. The cache was left for the process to close.");
+
         _http.Dispose();
     }
 
