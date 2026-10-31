@@ -51,10 +51,14 @@ public sealed class TodoistUnsafeAddressException : TodoistNetworkException
 /// Raised when Todoist answered <c>429</c>. Distinct from an ordinary failure because the fix is to
 /// wait rather than to retry: the caller is being asked to stop for a while, not told something broke.
 /// </summary>
+/// <remarks>
+/// Carries the status, so it isn't <see cref="TodoistNetworkException.Unreachable"/>: the server
+/// answered, and telling the user they're offline would be untrue.
+/// </remarks>
 public sealed class TodoistRateLimitException : TodoistNetworkException
 {
     public TodoistRateLimitException(string message, TimeSpan? retryAfter)
-        : base(message) => RetryAfter = retryAfter;
+        : base(message, 429) => RetryAfter = retryAfter;
 
     /// <summary>How long the server asked us to wait, when it said. Null means it didn't.</summary>
     public TimeSpan? RetryAfter { get; }

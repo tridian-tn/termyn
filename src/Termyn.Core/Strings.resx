@@ -23,8 +23,7 @@
   </data>
   <!--
     What the client and the sync engine say when something goes wrong, for the dialogs that show an
-    exception's message. The rate-limit message stays in code: it drives the backoff and is only
-    ever logged, never shown.
+    exception's message.
   -->
   <data name="TokenRejected" xml:space="preserve">
     <value>Todoist rejected the API token.</value>
@@ -72,6 +71,10 @@
   <data name="AttachmentNotFetched" xml:space="preserve">
     <value>{0} couldn't be downloaded.</value>
     <comment>Shown when an attachment's download failed for a reason there's nothing more to say about. {0} is the file's name.</comment>
+  </data>
+  <data name="RateLimited" xml:space="preserve">
+    <value>Todoist is rate-limiting this account. Try again in a minute.</value>
+    <comment>Todoist answered 429. Shown when a file download is refused for it; a sync just waits.</comment>
   </data>
   <data name="TokenTurnedAway" xml:space="preserve">
     <value>Todoist turned the token away. Reconnect to make changes.</value>

@@ -286,6 +286,20 @@ public class TodoistApiClientTests
     }
 
     [Fact]
+    public async Task A_rate_limit_is_an_answer_rather_than_being_offline()
+    {
+        // Read as unreachable, a download refused for it told the user they were offline.
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}");
+
+        using var destination = new MemoryStream();
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(
+            () => client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken));
+
+        Assert.False(ex.Unreachable);
+        Assert.Equal(429, ex.Status);
+    }
+
+    [Fact]
     public async Task A_rate_limit_with_no_advice_says_so_rather_than_guessing()
     {
         var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}");

@@ -372,7 +372,7 @@ public sealed class TodoistApiClient : ITodoistApi
             return;
 
         if (resp.StatusCode is HttpStatusCode.TooManyRequests)
-            throw new TodoistRateLimitException("Todoist is rate-limiting this account.", RetryAfter(resp));
+            throw new TodoistRateLimitException(Strings.RateLimited, RetryAfter(resp));
 
         throw new TodoistNetworkException(string.Format(CultureInfo.CurrentCulture, Strings.UnexpectedHttpStatus, (int)resp.StatusCode), (int)resp.StatusCode);
     }
