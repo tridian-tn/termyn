@@ -987,15 +987,19 @@ internal sealed class MainForm : Form
 
     /// <summary>Takes the global hotkey.</summary>
     /// <returns>What to tell the user, or null when there is nothing worth saying.</returns>
-    private string? RegisterHotkey(bool announce)
+    private string? RegisterHotkey(bool announce) => RegisterHotkey(_settings, announce);
+
+    /// <param name="settings">The settings to take it from, which may not be in force yet</param>
+    /// <param name="announce">Whether to say so when it worked</param>
+    private string? RegisterHotkey(AppSettings settings, bool announce)
     {
-        if (!_settings.HotkeyEnabled)
+        if (!settings.HotkeyEnabled)
         {
             _shell.Hotkey.Unregister();
             return announce ? Strings.HotkeyNone : null;
         }
 
-        var binding = _settings.HotkeyBinding;
+        var binding = settings.HotkeyBinding;
         if (_shell.Hotkey.Register(binding))
             return announce ? string.Format(CultureInfo.CurrentCulture, Strings.HotkeyIs, binding) : null;
 
@@ -1083,6 +1087,24 @@ internal sealed class MainForm : Form
             notices.Add(Strings.NoticeLaunchAtLogin);
         }
 
+        // Before the settings are replaced, since a refusal decides which binding gets saved.
+        string? hotkeyNotice = null;
+        if (hotkeyChanged)
+        {
+            // Cleared either way: whatever it said is about the binding that has just been replaced.
+            _hotkeyNotice = null;
+            var working = _shell.Hotkey.Current;
+            hotkeyNotice = RegisterHotkey(amended, announce: true);
+
+            // Refused, with the binding from before still held. That one is what the key does, so
+            // it's what is saved, rather than a combination that would be refused again next start.
+            if (amended.HotkeyEnabled && working is { } kept && _shell.Hotkey.Current == kept && kept != amended.HotkeyBinding)
+            {
+                hotkeyNotice = string.Format(CultureInfo.CurrentCulture, Strings.HotkeyTakenKept, amended.HotkeyBinding, kept);
+                amended = amended with { Hotkey = kept.ToString() };
+            }
+        }
+
         _settings = amended;
         _outline.PriorityTips = _settings.ShowPriorityTips;
 
@@ -1096,13 +1118,8 @@ internal sealed class MainForm : Form
             notices.Add(Strings.NoticeFrameTheme);
         }
 
-        if (hotkeyChanged)
-        {
-            // Cleared either way: whatever it said is about the binding that has just been replaced.
-            _hotkeyNotice = null;
-            if (RegisterHotkey(announce: true) is { } hotkeyNotice)
-                notices.Add(hotkeyNotice);
-        }
+        if (hotkeyNotice is not null)
+            notices.Add(hotkeyNotice);
 
         if (cadenceChanged)
             notices.Add(Strings.NoticeSyncCadence);

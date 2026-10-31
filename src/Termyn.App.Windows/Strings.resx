@@ -727,6 +727,10 @@
     <value>Another application already owns {0} — quick-add has no hotkey.</value>
     <comment>Status bar when another program has the chosen hotkey. {0} is the key combination.</comment>
   </data>
+  <data name="HotkeyTakenKept" xml:space="preserve">
+    <value>Another application already owns {0}, so quick-add keeps {1}.</value>
+    <comment>Status bar when another program has the newly chosen hotkey and the one from before still works. {0} is the combination asked for and {1} the one kept.</comment>
+  </data>
   <data name="UpdatesChecking" xml:space="preserve">
     <value>Checking for updates…</value>
     <comment>Status bar while asking GitHub for a newer release.</comment>

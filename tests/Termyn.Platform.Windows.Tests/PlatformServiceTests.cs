@@ -90,6 +90,39 @@ public class GlobalHotkeyTests
     }
 
     [Fact]
+    public void A_refused_combination_leaves_the_working_one_in_place()
+    {
+        // Changing to a key something else owns used to let go of the one that worked first, and
+        // leave the user with no hotkey at all.
+        var taken = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F7");
+        var working = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F6");
+
+        using var owner = new WindowsGlobalHotkey();
+        Assert.True(owner.Register(taken), "the desktop refused an unlikely combination");
+
+        using var hotkey = new WindowsGlobalHotkey();
+        Assert.True(hotkey.Register(working), "the desktop refused an unlikely combination");
+
+        Assert.False(hotkey.Register(taken));
+        Assert.Equal(working, hotkey.Current);
+
+        // And really still held, rather than only remembered: nobody else can have it.
+        using var latecomer = new WindowsGlobalHotkey();
+        Assert.False(latecomer.Register(working));
+    }
+
+    [Fact]
+    public void Registering_what_is_already_held_keeps_it()
+    {
+        using var hotkey = new WindowsGlobalHotkey();
+        var binding = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F9");
+
+        Assert.True(hotkey.Register(binding));
+        Assert.True(hotkey.Register(binding));
+        Assert.Equal(binding, hotkey.Current);
+    }
+
+    [Fact]
     public void The_window_it_listens_on_is_message_only()
     {
         // Message-only means parented into the HWND_MESSAGE namespace: posted messages and nothing
