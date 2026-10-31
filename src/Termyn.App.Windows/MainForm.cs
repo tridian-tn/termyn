@@ -3899,8 +3899,10 @@ internal sealed class MainForm : Form
     private async Task ToggleCompletedAsync()
     {
         // The fetch is a round trip over up to three months of history, so it is worth saying that
-        // something is happening rather than leaving the list unchanged for a moment.
-        if (!_presenter.ShowingCompleted)
+        // something is happening rather than leaving the list unchanged for a moment. Not for the
+        // press that calls a fetch off, which is not one starting.
+        var callingOff = _presenter.FetchingCompleted;
+        if (!_presenter.ShowingCompleted && !callingOff)
             _status.Text = Strings.CompletedFetching;
 
         await GuardedAsync(async () =>
@@ -3908,6 +3910,10 @@ internal sealed class MainForm : Form
             if (!await _presenter.ToggleCompletedAsync(_cts.Token))
                 _status.Text = Strings.CompletedOffline;
         });
+
+        // The fetch that was called off says nothing more, so "fetching" would otherwise stay up.
+        if (callingOff && _status.Text == Strings.CompletedFetching)
+            RenderStatus();
     }
 
     private void OpenPalette()
@@ -3975,7 +3981,22 @@ internal sealed class MainForm : Form
             return false;
 
         string? id = null;
-        Guarded(() => id = _presenter.AddSubtask(parentId, text));
+        try
+        {
+            id = _presenter.AddSubtask(parentId, text);
+        }
+        catch (CaptureRefusedException refused)
+        {
+            // Not a failure: a sub-task the app won't make, such as one that repeats. Said on the
+            // status bar like any other refusal, and not logged as though something broke.
+            _status.Text = refused.Message;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+            return false;
+        }
 
         if (id is null)
             return false;
