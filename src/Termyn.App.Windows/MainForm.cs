@@ -924,6 +924,9 @@ internal sealed class MainForm : Form
         if (_presenter.IsSameAccount(check.UserId))
         {
             _presenter.Reconnect(check.Token, check.UserId);
+
+            // Whatever description was kept back for want of a token goes in with the sync it sets off.
+            SaveDescription();
             _scheduler.RequestNow();
             return;
         }
@@ -2120,17 +2123,48 @@ internal sealed class MainForm : Form
         }
 
         // What the box is on is changing, so whatever was typed into it belongs to the old one and
-        // has to go before the box is refilled.
-        SaveDescription();
+        // has to go before the box is refilled. With the token turned away it can't be written yet,
+        // so it's held for its own subject rather than lost under the next one's.
+        if (_presenter.ReconnectNeeded && _draft.Take(_description.Text) is { } unsaved)
+            _heldDescription = unsaved;
+        else
+            SaveDescription();
 
         _draft.Open(kind, id, _presenter.DescriptionOf(kind, id));
-        ShowDescription(_draft.Opened);
+
+        // Back on the one held, the box opens on what was typed, still to be saved, rather than on
+        // the account's copy.
+        var shown = TakeHeldDescription(kind, id) ?? _draft.Opened;
+        ShowDescription(shown);
 
         ShowDescriptionEditable(_presenter.AccessToDescriptionOf(kind, id));
 
         // Nothing written yet has nothing to read, and a rendering of nothing is a blank panel that
         // gives no sign it would take any typing. So an empty one opens ready to write.
-        SetDescriptionMode(writing: _draft.Opened.Length == 0 && !_description.ReadOnly, focus: false);
+        SetDescriptionMode(writing: shown.Length == 0 && !_description.ReadOnly, focus: false);
+    }
+
+    /// <summary>
+    /// A description typed before the token was turned away and not yet written, kept for the task
+    /// or project it was typed into once the box has moved on from it.
+    /// </summary>
+    /// <remarks>
+    /// One is enough: the box is read-only until a token comes, so nothing else can be typed into it
+    /// meanwhile. Written by the first save once there's a token again.
+    /// </remarks>
+    private (SubjectKind Kind, string OwnerId, string Text)? _heldDescription;
+
+    /// <summary>The held description, if it belongs to this subject, letting go of it.</summary>
+    /// <param name="kind">Which of the two the box is opening on</param>
+    /// <param name="id">The task or project it's opening on</param>
+    /// <returns>What was typed into it, or null when nothing is held for it</returns>
+    private string? TakeHeldDescription(SubjectKind kind, string? id)
+    {
+        if (id is null || _heldDescription is not { } held || held.Kind != kind || _presenter.CurrentIdOf(held.OwnerId) != id)
+            return null;
+
+        _heldDescription = null;
+        return held.Text;
     }
 
     /// <summary>
@@ -2824,6 +2858,13 @@ internal sealed class MainForm : Form
         // it's still there to save once a token comes.
         if (_presenter.ReconnectNeeded)
             return;
+
+        // One the box moved on from while there was no token to write it with.
+        if (_heldDescription is { } held)
+        {
+            _heldDescription = null;
+            Guarded(() => _presenter.SetDescription(held.Kind, _presenter.CurrentIdOf(held.OwnerId), held.Text));
+        }
 
         // The draft puts the box's line endings back to the account's before it compares or saves.
         if (_draft.Take(_description.Text) is not { } edit)
