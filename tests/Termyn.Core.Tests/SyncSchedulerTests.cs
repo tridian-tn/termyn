@@ -110,10 +110,12 @@ public class SyncSchedulerTests
     public async Task A_failing_sync_is_surfaced_and_the_loop_keeps_running()
     {
         var failures = new TaskCompletionSource<Exception>();
+        var again = new TaskCompletionSource();
         var calls = 0;
         await using var scheduler = new SyncScheduler(_ =>
         {
-            Interlocked.Increment(ref calls);
+            if (Interlocked.Increment(ref calls) >= 2)
+                again.TrySetResult();
             throw new InvalidOperationException("boom");
         }, Fast);
         scheduler.SyncFailed += ex => failures.TrySetResult(ex);
@@ -123,8 +125,10 @@ public class SyncSchedulerTests
         var error = await failures.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal("boom", error.Message);
 
-        // Still alive after the failure.
-        await Task.Delay(200, TestContext.Current.CancellationToken);
+        // Still alive after the failure: it comes round and syncs again. Waited for rather than
+        // looked for after a fixed sleep, which a runner that stalls its timers for longer than
+        // the sleep less one interval would fail, as a loaded macOS one did.
+        await again.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.True(Volatile.Read(ref calls) > 1);
     }
 
@@ -133,9 +137,11 @@ public class SyncSchedulerTests
     {
         var calls = 0;
         var reported = new TaskCompletionSource();
+        var again = new TaskCompletionSource();
         await using var scheduler = new SyncScheduler(_ =>
         {
-            Interlocked.Increment(ref calls);
+            if (Interlocked.Increment(ref calls) >= 2)
+                again.TrySetResult();
             // Not the scheduler's own shutdown token — this must not be mistaken for one.
             throw new OperationCanceledException(new CancellationToken(canceled: true));
         }, Fast);
@@ -144,7 +150,9 @@ public class SyncSchedulerTests
         scheduler.Start();
 
         await reported.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        await Task.Delay(200, TestContext.Current.CancellationToken);
+
+        // Waited for rather than looked for after a fixed sleep, as in the test above.
+        await again.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.True(Volatile.Read(ref calls) > 1);
     }
 

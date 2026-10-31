@@ -40,6 +40,13 @@ signed yet: somebody should look before these are downloadable. Run
 [the release checklist](release-checklist.md) against the draft's files, then press publish to make
 the release real, or delete the draft to abandon it.
 
+The tag packages the Mac app as well, for Apple Silicon only, as
+`Termyn-<version>-macos-arm64-debug.zip`, and the release waits for it. It's a Debug build for now,
+which is what the `-debug` says: the runner's Xcode is older than the one the macOS workload's
+Release build needs (see the comment on the `build-mac-app` job). It's unsigned and not notarised,
+so Gatekeeper refuses it on a double-click; opening the app from the context menu once gets past
+that.
+
 There's nothing to bump beforehand. Tag the commit you want to release (`v1.2.0`) and push the tag,
 and that commit is built as 1.2.0.
 
