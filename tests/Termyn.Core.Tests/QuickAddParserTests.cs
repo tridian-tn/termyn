@@ -1,5 +1,6 @@
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
+using Termyn.Core.Platform;
 using Termyn.TestSupport;
 
 namespace Termyn.Core.Tests;
@@ -159,6 +160,33 @@ public class QuickAddParserTests
         Assert.Equal(new DateOnly(y, mo, d), reminder.Date);
         Assert.Equal(new TimeOnly(h, mi), reminder.Time);
         Assert.Empty(parse.Unsupported);
+    }
+
+    [Theory]
+    [InlineData("Leave !2h", 3, 29, 3, 30)]     // the clocks go forward at one, so it's half three
+    [InlineData("Leave !2h", 10, 25, 1, 30)]    // and back at two, so it's half one again
+    [InlineData("Leave !1hb", 3, 29, 2, 30)]    // no due time: the same span from now
+    public void A_reminder_a_span_from_now_counts_the_hours_that_pass_across_a_change_of_clocks(string text, int mo, int d, int h, int mi)
+    {
+        // Half past midnight in London, the night the clocks change. Added to the wall clock, two
+        // hours from now came out an hour out either way.
+        var london = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+        var midnight = new DateTime(2026, mo, d, 0, 30, 0);
+        var clock = new At(new DateTimeOffset(midnight, london.GetUtcOffset(midnight)));
+
+        var parse = new QuickAddParser(clock).Parse(text, new DateSettings(london));
+
+        var reminder = Assert.IsType<AbsoluteReminder>(parse.Reminders.Single());
+        Assert.Equal(new DateOnly(2026, mo, d), reminder.Date);
+        Assert.Equal(new TimeOnly(h, mi), reminder.Time);
+    }
+
+    /// <summary>A clock stopped at one instant.</summary>
+    private sealed class At(DateTimeOffset now) : IClock
+    {
+        public DateOnly Today => DateOnly.FromDateTime(now.UtcDateTime);
+
+        public DateTimeOffset UtcNow => now.ToUniversalTime();
     }
 
     [Theory]
