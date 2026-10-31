@@ -233,6 +233,7 @@ public class GitHubReleaseCheckTests
     [InlineData("""{"tag_name":null}""")]
     [InlineData("""{"tag_name":{"v":"1.0.0"}}""")]
     [InlineData("""{"tag_name":["v1.0.0"]}""")]
+    [InlineData("""{"tag_name":"v1.0.0","tag_name":"v2.0.0"}""")]   // which one is meant can't be said
     public async Task An_unreadable_answer_means_not_knowing(string body)
         => Assert.Equal(UpdateResult.Unknown, await Returning(HttpStatusCode.OK, body).LatestAsync(TestContext.Current.CancellationToken));
 
