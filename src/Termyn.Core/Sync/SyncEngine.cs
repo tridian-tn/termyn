@@ -310,23 +310,54 @@ public sealed class SyncEngine
     /// </remarks>
     public bool WritesDue
     {
-        get { lock (_gate) return Due().Any(); }
+        get { lock (_gate) return Due().Count > 0; }
     }
 
     /// <summary>
-    /// The queued writes that may go now: everything pending, up to the first that's being left a
-    /// while. Called with the lock held.
+    /// The queued writes that may go now, in the order they were made. Called with the lock held.
     /// </summary>
     /// <remarks>
-    /// Up to it rather than around it, because writes go in the order they were made. One sent ahead
-    /// of a write it builds on would be refused for naming something that isn't there yet.
+    /// A write being left a while holds back only what builds on it: anything naming a resource it
+    /// writes or creates, and in turn anything naming theirs. One sent ahead of a write it builds on
+    /// would be refused for naming something that isn't there yet, or would land under the held
+    /// one and be undone by it. Everything else goes, so one stubborn write can't keep every later
+    /// edit to unrelated tasks waiting behind it.
     /// </remarks>
-    private IEnumerable<OutboxCommand> Due()
+    private List<OutboxCommand> Due()
     {
         var now = _clock.UtcNow;
-        return _outbox
-            .Where(c => c.State == OutboxState.Pending)
-            .TakeWhile(c => c.RetryAt is not { } at || at <= now);
+        var held = new HashSet<string>(StringComparer.Ordinal);
+        var due = new List<OutboxCommand>();
+
+        foreach (var c in _outbox)
+        {
+            if (c.State != OutboxState.Pending)
+                continue;
+
+            if ((c.RetryAt is { } at && at > now) || ReferencesAny(c, held))
+            {
+                held.UnionWith(Writes(c));
+                continue;
+            }
+
+            due.Add(c);
+        }
+
+        return due;
+    }
+
+    /// <summary>The resources a queued write changes or creates, by id.</summary>
+    private static IEnumerable<string> Writes(OutboxCommand cmd)
+    {
+        if (cmd.TempId is { } temp)
+            yield return temp;
+
+        var args = ParseArgs(cmd);
+        if (args["id"] is JsonValue id)
+            yield return id.ToString();
+
+        foreach (var nested in NestedIds(args))
+            yield return nested;
     }
 
     public IReadOnlyList<OutboxCommand> Outbox
@@ -1376,6 +1407,26 @@ public sealed class SyncEngine
     /// <param name="parent">The task it would move under</param>
     /// <returns>True when nothing would end up deeper than the limit allows</returns>
     private bool Fits(string id, TaskItem parent) => DepthOf(parent.Id) + 1 + HeightOf(id) <= MaxDepth;
+
+    /// <summary>
+    /// Whether a new sub-task can go under this task: it's held, still open, and not already as
+    /// deep as Todoist nests.
+    /// </summary>
+    /// <remarks>
+    /// The same rule <see cref="Fits"/> applies to a move, asked for a task with nothing under it,
+    /// so the two can't come to disagree about where the limit is.
+    /// </remarks>
+    /// <param name="parentId">The task the sub-task would go under</param>
+    /// <returns>True when a sub-task added there would be accepted</returns>
+    public bool CanNestUnder(string parentId)
+    {
+        lock (_gate)
+        {
+            return Model.Get(ResourceType.Items, parentId) is { } json
+                   && !Projections.ToTaskItem(json).Completed
+                   && DepthOf(parentId) + 1 <= MaxDepth;
+        }
+    }
 
     /// <summary>
     /// Whether an indent is refused for how deep it would go, rather than for want of a task above

@@ -146,6 +146,28 @@ public class RetryBackoffTests
     }
 
     [Fact]
+    public async Task A_write_to_something_else_goes_without_waiting_for_it()
+    {
+        // Only what builds on the write being left has to wait. Holding back everything behind it
+        // kept every later edit to unrelated tasks unsent for as long as the one write was refused.
+        var store = Store();
+        store.PutResource("items", "i2", """{"id":"i2","content":"Other","project_id":"p1"}""");
+        var engine = Engine(store);
+
+        engine.UpdateItem("i1", new JsonObject { ["content"] = "Renamed" });
+        RefuseAll(503);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        engine.UpdateItem("i1", new JsonObject { ["description"] = "later" });
+        engine.UpdateItem("i2", new JsonObject { ["content"] = "Unrelated" });
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        var sent = Assert.Single(_api.LastCommands);
+        Assert.Equal("i2", sent.Args["id"]?.ToString());
+        Assert.Equal(2, engine.Outbox.Count(c => c.State == OutboxState.Pending && c.ArgsJson.Contains("\"i1\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task A_restart_lets_it_go_again_straight_away()
     {
         var store = Store();
