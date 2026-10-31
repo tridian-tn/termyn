@@ -170,6 +170,18 @@ public class MainPresenterTests
     }
 
     [Fact]
+    public async Task A_phone_number_typed_into_a_capture_stays_on_the_task()
+    {
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+
+        Assert.DoesNotContain("needs a connection", presenter.PreviewText("Call John +447700900123"));
+
+        await presenter.CaptureAsync("Call John +447700900123", TestContext.Current.CancellationToken);
+
+        Assert.Equal("Call John +447700900123", presenter.Rows.Single().Content);
+    }
+
+    [Fact]
     public async Task An_unknown_section_stays_in_the_title_where_it_was_typed()
     {
         var store = new InMemorySnapshotStore();

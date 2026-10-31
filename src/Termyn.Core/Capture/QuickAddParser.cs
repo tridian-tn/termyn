@@ -9,8 +9,10 @@ namespace Termyn.Core.Capture;
 /// <summary>
 /// Parses quick-add text without the server, and reads a day typed into a box of its own. This is
 /// deliberately a strict subset of Todoist's syntax — only the tokens listed here are recognised;
-/// anything else is left in the task content verbatim. A task's recurrence and its assignees are
-/// flagged rather than guessed at, because getting them wrong offline would create the wrong task.
+/// anything else is left in the task content verbatim. A task's recurrence is flagged rather than
+/// guessed at, because getting it wrong offline would create the wrong task. A <c>+word</c> is just
+/// a word: assigning isn't supported, and a capture is created from this parse, so reading it as an
+/// assignee would only drop it — as often as not a phone number such as <c>+447700900123</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -175,10 +177,6 @@ public sealed partial class QuickAddParser
                     var label = Unescaped(token[1..]);
                     if (!labels.Contains(label, StringComparer.OrdinalIgnoreCase))
                         labels.Add(label);
-                    continue;
-                case '+' when token.Length > 1:
-                    // Assignees are out of scope; drop the token but tell the user it was ignored.
-                    unsupported.Add(token);
                     continue;
                 case '!' when token.Length > 1:
                 {

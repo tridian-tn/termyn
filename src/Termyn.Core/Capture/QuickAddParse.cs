@@ -64,8 +64,8 @@ public sealed record QuickAddParse
     public TimeOnly? DueTime { get; init; }
 
     /// <summary>
-    /// Tokens the offline parser recognised but cannot act on — recurrence, assignees, and a
-    /// reminder it couldn't read (a recurring <c>!every</c>, or a form it hasn't the grammar for).
+    /// Tokens the offline parser recognised but cannot act on — recurrence, and a reminder it
+    /// couldn't read (a recurring <c>!every</c>, or a form it hasn't the grammar for).
     /// The capture UI surfaces these so the user knows what was left out. A reminder it could read
     /// is in <see cref="Reminders"/> instead, not here.
     /// </summary>

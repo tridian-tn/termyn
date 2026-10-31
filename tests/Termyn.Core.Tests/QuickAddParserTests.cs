@@ -347,12 +347,15 @@ public class QuickAddParserTests
     }
 
     [Fact]
-    public void Assignees_are_dropped_and_flagged()
+    public void A_plus_word_stays_in_the_title()
     {
-        var parse = Parse("Review PR +alice");
+        // Assigning isn't supported, and a capture is made from this parse, so reading "+alice" as
+        // an assignee only took it off the task — and a phone number went with it.
+        var parse = Parse("Call John +447700900123");
 
-        Assert.Equal("Review PR", parse.Content);
-        Assert.Contains("+alice", parse.Unsupported);
+        Assert.Equal("Call John +447700900123", parse.Content);
+        Assert.Empty(parse.Unsupported);
+        Assert.Equal("Review PR +alice", Parse("Review PR +alice").Content);
     }
 
     [Fact]
