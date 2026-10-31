@@ -193,11 +193,13 @@ internal static class Program
         var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
         using var storeHeld = new Held(store);
 
-        if (store.Rebuilt)
-            log.Warn("The cache couldn't be read and was started again from nothing. Anything queued went with it.");
-
         var engine = new SyncEngine(api, store, secrets, log: log);
         engine.Load();
+
+        // After the load rather than before it: a damaged page is often only found by reading it,
+        // and the store rebuilds itself there too.
+        if (store.Rebuilt)
+            log.Warn("The cache couldn't be read and was started again from nothing. Anything queued went with it.");
 
         // Loaded first, because the cache decides what having no token means. With nothing held
         // it's a first start, or one after signing out. Over an account it's a token Todoist turned

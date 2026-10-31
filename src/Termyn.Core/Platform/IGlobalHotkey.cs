@@ -16,7 +16,9 @@ public interface IGlobalHotkey : IDisposable
     /// </summary>
     /// <returns>
     /// False when the desktop refused it — most often because another application already owns it.
-    /// The caller is expected to say so rather than leave the user pressing a key that does nothing.
+    /// A refusal puts the previous binding back where the desktop allows it, and <see cref="Current"/>
+    /// says what is actually held afterwards. The caller is expected to say so rather than leave the
+    /// user pressing a key that does nothing.
     /// </returns>
     bool Register(HotkeyBinding binding);
 

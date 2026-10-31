@@ -127,11 +127,11 @@ public sealed record ViewState
     /// </remarks>
     public IReadOnlyList<string> CollapsedTasks { get; init; } = [];
 
-    /// <summary>How wide the sidebar is, in pixels, or null until the window has saved it.</summary>
+    /// <summary>How wide the sidebar is, in pixels at 100% scale, or null until the window has saved it.</summary>
     /// <remarks>
-    /// This and the other sizes are null on a first start rather than a figure in pixels, which
-    /// can't be right at every display scale. The window works out a default for the screen it
-    /// opens on instead.
+    /// This and the other sizes are held at 100% scale and scaled to the display the window opens
+    /// on, so a size saved on one monitor isn't restored at the wrong scale on another. They are
+    /// null on a first start, which leaves the window to work out a default for the screen.
     /// </remarks>
     public int? SidebarWidth { get; init; }
 
@@ -139,8 +139,8 @@ public sealed record ViewState
     public bool ShowDescription { get; init; }
 
     /// <summary>
-    /// How tall the description panel is, in pixels off the bottom of the outline, or null until the
-    /// window has saved it.
+    /// How tall the description panel is, in pixels at 100% scale off the bottom of the outline, or
+    /// null until the window has saved it.
     /// </summary>
     public int? DescriptionHeight { get; init; }
 
@@ -156,7 +156,7 @@ public sealed record ViewState
     public int? WindowHeight { get; init; }
 
     /// <summary>
-    /// How wide each of the outline's columns is, in pixels, by the column's name.
+    /// How wide each of the outline's columns is, in pixels at 100% scale, by the column's name.
     /// </summary>
     /// <remarks>
     /// Empty until the window has saved them, which leaves the window to fit them to the outline it
