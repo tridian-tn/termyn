@@ -2886,20 +2886,30 @@ internal sealed class MainForm : Form
         if (_transfer is not null)
             return;
 
-        if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
-            return;
+        // Guarded throughout, since nothing above an async void handler would catch it: taking the
+        // file off is a write, and can be refused, and the window can be gone by the time it lands.
+        await GuardedAsync(async () =>
+        {
+            if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+                return;
 
-        if (!Confirm(string.Format(CultureInfo.CurrentCulture, Strings.RemoveAttachmentConfirm, file.FileName)))
-            return;
+            if (!Confirm(string.Format(CultureInfo.CurrentCulture, Strings.RemoveAttachmentConfirm, file.FileName)))
+                return;
 
-        // Guarded, since nothing above an async void handler would catch it: taking the file off is
-        // a write, and can be refused.
-        string? trouble = null;
-        await GuardedAsync(async () => trouble = await _presenter.DetachFileAsync(commentId));
-        RefreshComments();
+            string? trouble = null;
+            try
+            {
+                trouble = await _presenter.DetachFileAsync(commentId);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                    RefreshComments();
+            }
 
-        if (trouble is not null)
-            MessageBox.Show(this, trouble, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (trouble is not null && !IsDisposed)
+                MessageBox.Show(this, trouble, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
     }
 
     /// <summary>
