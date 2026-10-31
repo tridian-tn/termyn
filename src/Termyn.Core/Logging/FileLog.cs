@@ -80,16 +80,29 @@ public sealed class FileLog : ILog
 
         lock (_gate)
         {
-            try
+            // Rolled on its own, so a roll that can't be done doesn't take the entry with it. The
+            // file being held open elsewhere — a viewer, a backup, a virus scan — stops the move but
+            // not an append, and a log a little over its cap beats one that's gone quiet.
+            Attempt(() =>
             {
                 Directory.CreateDirectory(_directory);
                 Roll();
-                File.AppendAllText(Path, line + Environment.NewLine);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-            {
-                // Nothing to be done about it, and nothing worth failing over.
-            }
+            });
+
+            Attempt(() => File.AppendAllText(Path, line + Environment.NewLine));
+        }
+    }
+
+    /// <summary>Does some file work, swallowing the failures a log has no business failing over.</summary>
+    private static void Attempt(Action work)
+    {
+        try
+        {
+            work();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // Nothing to be done about it, and nothing worth failing over.
         }
     }
 
