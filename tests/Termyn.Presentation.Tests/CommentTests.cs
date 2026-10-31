@@ -212,6 +212,25 @@ public class CommentTests
     }
 
     [Fact]
+    public void The_count_the_pane_shows_keeps_up_with_what_is_written()
+    {
+        // Read off the last publish rather than a fresh projection of the account, so each write
+        // has to have published for the count to be right.
+        var presenter = Seeded(("project_notes", "pn1", """{"id":"pn1","project_id":"p1","content":"on the project"}"""));
+
+        Assert.Equal(1, presenter.CommentCountOn("p1"));
+        Assert.Equal(0, presenter.CommentCountOn("i1"));
+        Assert.Equal(0, presenter.CommentCountOn(null));
+
+        presenter.AddComment("i1", "first");
+        presenter.AddComment("i1", "second");
+        Assert.Equal(2, presenter.CommentCountOn("i1"));
+
+        presenter.DeleteComment(presenter.CommentsOn("i1")[0].Id);
+        Assert.Equal(1, presenter.CommentCountOn("i1"));
+    }
+
+    [Fact]
     public void A_task_with_no_comments_says_none_rather_than_nothing()
         => Assert.Equal(0, Seeded().Rows.Single(r => r.Id == "i1").CommentCount);
 

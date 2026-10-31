@@ -1483,12 +1483,14 @@ public sealed class MainPresenter
     /// <remarks>
     /// Read from the count the sync already keeps, rather than by asking for the comments and
     /// counting them: that builds a row for each one and formats its date, which is a great deal of
-    /// work for a number, and this is asked on every render.
+    /// work for a number, and this is asked on every render. Off the snapshot the last publish took,
+    /// too, rather than a fresh one, which projects every task in the account; every change to a
+    /// comment publishes, so it's the count on screen.
     /// </remarks>
     /// <param name="ownerId">The task or project to count for</param>
     /// <returns>How many it has, and none for anything not held</returns>
     public int CommentCountOn(string? ownerId)
-        => ownerId is null ? 0 : _engine.Snapshot().CommentCounts.GetValueOrDefault(ownerId);
+        => ownerId is not null && _projectedFrom is { } snapshot ? snapshot.CommentCounts.GetValueOrDefault(ownerId) : 0;
 
     /// <summary>
     /// The comments on a task or a project, oldest first and ready to draw.
