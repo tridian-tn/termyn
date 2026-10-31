@@ -130,6 +130,11 @@ public class RepeatFormTests
 
         using var dialog = Build(rule);
 
-        Assert.StartsWith("every tue starting 1753-01-0", dialog.Words, StringComparison.Ordinal);
+        Assert.Equal(new DateOnly(1753, 1, 1), dialog.Rule.Start);
+        Assert.Equal(new DateOnly(9998, 12, 31), dialog.Rule.Until);
+
+        // A start already gone by isn't written for a repeat on named weekdays: they come round on
+        // their own from today.
+        Assert.Equal("every tue until 9998-12-31", dialog.Words);
     }
 }
