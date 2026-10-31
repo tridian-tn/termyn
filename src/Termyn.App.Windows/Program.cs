@@ -21,9 +21,6 @@ internal static class Program
     /// </summary>
     private static FileLog? _log;
 
-    /// <summary>True while the box saying so is up, so a failure behind it is logged rather than stacked.</summary>
-    private static bool _reporting;
-
     [STAThread]
     private static void Main(string[] args)
     {
@@ -59,23 +56,24 @@ internal static class Program
     /// <param name="ex">What was thrown</param>
     private static void OnUiException(Exception ex)
     {
-        _log?.Error("Something nothing expected went wrong on the UI thread. Termyn carried on.", ex);
-
-        // One box at a time. A failure that repeats — in a paint, say — would otherwise pile them up
-        // faster than they could be closed.
-        if (_reporting)
+        // Once per session, and only the first one written out in full. A failure that repeats — in
+        // a paint or a timer, say — comes straight back the moment its box is closed, and a box per
+        // time round would leave the app unusable rather than merely broken in one place. The log
+        // still says how often it happened.
+        _uiFailures++;
+        if (_uiFailures > 1)
+        {
+            if (_uiFailures is 2 or 10 or 100 or 1000)
+                _log?.Warn($"Something went wrong on the UI thread again ({_uiFailures} times so far): {ex.GetType().Name}: {ex.Message}");
             return;
+        }
 
-        _reporting = true;
-        try
-        {
-            Tell(Strings.UnexpectedError, _log?.Path ?? ex.Message, MessageBoxIcon.Warning);
-        }
-        finally
-        {
-            _reporting = false;
-        }
+        _log?.Error("Something nothing expected went wrong on the UI thread. Termyn carried on.", ex);
+        Tell(Strings.UnexpectedError, _log?.Path ?? ex.Message, MessageBoxIcon.Warning);
     }
+
+    /// <summary>How many failures have reached the UI thread's handler this session.</summary>
+    private static int _uiFailures;
 
     /// <summary>
     /// Something thrown on another thread that nothing caught. The runtime ends the process once
@@ -253,8 +251,7 @@ internal static class Program
             fetcher: new AttachmentFetcher(api, secrets, attachments, new ZoneIdentifierMarker(log)),
             history: history,
             log: log);
-        var syncs = new SyncsInFlight(presenter.SyncAsync);
-        var scheduler = new SyncScheduler(syncs.RunAsync, settings.Cadence);
+        var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
 
         // Said once, here, rather than at every place a write is made. The engine queues all of
         // them through one method and tells us from there, so a new kind of write cannot be added
@@ -290,7 +287,7 @@ internal static class Program
         // still going is using the cache, so it's given longer, though not for ever. If it still
         // hasn't finished, nothing is closed or wiped under it: the files are left for the process
         // to close as it ends, and it does end, since a next session would open them a second time.
-        if (!syncs.WaitUntilIdle(TimeSpan.FromSeconds(15)))
+        if (!WaitForSyncs(presenter, TimeSpan.FromSeconds(15)))
         {
             storeHeld.Abandoned = true;
             historyHeld.Abandoned = true;
@@ -390,45 +387,29 @@ internal static class Program
     }
 
     /// <summary>
-    /// The sync the loop has running, if any, so shutdown can tell whether one outlived the loop.
+    /// Waits for the presenter's syncs to finish, keeping this thread's messages moving meanwhile.
     /// </summary>
     /// <remarks>
-    /// The loop stops waiting for a sync after a few seconds and doesn't say whether it finished,
-    /// and the cache it writes to is closed — or wiped, on signing out — straight after.
+    /// The first sync was started from the window, so what's left of it comes back to this thread to
+    /// run, and the message loop that would have run it has already ended. Blocked outright, the
+    /// wait could only ever time out.
     /// </remarks>
-    /// <param name="sync">One sync, as the loop runs it</param>
-    private sealed class SyncsInFlight(Func<CancellationToken, Task<SyncOutcome>> sync)
+    /// <param name="presenter">The presenter whose syncs to wait for</param>
+    /// <param name="timeout">How long to wait at most</param>
+    /// <returns>False when one was still running at the end of it</returns>
+    private static bool WaitForSyncs(MainPresenter presenter, TimeSpan timeout)
     {
-        private readonly Lock _gate = new();
-        private readonly ManualResetEventSlim _idle = new(initialState: true);
-        private int _running;
+        var waited = System.Diagnostics.Stopwatch.StartNew();
 
-        public async Task<SyncOutcome> RunAsync(CancellationToken ct)
+        while (!presenter.WaitForSyncs(TimeSpan.FromMilliseconds(50)))
         {
-            lock (_gate)
-            {
-                _running++;
-                _idle.Reset();
-            }
+            if (waited.Elapsed >= timeout)
+                return false;
 
-            try
-            {
-                return await sync(ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                lock (_gate)
-                {
-                    if (--_running == 0)
-                        _idle.Set();
-                }
-            }
+            Application.DoEvents();
         }
 
-        /// <summary>Waits for the sync running, if there is one, to finish.</summary>
-        /// <param name="timeout">The longest to wait</param>
-        /// <returns>False when one was still running at the end of it</returns>
-        public bool WaitUntilIdle(TimeSpan timeout) => _idle.Wait(timeout);
+        return true;
     }
 
     private static bool Has(string[] args, string flag)

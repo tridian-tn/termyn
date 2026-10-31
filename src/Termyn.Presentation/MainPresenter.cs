@@ -395,6 +395,45 @@ public sealed class MainPresenter
     /// <returns>What the sync loop should do next — come straight back, or hold off.</returns>
     public async Task<SyncOutcome> SyncAsync(CancellationToken ct = default)
     {
+        lock (_publishing)
+        {
+            if (_syncsRunning++ == 0)
+                _syncsIdle.Reset();
+        }
+
+        try
+        {
+            return await SyncOnceAsync(ct);
+        }
+        finally
+        {
+            lock (_publishing)
+            {
+                if (--_syncsRunning == 0)
+                    _syncsIdle.Set();
+            }
+        }
+    }
+
+    private int _syncsRunning;
+
+    private readonly ManualResetEventSlim _syncsIdle = new(initialState: true);
+
+    /// <summary>
+    /// Waits for every sync under way to finish, however it was started: the scheduler's loop,
+    /// the first one <see cref="LoadAsync"/> makes, or a caller's own.
+    /// </summary>
+    /// <remarks>
+    /// For shutting down. Whatever owns the cache can't close it, or wipe it on signing out, while
+    /// a sync could still write to it, and the scheduler stopping says nothing about the one the
+    /// window started before the loop ran.
+    /// </remarks>
+    /// <param name="timeout">How long to wait at most</param>
+    /// <returns>False when one was still running at the end of it</returns>
+    public bool WaitForSyncs(TimeSpan timeout) => _syncsIdle.Wait(timeout);
+
+    private async Task<SyncOutcome> SyncOnceAsync(CancellationToken ct)
+    {
         TimeSpan? pause = null;
 
         lock (_publishing)
@@ -768,7 +807,7 @@ public sealed class MainPresenter
             return null;
 
         var snapshot = _engine.Snapshot();
-        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !TakesSubtask(parentId, snapshot))
+        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !_engine.CanNestUnder(parentId))
             return null;
 
         var parse = Unblank(Placed(_parser.Parse(text, _engine.DateSettings)), text);
@@ -2095,38 +2134,7 @@ public sealed class MainPresenter
                 _engine.CanMoveItem(id, 1),
                 _engine.Holds(id),
                 TodoistLinkFor(id) is not null,
-                _projectedFrom is { } snapshot && TakesSubtask(id, snapshot));
-
-    /// <summary>
-    /// Whether a task can have a sub-task added under it.
-    /// </summary>
-    /// <remarks>
-    /// Not under one that's finished — the sub-task would be work filed under something already
-    /// ticked off — nor under one already at Todoist's deepest. Its depth in the account, which the
-    /// row can't say: a task whose parent isn't in the view, in a search or under Upcoming's days,
-    /// sits at the left whatever is above it.
-    /// </remarks>
-    /// <param name="id">The task the sub-task would go under</param>
-    /// <param name="snapshot">The account as it stands</param>
-    /// <returns>True when a sub-task can go under it</returns>
-    private static bool TakesSubtask(string id, ModelSnapshot snapshot)
-    {
-        var byId = new Dictionary<string, TaskItem>(StringComparer.Ordinal);
-        foreach (var item in snapshot.Items)
-            byId.TryAdd(item.Id, item);
-
-        if (!byId.TryGetValue(id, out var parent) || parent.Completed)
-            return false;
-
-        // Walked up, and stopped at anything already passed: a parent cycle is the account's data,
-        // not something to trust.
-        var depth = 0;
-        var seen = new HashSet<string>(StringComparer.Ordinal) { id };
-        for (var up = parent.ParentId; up is not null && seen.Add(up); up = byId.GetValueOrDefault(up)?.ParentId)
-            depth++;
-
-        return depth < SyncEngine.MaxDepth;
-    }
+                _engine.CanNestUnder(id));
 
     /// <summary>
     /// Where a task's page is in the Todoist web app.
