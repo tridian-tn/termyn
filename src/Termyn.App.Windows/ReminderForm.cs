@@ -165,6 +165,35 @@ internal sealed class ReminderForm : Form
         InvokeOnClick(_addAbsolute, EventArgs.Empty);
     }
 
+    /// <summary>Types a moment and presses Enter in its box, for a test with no keyboard.</summary>
+    /// <param name="typed">The moment, as it would be typed</param>
+    /// <returns>Whether the dialog took the key</returns>
+    internal bool EnterAt(string typed)
+    {
+        _absolute.Focus();
+        _absolute.Text = typed;
+        return ProcessDialogKey(Keys.Enter);
+    }
+
+    /// <summary>
+    /// Enter in the box for a moment adds what's typed there.
+    /// </summary>
+    /// <remarks>
+    /// Close is the dialog's accept button as well as its cancel, so Enter anywhere else closes it —
+    /// and in the box, it used to close it with the reminder just typed thrown away. An empty box
+    /// still closes, since there's nothing in it to lose.
+    /// </remarks>
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if (keyData == Keys.Enter && _absolute.Focused && _addAbsolute.Enabled && !string.IsNullOrWhiteSpace(_absolute.Text))
+        {
+            AddAbsolute();
+            return true;
+        }
+
+        return base.ProcessDialogKey(keyData);
+    }
+
     /// <summary>What the line under the controls says.</summary>
     internal string Message => _message.Text;
 

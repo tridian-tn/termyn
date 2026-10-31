@@ -98,6 +98,21 @@ public class ReminderFormTests
         Assert.Equal(string.Empty, dialog.Message);
     }
 
+    [WinFormsFact]
+    public void Enter_in_the_box_adds_the_moment_typed_rather_than_closing_over_it()
+    {
+        // Close is the dialog's accept button, so Enter in the box used to close it and throw the
+        // reminder away. Shown, off the screen, since a box nobody has shown can't take the focus.
+        var presenter = Pro();
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+
+        Assert.True(dialog.EnterAt("4 aug 2026 at 4pm"));
+
+        Assert.Equal("2026-08-04T16:00:00", Single(presenter).DueDate);
+        Assert.Equal(DialogResult.None, dialog.DialogResult);
+    }
+
     /// <summary>A presenter on a Pro plan, which may set reminders, holding one task.</summary>
     /// <param name="language">The language the account reads its dates in, or null for no user synced yet</param>
     /// <returns>The presenter</returns>
