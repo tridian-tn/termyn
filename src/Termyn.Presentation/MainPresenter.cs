@@ -3721,6 +3721,29 @@ public sealed class MainPresenter
         Republish();
     }
 
+    /// <summary>
+    /// Orders the outline exactly as asked: by a column pointing one way, or in the account's own
+    /// order.
+    /// </summary>
+    /// <remarks>
+    /// For a menu that names the direction outright — the Mac's Sort By, with Ascending and
+    /// Descending under the columns — where a header click only ever turns the current one round.
+    /// No column is the account's order whichever way it's said to point, so the two can't come out
+    /// as different orders that look the same.
+    /// </remarks>
+    /// <param name="sort">The order wanted</param>
+    /// <returns>False when the outline was already in it, so the caller can leave things be.</returns>
+    public bool SortBy(TaskSort sort)
+    {
+        var wanted = sort.IsDefault ? TaskSort.Default : sort;
+        if (wanted == Sort)
+            return false;
+
+        Sort = wanted;
+        Republish();
+        return true;
+    }
+
     /// <summary>Puts the outline back into the account's own order.</summary>
     /// <returns>False when it was already in it, so the caller can leave things be.</returns>
     public bool ClearSort()
