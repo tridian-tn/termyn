@@ -2304,7 +2304,7 @@ public sealed class SyncEngine
     /// <param name="fileName">What to call it on the account</param>
     /// <returns>The new comment's temporary id</returns>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401).</exception>
     public async Task<string?> AddCommentWithFileAsync(string ownerId, string content, Stream file, string fileName, CancellationToken ct = default)
     {
         string token;

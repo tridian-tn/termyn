@@ -237,6 +237,35 @@ public class AttachmentApiTests
     }
 
     [Fact]
+    public async Task A_forbidden_file_is_an_ordinary_failure_rather_than_a_rejected_token()
+    {
+        // A file the account may not see. Read as a bad token, it signed the user out over a permission.
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden))));
+        using var destination = new MemoryStream();
+        using var file = new MemoryStream([1]);
+
+        var download = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken));
+        var upload = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken));
+        var delete = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.DeleteUploadAsync("tok", "https://files.todoist.com/a", TestContext.Current.CancellationToken));
+
+        Assert.All([download, upload, delete], ex => Assert.Equal(403, ex.Status));
+    }
+
+    [Fact]
+    public async Task A_rejected_token_on_an_upload_or_delete_is_still_one()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))));
+        using var file = new MemoryStream([1]);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<TodoistAuthException>(
+            () => client.DeleteUploadAsync("tok", "https://files.todoist.com/a", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task A_refused_delete_is_still_reported()
     {
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError))));

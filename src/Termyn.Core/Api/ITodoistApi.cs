@@ -40,7 +40,7 @@ public interface ITodoistApi
     /// </remarks>
     /// <param name="progress">Told the running byte count, for a UI that has to show the wait</param>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401). A 403 is an ordinary failure.</exception>
     Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default);
 
     /// <summary>
@@ -51,13 +51,13 @@ public interface ITodoistApi
     /// <param name="content">The file's bytes, read as they're sent</param>
     /// <param name="fileName">What to call it on the account</param>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401). A 403 is an ordinary failure.</exception>
     Task<JsonObject> UploadAsync(string token, Stream content, string fileName, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes an uploaded file by its url. Not reversible — Todoist has no undelete for uploads.
     /// </summary>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401). A 403 is an ordinary failure.</exception>
     Task DeleteUploadAsync(string token, string fileUrl, CancellationToken ct = default);
 }

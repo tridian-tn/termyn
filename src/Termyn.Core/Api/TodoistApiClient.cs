@@ -86,6 +86,9 @@ public sealed class TodoistApiClient : ITodoistApi
     {
         using var deadline = Deadline(ct);
         using var resp = await SendAsync(token, syncToken, resourceTypes, commands, deadline.Token, ct);
+
+        // A 403 counts here as well as a 401. The sync is the whole account rather than one thing in
+        // it, so there's nothing narrower for it to be about than the token.
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new TodoistAuthException(Strings.TokenRejected);
         EnsureReachable(resp);
@@ -285,9 +288,15 @@ public sealed class TodoistApiClient : ITodoistApi
         EnsureReachable(resp);
     }
 
+    /// <summary>Throws for an upload or file request whose token was turned away.</summary>
+    /// <remarks>
+    /// A 401 only. A 403 here is about the file — one the account may not see, or a project it has
+    /// left — and reading it as a bad token would sign somebody out over a permission. It goes on to
+    /// be reported as the failure it is.
+    /// </remarks>
     private static void RejectBadToken(HttpResponseMessage resp)
     {
-        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        if (resp.StatusCode is HttpStatusCode.Unauthorized)
             throw new TodoistAuthException(Strings.TokenRejected);
     }
 
