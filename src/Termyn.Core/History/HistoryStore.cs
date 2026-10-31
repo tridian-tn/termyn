@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 
 namespace Termyn.Core.History;
@@ -140,7 +141,7 @@ public sealed class SqliteHistoryStore : IHistoryStore
 
         foreach (var entry in entries)
         {
-            at.Value = entry.At.ToString("O");
+            at.Value = entry.At.ToString("O", CultureInfo.InvariantCulture);
             said.Value = entry.Said;
             cmd.ExecuteNonQuery();
         }
@@ -164,7 +165,10 @@ public sealed class SqliteHistoryStore : IHistoryStore
         {
             // A row whose stamp can't be read is one nothing can be said about, so it is skipped
             // rather than shown at some invented time.
-            if (DateTimeOffset.TryParse(reader.GetString(0), out var at))
+            //
+            // Read in the one form it's written in, rather than whatever the machine's culture
+            // would make of it.
+            if (DateTimeOffset.TryParseExact(reader.GetString(0), "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var at))
                 found.Add(new StoredAction(at, reader.GetString(1)));
         }
 
@@ -175,7 +179,7 @@ public sealed class SqliteHistoryStore : IHistoryStore
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = "DELETE FROM entries WHERE at < $before;";
-        cmd.Parameters.AddWithValue("$before", before.ToString("O"));
+        cmd.Parameters.AddWithValue("$before", before.ToString("O", CultureInfo.InvariantCulture));
 
         return cmd.ExecuteNonQuery();
     }
