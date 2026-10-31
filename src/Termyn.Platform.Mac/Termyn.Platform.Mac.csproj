@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-macos</TargetFramework>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The macOS workload names one Xcode it was built against (27.1 for 27.0.10742) and refuses
+         any other, newer ones included. Nothing newer than that workload has shipped, and the
+         Xcode here is 27.2, which builds and runs this fine. Drop this once a workload names the
+         Xcode in use. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Termyn.Core\Termyn.Core.csproj" />
+  </ItemGroup>
+
+</Project>
