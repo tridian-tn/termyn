@@ -118,6 +118,11 @@ public sealed partial class QuickAddParser
         var unsupported = new List<string>();
         string? project = null;
         string? section = null;
+
+        // Where the place tokens sit among the words. They're kept there, so a caller that finds no
+        // such place can leave the token in the title where it was typed rather than lose it.
+        var projectAt = -1;
+        var sectionAt = -1;
         var priority = Priority.P4;
         DateOnly? date = null;
         TimeOnly? time = null;
@@ -150,15 +155,21 @@ public sealed partial class QuickAddParser
                 // task without being applied to it — the one thing here that lost what was typed.
                 case '#' when token.Length > 1:
                     if (project is null)
+                    {
                         project = Unescaped(token[1..]);
-                    else
-                        content.Add(token);
+                        projectAt = content.Count;
+                    }
+
+                    content.Add(token);
                     continue;
                 case '/' when token.Length > 1:
                     if (section is null)
+                    {
                         section = Unescaped(token[1..]);
-                    else
-                        content.Add(token);
+                        sectionAt = content.Count;
+                    }
+
+                    content.Add(token);
                     continue;
                 case '@' when token.Length > 1:
                     var label = Unescaped(token[1..]);
@@ -278,6 +289,12 @@ public sealed partial class QuickAddParser
             {
                 content.InsertRange(timeSlot, timeWords);
                 time = null;
+
+                // A place typed after the time moves along with the words put back before it.
+                if (projectAt >= timeSlot)
+                    projectAt += timeWords.Length;
+                if (sectionAt >= timeSlot)
+                    sectionAt += timeWords.Length;
             }
             else
             {
@@ -302,7 +319,10 @@ public sealed partial class QuickAddParser
 
         return new QuickAddParse
         {
-            Content = string.Join(' ', content),
+            Content = string.Join(' ', content.Where((_, at) => at != projectAt && at != sectionAt)),
+            Words = content,
+            ProjectAt = projectAt,
+            SectionAt = sectionAt,
             ProjectName = project,
             SectionName = section,
             Labels = labels,

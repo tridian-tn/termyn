@@ -307,7 +307,9 @@ public class DayBoxTests
 
         var parse = presenter.Preview(CapturePreviewText.Hint(presenter.CaptureReadsDays)).Parse;
 
-        Assert.Equal("Add a task…", parse.Content);
+        // The account has no project or section of those names, so they stay in the title as
+        // Todoist would keep them. Everything else the hint offers is read out of it.
+        Assert.Equal("Add a task… #project /section", parse.Content);
         Assert.Equal(presenter.CaptureReadsDays, parse.DueDate is not null);
     }
 

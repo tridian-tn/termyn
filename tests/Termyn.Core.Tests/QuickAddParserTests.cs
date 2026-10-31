@@ -413,6 +413,29 @@ public class QuickAddParserTests
         Assert.Equal("call mum #Personal", parse.Content);
     }
 
+    [Theory]
+    [InlineData("Fix issue #42 p1", true, false, "Fix issue #42")]
+    [InlineData("Read /dev docs #Work", false, true, "Read /dev docs")]
+    [InlineData("Read /dev docs #Work", true, true, "Read /dev docs #Work")]
+    [InlineData("Read /dev docs #Work", false, false, "Read docs")]
+    [InlineData("Call #My\\ Project now", true, false, "Call #My\\ Project now")]
+    public void A_place_can_be_written_back_where_it_was_typed(string text, bool project, bool section, string expected)
+    {
+        // For a capture naming a place there's no such thing as. Todoist keeps the word in the
+        // title, and in the middle of a sentence is where it belongs.
+        Assert.Equal(expected, Parse(text).TitleKeeping(project, section));
+    }
+
+    [Fact]
+    public void A_place_typed_after_a_time_put_back_is_written_back_in_order()
+    {
+        // The time goes back into the words when it has no day to go on, ahead of the place.
+        var parse = Parse("Plan fri 9am #Work");
+
+        Assert.Equal("Plan fri 9am", parse.Content);
+        Assert.Equal("Plan fri 9am #Work", parse.TitleKeeping(project: true, section: false));
+    }
+
     [Fact]
     public void A_second_section_stays_in_the_words()
     {

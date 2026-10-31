@@ -460,12 +460,12 @@
     <comment>As CaptureHint, with a day example for accounts that read dates from the text.</comment>
   </data>
   <data name="CaptureProjectUnknown" xml:space="preserve">
-    <value>#{0} (unknown — goes to Inbox)</value>
-    <comment>{0} is the project name typed, which no project matches.</comment>
+    <value>#{0} (no such project — kept in the title)</value>
+    <comment>{0} is the project name typed, which no single project matches. The #word stays in the task's title as typed, and the task goes where it would with no project named.</comment>
   </data>
   <data name="CaptureSectionUnknown" xml:space="preserve">
-    <value>/{0} (unknown)</value>
-    <comment>{0} is the section name typed, which no section matches.</comment>
+    <value>/{0} (no such section — kept in the title)</value>
+    <comment>{0} is the section name typed, which no single section matches. The /word stays in the task's title as typed.</comment>
   </data>
   <data name="CaptureNeedsConnection" xml:space="preserve">
     <value>(needs a connection: {0})</value>

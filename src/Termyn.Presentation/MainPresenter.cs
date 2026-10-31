@@ -610,8 +610,9 @@ public sealed class MainPresenter
 
         parse = Dated(parse, start);
 
-        // With nothing named at all, a capture belongs wherever the user is looking. Applied
-        // together: a section from one view with a project named in the text is not a real place.
+        // With no place named, or none found for what was named — the words stayed in the title —
+        // a capture belongs wherever the user is looking. Applied together: a section from one
+        // view with a project named in the text is not a real place.
         if (projectId is null && sectionId is null)
         {
             projectId = Selection.ProjectId ?? SectionProjectId();
@@ -730,27 +731,15 @@ public sealed class MainPresenter
     /// <remarks>
     /// The parser reads "#Home" as a project and takes it out of the content. A sub-task lives
     /// where its parent lives, so there is nothing to act on — and dropping the token would delete
-    /// something the user typed, which is no better here than it was in the capture box. It goes on
-    /// the end rather than back where it was: the parser doesn't say where it came from, and a word
-    /// out of order is a smaller wrong than a word that isn't there.
+    /// something the user typed, which is no better here than it was in the capture box. It goes
+    /// back where it was typed.
     /// </remarks>
     /// <param name="parse">What the quick-add grammar made of the text</param>
     /// <returns>The same parse, with any place it named written back into the words</returns>
     private static QuickAddParse Placed(QuickAddParse parse)
-    {
-        if (parse.ProjectName is null && parse.SectionName is null)
-            return parse;
-
-        var words = new StringBuilder(parse.Content);
-
-        if (parse.ProjectName is { } project)
-            words.Append(words.Length > 0 ? " #" : "#").Append(QuickAddParser.Escaped(project));
-
-        if (parse.SectionName is { } section)
-            words.Append(words.Length > 0 ? " /" : "/").Append(QuickAddParser.Escaped(section));
-
-        return parse with { Content = words.ToString(), ProjectName = null, SectionName = null };
-    }
+        => parse.ProjectName is null && parse.SectionName is null
+            ? parse
+            : parse with { Content = parse.TitleKeeping(project: true, section: true), ProjectName = null, SectionName = null };
 
     /// <summary>
     /// The preview line for some capture text, empty when there is nothing typed. Both capture boxes
@@ -2501,15 +2490,37 @@ public sealed class MainPresenter
             ? _engine.Snapshot().Sections.FirstOrDefault(s => s.Id == id)?.ProjectId
             : null;
 
+    /// <summary>
+    /// Reads capture text and finds the project and section it names.
+    /// </summary>
+    /// <remarks>
+    /// A name that finds no place, or more than one, stays in the title as it was typed, the way
+    /// Todoist keeps an unknown <c>#word</c>: "Fix issue #42" is a title, not a project called 42.
+    /// The names are left on the parse so the preview can say why the word stayed.
+    /// </remarks>
     private (QuickAddParse Parse, string? ProjectId, string? SectionId) Resolve(string text)
     {
         var parse = _parser.Parse(text, _engine.DateSettings);
+        var (projectId, sectionId) = Place(parse);
 
-        // Every word was a token, so there is no task text left. Keep the raw input rather than
-        // creating a blank task the server would reject and silently discard.
-        if (string.IsNullOrWhiteSpace(parse.Content))
-            parse = parse with { Content = text.Trim() };
+        parse = parse with
+        {
+            Content = parse.TitleKeeping(project: projectId is null, section: sectionId is null),
+        };
 
+        return (Unblank(parse, text), projectId, sectionId);
+    }
+
+    /// <summary>
+    /// Keeps the raw input where every word was a token and no task text is left, rather than
+    /// creating a blank task the server would reject and silently discard.
+    /// </summary>
+    private static QuickAddParse Unblank(QuickAddParse parse, string text)
+        => string.IsNullOrWhiteSpace(parse.Content) ? parse with { Content = text.Trim() } : parse;
+
+    /// <summary>The project and section a parse names, where each names exactly one.</summary>
+    private (string? ProjectId, string? SectionId) Place(QuickAddParse parse)
+    {
         // An ambiguous name is treated as unresolved: filing the task under whichever project
         // happened to be enumerated first would be a guess.
         string? projectId = null;
@@ -2542,7 +2553,7 @@ public sealed class MainPresenter
             }
         }
 
-        return (parse, projectId, sectionId);
+        return (projectId, sectionId);
     }
 
     /// <summary>Re-reads the model and republishes. Call after anything that mutates the engine.</summary>

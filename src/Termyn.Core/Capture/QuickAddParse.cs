@@ -10,6 +10,54 @@ public sealed record QuickAddParse
 
     public string? ProjectName { get; init; }
     public string? SectionName { get; init; }
+
+    /// <summary>
+    /// Every word of the title as typed, the <c>#project</c> and <c>/section</c> tokens included,
+    /// which <see cref="TitleKeeping"/> rebuilds the title from. Empty for a parse made by hand.
+    /// </summary>
+    internal IReadOnlyList<string> Words { get; init; } = [];
+
+    /// <summary>Where in <see cref="Words"/> the project's token is, or -1 when none was read.</summary>
+    internal int ProjectAt { get; init; } = -1;
+
+    /// <summary>Where in <see cref="Words"/> the section's token is, or -1 when none was read.</summary>
+    internal int SectionAt { get; init; } = -1;
+
+    /// <summary>
+    /// The title with the place the text named left in it, where it was typed.
+    /// </summary>
+    /// <remarks>
+    /// For a caller that can't put the task where the text says: a name no project has, one two
+    /// projects share, or a sub-task, which lives where its parent does. Todoist keeps an unknown
+    /// <c>#word</c> in the title, and "Fix issue #42" is a title rather than a place.
+    /// </remarks>
+    /// <param name="project">Whether to leave the project's token in the title</param>
+    /// <param name="section">Whether to leave the section's token in the title</param>
+    /// <returns>The title</returns>
+    public string TitleKeeping(bool project, bool section)
+    {
+        project &= ProjectName is not null;
+        section &= SectionName is not null;
+
+        if (!project && !section)
+            return Content;
+
+        // Made by hand rather than by the parser, so there's no telling where the token was. On
+        // the end, which is a word out of order rather than a word missing.
+        if (Words.Count == 0)
+        {
+            var words = new List<string>();
+            if (Content.Length > 0)
+                words.Add(Content);
+            if (project)
+                words.Add("#" + QuickAddParser.Escaped(ProjectName!));
+            if (section)
+                words.Add("/" + QuickAddParser.Escaped(SectionName!));
+            return string.Join(' ', words);
+        }
+
+        return string.Join(' ', Words.Where((_, at) => (at != ProjectAt || project) && (at != SectionAt || section)));
+    }
     public IReadOnlyList<string> Labels { get; init; } = [];
     public Priority Priority { get; init; } = Priority.P4;
     public DateOnly? DueDate { get; init; }
