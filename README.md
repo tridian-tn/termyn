@@ -24,10 +24,10 @@ To produce an installer or a portable zip, see [docs/packaging.md](docs/packagin
 
 ### On a Mac
 
-> **Mac support is under development.** There is no Mac app yet. What builds on macOS today is
-> everything below the UI — `Core`, `Presentation` and their tests — which a native client is
-> being built on. `Termyn.slnx` itself doesn't build there, since the Windows projects target
-> `net10.0-windows`.
+> **Mac support is under development.** The native Mac app is read-only for now: it connects to
+> Todoist, shows the sidebar and the tasks in each view, and keeps them in sync. Nothing can be
+> changed from it yet. `Termyn.slnx` doesn't build on a Mac, since the Windows projects target
+> `net10.0-windows`; `Termyn.Mac.slnx` is the Mac's solution.
 
 1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) for your Mac's
    architecture (Arm64 for Apple Silicon). It goes in `/usr/local/share/dotnet`, and `dotnet` is on
@@ -39,15 +39,17 @@ To produce an installer or a portable zip, see [docs/packaging.md](docs/packagin
    dotnet test --solution Termyn.Portable.slnf
    ```
 
-The native client will also need:
+The Mac app also needs:
 
-3. **Xcode**, the full app from the App Store rather than the Command Line Tools alone, in the
-   version the macOS workload asks for (Xcode 27 for workload 27.0). Open it once to let it finish
-   installing, then point the command-line tools at it:
+3. **Xcode**, the full app from the App Store rather than the Command Line Tools alone. Open it
+   once to let it finish installing, then point the command-line tools at it:
 
    ```bash
    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
    ```
+
+   A macOS workload names the one Xcode it was built against and refuses any other. The Mac
+   projects turn that check off (`ValidateXcodeVersion`), so a newer Xcode works too.
 
 4. **The macOS workload.** `sudo` doesn't search the `PATH` your shell has, so `dotnet` is named in
    full:
@@ -56,7 +58,20 @@ The native client will also need:
    sudo /usr/local/share/dotnet/dotnet workload install macos
    ```
 
-CI builds and tests the portable projects on macOS as well as Windows.
+5. Build the app and open it:
+
+   ```bash
+   dotnet build src/Termyn.App.Mac
+   ```
+
+   ```bash
+   open src/Termyn.App.Mac/bin/Debug/net10.0-macos/osx-arm64/Termyn.app
+   ```
+
+   The token is kept in your login Keychain, as an item named Termyn. A rebuilt app counts as a
+   new one to the Keychain, which asks once whether it may read the token; Always Allow settles it.
+
+CI builds and tests the portable projects on macOS as well as Windows, and builds the Mac app.
 
 ## What it does
 
@@ -79,7 +94,7 @@ by name rather than answered wrongly.
 
 ## Layout
 
-The solution is split so a future native Linux/macOS client can reuse everything below the UI:
+The solution is split so the native clients share everything below the UI: the Windows one, and the Mac one being built (a Linux one could do the same):
 
 | Project | TFM | Role |
 |---|---|---|
@@ -87,6 +102,8 @@ The solution is split so a future native Linux/macOS client can reuse everything
 | `src/Termyn.Presentation` | `net10.0` | UI-framework-agnostic presenters |
 | `src/Termyn.Platform.Windows` | `net10.0-windows` | Windows platform services (DPAPI token store, paths) |
 | `src/Termyn.App.Windows` | `net10.0-windows` | WinForms UI + composition root |
+| `src/Termyn.Platform.Mac` | `net10.0-macos` | Mac platform services (Keychain token store, paths) |
+| `src/Termyn.App.Mac` | `net10.0-macos` | AppKit UI + composition root (read-only, under development) |
 | `tests/Termyn.TestSupport` | `net10.0` | Shared test doubles |
 | `tests/Termyn.Core.Tests`, `tests/Termyn.Presentation.Tests`, `tests/Termyn.Perf.Tests` | `net10.0` | xUnit tests over the portable core |
 | `tests/Termyn.Platform.Windows.Tests`, `tests/Termyn.App.Windows.Tests` | `net10.0-windows` | xUnit tests over the Windows layers |

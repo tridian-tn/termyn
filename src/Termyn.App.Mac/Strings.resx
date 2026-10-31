@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    What the Mac app's own windows and menus say. Everything the presenter says — the sidebar's
+    names, the status, the due dates — comes from Termyn.Presentation's catalogue instead.
+  -->
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="TokenWindowTitle" xml:space="preserve">
+    <value>Welcome to Termyn</value>
+    <comment>Title of the window that asks for a Todoist API token on first launch.</comment>
+  </data>
+  <data name="TokenHeading" xml:space="preserve">
+    <value>Connect to Todoist</value>
+    <comment>Bold heading in the token window, above the explanation.</comment>
+  </data>
+  <data name="TokenExplanation" xml:space="preserve">
+    <value>Termyn reads your tasks with your Todoist API token. It's kept in your Keychain and only ever sent to Todoist.</value>
+    <comment>Explains what the token is for and where it's kept, under the token window's heading.</comment>
+  </data>
+  <data name="TokenPlaceholder" xml:space="preserve">
+    <value>API token</value>
+    <comment>Placeholder in the empty field the token is pasted into.</comment>
+  </data>
+  <data name="TokenWhere" xml:space="preserve">
+    <value>Where's my token?</value>
+    <comment>Link in the token window that opens Todoist's integration settings, where the API token is shown.</comment>
+  </data>
+  <data name="TokenConnect" xml:space="preserve">
+    <value>Connect</value>
+    <comment>Default button in the token window: checks the token with Todoist and stores it.</comment>
+  </data>
+  <data name="TokenRejected" xml:space="preserve">
+    <value>Todoist didn't accept that token. Check it was copied in full.</value>
+    <comment>Shown under the token field when Todoist turns the token away.</comment>
+  </data>
+  <data name="TokenUnreachable" xml:space="preserve">
+    <value>Couldn't reach Todoist. Check your connection and try again.</value>
+    <comment>Shown under the token field when Todoist couldn't be reached to check the token.</comment>
+  </data>
+  <data name="TokenSaveFailed" xml:space="preserve">
+    <value>The token couldn't be saved to your Keychain. Try again.</value>
+    <comment>Shown under the token field when Todoist accepted the token but the Keychain wouldn't store it.</comment>
+  </data>
+  <data name="NoTasks" xml:space="preserve">
+    <value>No Tasks</value>
+    <comment>Centred in the task list when the selected view has nothing in it. Title case, as macOS writes empty-state titles.</comment>
+  </data>
+  <data name="UnreadableFilter" xml:space="preserve">
+    <value>Termyn can't read this filter: {0}</value>
+    <comment>Centred in the task list when a saved filter uses something Termyn can't evaluate. {0} is the filter's query as written in Todoist.</comment>
+  </data>
+  <data name="UnreadableFilterLink" xml:space="preserve">
+    <value>Open in Todoist</value>
+    <comment>Button under the unreadable-filter notice that opens the filter in Todoist's web app.</comment>
+  </data>
+  <data name="ReconnectNeeded" xml:space="preserve">
+    <value>Todoist turned the saved token away, so nothing is syncing. Reconnecting arrives in a later version.</value>
+    <comment>Banner above the task list when Todoist has rejected the stored token. The tasks below are still shown from the local copy.</comment>
+  </data>
+  <data name="SyncFailed" xml:space="preserve">
+    <value>Sync failed: {0}</value>
+    <comment>Window subtitle when a sync fails for a reason other than being offline. {0} is the error's own message.</comment>
+  </data>
+  <data name="Completed" xml:space="preserve">
+    <value>Completed</value>
+    <comment>Read out by VoiceOver for the filled circle in front of a completed task.</comment>
+  </data>
+  <data name="CommentCount" xml:space="preserve">
+    <value>{0} comments</value>
+    <comment>Read out by VoiceOver for the comment mark on a task row. {0} is how many comments it has.</comment>
+  </data>
+  <data name="ToolbarSync" xml:space="preserve">
+    <value>Sync</value>
+    <comment>Label of the toolbar button that syncs with Todoist now.</comment>
+  </data>
+  <data name="ToolbarSyncTip" xml:space="preserve">
+    <value>Sync with Todoist now</value>
+    <comment>Tooltip of the toolbar button that syncs with Todoist now.</comment>
+  </data>
+  <data name="MenuAbout" xml:space="preserve">
+    <value>About Termyn</value>
+    <comment>Application menu item that opens the About panel.</comment>
+  </data>
+  <data name="MenuSettings" xml:space="preserve">
+    <value>Settings…</value>
+    <comment>Application menu item for the Settings window, which doesn't exist yet, so the item is disabled.</comment>
+  </data>
+  <data name="MenuServices" xml:space="preserve">
+    <value>Services</value>
+    <comment>Application menu's Services submenu, filled in by macOS.</comment>
+  </data>
+  <data name="MenuHide" xml:space="preserve">
+    <value>Hide Termyn</value>
+    <comment>Application menu item that hides the app.</comment>
+  </data>
+  <data name="MenuHideOthers" xml:space="preserve">
+    <value>Hide Others</value>
+    <comment>Application menu item that hides every other app.</comment>
+  </data>
+  <data name="MenuShowAll" xml:space="preserve">
+    <value>Show All</value>
+    <comment>Application menu item that shows every hidden app.</comment>
+  </data>
+  <data name="MenuQuit" xml:space="preserve">
+    <value>Quit Termyn</value>
+    <comment>Application menu item that quits the app.</comment>
+  </data>
+  <data name="MenuFile" xml:space="preserve">
+    <value>File</value>
+    <comment>Title of the File menu.</comment>
+  </data>
+  <data name="MenuClose" xml:space="preserve">
+    <value>Close</value>
+    <comment>File menu item that closes the front window.</comment>
+  </data>
+  <data name="MenuEdit" xml:space="preserve">
+    <value>Edit</value>
+    <comment>Title of the Edit menu.</comment>
+  </data>
+  <data name="MenuUndo" xml:space="preserve">
+    <value>Undo</value>
+    <comment>Edit menu item.</comment>
+  </data>
+  <data name="MenuRedo" xml:space="preserve">
+    <value>Redo</value>
+    <comment>Edit menu item.</comment>
+  </data>
+  <data name="MenuCut" xml:space="preserve">
+    <value>Cut</value>
+    <comment>Edit menu item.</comment>
+  </data>
+  <data name="MenuCopy" xml:space="preserve">
+    <value>Copy</value>
+    <comment>Edit menu item.</comment>
+  </data>
+  <data name="MenuPaste" xml:space="preserve">
+    <value>Paste</value>
+    <comment>Edit menu item.</comment>
+  </data>
+  <data name="MenuSelectAll" xml:space="preserve">
+    <value>Select All</value>
+    <comment>Edit menu item.</comment>
+  </data>
+  <data name="MenuView" xml:space="preserve">
+    <value>View</value>
+    <comment>Title of the View menu.</comment>
+  </data>
+  <data name="MenuToday" xml:space="preserve">
+    <value>Today</value>
+    <comment>View menu item that shows the Today view, the same as picking it in the sidebar.</comment>
+  </data>
+  <data name="MenuUpcoming" xml:space="preserve">
+    <value>Upcoming</value>
+    <comment>View menu item that shows the Upcoming view, the same as picking it in the sidebar.</comment>
+  </data>
+  <data name="MenuInbox" xml:space="preserve">
+    <value>Inbox</value>
+    <comment>View menu item that shows the Inbox, the same as picking it in the sidebar.</comment>
+  </data>
+  <data name="MenuSyncNow" xml:space="preserve">
+    <value>Sync Now</value>
+    <comment>View menu item that syncs with Todoist straight away.</comment>
+  </data>
+  <data name="MenuShowSidebar" xml:space="preserve">
+    <value>Show Sidebar</value>
+    <comment>View menu item that shows or hides the sidebar. macOS switches it to "Hide Sidebar" while the sidebar is showing.</comment>
+  </data>
+  <data name="MenuWindow" xml:space="preserve">
+    <value>Window</value>
+    <comment>Title of the Window menu.</comment>
+  </data>
+  <data name="MenuMinimize" xml:space="preserve">
+    <value>Minimize</value>
+    <comment>Window menu item.</comment>
+  </data>
+  <data name="MenuZoom" xml:space="preserve">
+    <value>Zoom</value>
+    <comment>Window menu item.</comment>
+  </data>
+  <data name="MenuBringAllToFront" xml:space="preserve">
+    <value>Bring All to Front</value>
+    <comment>Window menu item.</comment>
+  </data>
+  <data name="MenuHelp" xml:space="preserve">
+    <value>Help</value>
+    <comment>Title of the Help menu.</comment>
+  </data>
+  <data name="MenuProjectPage" xml:space="preserve">
+    <value>Termyn on GitHub</value>
+    <comment>Help menu item that opens Termyn's project page.</comment>
+  </data>
+</root>

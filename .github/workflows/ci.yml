@@ -61,6 +61,38 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
 
+  # The native Mac app, built and nothing more: it has no tests of its own yet, and the code below
+  # it is tested by the job above. Its own job because it needs the macOS workload and Xcode, which
+  # the portable projects don't, and installing the workload is most of what this job spends.
+  #
+  # The projects build with ValidateXcodeVersion off, since a workload names one exact Xcode and
+  # the runner image's default moves on its own schedule. Not something the packaging waits on.
+  #
+  # Debug rather than Release, because of the Xcode on the runner. The workload wants the macOS 27
+  # SDK, which comes with Xcode 27.1, and the macos-26 image's newest is 26.6. A Release build trims
+  # the app and writes its Objective-C registrations at build time, and both read that SDK's
+  # headers, so it fails (MT0179). A Debug build does neither — it registers at launch — so it
+  # still compiles every project and makes the .app, which is what this job is here to say. Back to
+  # Release once the image carries an Xcode the workload accepts.
+  build-mac-app:
+    name: build (macOS app)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install the macOS workload
+        run: dotnet workload install macos
+
+      - name: Build
+        run: dotnet build src/Termyn.App.Mac -c Debug
+
   # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
   # only made every run a minute longer. The release job waits on both, so nothing is attached to a
   # release unless the suite passed too.

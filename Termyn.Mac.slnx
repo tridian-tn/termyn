@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Termyn.Core/Termyn.Core.csproj" />
+    <Project Path="src/Termyn.Presentation/Termyn.Presentation.csproj" />
+    <Project Path="src/Termyn.Platform.Mac/Termyn.Platform.Mac.csproj" />
+    <Project Path="src/Termyn.App.Mac/Termyn.App.Mac.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Termyn.TestSupport/Termyn.TestSupport.csproj" />
+    <Project Path="tests/Termyn.Core.Tests/Termyn.Core.Tests.csproj" />
+    <Project Path="tests/Termyn.Presentation.Tests/Termyn.Presentation.Tests.csproj" />
+    <Project Path="tests/Termyn.Perf.Tests/Termyn.Perf.Tests.csproj" />
+  </Folder>
+</Solution>
