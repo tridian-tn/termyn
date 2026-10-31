@@ -1,4 +1,5 @@
 using System.Globalization;
+using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
@@ -32,7 +33,7 @@ public class CommentTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            CultureInfo.CurrentCulture = Regions.American;
             var presenter = Seeded(
                 ("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}"""),
                 ("notes", "n1", """{"id":"n1","item_id":"i1","content":"said","posted_at":"2026-08-12T08:30:00Z"}"""));
@@ -177,6 +178,39 @@ public class CommentTests
         Assert.Empty(presenter.CommentsOn("i1"));
     }
 
+    [Fact]
+    public async Task A_comment_is_neither_changed_nor_removed_where_it_cannot_be_commented_on()
+    {
+        // The pane goes read-only while the token's turned away, but the Delete key reached the
+        // presenter regardless and the delete went through.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", """{"id":"i1","content":"Write it up"}""");
+        store.PutResource("notes", "n1", """{"id":"n1","item_id":"i1","content":"keep me"}""");
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
+
+        api.Throw = new TodoistAuthException("rejected");
+        await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.SyncAsync(TestContext.Current.CancellationToken));
+
+        Assert.False(presenter.CanCommentOn("i1"));
+        Assert.False(presenter.EditComment("n1", "changed"));
+        Assert.False(presenter.DeleteComment("n1"));
+        Assert.Equal("keep me", Assert.Single(presenter.CommentsOn("i1")).Content);
+    }
+
+    [Fact]
+    public void A_comment_on_something_held_can_still_be_changed_and_removed()
+    {
+        var presenter = Seeded(("project_notes", "pn1", """{"id":"pn1","project_id":"p1","content":"on the project"}"""));
+
+        Assert.True(presenter.EditComment("pn1", "said better"));
+        Assert.Equal("said better", Assert.Single(presenter.CommentsOn("p1")).Content);
+        Assert.True(presenter.DeleteComment("pn1"));
+        Assert.Empty(presenter.CommentsOn("p1"));
+    }
+
     // ---- Whether the box should be there at all --------------------------------------------------
 
     [Fact]
@@ -209,6 +243,25 @@ public class CommentTests
             ("notes", "n2", """{"id":"n2","item_id":"i1","content":"two"}"""));
 
         Assert.Equal(2, presenter.Rows.Single(r => r.Id == "i1").CommentCount);
+    }
+
+    [Fact]
+    public void The_count_the_pane_shows_keeps_up_with_what_is_written()
+    {
+        // Read off the last publish rather than a fresh projection of the account, so each write
+        // has to have published for the count to be right.
+        var presenter = Seeded(("project_notes", "pn1", """{"id":"pn1","project_id":"p1","content":"on the project"}"""));
+
+        Assert.Equal(1, presenter.CommentCountOn("p1"));
+        Assert.Equal(0, presenter.CommentCountOn("i1"));
+        Assert.Equal(0, presenter.CommentCountOn(null));
+
+        presenter.AddComment("i1", "first");
+        presenter.AddComment("i1", "second");
+        Assert.Equal(2, presenter.CommentCountOn("i1"));
+
+        presenter.DeleteComment(presenter.CommentsOn("i1")[0].Id);
+        Assert.Equal(1, presenter.CommentCountOn("i1"));
     }
 
     [Fact]

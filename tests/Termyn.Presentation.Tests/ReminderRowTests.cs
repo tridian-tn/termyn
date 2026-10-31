@@ -44,7 +44,7 @@ public class ReminderRowTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
+            CultureInfo.CurrentCulture = Regions.British;
 
             Assert.Equal("At Fri, 14 Aug 09:30", Row(ReminderKind.Absolute, due: "2026-08-14T09:30:00").ToString());
         }
@@ -59,7 +59,7 @@ public class ReminderRowTests
     {
         // Todoist sends it as a UTC instant. 13:00 UTC is 09:00 in New York in October, whatever
         // timezone the machine showing it is in.
-        using var british = new CultureScope("en-GB");
+        using var british = new CultureScope(Regions.British);
         var newYork = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 
         Assert.Equal("At Sat, 24 Oct 09:00", Row(ReminderKind.Absolute, due: "2026-10-24T13:00:00Z", zone: newYork).ToString());
@@ -78,7 +78,7 @@ public class ReminderRowTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-GB");
+            CultureInfo.CurrentCulture = Regions.British;
             var row = new ReminderRow(new Reminder
             {
                 Id = "r1", ItemId = "i1", Kind = ReminderKind.Absolute, DueDate = "2026-10-24T09:00:00", Schedule = "every sat 9am",

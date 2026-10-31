@@ -63,6 +63,7 @@ public sealed class AttachmentCacheTests : IDisposable
     [InlineData("archive.tar.gz", ".gz")]
     [InlineData("no-extension", "")]
     [InlineData("trouble.pdf\\..\\..\\evil", "")]
+    [InlineData("trouble.pdf/../../evil", "")] // the separator that climbs on macOS and Linux too
     [InlineData("trouble.p df", "")]
     [InlineData("trouble.thisisaverylongextension", "")]
     public void An_extension_from_an_account_is_checked_rather_than_trusted(string fileName, string expected)

@@ -199,13 +199,12 @@ public sealed class FailingWriteStore : ISnapshotStore
     private readonly InMemorySnapshotStore _inner = new();
 
     public StoredSnapshot Load() => _inner.Load();
-    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken) => _inner.SaveSync(upserts, deletes, syncToken);
+    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null) => _inner.SaveSync(upserts, deletes, syncToken, deferredDeletes);
     public void PutResource(string type, string id, string json) => _inner.PutResource(type, id, json);
     public void DeleteResource(string type, string id) => _inner.DeleteResource(type, id);
     public void RenameResource(string type, string oldId, string newId) => _inner.RenameResource(type, oldId, newId);
     public void UpdateCommand(OutboxCommand command) => _inner.UpdateCommand(command);
     public void DeleteCommands(IReadOnlyList<string> uuids) => _inner.DeleteCommands(uuids);
-    public void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys) => _inner.SaveDeferredDeletes(keys);
     public void Purge() => _inner.Purge();
     public void Dispose() => _inner.Dispose();
 
@@ -219,13 +218,12 @@ public sealed class UnpurgeableStore : ISnapshotStore
     private readonly InMemorySnapshotStore _inner = new();
 
     public StoredSnapshot Load() => _inner.Load();
-    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken) => _inner.SaveSync(upserts, deletes, syncToken);
+    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null) => _inner.SaveSync(upserts, deletes, syncToken, deferredDeletes);
     public void PutResource(string type, string id, string json) => _inner.PutResource(type, id, json);
     public void DeleteResource(string type, string id) => _inner.DeleteResource(type, id);
     public void RenameResource(string type, string oldId, string newId) => _inner.RenameResource(type, oldId, newId);
     public void UpdateCommand(OutboxCommand command) => _inner.UpdateCommand(command);
     public void DeleteCommands(IReadOnlyList<string> uuids) => _inner.DeleteCommands(uuids);
-    public void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys) => _inner.SaveDeferredDeletes(keys);
     public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes) => _inner.ApplyLocalWrite(command, upserts, deletes);
     public void Dispose() => _inner.Dispose();
 

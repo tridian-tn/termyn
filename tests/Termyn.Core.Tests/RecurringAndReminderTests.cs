@@ -469,6 +469,10 @@ public class RecurringAndReminderTests
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
+        // Both kept until the refused task is let go.
+        Assert.Single(engine.Snapshot().Reminders);
+        engine.DismissRefusedAdds();
+
         Assert.Empty(engine.Snapshot().Reminders);
         Assert.Empty(engine.Outbox);
     }

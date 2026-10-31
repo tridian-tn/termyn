@@ -9,8 +9,10 @@ namespace Termyn.Core.Capture;
 /// <summary>
 /// Parses quick-add text without the server, and reads a day typed into a box of its own. This is
 /// deliberately a strict subset of Todoist's syntax — only the tokens listed here are recognised;
-/// anything else is left in the task content verbatim. A task's recurrence and its assignees are
-/// flagged rather than guessed at, because getting them wrong offline would create the wrong task.
+/// anything else is left in the task content verbatim. A task's recurrence is flagged rather than
+/// guessed at, because getting it wrong offline would create the wrong task. A <c>+word</c> is just
+/// a word: assigning isn't supported, and a capture is created from this parse, so reading it as an
+/// assignee would only drop it — as often as not a phone number such as <c>+447700900123</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -118,6 +120,11 @@ public sealed partial class QuickAddParser
         var unsupported = new List<string>();
         string? project = null;
         string? section = null;
+
+        // Where the place tokens sit among the words. They're kept there, so a caller that finds no
+        // such place can leave the token in the title where it was typed rather than lose it.
+        var projectAt = -1;
+        var sectionAt = -1;
         var priority = Priority.P4;
         DateOnly? date = null;
         TimeOnly? time = null;
@@ -150,24 +157,26 @@ public sealed partial class QuickAddParser
                 // task without being applied to it — the one thing here that lost what was typed.
                 case '#' when token.Length > 1:
                     if (project is null)
+                    {
                         project = Unescaped(token[1..]);
-                    else
-                        content.Add(token);
+                        projectAt = content.Count;
+                    }
+
+                    content.Add(token);
                     continue;
                 case '/' when token.Length > 1:
                     if (section is null)
+                    {
                         section = Unescaped(token[1..]);
-                    else
-                        content.Add(token);
+                        sectionAt = content.Count;
+                    }
+
+                    content.Add(token);
                     continue;
                 case '@' when token.Length > 1:
                     var label = Unescaped(token[1..]);
                     if (!labels.Contains(label, StringComparer.OrdinalIgnoreCase))
                         labels.Add(label);
-                    continue;
-                case '+' when token.Length > 1:
-                    // Assignees are out of scope; drop the token but tell the user it was ignored.
-                    unsupported.Add(token);
                     continue;
                 case '!' when token.Length > 1:
                 {
@@ -278,6 +287,12 @@ public sealed partial class QuickAddParser
             {
                 content.InsertRange(timeSlot, timeWords);
                 time = null;
+
+                // A place typed after the time moves along with the words put back before it.
+                if (projectAt >= timeSlot)
+                    projectAt += timeWords.Length;
+                if (sectionAt >= timeSlot)
+                    sectionAt += timeWords.Length;
             }
             else
             {
@@ -294,7 +309,7 @@ public sealed partial class QuickAddParser
             {
                 StagedAbsolute a => new AbsoluteReminder(a.Date, a.Time),
                 StagedBeforeDue b when time is not null => new RelativeReminder(b.Minutes),
-                StagedBeforeDue b => Absolute(Moment(now, b.Minutes, floorToHour: false)),
+                StagedBeforeDue b => Absolute(Moment(settings, b.Minutes, floorToHour: false)),
                 StagedRecurring r => new RecurringReminder(r.Schedule),
                 _ => throw new InvalidOperationException(),
             });
@@ -302,7 +317,10 @@ public sealed partial class QuickAddParser
 
         return new QuickAddParse
         {
-            Content = string.Join(' ', content),
+            Content = string.Join(' ', content.Where((_, at) => at != projectAt && at != sectionAt)),
+            Words = content,
+            ProjectAt = projectAt,
+            SectionAt = sectionAt,
             ProjectName = project,
             SectionName = section,
             Labels = labels,
@@ -960,7 +978,7 @@ public sealed partial class QuickAddParser
         // "around 4 hours later from current time, rounded down to the closest hour".
         if (spec == "later")
         {
-            var (d, t) = Moment(now, 4 * 60, floorToHour: true);
+            var (d, t) = Moment(settings, 4 * 60, floorToHour: true);
             return new StagedAbsolute(d, t);
         }
 
@@ -973,7 +991,7 @@ public sealed partial class QuickAddParser
                 return new StagedBeforeDue(span);
             }
 
-            var (d, t) = Moment(now, span, floorToHour: false);
+            var (d, t) = Moment(settings, span, floorToHour: false);
             return new StagedAbsolute(d, t);
         }
 
@@ -1155,13 +1173,18 @@ public sealed partial class QuickAddParser
     }
 
     /// <summary>A moment a span of minutes on from now, to the minute, or floored to the hour.</summary>
-    /// <param name="now">The account's wall-clock time</param>
+    /// <remarks>
+    /// Counted on from the instant and only then put on the account's clock. Added to the wall-clock
+    /// time instead, "!2h" at half past midnight on the night the clocks go forward came out an hour
+    /// late, and an hour early on the night they go back.
+    /// </remarks>
+    /// <param name="settings">What the account says about reading a date, for its timezone</param>
     /// <param name="minutes">The span</param>
     /// <param name="floorToHour">Whether to drop the minutes, as <c>!later</c> does</param>
-    /// <returns>The day and time it lands on</returns>
-    private static (DateOnly Date, TimeOnly Time) Moment(DateTime now, int minutes, bool floorToHour)
+    /// <returns>The day and time it lands on, in the account's timezone</returns>
+    private (DateOnly Date, TimeOnly Time) Moment(DateSettings settings, int minutes, bool floorToHour)
     {
-        var at = now.AddMinutes(minutes);
+        var at = TimeZoneInfo.ConvertTime(_clock.UtcNow.AddMinutes(minutes), settings.TimeZone).DateTime;
         return (DateOnly.FromDateTime(at), floorToHour ? new TimeOnly(at.Hour, 0) : new TimeOnly(at.Hour, at.Minute));
     }
 

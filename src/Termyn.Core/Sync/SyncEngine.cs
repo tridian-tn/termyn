@@ -299,6 +299,67 @@ public sealed class SyncEngine
         get { lock (_gate) return _outbox.Count(c => c.State == OutboxState.Failed); }
     }
 
+    /// <summary>
+    /// Whether a queued write is ready to go now, so whatever drives the loop knows to come straight
+    /// back rather than waiting for its clock.
+    /// </summary>
+    /// <remarks>
+    /// Not the same as <see cref="PendingCount"/> being above nought. A write the server refused for
+    /// now, or didn't answer, is left a while before it goes again, and coming straight back for it
+    /// was what spent all its attempts in a few seconds.
+    /// </remarks>
+    public bool WritesDue
+    {
+        get { lock (_gate) return Due().Count > 0; }
+    }
+
+    /// <summary>
+    /// The queued writes that may go now, in the order they were made. Called with the lock held.
+    /// </summary>
+    /// <remarks>
+    /// A write being left a while holds back only what builds on it: anything naming a resource it
+    /// writes or creates, and in turn anything naming theirs. One sent ahead of a write it builds on
+    /// would be refused for naming something that isn't there yet, or would land under the held
+    /// one and be undone by it. Everything else goes, so one stubborn write can't keep every later
+    /// edit to unrelated tasks waiting behind it.
+    /// </remarks>
+    private List<OutboxCommand> Due()
+    {
+        var now = _clock.UtcNow;
+        var held = new HashSet<string>(StringComparer.Ordinal);
+        var due = new List<OutboxCommand>();
+
+        foreach (var c in _outbox)
+        {
+            if (c.State != OutboxState.Pending)
+                continue;
+
+            if ((c.RetryAt is { } at && at > now) || ReferencesAny(c, held))
+            {
+                held.UnionWith(Writes(c));
+                continue;
+            }
+
+            due.Add(c);
+        }
+
+        return due;
+    }
+
+    /// <summary>The resources a queued write changes or creates, by id.</summary>
+    private static IEnumerable<string> Writes(OutboxCommand cmd)
+    {
+        if (cmd.TempId is { } temp)
+            yield return temp;
+
+        var args = ParseArgs(cmd);
+        if (args["id"] is JsonValue id)
+            yield return id.ToString();
+
+        foreach (var nested in NestedIds(args))
+            yield return nested;
+    }
+
     public IReadOnlyList<OutboxCommand> Outbox
     {
         get { lock (_gate) return _outbox.ToList(); }
@@ -429,7 +490,7 @@ public sealed class SyncEngine
             token = TokenOrThrow();
             syncToken = Model.SyncToken;
             generation = _generation;
-            pending = _outbox.Where(c => c.State == OutboxState.Pending).Take(MaxCommandsPerSync).ToList();
+            pending = Due().Take(MaxCommandsPerSync).ToList();
             commands = pending.Select(c => new Command(c.Type, c.Uuid, c.TempId, ParseArgs(c))).ToList();
 
             // Once a command is on the wire, undoing it locally would diverge from the server.
@@ -1346,6 +1407,26 @@ public sealed class SyncEngine
     /// <param name="parent">The task it would move under</param>
     /// <returns>True when nothing would end up deeper than the limit allows</returns>
     private bool Fits(string id, TaskItem parent) => DepthOf(parent.Id) + 1 + HeightOf(id) <= MaxDepth;
+
+    /// <summary>
+    /// Whether a new sub-task can go under this task: it's held, still open, and not already as
+    /// deep as Todoist nests.
+    /// </summary>
+    /// <remarks>
+    /// The same rule <see cref="Fits"/> applies to a move, asked for a task with nothing under it,
+    /// so the two can't come to disagree about where the limit is.
+    /// </remarks>
+    /// <param name="parentId">The task the sub-task would go under</param>
+    /// <returns>True when a sub-task added there would be accepted</returns>
+    public bool CanNestUnder(string parentId)
+    {
+        lock (_gate)
+        {
+            return Model.Get(ResourceType.Items, parentId) is { } json
+                   && !Projections.ToTaskItem(json).Completed
+                   && DepthOf(parentId) + 1 <= MaxDepth;
+        }
+    }
 
     /// <summary>
     /// Whether an indent is refused for how deep it would go, rather than for want of a task above
@@ -2304,7 +2385,7 @@ public sealed class SyncEngine
     /// <param name="fileName">What to call it on the account</param>
     /// <returns>The new comment's temporary id</returns>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected (401/403).</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401).</exception>
     public async Task<string?> AddCommentWithFileAsync(string ownerId, string content, Stream file, string fileName, CancellationToken ct = default)
     {
         string token;
@@ -2794,16 +2875,19 @@ public sealed class SyncEngine
 
     private void RevertLocked(OutboxCommand cmd)
     {
+        // Letting a create go takes away what it made, and with it everything queued on top, as a
+        // refused one used to be cancelled.
+        if (IsCreate(cmd))
+        {
+            CascadeCancel(cmd);
+            return;
+        }
+
         // A failed one was rolled back when it failed, and letting it go is only taking it off the
         // count. Rolled back again, it'd put its prior back over whatever's happened since — a
         // later write that landed, typically the same change made again — and the server would
         // never say otherwise.
-        if (IsCreate(cmd))
-        {
-            if (cmd.TempId is { } temp)
-                RemoveObject(temp);
-        }
-        else if (cmd.State != OutboxState.Failed)
+        if (cmd.State != OutboxState.Failed)
             RestorePriors(cmd);
 
         _outbox.Remove(cmd);
@@ -3384,22 +3468,30 @@ public sealed class SyncEngine
 
         foreach (var cmd in sent)
         {
-            if (!_outbox.Contains(cmd))
-                continue; // already cancelled by an earlier cascade this round
+            // Already settled by an earlier one this round: failed along with a create it built on.
+            if (!_outbox.Contains(cmd) || cmd.State != OutboxState.Pending)
+                continue;
 
             if (!syncStatus.TryGetValue(cmd.Uuid, out var result))
             {
                 // No verdict: keep it pending, but count the rounds so a command the server never
-                // reports on cannot block its resource forever.
+                // reports on cannot block its resource forever, and leave it a while before asking
+                // again, so the rounds are spread out rather than spent in seconds.
                 cmd.NoVerdictRounds++;
                 if (cmd.NoVerdictRounds >= _attemptCeiling)
+                {
                     Fail(cmd, Strings.NoResultForChange);
+                }
                 else
+                {
+                    cmd.RetryAt = RetryAfter(cmd.NoVerdictRounds);
                     _store.UpdateCommand(cmd);
+                }
                 continue;
             }
 
             cmd.NoVerdictRounds = 0;
+            cmd.RetryAt = null;
 
             if (result.Ok)
             {
@@ -3416,19 +3508,24 @@ public sealed class SyncEngine
 
             // What kind of change it was and what the server said about it. Never its arguments:
             // those carry what the user typed.
-            _log?.Warn($"Todoist refused {cmd.Type} (uuid {cmd.Uuid}, attempt {cmd.Attempts}): {cmd.LastError}");
+            _log?.Warn($"Todoist refused {cmd.Type} (uuid {cmd.Uuid}, attempt {cmd.Attempts}, status {result.HttpCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}): {cmd.LastError}");
 
-            if (IsCreate(cmd))
-            {
-                CascadeCancel(cmd);
-                continue;
-            }
+            var transient = Transient(result);
 
-            if (cmd.Attempts >= _attemptCeiling)
+            // A refused create is given up on straight away, as it always was: asking again for
+            // something the server has said no to gains nothing. Failed now rather than cancelled,
+            // though. Cancelled, it took what the user had typed with it. Not one refused for now,
+            // which is tried again like anything else.
+            if ((IsCreate(cmd) && !transient) || cmd.Attempts >= _attemptCeiling)
             {
                 Fail(cmd, cmd.LastError);
                 continue;
             }
+
+            // Refused for now: left a while, longer each time, so the attempts aren't all spent in
+            // the seconds a busy server takes to recover. Any other refusal goes again next round.
+            if (transient)
+                cmd.RetryAt = RetryAfter(cmd.Attempts);
 
             _store.UpdateCommand(cmd);
 
@@ -3437,6 +3534,31 @@ public sealed class SyncEngine
         }
 
         Resend(reordered, unmoved);
+    }
+
+    /// <summary>
+    /// Whether a refusal is the server asking to be tried again later rather than saying no.
+    /// </summary>
+    /// <remarks>
+    /// A 429 or a 5xx. Any other refusal, a 4xx or one that gave no status, keeps the path it always
+    /// had: tried again next round until the ceiling.
+    /// </remarks>
+    private static bool Transient(CommandResult result) => result.HttpCode is 429 or >= 500;
+
+    /// <summary>How long a write that has been refused for now, or not answered, is left before it goes again.</summary>
+    private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(15);
+
+    /// <summary>The longest a write is left between tries, however many it has had.</summary>
+    private static readonly TimeSpan LongestRetry = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// When a write refused for now may next go: <see cref="FirstRetry"/>, doubling with each try.
+    /// </summary>
+    /// <param name="tries">How many times in a row it has been refused for now, or gone unanswered</param>
+    private DateTimeOffset RetryAfter(int tries)
+    {
+        var wait = FirstRetry * Math.Pow(2, Math.Clamp(tries - 1, 0, 16));
+        return _clock.UtcNow + (wait > LongestRetry ? LongestRetry : wait);
     }
 
     /// <summary>
@@ -3476,8 +3598,10 @@ public sealed class SyncEngine
     /// A delete is the one that hurts — the resource stays gone locally while the account still has
     /// it, and a label quietly missing from a dozen tasks is not something anyone would spot.
     /// The command stays in the outbox, failed, so the count still tells the user something went
-    /// wrong. Creates are left alone: an <c>_add</c> the server never ruled on may well have been
-    /// applied, and dropping the local copy would throw away what the user typed.
+    /// wrong. Creates are left alone, refused or never ruled on: dropping the local copy would throw
+    /// away what the user typed, and one never ruled on may well have been applied. It stays on
+    /// screen and in the list of failures until it's dismissed, which is when it goes
+    /// (<see cref="RevertLocked"/>). What was queued on top of it fails with it.
     /// </remarks>
     private void Fail(OutboxCommand cmd, string? error)
     {
@@ -3493,6 +3617,63 @@ public sealed class SyncEngine
 
         // Nothing left to reverse, and the barrier it may have recorded should no longer stop Undo.
         ForgetUndoable(cmd.Uuid);
+
+        if (IsCreate(cmd))
+            FailBuiltOn(cmd);
+    }
+
+    /// <summary>
+    /// Fails everything still queued that names what a failed create made, and anything that names
+    /// those in turn.
+    /// </summary>
+    /// <remarks>
+    /// They can't land: the server never gave the thing they name a real id. Left pending they'd be
+    /// refused to the ceiling one by one, and an edit to the new task rolled back on the way would
+    /// take its typing off a task that's being kept.
+    ///
+    /// Kept rather than undone, as the create is. A move, close or reorder is put back all the same,
+    /// as a cancelled one is (<see cref="CascadeCancel"/>), since it can reach things the server does
+    /// have — a real task moved into a project that was never made.
+    /// </remarks>
+    /// <param name="create">The create that failed</param>
+    private void FailBuiltOn(OutboxCommand create)
+    {
+        var dead = new HashSet<string>(StringComparer.Ordinal);
+        if (create.TempId is { } root)
+            dead.Add(root);
+
+        var failed = new List<OutboxCommand>();
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var c in _outbox)
+            {
+                if (c.State != OutboxState.Pending || failed.Contains(c) || !ReferencesAny(c, dead))
+                    continue;
+
+                failed.Add(c);
+                if (IsCreate(c) && c.TempId is { } temp)
+                    dead.Add(temp);
+                grew = true;
+            }
+        }
+        while (grew);
+
+        // Latest first, for the reason CascadeCancel gives.
+        foreach (var c in failed.OrderByDescending(c => c.Seq))
+        {
+            c.State = OutboxState.Failed;
+            c.LastError ??= create.LastError;
+
+            _log?.Warn($"Gave up on {c.Type} (uuid {c.Uuid}) with the {create.Type} it builds on (uuid {create.Uuid}).");
+
+            if (c.Type is "item_move" or "item_close" || Reorder.For(c.Type) is not null)
+                RestorePriors(c);
+
+            _store.UpdateCommand(c);
+            ForgetUndoable(c.Uuid);
+        }
     }
 
     private void ApplyServerChanges(SyncResponse response)
@@ -3516,9 +3697,20 @@ public sealed class SyncEngine
                 continue;
             }
 
-            // An un-acked edit of our own owns this resource until it lands.
-            if (pendingKeys.Contains(key))
+            // An un-acked write of our own owns what it wrote until it lands. The server's copy still
+            // matters, because the token moves past it either way: it goes into the write's prior,
+            // so a write that fails puts back what the server has now rather than what it had then,
+            // and whatever the write didn't touch is taken as it comes.
+            if (held)
+            {
+                if (TakeServerCopy(key, change.Json) is { } merged)
+                {
+                    Model.Upsert(change.ResourceType, change.Id, merged);
+                    upserts.Add(new StoredResource(change.ResourceType, change.Id, merged.ToJsonString()));
+                }
+
                 continue;
+            }
 
             if (change.IsDeleted)
             {
@@ -3529,16 +3721,6 @@ public sealed class SyncEngine
             else
             {
                 var clone = change.Json.DeepClone().AsObject();
-
-                // A pending reorder only owns the position, so take everything else the server sends
-                // rather than dropping the change — the token advances past it either way. Which
-                // field the position lives in comes with the key, since the three kinds disagree.
-                if (reorderedKeys.TryGetValue(key, out var placedIn)
-                    && Model.Get(change.ResourceType, change.Id)?[placedIn] is { } localOrder)
-                {
-                    clone[placedIn] = localOrder.DeepClone();
-                }
-
                 Model.Upsert(change.ResourceType, change.Id, clone);
                 upserts.Add(new StoredResource(change.ResourceType, change.Id, clone.ToJsonString()));
             }
@@ -3581,18 +3763,166 @@ public sealed class SyncEngine
                 deletes.Add(deferred);
         }
 
+        // The token moves past these tombstones, so the server will never resend them: they have to
+        // survive a restart, and go in with the token so a crash can't land between the two.
         var token = response.SyncToken ?? Model.SyncToken;
         Model.SyncToken = token;
-        _store.SaveSync(upserts, deletes, token);
+        _store.SaveSync(upserts, deletes, token, _deferredDeletes);
+    }
 
-        // The token has moved past these tombstones, so the server will never resend them: they have
-        // to survive a restart or the deleted resource would come back permanently.
-        _store.SaveDeferredDeletes(_deferredDeletes);
+    /// <summary>
+    /// Takes the server's copy of a resource that queued writes own: into their priors, and onto
+    /// the local copy wherever none of them wrote.
+    /// </summary>
+    /// <remarks>
+    /// Dropped, as it was, the server's change was lost for good once the token moved past it, and a
+    /// write that then failed rolled back to the state before it, stale since. Now each write's prior
+    /// gets the server's values for every field nothing queued before it wrote, which keeps the
+    /// chain <see cref="PassOn"/> relies on: the earliest write of a field holds the server's value,
+    /// and each later one what the write before it put there.
+    ///
+    /// The local copy keeps every field a queued write wrote, so what the user did stays on screen,
+    /// and takes the rest from the server, the way a pending reorder always took all but its
+    /// position. Not when a queued write owns the whole resource, a delete say: there's no local copy
+    /// to put it on, and its prior is what comes back if the delete fails.
+    /// </remarks>
+    /// <param name="key">The resource</param>
+    /// <param name="server">The server's copy of it</param>
+    /// <returns>What the local copy becomes, or null to leave it as it is</returns>
+    private JsonObject? TakeServerCopy(ResourceKey key, JsonObject server)
+    {
+        var written = new HashSet<string>(StringComparer.Ordinal);
+        var whole = false;
+        var onlyReorders = true;
+
+        foreach (var cmd in _outbox.Where(c => c.State == OutboxState.Pending).OrderBy(c => c.Seq))
+        {
+            if (!Owns(cmd, key, out var fields))
+                continue;
+
+            if (!whole)
+                FoldIntoPrior(cmd, key, server, written, fields);
+
+            if (fields is null)
+                whole = true;
+            else
+                written.UnionWith(fields);
+
+            onlyReorders &= Reorder.For(cmd.Type) is not null;
+        }
+
+        if (whole)
+            return null;
+
+        // Not held here and owned only by a reorder, which never needed a local copy to take the
+        // server's: as before, it's taken whole. Owned by anything else, it stays as it was.
+        if (Model.Get(key.Type, key.Id) is not { } current)
+            return onlyReorders ? server.DeepClone().AsObject() : null;
+
+        var merged = server.DeepClone().AsObject();
+        foreach (var field in written)
+            if (current.TryGetPropertyValue(field, out var mine))
+                merged[field] = mine?.DeepClone();
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Whether a queued write owns a resource until it lands, and which of its fields.
+    /// </summary>
+    /// <remarks>
+    /// The same writes <see cref="PendingResourceKeys"/> and <see cref="PendingReorderKeys"/> name.
+    /// A create isn't among them: the server never sends anything under the id it was given here.
+    /// </remarks>
+    /// <param name="cmd">A pending write</param>
+    /// <param name="key">The resource</param>
+    /// <param name="fields">The fields it wrote, or null when it owns the whole resource</param>
+    private bool Owns(OutboxCommand cmd, ResourceKey key, out IReadOnlyList<string>? fields)
+    {
+        fields = null;
+
+        if (cmd.TempId is not null)
+            return false;
+
+        var args = ParseArgs(cmd);
+
+        if (Reorder.For(cmd.Type) is { } kind)
+        {
+            fields = [kind.Order];
+            return kind.Resource == key.Type && NestedIds(args).Contains(key.Id);
+        }
+
+        if (cmd.PriorJson is null || args["id"] is not JsonValue id || ResourceTypeFor(cmd) != key.Type)
+            return false;
+
+        var named = id.ToString() == key.Id;
+        if (!named && !(cmd.Type is "item_move" or "item_close" && CarriedBy(id.ToString(), cmd.PriorJson).Contains(key.Id)))
+            return false;
+
+        fields = cmd.Type switch
+        {
+            "item_move" => named ? MovedFields : CarriedFields,
+            "item_close" or "item_uncomplete" => ["checked"],
+            _ when WritesNamedFields(cmd) => args.Select(a => a.Key).Where(k => k != "id").ToList(),
+            _ => null,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the server's copy of a resource into what a queued write recorded of it, leaving the
+    /// fields an earlier queued write wrote.
+    /// </summary>
+    /// <param name="cmd">The queued write</param>
+    /// <param name="key">The resource</param>
+    /// <param name="server">The server's copy of it</param>
+    /// <param name="writtenBefore">The fields written by queued writes before this one</param>
+    /// <param name="fields">The fields this one wrote, or null for the whole resource</param>
+    private void FoldIntoPrior(OutboxCommand cmd, ResourceKey key, JsonObject server, HashSet<string> writtenBefore, IReadOnlyList<string>? fields)
+    {
+        if (cmd.PriorJson is null || TryParseNode(cmd.PriorJson) is not { } node)
+            return;
+
+        var changed = false;
+
+        foreach (var entry in PriorEntries(node))
+        {
+            // A cascading delete wraps each resource with its type, since one can span several.
+            var prior = entry["resource"] is JsonObject inner
+                ? entry["type"]?.ToString() == key.Type ? inner : null
+                : entry;
+
+            if (prior?["id"]?.ToString() != key.Id)
+                continue;
+
+            foreach (var (field, value) in server)
+                if (!writtenBefore.Contains(field))
+                    prior[field] = value?.DeepClone();
+
+            // One this write wrote that the server doesn't have was added by the write, and rolling
+            // it back takes it off again (Rewound).
+            foreach (var field in fields ?? [])
+                if (!writtenBefore.Contains(field) && !server.ContainsKey(field))
+                    prior.Remove(field);
+
+            changed = true;
+        }
+
+        if (!changed)
+            return;
+
+        cmd.PriorJson = node.ToJsonString();
+        _store.UpdateCommand(cmd);
+
+        // A delete that's landed is undone by making the task again from what was recorded, and
+        // that should be the task as the server last had it too.
+        if (_undoable.TryGetValue(cmd.Uuid, out var undo) && undo.PriorJson is not null)
+            _undoable[cmd.Uuid] = undo with { PriorJson = cmd.PriorJson };
     }
 
     private void CascadeCancel(OutboxCommand createCommand)
     {
-        // Cancel the failed create, everything that referenced it, and — transitively — anything that
+        // Cancel the create, everything that referenced it, and — transitively — anything that
         // referenced those, so a whole offline-built subtree rolls back in one go.
         var doomedIds = new HashSet<string>();
         if (createCommand.TempId is { } rootTemp)
@@ -3627,13 +3957,13 @@ public sealed class SyncEngine
         // server will never be told about it — a task indented under one whose add was refused is
         // left under a parent that isn't there, and one ticked off with it stays ticked. So they're
         // put back the way a refused one's are. After the removals, so nothing's written to a task
-        // that's going anyway.
+        // that's going anyway. Not one that has failed: that was put back when it did.
         //
         // Latest first, so a task two of them moved goes back where the earlier one found it. The
         // later one's priors have it where the earlier one put it, which can be under a task that's
         // just gone.
         foreach (var d in doomed.OrderByDescending(c => c.Seq))
-            if (d.Type is "item_move" or "item_close" || Reorder.For(d.Type) is not null)
+            if (d.State == OutboxState.Pending && (d.Type is "item_move" or "item_close" || Reorder.For(d.Type) is not null))
                 RestorePriors(d);
 
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());

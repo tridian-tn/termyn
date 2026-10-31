@@ -2,6 +2,7 @@ using Termyn.Core.Api;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -65,6 +66,65 @@ public class ReconnectWindowTests
         Assert.False(Commands.StateOf(AppCommand.Reconnect, context).Enabled);
         Assert.Contains("Synced", Status(window).Text);
         Assert.Equal(Cursors.Default, Status(window).Cursor);
+    }
+
+    [WinFormsFact]
+    public async Task A_description_typed_before_the_token_went_is_kept_for_its_own_task()
+    {
+        // It can't be written while there's no token, and moving to another task used to open that
+        // one's description over it, losing what had been typed.
+        var store = Held();
+        store.PutResource("items", "t1", """{"id":"t1","content":"Plan the week","description":"Notes","project_id":"p","child_order":1}""");
+        store.PutResource("items", "t2", """{"id":"t2","content":"Book the venue","project_id":"p","child_order":2}""");
+        var api = new FakeApi();
+        var settings = Path.Combine(Path.GetTempPath(), $"reconnect-window-description-{Guid.NewGuid():N}.json");
+
+        try
+        {
+            using var window = TestWindow.Start(settings, store, api, out var presenter);
+            _ = window.Handle;
+            presenter.Select(ViewSelection.OfProject("p"));
+            window.ShowPanelTab(comments: false);
+
+            var outline = TestWindow.Find<OutlineView>(window);
+            var editor = TestWindow.Find<MarkdownEditor>(window);
+            _ = outline.Handle;
+            _ = editor.Handle;
+
+            outline.SelectId("t1");
+            editor.Text = "Notes, and more";
+
+            // Turned away before the typing paused long enough to be saved.
+            api.Throw = new TodoistAuthException("rejected");
+            try
+            {
+                await presenter.SyncAsync();
+            }
+            catch (TodoistAuthException)
+            {
+                // What a rejected token is reported as; the engine has let go of it either way.
+            }
+
+            Assert.True(presenter.ReconnectNeeded);
+
+            outline.SelectId("t2");
+            Assert.Equal(string.Empty, editor.Text);
+
+            outline.SelectId("t1");
+            Assert.Equal("Notes, and more", editor.Text);
+
+            // And once there's a token again, it's written to the task it was typed into.
+            outline.SelectId("t2");
+            api.Throw = null;
+            presenter.Reconnect("tok2", "u1");
+            outline.SelectId("t1");
+
+            Assert.Equal("Notes, and more", presenter.DescriptionOf(SubjectKind.Task, "t1"));
+        }
+        finally
+        {
+            File.Delete(settings);
+        }
     }
 
     /// <summary>The status line along the bottom of the window.</summary>

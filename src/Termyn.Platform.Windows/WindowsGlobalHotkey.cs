@@ -38,6 +38,11 @@ public sealed class WindowsGlobalHotkey : IGlobalHotkey
     internal IntPtr Handle => _window.Handle;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A refusal leaves the binding from before in place. Swapping one for the other means letting
+    /// go first — the desktop keeps both under one id otherwise — so a combination something else
+    /// owns used to leave nothing registered at all, and the key that had been working stopped.
+    /// </remarks>
     public bool Register(HotkeyBinding binding)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -45,14 +50,28 @@ public sealed class WindowsGlobalHotkey : IGlobalHotkey
         if (!binding.IsValid || ToVirtualKey(binding.Key) is not { } key)
             return false;
 
+        // Already ours. Letting go and asking again would only open a moment for something else to
+        // take it.
+        if (binding == Current)
+            return true;
+
+        var previous = Current;
         Unregister();
 
-        if (!RegisterHotKey(_window.Handle, HotkeyId, ToModifiers(binding.Modifiers) | ModNoRepeat, key))
+        if (!TryRegister(binding.Modifiers, key))
+        {
+            if (previous is not null && ToVirtualKey(previous.Key) is { } kept && TryRegister(previous.Modifiers, kept))
+                Current = previous;
+
             return false;
+        }
 
         Current = binding;
         return true;
     }
+
+    private bool TryRegister(HotkeyModifiers modifiers, uint key)
+        => RegisterHotKey(_window.Handle, HotkeyId, ToModifiers(modifiers) | ModNoRepeat, key);
 
     public void Unregister()
     {

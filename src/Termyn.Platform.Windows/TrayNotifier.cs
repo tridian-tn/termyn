@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Termyn.Core.Platform;
 
 namespace Termyn.Platform.Windows;
@@ -32,7 +33,7 @@ public sealed class TrayNotifier : INotifier
             if (e.Button == MouseButtons.Left)
                 Activated?.Invoke();
         };
-        _menu.Opening += (_, _) => MenuOpening?.Invoke();
+        _menu.Opening += (_, e) => OnMenuOpening(e);
         // Nothing is drawn here. The first icon costs the best part of a tenth of a second — GDI+
         // coming up, mostly — and doing that before the window exists is a tenth of a second added
         // to every start. The host asks for a status once it has something to show.
@@ -59,7 +60,27 @@ public sealed class TrayNotifier : INotifier
     internal IReadOnlyList<ToolStripItem> MenuItems => _menu.Items.Cast<ToolStripItem>().ToList();
 
     /// <summary>Says the menu is about to be shown, for a test with no tray to right-click.</summary>
-    internal void RaiseMenuOpening() => MenuOpening?.Invoke();
+    /// <returns>Whether the menu would then be shown</returns>
+    internal bool RaiseMenuOpening()
+    {
+        // Set up the way WinForms sets it up: cancelled already when the strip is empty.
+        var opening = new CancelEventArgs(_menu.Items.Count == 0);
+        OnMenuOpening(opening);
+        return !opening.Cancel;
+    }
+
+    /// <summary>
+    /// Lets the host fill the menu, then says whether there's anything to show.
+    /// </summary>
+    /// <remarks>
+    /// WinForms raises this already cancelled when the strip was empty as it began to open, so a menu
+    /// first filled here would never appear without the answer being given again afterwards.
+    /// </remarks>
+    private void OnMenuOpening(CancelEventArgs e)
+    {
+        MenuOpening?.Invoke();
+        e.Cancel = _menu.Items.Count == 0;
+    }
 
     public bool Visible
     {

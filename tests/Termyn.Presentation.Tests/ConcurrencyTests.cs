@@ -75,6 +75,48 @@ public class ConcurrencyTests
         Assert.Null(failure);
     }
 
+    [Fact]
+    public async Task The_first_sync_is_waited_for_like_the_loops_own()
+    {
+        // Shutdown waits for syncs before closing the cache. It used to count only the loop's, so
+        // the one the window starts on loading could still be writing when the cache was closed.
+        using var answer = new ManualResetEventSlim();
+        var api = new FakeApi
+        {
+            Next = _ =>
+            {
+                answer.Wait(TestContext.Current.CancellationToken);
+                return new SyncResponse { SyncToken = "s1" };
+            },
+        };
+
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(new DateOnly(2026, 7, 31))));
+
+        Assert.True(presenter.WaitForSyncs(TimeSpan.Zero));
+
+        var loading = Task.Run(() => presenter.LoadAsync(TestContext.Current.CancellationToken), TestContext.Current.CancellationToken);
+        await WaitUntil(() => !presenter.WaitForSyncs(TimeSpan.Zero));
+
+        Assert.False(presenter.WaitForSyncs(TimeSpan.FromMilliseconds(100)));
+
+        answer.Set();
+        await loading;
+
+        Assert.True(presenter.WaitForSyncs(TimeSpan.Zero));
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Gave up waiting.");
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+    }
+
     /// <summary>An engine whose every sync adds a fresh batch of tasks and tombstones the last one.</summary>
     /// <param name="steady">How many tasks besides "stable" are there throughout, as steady0, steady1…</param>
     private static MainPresenter Churning(out CancellationTokenSource cts, int steady = 0)

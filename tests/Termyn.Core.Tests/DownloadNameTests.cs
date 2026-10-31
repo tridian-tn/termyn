@@ -63,6 +63,50 @@ public sealed class DownloadNameTests
         => Assert.Equal("attachment", DownloadName.Safe(name));
 
     [Theory]
+    [InlineData("invoice‮fdp.exe", "invoicefdp.exe")]       // reads as "invoiceexe.pdf" when shown
+    [InlineData("⁧report⁩.exe", "report.exe")]
+    [InlineData("zero​width﻿.txt", "zerowidth.txt")]
+    public void Invisible_characters_that_change_how_a_name_reads_are_taken_out(string name, string expected)
+        => Assert.Equal(expected, DownloadName.Safe(name));
+
+    [Theory]
+    [InlineData("del\u007Fete.txt", "del_ete.txt")]
+    [InlineData("c1\u0085control.txt", "c1_control.txt")]
+    public void Every_control_character_becomes_an_underscore(string name, string expected)
+        => Assert.Equal(expected, DownloadName.Safe(name));
+
+    [Fact]
+    public void A_very_long_name_is_shortened_and_keeps_its_extension()
+    {
+        // Past 255 a name can't be made at all, and a long one under that can still run a path past
+        // what the system allows.
+        var safe = DownloadName.Safe(new string('a', 300) + ".pdf");
+
+        Assert.Equal(new string('a', 120) + ".pdf", safe);
+    }
+
+    [Fact]
+    public void A_name_is_never_cut_between_the_halves_of_a_character()
+    {
+        // Each of these is two UTF-16 units, so the cut at 120 would fall in the middle of one.
+        var safe = DownloadName.Safe("a" + string.Concat(Enumerable.Repeat("\U0001F600", 100)) + ".txt");
+
+        var stem = safe[..^".txt".Length];
+        Assert.Equal(119, stem.Length);
+        Assert.False(char.IsHighSurrogate(stem[^1]));
+        Assert.EndsWith(".txt", safe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_name_whose_extension_is_itself_too_long_is_shortened_whole()
+    {
+        var safe = DownloadName.Safe("notes." + new string('x', 300));
+
+        Assert.Equal(120, safe.Length);
+        Assert.StartsWith("notes.", safe, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("agenda.pdf", 0, "agenda.pdf")]
     [InlineData("agenda.pdf", 1, "agenda (1).pdf")]
     [InlineData("agenda.pdf", 12, "agenda (12).pdf")]

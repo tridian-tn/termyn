@@ -19,6 +19,9 @@ public class FailuresTests
 {
     private static readonly DateOnly Today = new(2026, 7, 31);
 
+    /// <summary>The engine's clock, moved on by <see cref="Ignore"/> so an unanswered write is asked about again.</summary>
+    private readonly FixedClock _clock = new(Today);
+
     [Fact]
     public async Task Nothing_refused_is_nothing_to_read()
     {
@@ -260,14 +263,14 @@ public class FailuresTests
         => new([], [], [], [], [], [], null, Today, TimeZoneInfo.Utc, null, null, 0, 0, [], new Dictionary<string, int>(), new HashSet<string>());
 
     /// <summary>A presenter over one project and one task, with nothing refused yet.</summary>
-    private static async Task<(MainPresenter Presenter, SyncEngine Engine, FakeApi Api)> Loaded()
+    private async Task<(MainPresenter Presenter, SyncEngine Engine, FakeApi Api)> Loaded()
     {
         var store = new InMemorySnapshotStore();
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
         store.PutResource("items", "i1", """{"id":"i1","content":"Task","project_id":"p1"}""");
 
         var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
-        var clock = new FixedClock(Today);
+        var clock = _clock;
 
         // Two attempts, so a refusal reaches the ceiling in the two syncs below rather than in ten.
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, clock, attemptCeiling: 2);
@@ -301,16 +304,16 @@ public class FailuresTests
     /// Has the server say nothing at all about what it was sent, until the engine gives up waiting.
     /// </summary>
     /// <remarks>
-    /// The only way a creation reaches the failed state. A creation the server <em>refuses</em> is
-    /// cancelled outright — taken off the queue and out of the model there and then — because a
-    /// refusal is a definite answer. One it never rules on is not: the account may well have the
-    /// task, so what was typed is kept and the user is left to decide.
+    /// Silence leaves a creation unruled, as against refused: the account may well have the task.
+    /// What was typed is kept either way, and the user is left to decide. The clock is moved on
+    /// between the two, as an unanswered write is left a while before it's asked about again.
     /// </remarks>
-    private static async Task Ignore(MainPresenter presenter, SyncEngine engine, FakeApi api)
+    private async Task Ignore(MainPresenter presenter, SyncEngine engine, FakeApi api)
     {
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
         await engine.SyncAsync();
+        _clock.Advance(TimeSpan.FromMinutes(1));
         await engine.SyncAsync();
         await presenter.LoadAsync();
     }

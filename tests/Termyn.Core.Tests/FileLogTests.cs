@@ -133,6 +133,21 @@ public sealed class FileLogTests : IDisposable
     }
 
     [Fact]
+    public void A_roll_that_cannot_be_done_still_keeps_the_entry()
+    {
+        // Something held open elsewhere stops the roll's move but not an append. Rolled in the
+        // same breath as the write, every entry after that went nowhere. A folder where the first
+        // archive goes is what stands in for it here, since it refuses the move on any system.
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(Path.Combine(_directory, "termyn.log"), new string('x', 600 * 1024));
+        Directory.CreateDirectory(Path.Combine(_directory, "termyn.1.log"));
+
+        Log().Info("still heard");
+
+        Assert.EndsWith("still heard", Read().TrimEnd(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_log_that_cannot_be_written_is_not_worth_an_exception()
     {
         // A path that can't be a directory, standing in for a disk that's full or a folder that

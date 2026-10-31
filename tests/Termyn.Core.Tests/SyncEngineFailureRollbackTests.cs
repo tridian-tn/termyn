@@ -171,12 +171,14 @@ public class SyncEngineFailureRollbackTests
     {
         // No verdict at the ceiling is the same outcome as a rejection: it isn't going to land.
         var store = Seeded();
-        var (engine, api) = Engine(store);
+        var clock = new FixedClock(new DateOnly(2026, 7, 31));
+        var (engine, api) = Engine(store, clock: clock);
 
         engine.DeleteProject("p1");
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(1));
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(engine.Snapshot().Projects);
@@ -189,12 +191,14 @@ public class SyncEngineFailureRollbackTests
         // It may well have been applied, and there is no prior to go back to — dropping it would
         // throw away the user's own text on a guess.
         var store = new InMemorySnapshotStore();
-        var (engine, api) = Engine(store);
+        var clock = new FixedClock(new DateOnly(2026, 7, 31));
+        var (engine, api) = Engine(store, clock: clock);
 
         engine.AddItem(new JsonObject { ["content"] = "Written offline" });
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(1));
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Written offline"], engine.Snapshot().Items.Select(i => i.Content));
@@ -395,6 +399,10 @@ public class SyncEngineFailureRollbackTests
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
+        // Kept while the refused add is in the list of failures, and gone for good once it is let go.
+        Assert.Contains(engine.Snapshot().Items, i => i.Id == temp);
+        engine.DismissRefusedAdds();
+
         var snapshot = engine.Snapshot();
         Assert.Equal("Work", snapshot.Projects.Single(p => p.Id == "p1").Name);
         Assert.Equal("Admin", snapshot.Sections.Single().Name);
@@ -415,6 +423,7 @@ public class SyncEngineFailureRollbackTests
         Fails(api, engine);
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         Assert.Equal(["Task"], engine.Snapshot().Items.Select(i => i.Content));
         Assert.Equal(["home"], engine.Snapshot().Items.Single().Labels);
@@ -436,6 +445,7 @@ public class SyncEngineFailureRollbackTests
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.True(engine.Undo());
+        engine.DismissRefusedAdds();
         Assert.Equal("Work", engine.Snapshot().Projects.Single(p => p.Id == "p1").Name);
         Assert.Equal(["Task"], engine.Snapshot().Items.Select(i => i.Content));
         Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
@@ -491,6 +501,7 @@ public class SyncEngineFailureRollbackTests
         var (restarted, restartedApi) = Engine(store, attemptCeiling: 1);
         Fails(restartedApi, restarted);
         await restarted.SyncAsync(TestContext.Current.CancellationToken);
+        restarted.DismissRefusedAdds();
 
         Assert.Equal(1, restarted.FailedCount);
         Assert.Equal("Work", restarted.Snapshot().Projects.Single(p => p.Id == "p1").Name);
@@ -528,6 +539,71 @@ public class SyncEngineFailureRollbackTests
         var restored = Assert.Single(restarted.Snapshot().Items, i => i.Content == "Written offline");
         Assert.Equal("real", restored.Id);
         Assert.DoesNotContain(store.Load().Resources, r => r.Id == temp);
+    }
+
+    // ---- A refused create ------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_refused_add_keeps_what_was_typed_and_says_it_failed()
+    {
+        // It was deleted on the spot, and with it whatever had been typed, with nothing to say so.
+        var store = Seeded();
+        var (engine, api) = Engine(store, attemptCeiling: 5);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        Fails(api, engine);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(engine.Snapshot().Items, i => i.Id == temp && i.Content == "Written offline");
+        var failed = Assert.Single(engine.Outbox);
+        Assert.Equal(OutboxState.Failed, failed.State);
+        Assert.Equal("rejected", failed.LastError);
+        Assert.Equal(0, engine.PendingCount);
+
+        // And after a restart.
+        Assert.Contains(Reload(store).Snapshot().Items, i => i.Id == temp);
+    }
+
+    [Fact]
+    public async Task An_edit_to_a_task_whose_add_is_refused_fails_with_it_and_keeps_its_typing()
+    {
+        // Left pending it would be refused to the ceiling, and rolled back on the way, taking the
+        // description off a task that's being kept.
+        var (engine, api) = Engine(Seeded(), attemptCeiling: 5);
+
+        var temp = engine.AddItem(new JsonObject { ["content"] = "Written offline", ["project_id"] = "p1" });
+        engine.UpdateItem(temp, new JsonObject { ["description"] = "notes typed offline" });
+        Fails(api, engine);
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("notes typed offline", engine.Snapshot().Items.Single(i => i.Id == temp).Description);
+        Assert.Equal(2, engine.FailedCount);
+        Assert.Equal(0, engine.PendingCount);
+    }
+
+    [Fact]
+    public async Task Letting_a_refused_add_go_takes_it_and_what_was_built_on_it_away()
+    {
+        var store = Seeded();
+        var (engine, api) = Engine(store);
+
+        var parent = engine.AddItem(new JsonObject { ["content"] = "Parent", ["project_id"] = "p1" });
+        engine.AddItem(new JsonObject { ["content"] = "Child", ["project_id"] = "p1", ["parent_id"] = parent });
+
+        // Only the parent is refused; the child can't land without it.
+        api.Next = commands => new SyncResponse
+        {
+            SyncToken = "s2",
+            SyncStatus = commands.Where(c => c.TempId == parent).ToDictionary(c => c.Uuid, _ => new CommandResult(false, "ERR", "rejected")),
+        };
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(2, engine.FailedCount);
+
+        engine.Revert(engine.Outbox.Single(c => c.TempId == parent).Uuid);
+
+        Assert.Equal(["Task"], engine.Snapshot().Items.Select(i => i.Content));
+        Assert.Empty(engine.Outbox);
+        Assert.Equal(["Task"], Reload(store).Snapshot().Items.Select(i => i.Content));
     }
 
     // ---- Letting a failed write go ---------------------------------------------------------------
@@ -693,10 +769,10 @@ public class SyncEngineFailureRollbackTests
         return store;
     }
 
-    private static (SyncEngine Engine, FakeApi Api) Engine(InMemorySnapshotStore store, int attemptCeiling = 2)
+    private static (SyncEngine Engine, FakeApi Api) Engine(InMemorySnapshotStore store, int attemptCeiling = 2, FixedClock? clock = null)
     {
         var api = new FakeApi();
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)), attemptCeiling: attemptCeiling);
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, clock ?? new FixedClock(new DateOnly(2026, 7, 31)), attemptCeiling: attemptCeiling);
         engine.Load();
         return (engine, api);
     }

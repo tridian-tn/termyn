@@ -143,10 +143,15 @@ public sealed class GitHubReleaseCheck
             return version is null ? UpdateResult.Unknown : new UpdateResult(version, SafeUrl(TextOf(release, "html_url")));
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException
+                                      or InvalidOperationException or ArgumentException
                                       or TaskCanceledException && !ct.IsCancellationRequested)
         {
             // Not knowing is a normal outcome for something the user asked about in passing. A
             // cancellation from the caller is excluded by the filter and propagates.
+            //
+            // The last two are what the JSON nodes throw on an odd payload rather than at the parse:
+            // a key given twice is only found when the object is first read, and a value can refuse
+            // the type asked of it.
             return UpdateResult.Unknown;
         }
     }

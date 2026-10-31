@@ -12,7 +12,12 @@ namespace Termyn.App.Windows;
 /// </summary>
 internal sealed class OutlineView : ListView
 {
-    private const int IndentWidth = 18;
+    /// <summary>How far in each level of sub-task sits, at 100%.</summary>
+    /// <remarks>
+    /// This and the sizes below are at 100% and scaled to the display wherever they're used, so the
+    /// boxes and the arrows grow with the text beside them rather than staying a 100% screen's size.
+    /// </remarks>
+    private const int IndentAt96 = 18;
     private const int TextInset = 6;
 
     /// <summary>
@@ -23,10 +28,10 @@ internal sealed class OutlineView : ListView
     /// one without still start their words in the same place. A gutter that appeared and vanished
     /// would shuffle the whole column sideways as tasks gained and lost children.
     /// </remarks>
-    private const int ExpanderWidth = 14;
+    private const int ExpanderAt96 = 14;
 
     /// <summary>How big the arrow itself is drawn inside that room.</summary>
-    private const int ExpanderGlyph = 8;
+    private const int ExpanderGlyphAt96 = 8;
 
     /// <summary>
     /// How much room the box that ticks a task off takes, between the expander and the words.
@@ -35,10 +40,25 @@ internal sealed class OutlineView : ListView
     /// Wider than the box drawn in it, and the whole of it answers to a click: a fourteen-pixel
     /// square is a target people miss, and the room around it costs nothing to hand over.
     /// </remarks>
-    private const int CheckWidth = 20;
+    private const int CheckAt96 = 20;
 
     /// <summary>How big the box itself is drawn inside that room.</summary>
-    private const int CheckSize = 13;
+    private const int CheckSizeAt96 = 13;
+
+    /// <summary>The largest a project's dot is drawn, and a priority's.</summary>
+    private const int DotAt96 = 8;
+    private const int PriorityDotAt96 = 9;
+
+    /// <summary>A size at 100% at the scale of the display the list is on.</summary>
+    /// <param name="logical">The size at 100%</param>
+    /// <returns>The size in the display's pixels</returns>
+    private int AtScale(int logical) => StartupLayout.Scaled(logical, DeviceDpi);
+
+    private int IndentWidth => AtScale(IndentAt96);
+
+    private int ExpanderWidth => AtScale(ExpanderAt96);
+
+    private int CheckWidth => AtScale(CheckAt96);
 
     private IReadOnlyList<TaskRow> _rows = [];
 
@@ -1330,7 +1350,7 @@ internal sealed class OutlineView : ListView
         switch (OutlineCells.PaintOf(column))
         {
             case CellPaint.Priority:
-                DrawPriority(e.Graphics, e.Bounds, row.Priority);
+                DrawPriority(e.Graphics, e.Bounds, row.Priority, DeviceDpi);
                 break;
 
             case CellPaint.Project:
@@ -1347,16 +1367,16 @@ internal sealed class OutlineView : ListView
                 var bounds = e.Bounds;
                 bounds.X += row.Depth * IndentWidth;
                 bounds.Width -= row.Depth * IndentWidth;
-                DrawGuides(e.Graphics, e.Bounds, row.Depth, selected ? Theme.OnAccent : Theme.Border);
+                DrawGuides(e.Graphics, e.Bounds, row.Depth, IndentWidth, selected ? Theme.OnAccent : Theme.Border);
 
                 // The words start after the expander whether or not there is one to draw.
                 if (row.HasChildren)
-                    DrawExpander(e.Graphics, Expander(bounds), row.Collapsed, selected ? Theme.OnAccent : Theme.Muted);
+                    DrawExpander(e.Graphics, Expander(bounds), row.Collapsed, AtScale(ExpanderGlyphAt96), selected ? Theme.OnAccent : Theme.Muted);
 
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
 
-                DrawCheck(e.Graphics, Checkbox(bounds), done, selected ? Theme.OnAccent : Theme.Muted);
+                DrawCheck(e.Graphics, Checkbox(bounds, DeviceDpi), done, selected ? Theme.OnAccent : Theme.Muted);
 
                 bounds.X += CheckWidth;
                 bounds.Width -= CheckWidth;
@@ -1413,20 +1433,21 @@ internal sealed class OutlineView : ListView
     private Pen? _rule;
 
     /// <summary>Where the expander sits, given the row's first column already moved in by its depth.</summary>
-    private static Rectangle Expander(Rectangle indented)
+    private Rectangle Expander(Rectangle indented)
         => new(indented.X, indented.Y, ExpanderWidth, indented.Height);
 
     /// <summary>
     /// Where the box that ticks a task off sits, given the row already moved past its expander.
     /// </summary>
     /// <param name="indented">The first column, indented and past the expander's room</param>
+    /// <param name="dpi">The display's dots per inch, which is 96 at 100%</param>
     /// <returns>The square the box is drawn in, centred in the room it's given</returns>
-    internal static Rectangle Checkbox(Rectangle indented)
+    internal static Rectangle Checkbox(Rectangle indented, int dpi = 96)
     {
-        var size = Math.Min(CheckSize, Math.Max(0, indented.Height - 4));
+        var size = Math.Min(StartupLayout.Scaled(CheckSizeAt96, dpi), Math.Max(0, indented.Height - StartupLayout.Scaled(4, dpi)));
 
         return new Rectangle(
-            indented.X + ((CheckWidth - size) / 2),
+            indented.X + ((StartupLayout.Scaled(CheckAt96, dpi) - size) / 2),
             indented.Y + ((indented.Height - size) / 2),
             size,
             size);
@@ -1488,10 +1509,11 @@ internal sealed class OutlineView : ListView
     /// <param name="g">What to draw on</param>
     /// <param name="bounds">The room the expander has</param>
     /// <param name="collapsed">Whether the sub-tasks are currently hidden</param>
+    /// <param name="glyph">How big the arrow is at most, at the display's scale</param>
     /// <param name="colour">What to draw it in</param>
-    private static void DrawExpander(Graphics g, Rectangle bounds, bool collapsed, Color colour)
+    private static void DrawExpander(Graphics g, Rectangle bounds, bool collapsed, int glyph, Color colour)
     {
-        var size = Math.Min(ExpanderGlyph, Math.Min(bounds.Width, bounds.Height));
+        var size = Math.Min(glyph, Math.Min(bounds.Width, bounds.Height));
         var left = bounds.X + ((bounds.Width - size) / 2);
         var top = bounds.Y + ((bounds.Height - size) / 2);
 
@@ -1510,7 +1532,7 @@ internal sealed class OutlineView : ListView
     }
 
     /// <summary>Faint vertical rules showing how deep a sub-task sits.</summary>
-    private static void DrawGuides(Graphics g, Rectangle bounds, int depth, Color colour)
+    private static void DrawGuides(Graphics g, Rectangle bounds, int depth, int indent, Color colour)
     {
         if (depth == 0)
             return;
@@ -1518,7 +1540,7 @@ internal sealed class OutlineView : ListView
         using var pen = new Pen(colour);
         for (var level = 0; level < depth; level++)
         {
-            var x = bounds.X + (level * IndentWidth) + (IndentWidth / 2);
+            var x = bounds.X + (level * indent) + (indent / 2);
             g.DrawLine(pen, x, bounds.Top, x, bounds.Bottom);
         }
     }
@@ -1583,7 +1605,7 @@ internal sealed class OutlineView : ListView
     /// <summary>Draws a colour's dot at the left of <paramref name="bounds"/>, and takes its room.</summary>
     private void DrawDot(Graphics g, ref Rectangle bounds, Color colour)
     {
-        var size = Math.Min(8, bounds.Height - 8);
+        var size = Math.Min(AtScale(DotAt96), bounds.Height - AtScale(8));
         if (size <= 0)
             return;
 
@@ -1594,14 +1616,16 @@ internal sealed class OutlineView : ListView
         bounds.Width = Math.Max(0, bounds.Width - taken);
     }
 
-    private static void DrawPriority(Graphics g, Rectangle bounds, Priority priority)
+    private static void DrawPriority(Graphics g, Rectangle bounds, Priority priority, int dpi)
     {
         if (priority == Priority.P4)
             return;
 
         var colour = Theme.ForPriority(priority);
 
-        var size = Math.Min(9, bounds.Height - 8);
+        var size = Math.Min(StartupLayout.Scaled(PriorityDotAt96, dpi), bounds.Height - StartupLayout.Scaled(8, dpi));
+        if (size <= 0)
+            return;
 
         Dots.Fill(
             g,

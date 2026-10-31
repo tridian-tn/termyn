@@ -27,7 +27,10 @@ internal sealed class SearchBox : TextBox
 
     private const int EcRightMargin = 0x0002;
 
-    /// <summary>How wide the cross is, how far it sits in from the edges, and the two together.</summary>
+    /// <summary>
+    /// How wide the cross is, how far it sits in from the edges, and the two together, at 100%.
+    /// </summary>
+    /// <remarks>Scaled to the display where they're used, so the cross grows with the words beside it.</remarks>
     private const int ResetWidth = 18;
 
     private const int Inset = 3;
@@ -201,11 +204,27 @@ internal sealed class SearchBox : TextBox
 
         Colour();
         PlaceReset();
-
-        // Keeps the words off the cross. Without it a long search runs under it and the last of
-        // what was typed is behind the thing offering to delete it.
-        SendMessage(Handle, EmSetMargins, EcRightMargin, ResetRoom << 16);
+        KeepWordsOffReset();
     }
+
+    /// <summary>Sizes the cross and the room kept for it again on a screen of another scale.</summary>
+    protected override void RescaleConstantsForDpi(int deviceDpiOld, int deviceDpiNew)
+    {
+        base.RescaleConstantsForDpi(deviceDpiOld, deviceDpiNew);
+
+        if (!IsHandleCreated)
+            return;
+
+        PlaceReset();
+        KeepWordsOffReset();
+    }
+
+    /// <summary>
+    /// Keeps the words off the cross. Without it a long search runs under it and the last of what
+    /// was typed is behind the thing offering to delete it.
+    /// </summary>
+    private void KeepWordsOffReset()
+        => SendMessage(Handle, EmSetMargins, EcRightMargin, LogicalToDeviceUnits(ResetRoom) << 16);
 
     protected override void OnSizeChanged(EventArgs e)
     {
@@ -251,11 +270,12 @@ internal sealed class SearchBox : TextBox
     /// </remarks>
     private void PlaceReset()
     {
-        var room = Math.Max(ClientSize.Height - (Inset * 2), 1);
-        var size = Math.Min(ResetWidth, room);
+        var inset = LogicalToDeviceUnits(Inset);
+        var room = Math.Max(ClientSize.Height - (inset * 2), 1);
+        var size = Math.Min(LogicalToDeviceUnits(ResetWidth), room);
 
         _reset.Bounds = new Rectangle(
-            ClientSize.Width - size - Inset,
+            ClientSize.Width - size - inset,
             (ClientSize.Height - size) / 2,
             size,
             size);

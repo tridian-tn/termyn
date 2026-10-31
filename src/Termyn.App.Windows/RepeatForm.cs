@@ -282,13 +282,29 @@ internal sealed class RepeatForm : Form
         foreach (var box in _days)
             box.Checked = rule.Days.Contains((DayOfWeek)box.Tag!);
 
-        _start.Value = (rule.Start ?? day).ToDateTime(TimeOnly.MinValue);
+        _start.Value = Within(_start, rule.Start ?? day);
         _time.Value = AnyDay + (rule.Time ?? Morning).ToTimeSpan();
         _time.Checked = rule.Time is not null;
 
-        _until.Value = (rule.Until ?? day.AddMonths(1)).ToDateTime(TimeOnly.MinValue);
+        _until.Value = Within(_until, rule.Until ?? (day < DateOnly.MaxValue.AddMonths(-1) ? day.AddMonths(1) : day));
         _endsOn.Checked = rule.Until is not null;
         _never.Checked = rule.Until is null;
+    }
+
+    /// <summary>
+    /// A day as the nearest one a date picker can show.
+    /// </summary>
+    /// <remarks>
+    /// The days come from the account's words, which can name one before 1753 or after 9998, and a
+    /// picker throws on being given either rather than settling for the nearest it has.
+    /// </remarks>
+    /// <param name="picker">The picker the day is for</param>
+    /// <param name="day">The day asked for</param>
+    /// <returns>That day, or the picker's first or last</returns>
+    private static DateTime Within(DateTimePicker picker, DateOnly day)
+    {
+        var at = day.ToDateTime(TimeOnly.MinValue);
+        return at < picker.MinDate ? picker.MinDate.Date : at > picker.MaxDate ? picker.MaxDate.Date : at;
     }
 
     /// <summary>Puts the unit list in the singular or the plural to go with the number before it.</summary>

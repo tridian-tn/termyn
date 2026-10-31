@@ -53,7 +53,7 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(handler));
 
         using var destination = new MemoryStream();
-        await client.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken);
+        await client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal("Bearer", handler.LastRequest!.Headers.Authorization!.Scheme);
         Assert.Equal("tok", handler.LastRequest.Headers.Authorization.Parameter);
@@ -66,7 +66,62 @@ public class AttachmentApiTests
 
         using var destination = new MemoryStream();
         await Assert.ThrowsAsync<TodoistAuthException>(
-            () => client.DownloadAsync("tok", "https://files.todoist.test/a", destination, ct: TestContext.Current.CancellationToken));
+            () => client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("https://evil.example/a")]
+    [InlineData("https://eviltodoist.com/a")]
+    [InlineData("https://files.todoist.com.evil.example/a")]
+    [InlineData("https://files.todoist.com@evil.example/a")]
+    [InlineData("https://files.todoist.com:8443/a")]
+    public async Task A_file_anywhere_but_todoist_is_fetched_without_the_token(string url)
+    {
+        // The url is whatever the comment says, and on a shared project anyone can write one. Sent
+        // the token, a server of their own would have it.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) });
+        var client = new TodoistApiClient(new HttpClient(handler));
+
+        using var destination = new MemoryStream();
+        await client.DownloadAsync("tok", url, destination, ct: TestContext.Current.CancellationToken);
+
+        Assert.Null(handler.LastRequest!.Headers.Authorization);
+        Assert.Equal([1], destination.ToArray());
+    }
+
+    [Fact]
+    public async Task Somebody_elses_server_turning_a_download_away_says_nothing_about_the_token()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))));
+
+        using var destination = new MemoryStream();
+        var ex = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.DownloadAsync("tok", "https://evil.example/a", destination, ct: TestContext.Current.CancellationToken));
+
+        Assert.Equal(401, ex.Status);
+    }
+
+    [Theory]
+    [InlineData("http://files.todoist.com/a")]
+    [InlineData("http://evil.example/a")]
+    [InlineData("/uploads/a.pdf")]
+    [InlineData("files.todoist.com/a")]
+    [InlineData("file:///etc/passwd")]
+    [InlineData("ftp://files.todoist.com/a")]
+    [InlineData("not a url at all")]
+    [InlineData("")]
+    public async Task A_file_address_that_isnt_https_is_refused_before_anything_is_sent(string url)
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) });
+        var client = new TodoistApiClient(new HttpClient(handler));
+
+        using var destination = new MemoryStream();
+        var ex = await Assert.ThrowsAsync<TodoistUnsafeAddressException>(
+            () => client.DownloadAsync("tok", url, destination, ct: TestContext.Current.CancellationToken));
+
+        // A refusal rather than being offline: nothing was tried, so "try again later" would be untrue.
+        Assert.False(ex.Unreachable);
+        Assert.Null(handler.LastRequest);
     }
 
     [Fact]
@@ -179,6 +234,35 @@ public class AttachmentApiTests
         var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
 
         await client.DeleteUploadAsync("tok", "https://files.todoist.test/a", TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_forbidden_file_is_an_ordinary_failure_rather_than_a_rejected_token()
+    {
+        // A file the account may not see. Read as a bad token, it signed the user out over a permission.
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden))));
+        using var destination = new MemoryStream();
+        using var file = new MemoryStream([1]);
+
+        var download = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken));
+        var upload = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken));
+        var delete = await Assert.ThrowsAsync<TodoistNetworkException>(
+            () => client.DeleteUploadAsync("tok", "https://files.todoist.com/a", TestContext.Current.CancellationToken));
+
+        Assert.All([download, upload, delete], ex => Assert.Equal(403, ex.Status));
+    }
+
+    [Fact]
+    public async Task A_rejected_token_on_an_upload_or_delete_is_still_one()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized))));
+        using var file = new MemoryStream([1]);
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => client.UploadAsync("tok", file, "a.pdf", TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<TodoistAuthException>(
+            () => client.DeleteUploadAsync("tok", "https://files.todoist.com/a", TestContext.Current.CancellationToken));
     }
 
     [Fact]

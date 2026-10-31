@@ -26,17 +26,39 @@ public class TodoistNetworkException : Exception
     public int? Status { get; }
 
     /// <summary>Whether nothing answered at all — no connection, or a request that timed out.</summary>
-    public bool Unreachable => Status is null;
+    public virtual bool Unreachable => Status is null;
+}
+
+/// <summary>
+/// Raised before anything is sent, when a url isn't one the client is willing to fetch from.
+/// </summary>
+/// <remarks>
+/// A network failure by type only so that callers already mapping those show it as a failure rather
+/// than letting it escape. Nothing was tried, so it is never reported as being offline.
+/// </remarks>
+public sealed class TodoistUnsafeAddressException : TodoistNetworkException
+{
+    public TodoistUnsafeAddressException(string message)
+        : base(message)
+    {
+    }
+
+    /// <inheritdoc />
+    public override bool Unreachable => false;
 }
 
 /// <summary>
 /// Raised when Todoist answered <c>429</c>. Distinct from an ordinary failure because the fix is to
 /// wait rather than to retry: the caller is being asked to stop for a while, not told something broke.
 /// </summary>
+/// <remarks>
+/// Carries the status, so it isn't <see cref="TodoistNetworkException.Unreachable"/>: the server
+/// answered, and telling the user they're offline would be untrue.
+/// </remarks>
 public sealed class TodoistRateLimitException : TodoistNetworkException
 {
     public TodoistRateLimitException(string message, TimeSpan? retryAfter)
-        : base(message) => RetryAfter = retryAfter;
+        : base(message, 429) => RetryAfter = retryAfter;
 
     /// <summary>How long the server asked us to wait, when it said. Null means it didn't.</summary>
     public TimeSpan? RetryAfter { get; }

@@ -100,6 +100,18 @@ public class CommandsTests
     }
 
     [Fact]
+    public void A_new_sub_task_goes_by_what_the_model_says_rather_than_the_rows_indent()
+    {
+        // A row at the left of a search or of Upcoming's days can be four levels down in the
+        // account, and the indent it's drawn at said there was room under it.
+        var shallow = Row() with { Depth = 0 };
+
+        Assert.False(State(AppCommand.NewSubtask, new CommandContext(shallow, new TaskAbilities())).Enabled);
+        Assert.True(State(AppCommand.NewSubtask, new CommandContext(shallow, new TaskAbilities(CanAddSubtask: true))).Enabled);
+        Assert.False(State(AppCommand.NewSubtask, new CommandContext(Abilities: new TaskAbilities(CanAddSubtask: true))).Enabled);
+    }
+
+    [Fact]
     public void Moving_a_row_is_greyed_at_the_end_it_has_reached()
     {
         // The top of the list and the bottom, which is also how the pair says where the row sits.
@@ -353,8 +365,8 @@ public class CommandsTests
         var first = presenter.AbilitiesFor("a");
         var second = presenter.AbilitiesFor("b");
 
-        Assert.Equal(new TaskAbilities(CanIndent: false, CanOutdent: false, CanMoveUp: false, CanMoveDown: true, CanMoveTo: true, CanShowInTodoist: true), first);
-        Assert.Equal(new TaskAbilities(CanIndent: true, CanOutdent: false, CanMoveUp: true, CanMoveDown: false, CanMoveTo: true, CanShowInTodoist: true), second);
+        Assert.Equal(new TaskAbilities(CanIndent: false, CanOutdent: false, CanMoveUp: false, CanMoveDown: true, CanMoveTo: true, CanShowInTodoist: true, CanAddSubtask: true), first);
+        Assert.Equal(new TaskAbilities(CanIndent: true, CanOutdent: false, CanMoveUp: true, CanMoveDown: false, CanMoveTo: true, CanShowInTodoist: true, CanAddSubtask: true), second);
     }
 
     [Fact]

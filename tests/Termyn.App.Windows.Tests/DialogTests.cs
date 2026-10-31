@@ -72,6 +72,31 @@ public class DialogTests
     }
 
     [WinFormsFact]
+    public void The_label_dialog_names_its_task_with_any_ampersand_in_it()
+    {
+        using var dialog = LabelPickerForm.For("Books & Papers", [], []);
+        dialog.CreateControl();
+
+        var heading = Every(dialog).OfType<Label>().Single(l => l.Text == "Books & Papers");
+
+        Assert.False(heading.UseMnemonic, "the heading would eat the ampersand");
+    }
+
+    [WinFormsFact]
+    public void Enter_in_the_label_name_box_adds_the_label_and_leaves_the_dialog_open()
+    {
+        // The accept button used to take the key before the box saw it, closing the dialog. Shown,
+        // off the screen, since a box nobody has shown can't take the focus.
+        using var dialog = LabelPickerForm.For("Ship it", ["home"], []);
+        TestWindow.ShowOffScreen(dialog);
+
+        Assert.True(dialog.EnterName("errands"));
+
+        Assert.Equal(["errands"], dialog.Ticked);
+        Assert.Equal(DialogResult.None, dialog.DialogResult);
+    }
+
+    [WinFormsFact]
     public void A_prompt_with_nothing_to_name_says_nothing()
     {
         // Every other caller has one thing it could be acting on and has already said so in the

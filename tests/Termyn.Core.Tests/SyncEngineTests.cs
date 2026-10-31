@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Termyn.Core.Api;
 using Termyn.Core.Model;
+using Termyn.Core.Platform;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
 
@@ -811,6 +812,10 @@ public class SyncEngineTests
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
+        // Failed rather than cancelled, keeping the new task until the failure is let go.
+        Assert.Contains(engine.Snapshot().Items, i => i.Id == temp);
+        engine.DismissRefusedAdds();
+
         // The reorder went with the failed create, so the server never hears about it: the local
         // positions must go back rather than silently diverging.
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
@@ -946,7 +951,8 @@ public class SyncEngineTests
     public async Task A_tombstone_withheld_by_a_pending_write_is_applied_once_that_write_resolves()
     {
         var api = new FakeApi();
-        var engine = SeededEngine(api);
+        var clock = new FixedClock(new DateOnly(2026, 7, 31));
+        var engine = SeededEngine(api, clock);
 
         engine.UpdateItem("i1", new JsonObject { ["content"] = "LOCAL" });
 
@@ -954,6 +960,8 @@ public class SyncEngineTests
         await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Single(engine.Snapshot().Items);
 
+        // Unanswered, so the edit is left a while before it goes again.
+        clock.Advance(TimeSpan.FromMinutes(1));
         api.Next = cmds => Resp("s3", status: (cmds.Single().Uuid, true));
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
@@ -976,6 +984,11 @@ public class SyncEngineTests
             return Resp("s1", status: (parentAdd.Uuid, false));
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        // Kept, all three, and failed with the parent rather than left to be refused one by one.
+        Assert.Equal(3, engine.Snapshot().Items.Count);
+        Assert.Equal(3, engine.FailedCount);
+        engine.DismissRefusedAdds();
 
         Assert.Equal(0, engine.PendingCount);
         Assert.Empty(engine.Snapshot().Items);
@@ -1007,12 +1020,15 @@ public class SyncEngineTests
     public async Task A_command_the_server_never_reports_on_eventually_fails()
     {
         var api = new FakeApi { Next = _ => Resp("s1") };
-        var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets(), attemptCeiling: 2);
+        var clock = new FixedClock(new DateOnly(2026, 7, 31));
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets(), clock, attemptCeiling: 2);
         engine.AddItem(new JsonObject { ["content"] = "Orphan" });
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, engine.PendingCount);
 
+        // Left a while before it's asked about again.
+        clock.Advance(TimeSpan.FromMinutes(1));
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, engine.PendingCount);
@@ -1510,11 +1526,11 @@ public class SyncEngineTests
         => new(api, new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" });
 
     /// <summary>An engine holding one cached item "i1" with content "A", and no pending commands.</summary>
-    private static SyncEngine SeededEngine(FakeApi? api = null)
+    private static SyncEngine SeededEngine(FakeApi? api = null, IClock? clock = null)
     {
         var store = new InMemorySnapshotStore();
         store.PutResource("items", "i1", """{"id":"i1","content":"A","checked":false}""");
-        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, clock);
         engine.Load();
         return engine;
     }

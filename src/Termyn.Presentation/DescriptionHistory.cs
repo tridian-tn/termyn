@@ -121,9 +121,19 @@ public sealed class DescriptionHistory
     }
 
     /// <summary>The state after this one, or null when nothing has been undone.</summary>
+    /// <remarks>
+    /// What is on screen is noted first, as undo notes it. Typing after an undo and pressing redo
+    /// before the pause that records it would otherwise throw that typing away for the state the
+    /// undo left behind. Typed over, the undone states are a branch nobody is on any more, so
+    /// there is nothing to redo — what any editor does.
+    /// </remarks>
+    /// <param name="current">What the box says now</param>
+    /// <param name="caret">Where the caret is now</param>
     /// <returns>What to put in the box, or null</returns>
-    public Snapshot? Redo()
+    public Snapshot? Redo(string current, int caret)
     {
+        Record(current, caret);
+
         if (!CanRedo)
             return null;
 

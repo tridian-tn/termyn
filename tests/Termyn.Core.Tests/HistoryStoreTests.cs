@@ -67,6 +67,29 @@ public class HistoryStoreTests : IDisposable
     }
 
     [Fact]
+    public void The_time_is_read_back_the_same_whatever_the_machine_is_set_to()
+    {
+        // Read exactly as it was written rather than left to the machine's culture to recognise —
+        // here one whose calendar isn't the Gregorian one. Nothing that comes back is formatted, so
+        // no culture's output is assumed.
+        using var store = new SqliteHistoryStore(_path);
+        var at = new DateTimeOffset(2026, 8, 15, 9, 30, 15, TimeSpan.FromHours(2));
+        store.Append([new StoredAction(at, "Completed something")]);
+
+        var was = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("th-TH");
+
+            Assert.Equal(at, Assert.Single(store.Recent(10)).At);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = was;
+        }
+    }
+
+    [Fact]
     public void Only_as_many_as_were_asked_for()
     {
         using var store = new SqliteHistoryStore(_path);

@@ -16,9 +16,9 @@ namespace Termyn.Presentation;
 /// Whether letting it go takes something off this machine. A change to something that already
 /// exists was put back when the engine gave up on it, so dismissing costs nothing.
 ///
-/// A creation is the other way about. One the server refuses outright is cancelled there and then
-/// and never reaches this list at all, so a creation that does reach it is one the server never
-/// ruled on — which is why what was typed was kept, and dismissing is what finally takes it away.
+/// A creation is the other way about. Whether the server refused it or never ruled on it, what was
+/// typed is kept on this machine so it isn't lost with the refusal, and dismissing is what finally
+/// takes it away — along with anything queued on top of it.
 /// </param>
 /// <param name="Unruled">
 /// Whether the server never said either way, as against having refused it. Only a refusal says

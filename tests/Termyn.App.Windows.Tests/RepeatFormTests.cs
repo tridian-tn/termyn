@@ -120,4 +120,21 @@ public class RepeatFormTests
         Assert.Equal("This task repeats \"every other fri\", which can't be shown here. Saving replaces it.", dialog.Unreadable);
         Assert.Equal("every tue starting 2026-08-04", dialog.Words);
     }
+
+    [WinFormsFact]
+    public void Days_past_what_the_calendar_can_show_open_on_the_nearest_it_can()
+    {
+        // The account's words can name a day before 1753 or after 9998, and the date pickers threw
+        // on being handed one, so the dialog didn't open at all.
+        var rule = new RepeatRule(RepeatUnit.Week, Weekdays: [DayOfWeek.Tuesday], Start: new DateOnly(1700, 1, 5), Until: new DateOnly(9999, 12, 31));
+
+        using var dialog = Build(rule);
+
+        Assert.Equal(new DateOnly(1753, 1, 1), dialog.Rule.Start);
+        Assert.Equal(new DateOnly(9998, 12, 31), dialog.Rule.Until);
+
+        // A start already gone by isn't written for a repeat on named weekdays: they come round on
+        // their own from today.
+        Assert.Equal("every tue until 9998-12-31", dialog.Words);
+    }
 }

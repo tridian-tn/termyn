@@ -27,8 +27,159 @@ public class TodoistApiClientTests
         var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         Assert.Same(running, finished);
-        // A cancellation, not some other failure — the point is that the deadline is what ended it.
-        Assert.IsAssignableFrom<OperationCanceledException>(await running);
+
+        // A timeout, the same as one before the headers: let out as a bare cancellation, the caller
+        // took it for its own and the sync loop reported it as a crash rather than as being offline.
+        var thrown = Assert.IsType<TodoistNetworkException>(await running);
+        Assert.True(thrown.Unreachable);
+        Assert.IsAssignableFrom<OperationCanceledException>(thrown.InnerException);
+    }
+
+    [Fact]
+    public async Task Calling_a_sync_off_part_way_through_its_body_is_still_a_cancellation()
+    {
+        var client = new TodoistApiClient(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new StallingStream()),
+        })));
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.SyncAsync("tok", "*", ["items"], [], cts.Token));
+    }
+
+    [Fact]
+    public async Task A_download_that_stops_moving_times_out()
+    {
+        var client = new TodoistApiClient(
+            new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) })),
+            idle: TimeSpan.FromMilliseconds(250));
+
+        using var destination = new MemoryStream();
+        var running = Record.ExceptionAsync(() => client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken)).AsTask();
+        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        Assert.Same(running, finished);
+        Assert.True(Assert.IsType<TodoistNetworkException>(await running).Unreachable);
+    }
+
+    [Fact]
+    public async Task A_download_that_keeps_moving_finishes_however_long_it_takes()
+    {
+        // A whole-transfer deadline failed a large file on a slow link that was doing nothing wrong.
+        var client = new TodoistApiClient(
+            new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new TricklingStream(8, TimeSpan.FromMilliseconds(100))) })),
+            deadline: TimeSpan.FromMilliseconds(300),
+            idle: TimeSpan.FromMilliseconds(500));
+
+        using var destination = new MemoryStream();
+        await client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(8, destination.Length);
+    }
+
+    [Fact]
+    public async Task An_upload_that_keeps_moving_finishes_however_long_it_takes()
+    {
+        // The handler reads the whole file before answering, the way the wire does.
+        var client = new TodoistApiClient(
+            new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"file_url":"https://files.todoist.com/a"}""") })),
+            deadline: TimeSpan.FromMilliseconds(300),
+            idle: TimeSpan.FromMilliseconds(500));
+
+        using var file = new TricklingStream(8, TimeSpan.FromMilliseconds(100));
+        var attachment = await client.UploadAsync("tok", file, "a.bin", TestContext.Current.CancellationToken);
+
+        Assert.Equal("https://files.todoist.com/a", attachment["file_url"]!.ToString());
+    }
+
+    [Fact]
+    public async Task An_upload_the_server_takes_a_while_to_store_still_lands()
+    {
+        // The stall timer used to run on past the last byte, so a server taking longer to store the
+        // file than the wait for a block cut off an upload that had gone through.
+        var client = new TodoistApiClient(
+            new HttpClient(new SlowToAnswerHandler(TimeSpan.FromMilliseconds(750))),
+            deadline: TimeSpan.FromSeconds(5),
+            idle: TimeSpan.FromMilliseconds(250));
+
+        using var file = new MemoryStream([1, 2, 3]);
+        var attachment = await client.UploadAsync("tok", file, "a.bin", TestContext.Current.CancellationToken);
+
+        Assert.Equal("https://files.todoist.com/a", attachment["file_url"]!.ToString());
+    }
+
+    /// <summary>Reads the whole request, then takes its time over the answer, as storing a file does.</summary>
+    private sealed class SlowToAnswerHandler(TimeSpan thinking) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content is not null)
+                await request.Content.CopyToAsync(Stream.Null, cancellationToken);
+
+            await Task.Delay(thinking, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"file_url":"https://files.todoist.com/a"}""") };
+        }
+    }
+
+    [Fact]
+    public async Task An_upload_whose_answer_never_comes_times_out()
+    {
+        var client = new TodoistApiClient(new HttpClient(new SilentHandler()), idle: TimeSpan.FromMilliseconds(250));
+
+        using var file = new MemoryStream([1, 2, 3]);
+        var running = Record.ExceptionAsync(() => client.UploadAsync("tok", file, "a.bin", TestContext.Current.CancellationToken)).AsTask();
+        var finished = await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        Assert.Same(running, finished);
+        Assert.True(Assert.IsType<TodoistNetworkException>(await running).Unreachable);
+    }
+
+    [Fact]
+    public void The_shared_client_leaves_the_bounds_to_each_call()
+    {
+        using var http = TodoistHttp.CreateClient();
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
+    }
+
+    /// <summary>A body or a file that arrives a byte at a time, steadily, for as long as it lasts.</summary>
+    private sealed class TricklingStream(int bytes, TimeSpan gap) : Stream
+    {
+        private int _left = bytes;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (_left == 0 || buffer.Length == 0)
+                return 0;
+
+            await Task.Delay(gap, ct).ConfigureAwait(false);
+            buffer.Span[0] = 1;
+            _left--;
+            return 1;
+        }
+    }
+
+    /// <summary>A server that takes the request and never answers it.</summary>
+    private sealed class SilentHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
     }
 
     /// <summary>A body that starts arriving and then doesn't finish — a stalled server, or a dead link.</summary>
@@ -129,6 +280,42 @@ public class TodoistApiClientTests
         Assert.False(status.Ok);
         Assert.Equal("15", status.ErrorCode);
         Assert.Null(status.Error);
+    }
+
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"i1":"ok","i2":"ok"}""")]
+    public async Task A_verdict_that_names_no_error_is_a_success(string verdict)
+    {
+        // Read as a refusal, a write the server took was rolled back here and the two disagreed.
+        var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":""" + verdict + "}}");
+
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
+
+        Assert.True(result.SyncStatus["u"].Ok);
+    }
+
+    [Fact]
+    public async Task A_verdict_per_thing_with_an_error_among_them_is_a_refusal()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":{"i1":"ok","i2":{"error_code":22,"error":"Item not found","http_code":404}}}}""");
+
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
+
+        var status = result.SyncStatus["u"];
+        Assert.False(status.Ok);
+        Assert.Equal("Item not found", status.Error);
+        Assert.Equal(404, status.HttpCode);
+    }
+
+    [Fact]
+    public async Task A_refusal_says_what_status_the_server_gave_it()
+    {
+        var client = ClientReturning(HttpStatusCode.OK, """{"sync_status":{"u":{"error_code":42,"error":"Service unavailable","http_code":503}}}""");
+
+        var result = await client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken);
+
+        Assert.Equal(503, result.SyncStatus["u"].HttpCode);
     }
 
     [Fact]
@@ -283,6 +470,20 @@ public class TodoistApiClientTests
         var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(() => client.SyncAsync("tok", "*", ["items"], [], TestContext.Current.CancellationToken));
 
         Assert.Equal(TimeSpan.FromSeconds(42), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task A_rate_limit_is_an_answer_rather_than_being_offline()
+    {
+        // Read as unreachable, a download refused for it told the user they were offline.
+        var client = ClientReturning(HttpStatusCode.TooManyRequests, "{}");
+
+        using var destination = new MemoryStream();
+        var ex = await Assert.ThrowsAsync<TodoistRateLimitException>(
+            () => client.DownloadAsync("tok", "https://files.todoist.com/a", destination, ct: TestContext.Current.CancellationToken));
+
+        Assert.False(ex.Unreachable);
+        Assert.Equal(429, ex.Status);
     }
 
     [Fact]

@@ -18,15 +18,16 @@ public sealed class InMemorySnapshotStore : ISnapshotStore
         DeferredDeletes = _deferredDeletes.ToList(),
     };
 
-    public void SaveDeferredDeletes(IReadOnlyList<ResourceKey> keys) => _deferredDeletes = keys.ToList();
-
-    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken)
+    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null)
     {
         foreach (var u in upserts)
             _resources[(u.Type, u.Id)] = u.Json;
         foreach (var d in deletes)
             _resources.Remove((d.Type, d.Id));
         SyncToken = syncToken;
+
+        if (deferredDeletes is not null)
+            _deferredDeletes = deferredDeletes.ToList();
     }
 
     public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)

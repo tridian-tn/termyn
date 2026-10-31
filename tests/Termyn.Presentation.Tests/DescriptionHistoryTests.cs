@@ -60,8 +60,21 @@ public class DescriptionHistoryTests
         history.Undo("one two", 7);
 
         Assert.True(history.CanRedo);
-        Assert.Equal("one two", history.Redo()?.Text);
-        Assert.Null(history.Redo());
+        Assert.Equal("one two", history.Redo("one", 3)?.Text);
+        Assert.Null(history.Redo("one two", 7));
+    }
+
+    [Fact]
+    public void Typing_after_an_undo_is_not_lost_by_pressing_redo_before_the_pause()
+    {
+        // Undo, type a word, Ctrl+Y inside the pause that would have recorded it. Redo used to put
+        // back the undone state over the typing; typed over, there's nothing left to redo.
+        var history = After("one", "one two");
+        history.Undo("one two", 7);
+
+        Assert.Null(history.Redo("one three", 9));
+        Assert.False(history.CanRedo);
+        Assert.Equal("one", history.Undo("one three", 9)?.Text);
     }
 
     [Fact]
@@ -90,7 +103,7 @@ public class DescriptionHistoryTests
         var undone = history.Undo("one two three, still being typed", 32);
 
         Assert.Equal("one two", undone?.Text);
-        Assert.Equal("one two three, still being typed", history.Redo()?.Text);
+        Assert.Equal("one two three, still being typed", history.Redo("one two", 7)?.Text);
     }
 
     [Fact]

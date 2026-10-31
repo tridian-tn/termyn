@@ -64,6 +64,9 @@ internal sealed class FailedChangesForm : Form
             Location = new Point(14, 228),
             Size = new Size(492, 76),
             ForeColor = theme.Muted,
+
+            // Names what was changed, and the server's own words; an ampersand in either is a character.
+            UseMnemonic = false,
         };
 
         _dismiss = new Button { Text = Strings.FailedDismiss, Location = new Point(14, 316), Size = new Size(110, 30) };

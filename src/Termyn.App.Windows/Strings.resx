@@ -105,6 +105,14 @@
     <value>Termyn — quick add</value>
     <comment>Title bar of the small window the global hotkey opens for adding a task.</comment>
   </data>
+  <data name="QuickAddNotAdded" xml:space="preserve">
+    <value>This task wasn't added:
+
+{0}
+
+{1}</value>
+    <comment>Message from the quick-add window when an earlier task failed after the window was opened again for another one. {0} is the earlier task as it was typed and {1} the reason it wasn't added.</comment>
+  </data>
   <data name="SettingsTitle" xml:space="preserve">
     <value>Termyn — settings</value>
     <comment>Title bar of the settings dialog.</comment>
@@ -493,6 +501,10 @@
     <value>Editing — Ctrl+Enter to save, Esc to cancel</value>
     <comment>Hint beside the comment box while changing an existing comment.</comment>
   </data>
+  <data name="CommentNotSent" xml:space="preserve">
+    <value>The comment couldn't be saved, as what it was on has gone. What you typed is still in the box.</value>
+    <comment>Status bar when posting or editing a comment is turned down because its task, project or comment is no longer there.</comment>
+  </data>
   <data name="LabelsTitle" xml:space="preserve">
     <value>Labels</value>
     <comment>Title bar of the dialog for choosing a task's labels.</comment>
@@ -635,6 +647,10 @@
 {0}</value>
     <comment>Message when signing out fails. {0} is the error's own text.</comment>
   </data>
+  <data name="SyncStillRunning" xml:space="preserve">
+    <value>A sync was still running and didn't stop in time. Start Termyn again and try once more.</value>
+    <comment>The reason given in the sign-out or switch-account failure message when a background sync didn't stop as Termyn closed.</comment>
+  </data>
   <data name="MainReconnect" xml:space="preserve">
     <value>Todoist turned your token away. Click here to reconnect; until then nothing can be changed.</value>
     <comment>Status bar when Todoist refuses the stored token. Clicking the status bar opens the token dialog.</comment>
@@ -719,6 +735,10 @@
     <value>Another application already owns {0} — quick-add has no hotkey.</value>
     <comment>Status bar when another program has the chosen hotkey. {0} is the key combination.</comment>
   </data>
+  <data name="HotkeyTakenKept" xml:space="preserve">
+    <value>Another application already owns {0}, so quick-add keeps {1}.</value>
+    <comment>Status bar when another program has the newly chosen hotkey and the one from before still works. {0} is the combination asked for and {1} the one kept.</comment>
+  </data>
   <data name="UpdatesChecking" xml:space="preserve">
     <value>Checking for updates…</value>
     <comment>Status bar while asking GitHub for a newer release.</comment>
@@ -764,6 +784,18 @@ Open the release page?</value>
   <data name="StatusSomethingWrong" xml:space="preserve">
     <value>Something went wrong: {0}</value>
     <comment>Status bar when an action fails. {0} is the error's own text.</comment>
+  </data>
+  <data name="UnexpectedError" xml:space="preserve">
+    <value>Something went wrong that Termyn didn't expect. It has carried on, and the details are in its log:
+
+{0}</value>
+    <comment>Message box after an unexpected failure Termyn recovered from. {0} is the log file's path, or the error's own text when there's no log yet.</comment>
+  </data>
+  <data name="UnexpectedErrorClosing" xml:space="preserve">
+    <value>Something went wrong that Termyn didn't expect, and it has to close. The details are here:
+
+{0}</value>
+    <comment>Message box after an unexpected failure Termyn can't carry on from. {0} is the log file's path, or the error's own text when there's no log yet.</comment>
   </data>
   <data name="DeleteLabelConfirm" xml:space="preserve">
     <value>Are you sure you want to permanently delete the label "{0}" and remove it from every task?</value>
@@ -823,6 +855,16 @@ It can't be brought back — Todoist has no undelete.</value>
     <value>The file couldn't be opened.</value>
     <comment>Message when a downloaded attachment couldn't be opened.</comment>
   </data>
+  <data name="FileNotOpened" xml:space="preserve">
+    <value>{0} was downloaded but couldn't be opened.</value>
+    <comment>Status bar when a downloaded attachment couldn't be handed to any program, not even through Windows' "open with" box. {0} is the file's name.</comment>
+  </data>
+  <data name="OpenRunnableConfirm" xml:space="preserve">
+    <value>Are you sure you want to open {0}?
+
+It's a kind of file that can run programs on this computer. Only open it if you know who attached it and were expecting it.</value>
+    <comment>Confirmation before opening an attachment that's a program, script, installer or shortcut. {0} is the file's name. The default answer is No.</comment>
+  </data>
   <data name="FileSaveFailed" xml:space="preserve">
     <value>The file couldn't be saved.</value>
     <comment>Message when an attachment couldn't be saved to the Downloads folder.</comment>
@@ -852,6 +894,10 @@ It can't be brought back — Todoist has no undelete.</value>
 
 {1}</value>
     <comment>Message when an attachment upload fails. {0} is the file's name and {1} the error's own text.</comment>
+  </data>
+  <data name="AttachOwnerGone" xml:space="preserve">
+    <value>{0} was uploaded, but the task or project it was going on has gone, so nothing was posted. What you typed is still in the box.</value>
+    <comment>Message when the task or project a file was being attached to was deleted while the file uploaded. {0} is the file's name.</comment>
   </data>
   <data name="RemoveAttachmentConfirm" xml:space="preserve">
     <value>Are you sure you want to remove {0} from this comment?

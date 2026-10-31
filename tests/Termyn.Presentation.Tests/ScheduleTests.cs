@@ -74,7 +74,7 @@ public class ScheduleTests
     [Fact]
     public void Each_entry_says_which_day_it_lands_on()
     {
-        using var _ = new CultureScope("en-GB");
+        using var _ = new CultureScope(Regions.British);
         var days = ScheduleDays.From(new DateOnly(2026, 10, 27), DayOfWeek.Saturday, DayOfWeek.Monday);
 
         // The weekday alone for the next two days, and the date with it further out, punctuated the
@@ -175,6 +175,7 @@ public class ScheduleTests
     [Fact]
     public void Moving_a_task_is_noted_in_what_has_been_done()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = NewPresenter(Store()).Presenter;
 
         presenter.Reschedule("plain", new DateOnly(2026, 11, 2));

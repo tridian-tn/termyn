@@ -12,8 +12,13 @@ namespace Termyn.Presentation.Tests;
 /// whatever the machine running the tests has changed in its region settings. The English ones are
 /// checked word for word. The others are checked against the pattern they should come out in,
 /// since what's in question is the order, and a region's abbreviations are its own data — German's
-/// "Okt." and "Mo" — which can change from one version of ICU to the next. Word for word bar one
-/// thing: the space before AM or PM, which <see cref="Meridiem"/> takes from the machine.
+/// "Okt." and "Mo" — which can change from one version of ICU to the next.
+///
+/// English has changed between versions too, and Windows, macOS and Linux each carry their own ICU.
+/// Newer ones put a narrow no-break space before AM, which is taken as a space here, and drop the
+/// comma after British English's weekday, which can't be: it's punctuation Termyn copies from the
+/// long date. So British English is checked against both long dates written out, and against its
+/// own for following whichever of them the machine has.
 /// </remarks>
 public class DisplayDatesTests
 {
@@ -33,18 +38,33 @@ public class DisplayDatesTests
     [InlineData("en-US", "Oct 5, 2026 9:30 AM")]
     [InlineData("ja-JP", "2026年10月5日 9:30")]
     public void A_date_and_time_follow_the_regions_order(string culture, string expected)
-    {
-        var region = CultureInfo.GetCultureInfo(culture);
-        Assert.Equal(Meridiem.AsWritten(expected, region), DisplayDates.DateAndTime(Moment, region));
-    }
+        => Assert.Equal(expected, Regions.Spaced(DisplayDates.DateAndTime(Moment, CultureInfo.GetCultureInfo(culture))));
 
     [Theory]
-    [InlineData("en-GB", "Mon, 5 Oct 09:30")]
-    [InlineData("en-US", "Mon, Oct 5 9:30 AM")]
-    public void A_weekday_goes_where_the_regions_long_date_puts_it(string culture, string expected)
+    [InlineData("en-GB", "dddd, d MMMM yyyy", "Mon, 5 Oct 09:30")]
+    [InlineData("en-GB", "dddd d MMMM yyyy", "Mon 5 Oct 09:30")]
+    [InlineData("en-US", "dddd, MMMM d, yyyy", "Mon, Oct 5 9:30 AM")]
+    public void A_weekday_goes_where_the_regions_long_date_puts_it(string culture, string longDate, string expected)
     {
-        var region = CultureInfo.GetCultureInfo(culture);
-        Assert.Equal(Meridiem.AsWritten(expected, region), DisplayDates.WeekdayAndTime(Moment, region));
+        // Only the long date is written out: the month and day, the time and the names are the
+        // culture's own.
+        var region = (CultureInfo)CultureInfo.GetCultureInfo(culture).Clone();
+        region.DateTimeFormat.LongDatePattern = longDate;
+
+        Assert.Equal(expected, Regions.Spaced(DisplayDates.WeekdayAndTime(Moment, region)));
+    }
+
+    [Fact]
+    public void A_weekday_is_punctuated_the_way_the_regions_own_long_date_is()
+    {
+        // Windows' ICU has "dddd, d MMMM yyyy" for British English, and newer ones, such as the
+        // ICU 74 Ubuntu 24.04 ships, have "dddd d MMMM yyyy". Whichever this machine has, the
+        // weekday follows it.
+        var british = CultureInfo.GetCultureInfo("en-GB");
+        var comma = british.DateTimeFormat.LongDatePattern.StartsWith("dddd,", StringComparison.Ordinal);
+
+        Assert.Equal(comma ? "Mon, 5 Oct 09:30" : "Mon 5 Oct 09:30", DisplayDates.WeekdayAndTime(Moment, british));
+        Assert.Equal(comma ? "Mon, 5 Oct" : "Mon 5 Oct", DisplayDates.WeekdayDayMonth(Day, british));
     }
 
     [Fact]
@@ -136,10 +156,18 @@ public class DisplayDatesTests
     }
 
     [Theory]
-    [InlineData("en-GB", "Monday, 5 October 2026")]
-    [InlineData("en-US", "Monday, October 5, 2026")]
-    public void A_day_in_full_is_the_regions_long_date(string culture, string expected)
-        => Assert.Equal(expected, DisplayDates.LongDay(Day, CultureInfo.GetCultureInfo(culture)));
+    [InlineData("en-GB", "^Monday,? 5 October 2026$")]
+    [InlineData("en-US", "^Monday, October 5, 2026$")]
+    public void A_day_in_full_is_the_regions_long_date(string culture, string looksLike)
+    {
+        // The long date as this machine's ICU has it, whose British comma comes and goes with the
+        // version, and which still has to read as a long date in the region's order.
+        var region = CultureInfo.GetCultureInfo(culture);
+        var written = DisplayDates.LongDay(Day, region);
+
+        Assert.Equal(Day.ToString(region.DateTimeFormat.LongDatePattern, region), written);
+        Assert.Matches(looksLike, written);
+    }
 
     [Fact]
     public void A_day_the_regions_calendar_cant_hold_is_written_the_invariant_way()

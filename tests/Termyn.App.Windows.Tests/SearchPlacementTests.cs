@@ -39,6 +39,30 @@ public class SearchPlacementTests
         Assert.Equal(new Padding(8, 12, 8, 12), MainForm.SearchPaddingAt(192));
     }
 
+    [WinFormsFact]
+    public void A_search_waits_for_the_typing_to_pause_and_a_sync_meanwhile_leaves_the_box_alone()
+    {
+        // Every keystroke used to render the whole outline. Held back now, the box is a letter or
+        // two ahead of the presenter for a moment, and a render in that moment mustn't take them off.
+        using var window = TestWindow.Build("termyn-search-pause.json", null, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        var search = TestWindow.Find<SearchBox>(window);
+
+        search.Text = "ship";
+
+        Assert.True(window.SearchPending);
+        Assert.Equal(string.Empty, presenter.SearchQuery);
+
+        // The fake server answers at once, so this has rendered by the time it returns.
+        _ = presenter.SyncAsync();
+        Assert.Equal("ship", search.Text);
+
+        // Emptying the box isn't typing, so it goes at once.
+        search.Text = string.Empty;
+        Assert.False(window.SearchPending);
+        Assert.Equal(string.Empty, presenter.SearchQuery);
+    }
+
     /// <summary>
     /// A control's bounds in the window's client area, however deep inside it the control sits.
     /// </summary>

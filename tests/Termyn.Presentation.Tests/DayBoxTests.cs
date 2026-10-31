@@ -200,7 +200,7 @@ public class DayBoxTests
         var was = System.Globalization.CultureInfo.CurrentCulture;
         try
         {
-            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-GB");
+            System.Globalization.CultureInfo.CurrentCulture = Regions.British;
 
             Assert.Equal("Tuesday, 4 August 2026 at 16:30", DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
             Assert.Equal("Tuesday, 4 August 2026", DayBoxText.ForDeadline(DayReading.On(new DateOnly(2026, 8, 4)), english: true).Says);
@@ -217,7 +217,7 @@ public class DayBoxTests
         var was = System.Globalization.CultureInfo.CurrentCulture;
         try
         {
-            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+            System.Globalization.CultureInfo.CurrentCulture = Regions.American;
 
             Assert.Equal(Meridiem.AsWritten("Tuesday, August 4, 2026 at 4:30 PM", System.Globalization.CultureInfo.CurrentCulture), DayBoxText.ForDue(DayReading.On(new DateOnly(2026, 8, 4), new TimeOnly(16, 30))).Says);
         }
@@ -249,7 +249,7 @@ public class DayBoxTests
         var was = System.Globalization.CultureInfo.CurrentCulture;
         try
         {
-            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("en-GB");
+            System.Globalization.CultureInfo.CurrentCulture = Regions.British;
 
             Assert.Equal("Tuesday, 4 August 2026 at 09:00", DayBoxText.ForReminder(DayReading.On(new DateOnly(2026, 8, 4)), english: true).Says);
         }
@@ -307,7 +307,9 @@ public class DayBoxTests
 
         var parse = presenter.Preview(CapturePreviewText.Hint(presenter.CaptureReadsDays)).Parse;
 
-        Assert.Equal("Add a task…", parse.Content);
+        // The account has no project or section of those names, so they stay in the title as
+        // Todoist would keep them. Everything else the hint offers is read out of it.
+        Assert.Equal("Add a task… #project /section", parse.Content);
         Assert.Equal(presenter.CaptureReadsDays, parse.DueDate is not null);
     }
 

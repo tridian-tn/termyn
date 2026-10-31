@@ -23,8 +23,7 @@
   </data>
   <!--
     What the client and the sync engine say when something goes wrong, for the dialogs that show an
-    exception's message. The rate-limit message stays in code: it drives the backoff and is only
-    ever logged, never shown.
+    exception's message.
   -->
   <data name="TokenRejected" xml:space="preserve">
     <value>Todoist rejected the API token.</value>
@@ -50,6 +49,10 @@
   <data name="DownloadFailedPartWay" xml:space="preserve">
     <value>The download from Todoist failed part-way.</value>
   </data>
+  <data name="UnsafeFileAddress" xml:space="preserve">
+    <value>The file's address isn't a secure web address, so Termyn won't download from it.</value>
+    <comment>An attachment whose url is plain http, relative or malformed. Shown after "Todoist wouldn't hand over (file)."</comment>
+  </data>
   <data name="UnexpectedUploadResponse" xml:space="preserve">
     <value>Todoist returned an unexpected upload response.</value>
   </data>
@@ -59,6 +62,19 @@
   <data name="UnexpectedHttpStatus" xml:space="preserve">
     <value>Todoist returned HTTP {0}.</value>
     <comment>{0} is the HTTP status code of an answer the client didn't expect.</comment>
+  </data>
+  <!-- What fetching a comment's file says when it goes wrong in a way the client didn't report. -->
+  <data name="AttachmentLargerThanSaid" xml:space="preserve">
+    <value>{0} was larger than Todoist said it would be, so the download was stopped.</value>
+    <comment>Shown when an attachment's download ran past the size its comment gives. {0} is the file's name.</comment>
+  </data>
+  <data name="AttachmentNotFetched" xml:space="preserve">
+    <value>{0} couldn't be downloaded.</value>
+    <comment>Shown when an attachment's download failed for a reason there's nothing more to say about. {0} is the file's name.</comment>
+  </data>
+  <data name="RateLimited" xml:space="preserve">
+    <value>Todoist is rate-limiting this account. Try again in a minute.</value>
+    <comment>Todoist answered 429. Shown when a file download is refused for it; a sync just waits.</comment>
   </data>
   <data name="TokenTurnedAway" xml:space="preserve">
     <value>Todoist turned the token away. Reconnect to make changes.</value>

@@ -7,12 +7,28 @@ namespace Termyn.Core.Attachments;
 /// <remarks>
 /// A name from an account isn't one this machine has to accept as a path. A separator in it would
 /// put the copy somewhere other than the folder it was saved to, so every character Windows refuses
-/// in a name becomes an underscore. Nothing else is touched, since keeping the name is the point.
+/// in a name becomes an underscore. Invisible format characters go, so a name can't read as one kind
+/// of file and be another, and a very long name is shortened. Nothing else is touched, since keeping
+/// the name is the point.
+///
+/// Public so the window can show a name the way it'll be saved, rather than as it came.
 /// </remarks>
-internal static class DownloadName
+public static class DownloadName
 {
     /// <summary>What a name with nothing usable left in it is saved as.</summary>
     private const string Fallback = "attachment";
+
+    /// <summary>
+    /// The most of a name, before its extension, that's kept.
+    /// </summary>
+    /// <remarks>
+    /// Well inside the 255 most file systems allow in one name, leaving room for a number and the
+    /// extension, and for a Downloads folder some way down a long path.
+    /// </remarks>
+    private const int MostKept = 120;
+
+    /// <summary>The longest extension that's kept as one when a name is shortened.</summary>
+    private const int LongestExtension = 16;
 
     /// <summary>
     /// What Windows refuses in a file name, besides the control characters.
@@ -40,18 +56,39 @@ internal static class DownloadName
     /// <returns>The same name with anything Windows refuses replaced</returns>
     public static string Safe(string fileName)
     {
-        var chars = fileName.ToCharArray();
+        var chars = FileRisk.Visible(fileName).ToCharArray();
         for (var i = 0; i < chars.Length; i++)
-            if (chars[i] < ' ' || Refused.Contains(chars[i]))
+            if (char.IsControl(chars[i]) || Refused.Contains(chars[i]))
                 chars[i] = '_';
 
         // Windows drops these from the end of a name by itself, so "notes." would be made as "notes",
         // which is a different name from the one just found to be free.
-        var name = new string(chars).TrimEnd('.', ' ');
+        var name = Shortened(new string(chars)).TrimEnd('.', ' ');
         if (name.Length == 0)
             return Fallback;
 
         return Devices.Contains(name.Split('.')[0].TrimEnd(' ')) ? "_" + name : name;
+    }
+
+    /// <summary>
+    /// A name cut to <see cref="MostKept"/> before its extension, which is kept whole.
+    /// </summary>
+    /// <remarks>
+    /// Counted in UTF-16 units, which is what the file systems' limits count, and never cut between
+    /// the two halves of a character outside the basic plane.
+    /// </remarks>
+    private static string Shortened(string name)
+    {
+        var extension = Path.GetExtension(name);
+        if (extension.Length > LongestExtension || extension.Length == name.Length)
+            extension = string.Empty;
+
+        var stem = name[..(name.Length - extension.Length)];
+        if (stem.Length <= MostKept)
+            return name;
+
+        var cut = char.IsHighSurrogate(stem[MostKept - 1]) ? MostKept - 1 : MostKept;
+        return stem[..cut].TrimEnd(' ') + extension;
     }
 
     /// <summary>

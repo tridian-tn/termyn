@@ -26,6 +26,9 @@ internal sealed class LabelPickerForm : Form
             Size = new Size(332, 20),
             AutoEllipsis = true,
             ForeColor = SystemColors.GrayText,
+
+            // The task's own name, in which an ampersand is a character rather than an access key.
+            UseMnemonic = false,
         };
 
         _list = new CheckedListBox
@@ -60,18 +63,42 @@ internal sealed class LabelPickerForm : Form
         AcceptButton = ok;
         CancelButton = cancel;
         Controls.AddRange([heading, _list, prompt, _fresh, add, ok, cancel]);
-
-        // Enter in the name box adds a label rather than accepting the dialog, which would discard it.
-        _fresh.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode != Keys.Enter)
-                return;
-
-            e.Handled = true;
-            e.SuppressKeyPress = true;
-            AddFresh();
-        };
     }
+
+    /// <summary>
+    /// Enter in the name box adds the label and leaves the dialog open for another.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than on the box's KeyDown, which never saw the key: a single-line box hands Enter
+    /// on, and the accept button took it first and closed the dialog. An empty box still accepts.
+    /// </remarks>
+    protected override bool ProcessDialogKey(Keys keyData)
+    {
+        if (keyData == Keys.Enter && _fresh.Focused && !string.IsNullOrWhiteSpace(_fresh.Text))
+        {
+            AddFresh();
+            return true;
+        }
+
+        return base.ProcessDialogKey(keyData);
+    }
+
+    /// <summary>The dialog, built and not shown, for a test to drive.</summary>
+    internal static LabelPickerForm For(string task, IReadOnlyList<string> known, IReadOnlyList<string> applied)
+        => new(task, known, applied);
+
+    /// <summary>Types a name and presses Enter in its box, for a test with no keyboard.</summary>
+    /// <param name="name">The name, as it would be typed</param>
+    /// <returns>Whether the dialog took the key</returns>
+    internal bool EnterName(string name)
+    {
+        _fresh.Focus();
+        _fresh.Text = name;
+        return ProcessDialogKey(Keys.Enter);
+    }
+
+    /// <summary>The labels ticked so far.</summary>
+    internal IReadOnlyList<string> Ticked => _list.CheckedItems.Cast<object>().Select(o => o.ToString()!).ToList();
 
     /// <summary>The labels that ended up ticked, or <c>null</c> if the dialog was cancelled.</summary>
     public static IReadOnlyList<string>? Pick(

@@ -75,12 +75,15 @@ public class CapturePreviewTextTests
     }
 
     [Fact]
-    public void An_unknown_project_says_where_the_task_will_go_instead()
+    public void An_unknown_project_says_the_word_stays_in_the_title()
     {
+        // Not "goes to Inbox", which it never did: a capture naming no place it can find goes where
+        // one naming none would, with the word left in its title.
         var preview = CapturePreviewText.For(
             new CapturePreview(Parse("call mum #Nowhere"), ProjectResolved: false, SectionResolved: true, RemindersAvailable: true));
 
-        Assert.Contains("goes to Inbox", preview);
+        Assert.Contains("#Nowhere (no such project — kept in the title)", preview);
+        Assert.DoesNotContain("Inbox", preview);
     }
 
     [Fact]
@@ -96,7 +99,7 @@ public class CapturePreviewTextTests
         var parse = Parse("call mum") with { SectionName = "Nowhere" };
         var preview = CapturePreviewText.For(new CapturePreview(parse, ProjectResolved: true, SectionResolved: false, RemindersAvailable: true));
 
-        Assert.Contains("/Nowhere (unknown)", preview);
+        Assert.Contains("/Nowhere (no such section — kept in the title)", preview);
     }
 
     [Fact]

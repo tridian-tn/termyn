@@ -22,5 +22,9 @@ public sealed class CultureScope : IDisposable
     /// <param name="name">The culture's name, such as "en-GB"</param>
     public CultureScope(string name) => CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(name);
 
+    /// <summary>Sets the culture to one made here, such as one of <see cref="Regions"/>.</summary>
+    /// <param name="culture">The culture</param>
+    public CultureScope(CultureInfo culture) => CultureInfo.CurrentCulture = culture;
+
     public void Dispose() => CultureInfo.CurrentCulture = _was;
 }

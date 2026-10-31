@@ -63,6 +63,10 @@ public sealed class AttachmentCache
     /// <remarks>
     /// From an account, so it's checked rather than trusted: anything carrying a separator, or long
     /// enough to look like a name in its own right, is dropped instead of being built into a path.
+    ///
+    /// An extension that runs something is kept like any other: without it the file opens as
+    /// nothing at all. Guarding against it is done where it's opened, which asks first
+    /// (<see cref="FileRisk"/>), and by the file being marked as downloaded.
     /// </remarks>
     private static string SafeExtension(string fileName)
     {

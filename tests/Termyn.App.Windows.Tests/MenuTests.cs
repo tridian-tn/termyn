@@ -21,7 +21,7 @@ public class MenuTests
         TaskAbilities? can = null,
         bool completed = false,
         int depth = 0)
-        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true), Schedule: Days);
+        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true, true), Schedule: Days);
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -319,9 +319,10 @@ public class MenuTests
     {
         // Four levels below a top-level task is what Todoist takes, so a task already at four can
         // hold nothing further. Greyed rather than offered and refused, since the refusal would
-        // come back from the server long after the click.
-        using var shallow = BuildTaskMenu(OnTask(depth: 3));
-        using var deepest = BuildTaskMenu(OnTask(depth: 4));
+        // come back from the server long after the click. The model says how deep it is: the row's
+        // indent is only its depth in this view, nought for one whose parent isn't in it.
+        using var shallow = BuildTaskMenu(OnTask(depth: 3, can: new TaskAbilities(CanAddSubtask: true)));
+        using var deepest = BuildTaskMenu(OnTask(depth: 0, can: new TaskAbilities(CanAddSubtask: false)));
 
         Assert.True(Find(shallow, "New sub-task…").Enabled);
         Assert.False(Find(deepest, "New sub-task…").Enabled);
@@ -704,6 +705,23 @@ public class MenuTests
             using var built = Build(group.Children ?? [], OnTask());
             Assert.All(Every(built.Menu.Items), i => Assert.False(string.IsNullOrWhiteSpace(i.Text)));
         }
+    }
+
+    [WinFormsFact]
+    public void The_first_right_click_on_a_task_shows_its_menu()
+    {
+        // The menu is empty until it opens, and WinForms raises the opening of an empty strip
+        // already cancelled — so filling it there without saying so again showed nothing at all.
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"Ship it","project_id":"p1","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-task-menu.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        TestWindow.Find<OutlineView>(window).SelectId("a");
+
+        Assert.True(window.OpenTaskMenu());
     }
 
     private static IReadOnlyList<MenuEntry> Group(string heading)

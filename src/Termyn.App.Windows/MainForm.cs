@@ -106,6 +106,12 @@ internal sealed class MainForm : Form
     /// </remarks>
     private bool _syncingSearch;
 
+    /// <summary>Holds a search back until the typing pauses.</summary>
+    private readonly System.Windows.Forms.Timer _searchIdle;
+
+    /// <summary>How many times the panel has followed the selection, so a render can tell it already has.</summary>
+    private int _follows;
+
     /// <summary>The row filled in while the tree hasn't got the focus, so it can be cleared again.</summary>
     private TreeNode? _markedRow;
     private readonly OutlineView _outline;
@@ -189,9 +195,13 @@ internal sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _tickedIdle;
 
     /// <summary>The panel size as the user last left it, which is what gets saved.</summary>
+    /// <remarks>
+    /// At 100%, like the other sizes saved with it, and scaled to the window's display as it's put
+    /// back. Kept in the display's pixels they came back a size apart on a screen of another scale.
+    /// </remarks>
     private int _descriptionHeight;
 
-    /// <summary>The outline's column widths as they were saved, until the window lays them out.</summary>
+    /// <summary>The outline's column widths as they were saved, at 100%, until the window lays them out.</summary>
     private readonly Dictionary<TaskColumn, int> _savedColumns = [];
 
     /// <summary>
@@ -293,13 +303,24 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
 
+        // Each search renders the whole outline, which is work nobody is waiting on between two
+        // letters of a word still being typed.
+        _searchIdle = new System.Windows.Forms.Timer { Interval = 150 };
+        _searchIdle.Tick += (_, _) => SendSearch();
+
         _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = Strings.SearchPlaceholder };
         _search.TextChanged += (_, _) =>
         {
             if (_syncingSearch)
                 return;
 
-            Guarded(() => _presenter.Search(_search.Text));
+            _searchIdle.Stop();
+
+            // Emptied in one go, by the cross or Escape, rather than typed: nothing more is coming.
+            if (_search.TextLength == 0)
+                SendSearch();
+            else
+                _searchIdle.Start();
         };
 
         _sidebar = new SidebarTree
@@ -313,7 +334,7 @@ internal sealed class MainForm : Form
             ShowLines = false,
             ShowRootLines = false,
             FullRowSelect = true,
-            Indent = 14,
+            Indent = SidebarIndent,
             BorderStyle = BorderStyle.None,
 
             // Only the text, so the tree goes on drawing the row's background, its selection and
@@ -375,6 +396,10 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Top,
             Padding = new Padding(8, 4, 8, 4),
             Visible = false,
+
+            // It quotes the filter, which is the account's text: an ampersand read as a mnemonic
+            // vanished, and moved the link off the words it was meant to cover.
+            UseMnemonic = false,
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
 
@@ -428,8 +453,8 @@ internal sealed class MainForm : Form
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
         // worse, nowhere to type one.
         _comments = new CommentsView { Dock = DockStyle.Fill };
-        _comments.Posted += OnCommentPosted;
-        _comments.Edited += OnCommentEdited;
+        _comments.Post = OnCommentPosted;
+        _comments.Edit = OnCommentEdited;
         _comments.Deleted += OnCommentDeleted;
         _comments.OpenRequested += OnAttachmentOpened;
         _comments.DownloadRequested += OnAttachmentDownloaded;
@@ -552,6 +577,9 @@ internal sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 0, 0, 0),
             Text = Strings.MainLoading,
+
+            // What it says often names something of the account's: a file, a project, a filter.
+            UseMnemonic = false,
         };
 
         // The failed count and a rejected token are the only parts of the status there is anything
@@ -599,6 +627,10 @@ internal sealed class MainForm : Form
         bar.TabIndex = 3;
 
         _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
+
+        // Raised for a font of the tree's own and for one it takes from the window, so a new scale
+        // and a new font both come through here.
+        _sidebar.FontChanged += (_, _) => RebuildHeaderFont();
 
         RestoreViewState(_settings.View);
 
@@ -666,6 +698,7 @@ internal sealed class MainForm : Form
             _shell.Instance.SignalReceived -= OnInstanceSignal;
 
         _renderIdle.Dispose();
+        _searchIdle.Dispose();
         _saveIdle.Dispose();
         _tickedIdle.Dispose();
         _quickAdd?.AllowClose();
@@ -804,6 +837,9 @@ internal sealed class MainForm : Form
             WindowState = FormWindowState.Normal;
         Activate();
         BringToFront();
+
+        // A dialog the window is waiting on is what can take input, so it's what comes forward.
+        OpenDialog()?.Activate();
     }
 
     /// <summary>
@@ -878,16 +914,42 @@ internal sealed class MainForm : Form
             () => OnUi(RestoreWindow),
             () => OnUi(() => Guarded(QuickAdd.Summon)),
             () => _scheduler.RequestNow(),
-            () => OnUi(() => Guarded(OpenSettings)),
-            () => OnUi(() => _ = CheckForUpdatesAsync()),
-            () => OnUi(Exit),
-            key => OnUi(() => Guarded(() => OpenFromTray(key)))));
+            () => OnUi(() => UnlessModal(() => Guarded(OpenSettings))),
+            () => OnUi(() => UnlessModal(() => _ = CheckForUpdatesAsync())),
+            () => OnUi(() => UnlessModal(Exit)),
+            key => OnUi(() => UnlessModal(() => Guarded(() => OpenFromTray(key))))));
     }
+
+    /// <summary>
+    /// Runs something the tray asked for, unless one of the window's dialogs is up, in which case
+    /// that dialog is brought forward instead.
+    /// </summary>
+    /// <remarks>
+    /// The tray's menu still works while a dialog has the window, and what it offers doesn't wait:
+    /// a second Settings opened over the first, a view changed under a dialog about a task in it,
+    /// or the window closed out from under a dialog that then went on to write to it.
+    /// </remarks>
+    /// <param name="action">What was asked for</param>
+    private static void UnlessModal(Action action)
+    {
+        if (OpenDialog() is { } dialog)
+        {
+            dialog.Activate();
+            return;
+        }
+
+        action();
+    }
+
+    /// <summary>The dialog the window is waiting on, or null when there isn't one.</summary>
+    private static Form? OpenDialog()
+        => Application.OpenForms.OfType<Form>().FirstOrDefault(f => f is { Modal: true, Visible: true });
 
     /// <summary>Opens the window on a view the tray offered.</summary>
     /// <param name="key">The sidebar key of the view to open</param>
     private void OpenFromTray(string key)
     {
+        FlushSearch();
         if (_presenter.SelectByKey(key))
         {
             _sidebarKey = key;
@@ -924,6 +986,9 @@ internal sealed class MainForm : Form
         if (_presenter.IsSameAccount(check.UserId))
         {
             _presenter.Reconnect(check.Token, check.UserId);
+
+            // Whatever description was kept back for want of a token goes in with the sync it sets off.
+            SaveDescription();
             _scheduler.RequestNow();
             return;
         }
@@ -987,15 +1052,19 @@ internal sealed class MainForm : Form
 
     /// <summary>Takes the global hotkey.</summary>
     /// <returns>What to tell the user, or null when there is nothing worth saying.</returns>
-    private string? RegisterHotkey(bool announce)
+    private string? RegisterHotkey(bool announce) => RegisterHotkey(_settings, announce);
+
+    /// <param name="settings">The settings to take it from, which may not be in force yet</param>
+    /// <param name="announce">Whether to say so when it worked</param>
+    private string? RegisterHotkey(AppSettings settings, bool announce)
     {
-        if (!_settings.HotkeyEnabled)
+        if (!settings.HotkeyEnabled)
         {
             _shell.Hotkey.Unregister();
             return announce ? Strings.HotkeyNone : null;
         }
 
-        var binding = _settings.HotkeyBinding;
+        var binding = settings.HotkeyBinding;
         if (_shell.Hotkey.Register(binding))
             return announce ? string.Format(CultureInfo.CurrentCulture, Strings.HotkeyIs, binding) : null;
 
@@ -1051,10 +1120,24 @@ internal sealed class MainForm : Form
     private void ShowAbout()
         => AboutBox.Show(this, _shell.Paths, message => _status.Text = message);
 
+    /// <summary>True while the settings dialog is up, so a second can't be opened over it.</summary>
+    private bool _inSettings;
+
     private void OpenSettings()
     {
-        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is { } amended)
-            ApplySettings(amended);
+        if (_inSettings)
+            return;
+
+        _inSettings = true;
+        try
+        {
+            if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is { } amended)
+                ApplySettings(amended);
+        }
+        finally
+        {
+            _inSettings = false;
+        }
     }
 
     /// <summary>
@@ -1069,6 +1152,7 @@ internal sealed class MainForm : Form
                             || amended.HotkeyBinding != _settings.HotkeyBinding;
         var cadenceChanged = amended.SyncMode != _settings.SyncMode
                              || amended.ClampedInterval != _settings.ClampedInterval;
+        var cacheChanged = amended.AttachmentCache != _settings.AttachmentCache;
 
         // Collected rather than each written straight to the label: four of these can happen in one
         // save, and the last to run used to be the only one the user saw — including the one saying
@@ -1080,6 +1164,24 @@ internal sealed class MainForm : Form
             // Left where it was rather than saved as a wish the OS didn't grant.
             amended = amended with { LaunchAtLogin = _settings.LaunchAtLogin };
             notices.Add(Strings.NoticeLaunchAtLogin);
+        }
+
+        // Before the settings are replaced, since a refusal decides which binding gets saved.
+        string? hotkeyNotice = null;
+        if (hotkeyChanged)
+        {
+            // Cleared either way: whatever it said is about the binding that has just been replaced.
+            _hotkeyNotice = null;
+            var working = _shell.Hotkey.Current;
+            hotkeyNotice = RegisterHotkey(amended, announce: true);
+
+            // Refused, with the binding from before still held. That one is what the key does, so
+            // it's what is saved, rather than a combination that would be refused again next start.
+            if (amended.HotkeyEnabled && working is { } kept && _shell.Hotkey.Current == kept && kept != amended.HotkeyBinding)
+            {
+                hotkeyNotice = string.Format(CultureInfo.CurrentCulture, Strings.HotkeyTakenKept, amended.HotkeyBinding, kept);
+                amended = amended with { Hotkey = kept.ToString() };
+            }
         }
 
         _settings = amended;
@@ -1095,20 +1197,16 @@ internal sealed class MainForm : Form
             notices.Add(Strings.NoticeFrameTheme);
         }
 
-        if (hotkeyChanged)
-        {
-            // Cleared either way: whatever it said is about the binding that has just been replaced.
-            _hotkeyNotice = null;
-            if (RegisterHotkey(announce: true) is { } hotkeyNotice)
-                notices.Add(hotkeyNotice);
-        }
+        if (hotkeyNotice is not null)
+            notices.Add(hotkeyNotice);
 
         if (cadenceChanged)
             notices.Add(Strings.NoticeSyncCadence);
 
         // Straight away rather than at the next start: tightening the caps and then finding the
         // cache still over them until tomorrow is not what the setting appears to promise.
-        if (amended.AttachmentCache != _settings.AttachmentCache)
+        // Compared before the settings were replaced, like the rest: by now the two are the same.
+        if (cacheChanged)
             _presenter.SetDownloadLimits(amended.AttachmentCache);
 
         // Saved last, so the theme and hotkey are applied even when the file can't be written.
@@ -1162,7 +1260,10 @@ internal sealed class MainForm : Form
         // Only remembered here. The splitters are set once the window has a size to divide, which
         // is not yet: before it is parented a SplitContainer clamps every distance it is given
         // against its own default and quietly sticks there.
-        _descriptionHeight = state.DescriptionHeight ?? StartupLayout.Scaled(StartupLayout.DescriptionHeight, dpi);
+        //
+        // At 100%. A figure saved before they were is taken as one too: what scale it was saved at
+        // can't be known, and 100% is the commonest answer.
+        _descriptionHeight = state.DescriptionHeight ?? StartupLayout.DescriptionHeight;
 
         // _adjustingPanels is still true here, so the layout this sets off doesn't record the
         // container's unparented default over what has just been read.
@@ -1216,6 +1317,11 @@ internal sealed class MainForm : Form
         _presenter.RestoreCollapsed(state.CollapsedTasks);
     }
 
+    /// <summary>A size in the window's display pixels as it would be at 100%, which is how sizes are saved.</summary>
+    /// <param name="pixels">The size on the window's display</param>
+    /// <returns>The size at 100%</returns>
+    private int AtHundred(int pixels) => (int)Math.Round(pixels * 96.0 / DeviceDpi);
+
     /// <summary>A size at 100% as it is at the window's display scale.</summary>
     /// <param name="logical">The size at 100%</param>
     /// <returns>The size in the display's pixels</returns>
@@ -1257,6 +1363,7 @@ internal sealed class MainForm : Form
         base.OnHandleCreated(e);
         PadSearch();
         SizeStrips(DeviceDpi);
+        _sidebar.Indent = StartupLayout.Scaled(SidebarIndent, DeviceDpi);
     }
 
     /// <summary>Sizes the same again for a screen of another scale.</summary>
@@ -1265,7 +1372,14 @@ internal sealed class MainForm : Form
         base.OnDpiChanged(e);
         PadSearch();
         SizeStrips(e.DeviceDpiNew);
+        _sidebar.Indent = StartupLayout.Scaled(SidebarIndent, e.DeviceDpiNew);
     }
+
+    /// <summary>
+    /// How far in each level of the sidebar sits at 100%. The tree takes it in pixels, so it's
+    /// scaled for the screen the window's on rather than left a 100% screen's width everywhere.
+    /// </summary>
+    private const int SidebarIndent = 14;
 
     private ViewState CurrentViewState()
     {
@@ -1278,8 +1392,8 @@ internal sealed class MainForm : Form
             SelectedKey = _sidebarKey,
             CollapsedKeys = CollapsedKeys().ToList(),
             CollapsedTasks = _presenter.CollapsedTasks,
-            ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => c.Value),
-            SidebarWidth = _split.SplitterDistance,
+            ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => AtHundred(c.Value)),
+            SidebarWidth = AtHundred(_split.SplitterDistance),
             ShowDescription = !_detail.Panel2Collapsed,
             DescriptionHeight = _descriptionHeight,
             WindowX = bounds.X,
@@ -1445,14 +1559,20 @@ internal sealed class MainForm : Form
         // and the words that were typed have to go with it — left up they would sit there filtering
         // nothing. Assigning what is already there raises nothing, so on every other render this is
         // a comparison.
-        _syncingSearch = true;
-        try
+        //
+        // Not while a search is still waiting to be sent, though: the presenter is a few letters
+        // behind the box then, and catching up would take the letters back off it.
+        if (!_searchIdle.Enabled)
         {
-            _search.Text = _presenter.SearchQuery;
-        }
-        finally
-        {
-            _syncingSearch = false;
+            _syncingSearch = true;
+            try
+            {
+                _search.Text = _presenter.SearchQuery;
+            }
+            finally
+            {
+                _syncingSearch = false;
+            }
         }
 
         // Before the rows, so the header's arrow and the order beneath it are put up together.
@@ -1465,10 +1585,13 @@ internal sealed class MainForm : Form
             l => Theme.ToColor(l.Value),
             StringComparer.OrdinalIgnoreCase);
 
+        var follows = _follows;
         _outline.Rows = _presenter.Rows;
 
-        // After the rows, which is what decides whether the selected task is still there.
-        FollowSelection();
+        // After the rows, which is what decides whether the selected task is still there. Only if
+        // taking them didn't already: a selection that moved has been followed on the way.
+        if (_follows == follows)
+            FollowSelection();
 
         // After the rows as well: whether there's anything left to fold or unfold is read off them.
         // Every fold republishes the rows, so this is the one place that needs to ask.
@@ -1547,7 +1670,7 @@ internal sealed class MainForm : Form
         // Never nothing: a control measured before it has been laid out has no width yet, and a
         // wrap width of zero measures every word onto a line of its own.
         var room = Math.Max(1, width - padding.Horizontal);
-        var wrapped = TextRenderer.MeasureText(text, font, new Size(room, 0), TextFormatFlags.WordBreak);
+        var wrapped = TextRenderer.MeasureText(text, font, new Size(room, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
 
         return wrapped.Height + padding.Vertical;
     }
@@ -1573,8 +1696,12 @@ internal sealed class MainForm : Form
         // are what has to be compared. Rebuilding a tree that already matches is what made clicking
         // a row jump the scroll — clearing the nodes drops the view to the top, and the selection
         // that follows scrolls back down to the row that was clicked.
+        // Read once. A sync can publish from its own thread between two reads, and the tree would
+        // then be built from a different list than the one compared and remembered.
+        var sidebar = _presenter.Sidebar;
+
         if (_renderedSidebar is { } rendered
-            && (ReferenceEquals(rendered, _presenter.Sidebar) || rendered.SequenceEqual(_presenter.Sidebar)))
+            && (ReferenceEquals(rendered, sidebar) || rendered.SequenceEqual(sidebar)))
         {
             return;
         }
@@ -1584,7 +1711,7 @@ internal sealed class MainForm : Form
         var top = SidebarKeyOf(_sidebar.TopNode);
         var selected = SidebarKeyOf(_sidebar.SelectedNode);
 
-        _renderedSidebar = _presenter.Sidebar;
+        _renderedSidebar = sidebar;
         _syncingSidebar = true;
         try
         {
@@ -1598,7 +1725,7 @@ internal sealed class MainForm : Form
 
             // The presenter hands back a flattened tree; rebuild the nesting from each row's depth.
             var parents = new Dictionary<int, TreeNode>();
-            foreach (var node in _presenter.Sidebar)
+            foreach (var node in sidebar)
             {
                 var label = node.Count > 0 ? $"{node.Label}  ({node.Count})" : node.Label;
                 var tree = new TreeNode(label) { Tag = node };
@@ -1656,6 +1783,28 @@ internal sealed class MainForm : Form
     }
 
     private static string? SidebarKeyOf(TreeNode? node) => (node?.Tag as SidebarNode)?.Key;
+
+    /// <summary>
+    /// Makes the headings' bold font again from the tree's own, once that has changed.
+    /// </summary>
+    /// <remarks>
+    /// Made once, the headings stayed at the size the window opened at: on a screen of another
+    /// scale they were a size apart from every row under them.
+    /// </remarks>
+    private void RebuildHeaderFont()
+    {
+        var was = _headerFont;
+        _headerFont = new Font(_sidebar.Font, FontStyle.Bold);
+
+        foreach (var node in Flatten(_sidebar.Nodes))
+        {
+            if (node.Tag is SidebarNode { Kind: SidebarKind.Header })
+                node.NodeFont = _headerFont;
+        }
+
+        // Only once nothing in the tree is drawn with it.
+        was?.Dispose();
+    }
 
     private HashSet<string> CollapsedKeys()
     {
@@ -1733,6 +1882,29 @@ internal sealed class MainForm : Form
         crumbs.TabStop = false;
     }
 
+    /// <summary>Hands the presenter what's in the search box.</summary>
+    private void SendSearch()
+    {
+        _searchIdle.Stop();
+        Guarded(() => _presenter.Search(_search.Text));
+    }
+
+    /// <summary>
+    /// Sends a search still waiting on the typing to pause, ahead of opening another view.
+    /// </summary>
+    /// <remarks>
+    /// Opening a view drops the search. One sent after it would put the words back over the view
+    /// just opened, rather than being dropped with it.
+    /// </remarks>
+    private void FlushSearch()
+    {
+        if (_searchIdle.Enabled)
+            SendSearch();
+    }
+
+    /// <summary>Whether a search is waiting on the typing to pause, for a test.</summary>
+    internal bool SearchPending => _searchIdle.Enabled;
+
     private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
     {
         if (e.Link?.LinkData is ViewSelection target)
@@ -1749,6 +1921,7 @@ internal sealed class MainForm : Form
             return;
 
         _sidebarKey = node.Key;
+        FlushSearch();
 
         // By key, not by selection: a favourited project is two rows, and telling the presenter only
         // which view to open would leave it believing the copy down in the tree was the one clicked.
@@ -1762,6 +1935,7 @@ internal sealed class MainForm : Form
     /// </summary>
     private void SwitchView(int offset)
     {
+        FlushSearch();
         if (!_presenter.SelectAdjacent(offset))
             return;
 
@@ -1771,6 +1945,7 @@ internal sealed class MainForm : Form
 
     private void GoTo(ViewSelection selection)
     {
+        FlushSearch();
         _sidebarKey = selection.Key;
         Guarded(() => _presenter.Select(selection));
         Highlight();
@@ -1795,8 +1970,11 @@ internal sealed class MainForm : Form
         MarkSidebarSelection();
     }
 
-    /// <summary>How much room the dot takes from the text, beside the dot's own width.</summary>
+    /// <summary>How much room the dot takes from the text, beside the dot's own width, at 100%.</summary>
     private const int DotGap = 4;
+
+    /// <summary>The largest a sidebar row's dot is drawn, at 100%.</summary>
+    private const int DotSize = 8;
 
     /// <summary>
     /// How far in from the text's own left edge the dot starts.
@@ -1831,7 +2009,7 @@ internal sealed class MainForm : Form
 
         if (node.SitsInDotColumn)
         {
-            var size = Math.Min(8, bounds.Height - 6);
+            var size = Math.Min(_sidebar.LogicalToDeviceUnits(DotSize), bounds.Height - _sidebar.LogicalToDeviceUnits(6));
             var lead = _sidebar.LogicalToDeviceUnits(DotLead);
 
             if (size > 0 && node.Colour is { } colour)
@@ -1844,7 +2022,7 @@ internal sealed class MainForm : Form
 
             // The text keeps its full width rather than losing the dot's room: the row's background
             // is already drawn, and a name shortened by a dot would be the wrong thing to trim.
-            taken = lead + Math.Max(0, size) + DotGap;
+            taken = lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
         }
 
         TextRenderer.DrawText(
@@ -2041,6 +2219,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void FollowSelection()
     {
+        _follows++;
         FollowSelectionForDescription();
         FollowSelectionForComments();
 
@@ -2101,17 +2280,48 @@ internal sealed class MainForm : Form
         }
 
         // What the box is on is changing, so whatever was typed into it belongs to the old one and
-        // has to go before the box is refilled.
-        SaveDescription();
+        // has to go before the box is refilled. With the token turned away it can't be written yet,
+        // so it's held for its own subject rather than lost under the next one's.
+        if (_presenter.ReconnectNeeded && _draft.Take(_description.Text) is { } unsaved)
+            _heldDescription = unsaved;
+        else
+            SaveDescription();
 
         _draft.Open(kind, id, _presenter.DescriptionOf(kind, id));
-        ShowDescription(_draft.Opened);
+
+        // Back on the one held, the box opens on what was typed, still to be saved, rather than on
+        // the account's copy.
+        var shown = TakeHeldDescription(kind, id) ?? _draft.Opened;
+        ShowDescription(shown);
 
         ShowDescriptionEditable(_presenter.AccessToDescriptionOf(kind, id));
 
         // Nothing written yet has nothing to read, and a rendering of nothing is a blank panel that
         // gives no sign it would take any typing. So an empty one opens ready to write.
-        SetDescriptionMode(writing: _draft.Opened.Length == 0 && !_description.ReadOnly, focus: false);
+        SetDescriptionMode(writing: shown.Length == 0 && !_description.ReadOnly, focus: false);
+    }
+
+    /// <summary>
+    /// A description typed before the token was turned away and not yet written, kept for the task
+    /// or project it was typed into once the box has moved on from it.
+    /// </summary>
+    /// <remarks>
+    /// One is enough: the box is read-only until a token comes, so nothing else can be typed into it
+    /// meanwhile. Written by the first save once there's a token again.
+    /// </remarks>
+    private (SubjectKind Kind, string OwnerId, string Text)? _heldDescription;
+
+    /// <summary>The held description, if it belongs to this subject, letting go of it.</summary>
+    /// <param name="kind">Which of the two the box is opening on</param>
+    /// <param name="id">The task or project it's opening on</param>
+    /// <returns>What was typed into it, or null when nothing is held for it</returns>
+    private string? TakeHeldDescription(SubjectKind kind, string? id)
+    {
+        if (id is null || _heldDescription is not { } held || held.Kind != kind || _presenter.CurrentIdOf(held.OwnerId) != id)
+            return null;
+
+        _heldDescription = null;
+        return held.Text;
     }
 
     /// <summary>
@@ -2384,17 +2594,33 @@ internal sealed class MainForm : Form
         _comments.Invalidate();
     }
 
-    private void OnCommentPosted(string text) => Guarded(() =>
-    {
-        if (_presenter.AddComment(CommentsOwner, text))
-            RefreshComments();
-    });
+    private bool OnCommentPosted(string text) => SendComment(() => _presenter.AddComment(CommentsOwner, text));
 
-    private void OnCommentEdited(string id, string text) => Guarded(() =>
+    private bool OnCommentEdited(string id, string text) => SendComment(() => _presenter.EditComment(id, text));
+
+    /// <summary>Posts or rewrites a comment, saying so when it couldn't be.</summary>
+    /// <param name="send">The write, answering whether it was made</param>
+    /// <returns>True when it was, which is what lets the box empty</returns>
+    private bool SendComment(Func<bool> send)
     {
-        if (_presenter.EditComment(id, text))
+        try
+        {
+            if (!send())
+            {
+                // Turned down without an exception: what it was on has gone from the account.
+                _status.Text = Strings.CommentNotSent;
+                return false;
+            }
+
             RefreshComments();
-    });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+            return false;
+        }
+    }
 
     /// <summary>
     /// Deletes a comment, having asked first.
@@ -2424,11 +2650,35 @@ internal sealed class MainForm : Form
     /// <summary>
     /// Fetches a comment's file if it isn't already here, and hands it to the desktop.
     /// </summary>
-    private async void OnAttachmentOpened(string commentId)
+    /// <remarks>
+    /// A file of a kind that runs something is asked about first, with No as the default: the
+    /// name is whatever a collaborator called it, and the desktop would run "invoice.scr" on the
+    /// one click. Saving a copy isn't asked about, since nothing's run by that.
+    ///
+    /// Guarded throughout, since nothing above an async void handler would catch what it threw.
+    /// </remarks>
+    private async void OnAttachmentOpened(string commentId) => await GuardedAsync(async () =>
     {
-        if (await FetchFileAsync(commentId, _presenter.FetchAttachmentAsync, Strings.FileOpenFailed) is { } path)
-            OpenFile(path);
-    }
+        if (await FetchFileAsync(commentId, _presenter.FetchAttachmentAsync, Strings.FileOpenFailed) is not { } fetched)
+            return;
+
+        var (path, file) = fetched;
+
+        var name = DownloadName.Safe(file.FileName);
+        if (FileRisk.RunsCode(path) && !(AskBeforeRunning?.Invoke(name) ?? Confirm(string.Format(CultureInfo.CurrentCulture, Strings.OpenRunnableConfirm, name))))
+            return;
+
+        if (!OpenFile(path) && !IsDisposed)
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.FileNotOpened, name);
+    });
+
+    /// <summary>
+    /// Asks whether to open a file that runs something, given its name. A property so a test can
+    /// answer without a box appearing; null, as the window leaves it, asks the user.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<string, bool>? AskBeforeRunning { get; set; }
 
     /// <summary>
     /// Hands a fetched file to the desktop to open. A property so a test can see it asked for without
@@ -2451,19 +2701,21 @@ internal sealed class MainForm : Form
     /// next download. When Explorer can't be got to show the file, the status bar says so, since
     /// otherwise the setting would just appear not to work.
     /// </remarks>
-    private async void OnAttachmentDownloaded(string commentId)
+    private async void OnAttachmentDownloaded(string commentId) => await GuardedAsync(async () =>
     {
         var folder = _shell.Paths.DownloadsDirectory;
 
-        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is not { } path)
+        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is not { } fetched)
             return;
+
+        var path = fetched.Path;
 
         var name = Path.GetFileName(path);
         _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, name);
 
         if (_settings.ShowAfterDownloading && !await ShowInFolder(path) && !IsDisposed)
             _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSavedNotShown, name);
-    }
+    });
 
     /// <summary>
     /// Opens Explorer with a saved file selected, answering whether it could. A property so a test can
@@ -2484,8 +2736,8 @@ internal sealed class MainForm : Form
     /// <param name="commentId">The comment whose file is wanted</param>
     /// <param name="fetch">What getting it means: into the cache to open, or a copy into a folder</param>
     /// <param name="failed">What to say if it goes wrong with nothing more particular to say</param>
-    /// <returns>Where the file is, or null when it isn't anywhere, having already said why</returns>
-    private async Task<string?> FetchFileAsync(
+    /// <returns>Where the file is and which it is, or null when it isn't anywhere, having already said why</returns>
+    private async Task<(string Path, FileAttachment File)?> FetchFileAsync(
         string commentId,
         Func<FileAttachment, IProgress<long>, CancellationToken, Task<FetchResult>> fetch,
         string failed)
@@ -2498,21 +2750,25 @@ internal sealed class MainForm : Form
 
         using var transfer = new CancellationTokenSource();
         _transfer = transfer;
-        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.DownloadStarting, file.FileName);
+
+        // Shown as it would be saved, so a name can't use invisible characters to read as some
+        // other kind of file while it's coming in.
+        var name = DownloadName.Safe(file.FileName);
+        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.DownloadStarting, name);
 
         try
         {
             var progress = new Progress<long>(read => _comments.Progress =
                 file.FileSize > 0
-                    ? string.Format(CultureInfo.CurrentCulture, Strings.DownloadPercent, file.FileName, read * 100 / file.FileSize)
-                    : string.Format(CultureInfo.CurrentCulture, Strings.DownloadKilobytes, file.FileName, read / 1024));
+                    ? string.Format(CultureInfo.CurrentCulture, Strings.DownloadPercent, name, read * 100 / file.FileSize)
+                    : string.Format(CultureInfo.CurrentCulture, Strings.DownloadKilobytes, name, read / 1024));
 
             var result = await fetch(file, progress, transfer.Token);
 
             switch (result.Outcome)
             {
                 case FetchOutcome.Ready when result.Path is { } path:
-                    return path;
+                    return (path, file);
 
                 case FetchOutcome.Cancelled:
                     return null;
@@ -2545,30 +2801,48 @@ internal sealed class MainForm : Form
         if (picker.ShowDialog(this) != DialogResult.OK)
             return;
 
-        var file = new FileInfo(picker.FileName);
-
-        if (!_presenter.AllowsUploadOf(file.Length))
-        {
-            MessageBox.Show(
-                this,
-                string.Format(CultureInfo.CurrentCulture, Strings.AttachTooBig, file.Name, file.Length / (1024 * 1024), _presenter.UploadLimitMb),
-                "Termyn",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            return;
-        }
-
+        var path = picker.FileName;
+        var name = Path.GetFileName(path);
         using var transfer = new CancellationTokenSource();
-        _transfer = transfer;
-        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.Uploading, file.Name);
 
+        // Everything inside, the file's size included: an async void handler has nothing above it to
+        // catch what gets out, and a file can vanish between being picked and being read.
         try
         {
-            await _presenter.AddCommentWithFileAsync(CommentsOwner, _comments.Draft, file.FullName, transfer.Token);
+            var size = new FileInfo(path).Length;
+
+            if (!_presenter.AllowsUploadOf(size))
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format(CultureInfo.CurrentCulture, Strings.AttachTooBig, name, size / (1024 * 1024), _presenter.UploadLimitMb),
+                    "Termyn",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            _transfer = transfer;
+            _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.Uploading, name);
+
+            var posted = await _presenter.AddCommentWithFileAsync(CommentsOwner, _comments.Draft, path, transfer.Token);
 
             // Only once it has landed. Clearing the box first would lose what was typed alongside a
-            // file whose upload then failed.
-            _comments.ClearDraft();
+            // file whose upload then failed, or whose task went while it was on its way.
+            if (posted)
+            {
+                _comments.ClearDraft();
+            }
+            else
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format(CultureInfo.CurrentCulture, Strings.AttachOwnerGone, name),
+                    "Termyn",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+
             RefreshComments();
         }
         catch (OperationCanceledException)
@@ -2580,15 +2854,23 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                string.Format(CultureInfo.CurrentCulture, Strings.UploadFailed, file.Name, ex.Message),
+                string.Format(CultureInfo.CurrentCulture, Strings.UploadFailed, name, ex.Message),
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
+        catch (Exception ex)
+        {
+            // Anything else, such as the cache refusing the write. The box keeps the words either way.
+            Report(ex);
+        }
         finally
         {
-            _transfer = null;
-            _comments.Progress = null;
+            if (ReferenceEquals(_transfer, transfer))
+            {
+                _transfer = null;
+                _comments.Progress = null;
+            }
         }
     }
 
@@ -2604,20 +2886,30 @@ internal sealed class MainForm : Form
         if (_transfer is not null)
             return;
 
-        if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
-            return;
+        // Guarded throughout, since nothing above an async void handler would catch it: taking the
+        // file off is a write, and can be refused, and the window can be gone by the time it lands.
+        await GuardedAsync(async () =>
+        {
+            if (_presenter.CommentsOn(CommentsOwner).FirstOrDefault(c => c.Id == commentId)?.Attachment is not { } file)
+                return;
 
-        if (!Confirm(string.Format(CultureInfo.CurrentCulture, Strings.RemoveAttachmentConfirm, file.FileName)))
-            return;
+            if (!Confirm(string.Format(CultureInfo.CurrentCulture, Strings.RemoveAttachmentConfirm, file.FileName)))
+                return;
 
-        // Guarded, since nothing above an async void handler would catch it: taking the file off is
-        // a write, and can be refused.
-        string? trouble = null;
-        await GuardedAsync(async () => trouble = await _presenter.DetachFileAsync(commentId));
-        RefreshComments();
+            string? trouble = null;
+            try
+            {
+                trouble = await _presenter.DetachFileAsync(commentId);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                    RefreshComments();
+            }
 
-        if (trouble is not null)
-            MessageBox.Show(this, trouble, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (trouble is not null && !IsDisposed)
+                MessageBox.Show(this, trouble, "Termyn", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        });
     }
 
     /// <summary>
@@ -2680,7 +2972,7 @@ internal sealed class MainForm : Form
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
-            PutDescriptionBack(_history.Redo());
+            PutDescriptionBack(_history.Redo(_description.Text, _description.SelectionStart));
         }
     }
 
@@ -2749,6 +3041,13 @@ internal sealed class MainForm : Form
         // it's still there to save once a token comes.
         if (_presenter.ReconnectNeeded)
             return;
+
+        // One the box moved on from while there was no token to write it with.
+        if (_heldDescription is { } held)
+        {
+            _heldDescription = null;
+            Guarded(() => _presenter.SetDescription(held.Kind, _presenter.CurrentIdOf(held.OwnerId), held.Text));
+        }
 
         // The draft puts the box's line endings back to the account's before it compares or saves.
         if (_draft.Take(_description.Text) is not { } edit)
@@ -2829,7 +3128,7 @@ internal sealed class MainForm : Form
         // Clamped against what the container can actually take, not against a figure of ours. The
         // sidebar splitter can be dragged until the outline is its own minimum width, and asking a
         // panel for more room than exists throws rather than settling for what there is.
-        Restore(_detail, _detail.Height, _descriptionHeight, 60);
+        Restore(_detail, _detail.Height, AtScale(_descriptionHeight), AtScale(60));
 
         static void Restore(SplitContainer split, int across, int wanted, int preferred)
         {
@@ -2863,7 +3162,7 @@ internal sealed class MainForm : Form
             return;
 
         if (!_detail.Panel2Collapsed)
-            _descriptionHeight = _detail.Panel2.Height;
+            _descriptionHeight = AtHundred(_detail.Panel2.Height);
     }
 
     // ---- Commands ------------------------------------------------------------------------------
@@ -3039,6 +3338,21 @@ internal sealed class MainForm : Form
         }
 
         Refill(_taskMenu.Items, Menus.TaskContext);
+
+        // Said again rather than left as it came: WinForms raises this already cancelled when the
+        // strip is empty, which it is until the first opening fills it.
+        e.Cancel = _taskMenu.Items.Count == 0;
+    }
+
+    /// <summary>
+    /// Opens the task menu the way a right-click does, for a test with no pointer to click with.
+    /// </summary>
+    /// <returns>Whether the menu would be shown</returns>
+    internal bool OpenTaskMenu()
+    {
+        var opening = new CancelEventArgs(_taskMenu.Items.Count == 0);
+        OnTaskMenuOpening(_taskMenu, opening);
+        return !opening.Cancel;
     }
 
     /// <summary>The menu bar, one top-level heading per group, each refilled as it opens.</summary>
@@ -3574,6 +3888,9 @@ internal sealed class MainForm : Form
         }
 
         var command = CommandFor(keyData, ShortcutScope.Window);
+        if (command == AppCommand.None && !Typing())
+            command = CommandFor(keyData, ShortcutScope.OutsideText);
+
         if (command == AppCommand.None)
             return base.ProcessCmdKey(ref msg, keyData);
 
@@ -3581,12 +3898,27 @@ internal sealed class MainForm : Form
         return true;
     }
 
+    /// <summary>
+    /// Whether the focus is in a box that takes typing, where keys like Insert and AltGr+Shift+N
+    /// belong to the text. A read-only one is only being read, so the window's keys still apply.
+    /// </summary>
+    private bool Typing()
+    {
+        Control? focused = ActiveControl;
+        while (focused is ContainerControl { ActiveControl: { } inner })
+            focused = inner;
+
+        return focused is TextBoxBase { ReadOnly: false } or ComboBox { DropDownStyle: not ComboBoxStyle.DropDownList };
+    }
+
     /// <summary>Shows or hides completed tasks, fetching them the first time they're asked for.</summary>
     private async Task ToggleCompletedAsync()
     {
         // The fetch is a round trip over up to three months of history, so it is worth saying that
-        // something is happening rather than leaving the list unchanged for a moment.
-        if (!_presenter.ShowingCompleted)
+        // something is happening rather than leaving the list unchanged for a moment. Not for the
+        // press that calls a fetch off, which is not one starting.
+        var callingOff = _presenter.FetchingCompleted;
+        if (!_presenter.ShowingCompleted && !callingOff)
             _status.Text = Strings.CompletedFetching;
 
         await GuardedAsync(async () =>
@@ -3594,6 +3926,10 @@ internal sealed class MainForm : Form
             if (!await _presenter.ToggleCompletedAsync(_cts.Token))
                 _status.Text = Strings.CompletedOffline;
         });
+
+        // The fetch that was called off says nothing more, so "fetching" would otherwise stay up.
+        if (callingOff && _status.Text == Strings.CompletedFetching)
+            RenderStatus();
     }
 
     private void OpenPalette()
@@ -3661,7 +3997,22 @@ internal sealed class MainForm : Form
             return false;
 
         string? id = null;
-        Guarded(() => id = _presenter.AddSubtask(parentId, text));
+        try
+        {
+            id = _presenter.AddSubtask(parentId, text);
+        }
+        catch (CaptureRefusedException refused)
+        {
+            // Not a failure: a sub-task the app won't make, such as one that repeats. Said on the
+            // status bar like any other refusal, and not logged as though something broke.
+            _status.Text = refused.Message;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+            return false;
+        }
 
         if (id is null)
             return false;
@@ -3984,22 +4335,30 @@ internal sealed class MainForm : Form
 
     // ---- Plumbing ------------------------------------------------------------------------------
 
+    /// <remarks>
+    /// Each step guarded on its own, since this runs from an async void handler with nothing above
+    /// it to catch: a layout that can't be put back is no reason not to load, and a load that fails
+    /// is no reason not to start syncing.
+    /// </remarks>
     private async Task LoadAsync()
     {
-        // Restored here rather than in the constructor: before the splitter is parented and sized it
-        // clamps the distance against the container's default width and silently sticks there.
-        var least = AtScale(StartupLayout.SidebarLeast);
-        _split.SplitterDistance = Math.Clamp(
-            _settings.View.SidebarWidth ?? AtScale(StartupLayout.SidebarWidth),
-            least,
-            Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
-        ApplyPanelSizes();
+        Guarded(() =>
+        {
+            // Restored here rather than in the constructor: before the splitter is parented and sized
+            // it clamps the distance against the container's default width and silently sticks there.
+            var least = AtScale(StartupLayout.SidebarLeast);
+            _split.SplitterDistance = Math.Clamp(
+                AtScale(_settings.View.SidebarWidth ?? StartupLayout.SidebarWidth),
+                least,
+                Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
+            ApplyPanelSizes();
 
-        // After the sidebar, whose width decides what the outline is left with.
-        _outline.LayColumns(_savedColumns);
+            // After the sidebar, whose width decides what the outline is left with.
+            _outline.LayColumns(_savedColumns.ToDictionary(c => c.Key, c => AtScale(c.Value)));
+        });
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
-        _scheduler.Start();
+        Guarded(_scheduler.Start);
     }
 
     private void Guarded(Action action)

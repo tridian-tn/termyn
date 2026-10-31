@@ -90,6 +90,39 @@ public class GlobalHotkeyTests
     }
 
     [Fact]
+    public void A_refused_combination_leaves_the_working_one_in_place()
+    {
+        // Changing to a key something else owns used to let go of the one that worked first, and
+        // leave the user with no hotkey at all.
+        var taken = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F7");
+        var working = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F6");
+
+        using var owner = new WindowsGlobalHotkey();
+        Assert.True(owner.Register(taken), "the desktop refused an unlikely combination");
+
+        using var hotkey = new WindowsGlobalHotkey();
+        Assert.True(hotkey.Register(working), "the desktop refused an unlikely combination");
+
+        Assert.False(hotkey.Register(taken));
+        Assert.Equal(working, hotkey.Current);
+
+        // And really still held, rather than only remembered: nobody else can have it.
+        using var latecomer = new WindowsGlobalHotkey();
+        Assert.False(latecomer.Register(working));
+    }
+
+    [Fact]
+    public void Registering_what_is_already_held_keeps_it()
+    {
+        using var hotkey = new WindowsGlobalHotkey();
+        var binding = new HotkeyBinding(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift, "F9");
+
+        Assert.True(hotkey.Register(binding));
+        Assert.True(hotkey.Register(binding));
+        Assert.Equal(binding, hotkey.Current);
+    }
+
+    [Fact]
     public void The_window_it_listens_on_is_message_only()
     {
         // Message-only means parented into the HWND_MESSAGE namespace: posted messages and nothing
@@ -212,6 +245,25 @@ public class TrayNotifierTests
         tray.RaiseMenuOpening();
 
         Assert.Equal(1, asked);
+    }
+
+    [Fact]
+    public void A_menu_filled_as_it_opens_is_shown_even_though_it_started_empty()
+    {
+        // WinForms raises the opening already cancelled for an empty strip, which made the first
+        // right-click on a menu filled at that moment do nothing at all.
+        using var tray = new TrayNotifier();
+        tray.MenuOpening += () => tray.SetCommands([new NotifierCommand("Open Termyn", () => { })]);
+
+        Assert.True(tray.RaiseMenuOpening());
+    }
+
+    [Fact]
+    public void A_menu_left_empty_is_not_shown()
+    {
+        using var tray = new TrayNotifier();
+
+        Assert.False(tray.RaiseMenuOpening());
     }
 
     [Fact]
@@ -650,6 +702,27 @@ public class SingleInstanceTests
 
         Assert.NotEqual(mine.MutexName, theirs.MutexName);
         Assert.NotEqual(mine.PipeName, theirs.PipeName);
+    }
+
+    [Fact]
+    public void The_same_user_in_another_session_gets_a_pipe_of_their_own()
+    {
+        // The mutex is per session, so the console and a Remote Desktop session each hold an
+        // instance. One pipe name between them sent a launch in one session to the window in the
+        // other.
+        using var console = new WindowsSingleInstance("S-1-5-21-1-2-3-1001", session: 1);
+        using var remote = new WindowsSingleInstance("S-1-5-21-1-2-3-1001", session: 2);
+
+        Assert.NotEqual(console.PipeName, remote.PipeName);
+    }
+
+    [Fact]
+    public void The_default_pipe_is_this_session_s()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        using var mine = new WindowsSingleInstance(Scope());
+
+        Assert.EndsWith($"-{process.SessionId}", mine.PipeName, StringComparison.Ordinal);
     }
 
     [Fact]

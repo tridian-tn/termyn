@@ -1,5 +1,6 @@
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
+using Termyn.Core.Platform;
 using Termyn.TestSupport;
 
 namespace Termyn.Core.Tests;
@@ -159,6 +160,33 @@ public class QuickAddParserTests
         Assert.Equal(new DateOnly(y, mo, d), reminder.Date);
         Assert.Equal(new TimeOnly(h, mi), reminder.Time);
         Assert.Empty(parse.Unsupported);
+    }
+
+    [Theory]
+    [InlineData("Leave !2h", 3, 29, 3, 30)]     // the clocks go forward at one, so it's half three
+    [InlineData("Leave !2h", 10, 25, 1, 30)]    // and back at two, so it's half one again
+    [InlineData("Leave !1hb", 3, 29, 2, 30)]    // no due time: the same span from now
+    public void A_reminder_a_span_from_now_counts_the_hours_that_pass_across_a_change_of_clocks(string text, int mo, int d, int h, int mi)
+    {
+        // Half past midnight in London, the night the clocks change. Added to the wall clock, two
+        // hours from now came out an hour out either way.
+        var london = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+        var midnight = new DateTime(2026, mo, d, 0, 30, 0);
+        var clock = new At(new DateTimeOffset(midnight, london.GetUtcOffset(midnight)));
+
+        var parse = new QuickAddParser(clock).Parse(text, new DateSettings(london));
+
+        var reminder = Assert.IsType<AbsoluteReminder>(parse.Reminders.Single());
+        Assert.Equal(new DateOnly(2026, mo, d), reminder.Date);
+        Assert.Equal(new TimeOnly(h, mi), reminder.Time);
+    }
+
+    /// <summary>A clock stopped at one instant.</summary>
+    private sealed class At(DateTimeOffset now) : IClock
+    {
+        public DateOnly Today => DateOnly.FromDateTime(now.UtcDateTime);
+
+        public DateTimeOffset UtcNow => now.ToUniversalTime();
     }
 
     [Theory]
@@ -347,12 +375,15 @@ public class QuickAddParserTests
     }
 
     [Fact]
-    public void Assignees_are_dropped_and_flagged()
+    public void A_plus_word_stays_in_the_title()
     {
-        var parse = Parse("Review PR +alice");
+        // Assigning isn't supported, and a capture is made from this parse, so reading "+alice" as
+        // an assignee only took it off the task — and a phone number went with it.
+        var parse = Parse("Call John +447700900123");
 
-        Assert.Equal("Review PR", parse.Content);
-        Assert.Contains("+alice", parse.Unsupported);
+        Assert.Equal("Call John +447700900123", parse.Content);
+        Assert.Empty(parse.Unsupported);
+        Assert.Equal("Review PR +alice", Parse("Review PR +alice").Content);
     }
 
     [Fact]
@@ -411,6 +442,29 @@ public class QuickAddParserTests
 
         Assert.Equal("Work", parse.ProjectName);
         Assert.Equal("call mum #Personal", parse.Content);
+    }
+
+    [Theory]
+    [InlineData("Fix issue #42 p1", true, false, "Fix issue #42")]
+    [InlineData("Read /dev docs #Work", false, true, "Read /dev docs")]
+    [InlineData("Read /dev docs #Work", true, true, "Read /dev docs #Work")]
+    [InlineData("Read /dev docs #Work", false, false, "Read docs")]
+    [InlineData("Call #My\\ Project now", true, false, "Call #My\\ Project now")]
+    public void A_place_can_be_written_back_where_it_was_typed(string text, bool project, bool section, string expected)
+    {
+        // For a capture naming a place there's no such thing as. Todoist keeps the word in the
+        // title, and in the middle of a sentence is where it belongs.
+        Assert.Equal(expected, Parse(text).TitleKeeping(project, section));
+    }
+
+    [Fact]
+    public void A_place_typed_after_a_time_put_back_is_written_back_in_order()
+    {
+        // The time goes back into the words when it has no day to go on, ahead of the place.
+        var parse = Parse("Plan fri 9am #Work");
+
+        Assert.Equal("Plan fri 9am", parse.Content);
+        Assert.Equal("Plan fri 9am #Work", parse.TitleKeeping(project: true, section: false));
     }
 
     [Fact]

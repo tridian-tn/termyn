@@ -169,10 +169,19 @@ public sealed class MainPresenter
     private readonly IClock _clock;
 
     /// <summary>
-    /// Serialises publishing. Intents run on the UI thread while the background sync publishes from
-    /// its worker; without this an older snapshot can be assigned after a newer one and put a
-    /// completed task back on screen.
+    /// Serialises publishing, and guards the view state a publish reads and writes.
     /// </summary>
+    /// <remarks>
+    /// Intents run on the UI thread while the background sync publishes from its worker. Without
+    /// this an older snapshot can be assigned after a newer one and put a completed task back on
+    /// screen — and a publish walks the folded and ticked-off tasks and moves the selection while
+    /// the UI thread changes them, which throws, or loses whichever write came first.
+    ///
+    /// So every read and write of that state is made holding it, whichever thread it's on: the
+    /// presenter is driven by more than one UI, and none of them should have to marshal for it.
+    /// Nothing is raised while it's held, so a handler can't come back in on another thread and
+    /// wait on it. Taken before the engine's own lock, never after.
+    /// </remarks>
     private readonly Lock _publishing = new();
 
     private IReadOnlyList<TaskRow> _allRows = [];
@@ -375,7 +384,9 @@ public sealed class MainPresenter
     {
         // Set rather than noted (see NoteReachable): nothing has been tried yet, so this is where
         // the session starts from and not something learnt about the network.
-        IsOffline = false;
+        lock (_publishing)
+            IsOffline = false;
+
         Publish();
         await SyncAsync(ct);
     }
@@ -384,9 +395,50 @@ public sealed class MainPresenter
     /// <returns>What the sync loop should do next — come straight back, or hold off.</returns>
     public async Task<SyncOutcome> SyncAsync(CancellationToken ct = default)
     {
+        lock (_publishing)
+        {
+            if (_syncsRunning++ == 0)
+                _syncsIdle.Reset();
+        }
+
+        try
+        {
+            return await SyncOnceAsync(ct);
+        }
+        finally
+        {
+            lock (_publishing)
+            {
+                if (--_syncsRunning == 0)
+                    _syncsIdle.Set();
+            }
+        }
+    }
+
+    private int _syncsRunning;
+
+    private readonly ManualResetEventSlim _syncsIdle = new(initialState: true);
+
+    /// <summary>
+    /// Waits for every sync under way to finish, however it was started: the scheduler's loop,
+    /// the first one <see cref="LoadAsync"/> makes, or a caller's own.
+    /// </summary>
+    /// <remarks>
+    /// For shutting down. Whatever owns the cache can't close it, or wipe it on signing out, while
+    /// a sync could still write to it, and the scheduler stopping says nothing about the one the
+    /// window started before the loop ran.
+    /// </remarks>
+    /// <param name="timeout">How long to wait at most</param>
+    /// <returns>False when one was still running at the end of it</returns>
+    public bool WaitForSyncs(TimeSpan timeout) => _syncsIdle.Wait(timeout);
+
+    private async Task<SyncOutcome> SyncOnceAsync(CancellationToken ct)
+    {
         TimeSpan? pause = null;
 
-        _syncing = true;
+        lock (_publishing)
+            _syncing = true;
+
         PublishStatus();
 
         // The history rides the same cadence rather than keeping a timer of its own: there is
@@ -398,10 +450,14 @@ public sealed class MainPresenter
         try
         {
             await _engine.SyncAsync(ct);
-            NoteReachable(true);
-            _lastSyncedAt = _clock.UtcNow;
-            _pausedUntil = null;
-            _rateLimitStreak = 0;
+
+            lock (_publishing)
+            {
+                NoteReachable(true);
+                _lastSyncedAt = _clock.UtcNow;
+                _pausedUntil = null;
+                _rateLimitStreak = 0;
+            }
         }
         catch (TodoistRateLimitException ex)
         {
@@ -412,11 +468,13 @@ public sealed class MainPresenter
         }
         catch (TodoistNetworkException ex)
         {
-            NoteReachable(false, ex);
+            lock (_publishing)
+                NoteReachable(false, ex);
         }
         finally
         {
-            _syncing = false;
+            lock (_publishing)
+                _syncing = false;
 
             // A rejected token propagates, so this has to publish on the way out too: otherwise the
             // status goes on saying it's syncing rather than asking for a token.
@@ -424,7 +482,7 @@ public sealed class MainPresenter
         }
 
         // Only ask for another round while the network is answering, or the loop would spin.
-        return new SyncOutcome(!IsOffline && pause is null && _engine.PendingCount > 0, pause);
+        return new SyncOutcome(!IsOffline && pause is null && _engine.WritesDue, pause);
     }
 
     /// <summary>
@@ -435,6 +493,8 @@ public sealed class MainPresenter
     /// line saying Todoist is back can never appear without the one saying when it went. Only the
     /// change is written down: a window left open offline overnight would otherwise say the same
     /// thing nine hundred times, and the line that mattered would be lost among them.
+    ///
+    /// Called holding <see cref="_publishing"/>, which the status read from this is composed under.
     /// </remarks>
     /// <param name="reachable">Whether the request that just finished got through</param>
     /// <param name="error">What stopped it, when something did</param>
@@ -555,14 +615,17 @@ public sealed class MainPresenter
     /// </remarks>
     private TimeSpan Pause(TodoistRateLimitException ex)
     {
-        _rateLimitStreak = Math.Min(_rateLimitStreak + 1, MaxBackoffSteps);
+        lock (_publishing)
+        {
+            _rateLimitStreak = Math.Min(_rateLimitStreak + 1, MaxBackoffSteps);
 
-        var asked = ex.RetryAfter ?? Backoff(_rateLimitStreak);
-        var pause = asked > MaxPause ? MaxPause : asked;
+            var asked = ex.RetryAfter ?? Backoff(_rateLimitStreak);
+            var pause = asked > MaxPause ? MaxPause : asked;
 
-        _pausedUntil = _clock.UtcNow + pause;
-        NoteReachable(true);
-        return pause;
+            _pausedUntil = _clock.UtcNow + pause;
+            NoteReachable(true);
+            return pause;
+        }
     }
 
     /// <summary>
@@ -602,29 +665,64 @@ public sealed class MainPresenter
 
         var (parse, projectId, sectionId) = Resolve(text);
 
-        // A repeat is Todoist's to read, and the grammar here can't tell where "every monday" ends
-        // and the task's own words resume. Rather than file a one-off with the repeat left in the
-        // title, the capture is refused and the words are handed back for the user to sort out.
-        if (parse.IsRecurrence)
-            throw new CaptureRefusedException(Strings.CaptureNoRepeat);
-
+        Refuse(parse);
         parse = Dated(parse, start);
 
-        // With nothing named at all, a capture belongs wherever the user is looking. Applied
-        // together: a section from one view with a project named in the text is not a real place.
+        // With no place named, or none found for what was named — the words stayed in the title —
+        // a capture belongs wherever the user is looking. Applied together: a section from one
+        // view with a project named in the text is not a real place.
         if (projectId is null && sectionId is null)
         {
-            projectId = Selection.ProjectId ?? SectionProjectId();
-            sectionId = Selection.SectionId;
+            // Read once: a publish on the sync's thread can move the selection between two reads.
+            var view = Selection;
+            projectId = view.ProjectId ?? SectionProjectId(view);
+            sectionId = view.SectionId;
         }
 
-        var id = _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
+        Add(parse, projectId, sectionId);
 
-        // A reminder the text named with "!" is set onto the new task's id, queued after its
-        // item_add so the server has the task before the reminder points at it. The plan is
-        // re-checked before each — a capture can name several and the cap counts them one by one, so
-        // checking once would queue ones over it — and sending one the plan refuses is the thing the
-        // reminder UI is built never to do. Each add is held in the model, so the next check sees it.
+        // Said from the text rather than from the model: the words the user typed are the ones that
+        // go in, and a new id each time so two captures are never folded into one.
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAdded, text.Trim()), $"capture:{Guid.NewGuid():N}");
+
+        Publish();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Turns away a capture the grammar reads but can't honour, with the reason to show.
+    /// </summary>
+    /// <remarks>
+    /// A repeat is Todoist's to read, and the grammar here can't tell where "every monday" ends and
+    /// the task's own words resume. Rather than file a one-off with the repeat left in the title,
+    /// the capture is refused and the words are handed back for the user to sort out.
+    /// </remarks>
+    /// <param name="parse">What the grammar made of the text</param>
+    private static void Refuse(QuickAddParse parse)
+    {
+        if (parse.IsRecurrence)
+            throw new CaptureRefusedException(Strings.CaptureNoRepeat);
+    }
+
+    /// <summary>
+    /// Queues a task read from capture text, and the reminders its "!" named.
+    /// </summary>
+    /// <remarks>
+    /// Each reminder is set onto the new task's id, queued after its item_add so the server has the
+    /// task before the reminder points at it. The plan is re-checked before each — a capture can
+    /// name several and the cap counts them one by one, so checking once would queue ones over it —
+    /// and sending one the plan refuses is the thing the reminder UI is built never to do. Each add
+    /// is held in the model, so the next check sees it.
+    /// </remarks>
+    /// <param name="parse">What the grammar made of the text, already refused or let through</param>
+    /// <param name="projectId">The project it goes in, or null for the Inbox</param>
+    /// <param name="sectionId">The section it goes in, or null for none</param>
+    /// <param name="parentId">The task it goes under, or null for none</param>
+    /// <returns>The new task's id</returns>
+    private string Add(QuickAddParse parse, string? projectId, string? sectionId, string? parentId = null)
+    {
+        var id = _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId, parentId));
+
         foreach (var reminder in parse.Reminders)
         {
             if (!CanAddReminder())
@@ -644,12 +742,7 @@ public sealed class MainPresenter
             }
         }
 
-        // Said from the text rather than from the model: the words the user typed are the ones that
-        // go in, and a new id each time so two captures are never folded into one.
-        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAdded, text.Trim()), $"capture:{Guid.NewGuid():N}");
-
-        Publish();
-        return Task.CompletedTask;
+        return id;
     }
 
     /// <summary>
@@ -697,22 +790,31 @@ public sealed class MainPresenter
     ///
     /// A folded parent is opened, since a sub-task added into one would otherwise be created out of
     /// sight — the one way this can appear to have done nothing at all.
+    ///
+    /// Otherwise it's a capture, and goes by a capture's rules: a repeat is refused, the "!"
+    /// reminders are set, and text that was nothing but tokens is kept whole rather than sent blank.
     /// </remarks>
     /// <param name="parentId">The task the new one goes under</param>
     /// <param name="text">What was typed, in the quick-add grammar</param>
-    /// <returns>The new task's id, or null when there was nothing to add or nowhere to put it</returns>
+    /// <returns>
+    /// The new task's id, or null when there was nothing to add, nowhere to put it, or the parent
+    /// can't take one: it's finished, or already as deep as Todoist goes
+    /// </returns>
+    /// <exception cref="CaptureRefusedException">The text names a repeat, which only the server reads</exception>
     public string? AddSubtask(string parentId, string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
         var snapshot = _engine.Snapshot();
-        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent)
+        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !_engine.CanNestUnder(parentId))
             return null;
 
+        var parse = Unblank(Placed(_parser.Parse(text, _engine.DateSettings)), text);
+        Refuse(parse);
+
         var under = Named(parentId);
-        var parse = Placed(_parser.Parse(text, _engine.DateSettings));
-        var id = _engine.AddItem(ItemFields.ForAdd(parse, parent.ProjectId, parent.SectionId, parentId));
+        var id = Add(parse, parent.ProjectId, parent.SectionId, parentId);
 
         lock (_publishing)
             _collapsed.Remove(parentId);
@@ -730,27 +832,15 @@ public sealed class MainPresenter
     /// <remarks>
     /// The parser reads "#Home" as a project and takes it out of the content. A sub-task lives
     /// where its parent lives, so there is nothing to act on — and dropping the token would delete
-    /// something the user typed, which is no better here than it was in the capture box. It goes on
-    /// the end rather than back where it was: the parser doesn't say where it came from, and a word
-    /// out of order is a smaller wrong than a word that isn't there.
+    /// something the user typed, which is no better here than it was in the capture box. It goes
+    /// back where it was typed.
     /// </remarks>
     /// <param name="parse">What the quick-add grammar made of the text</param>
     /// <returns>The same parse, with any place it named written back into the words</returns>
     private static QuickAddParse Placed(QuickAddParse parse)
-    {
-        if (parse.ProjectName is null && parse.SectionName is null)
-            return parse;
-
-        var words = new StringBuilder(parse.Content);
-
-        if (parse.ProjectName is { } project)
-            words.Append(words.Length > 0 ? " #" : "#").Append(QuickAddParser.Escaped(project));
-
-        if (parse.SectionName is { } section)
-            words.Append(words.Length > 0 ? " /" : "/").Append(QuickAddParser.Escaped(section));
-
-        return parse with { Content = words.ToString(), ProjectName = null, SectionName = null };
-    }
+        => parse.ProjectName is null && parse.SectionName is null
+            ? parse
+            : parse with { Content = parse.TitleKeeping(project: true, section: true), ProjectName = null, SectionName = null };
 
     /// <summary>
     /// The preview line for some capture text, empty when there is nothing typed. Both capture boxes
@@ -831,13 +921,39 @@ public sealed class MainPresenter
     /// them — and turning it off drops the fetch, since nothing would ever tell it that it had gone
     /// stale.
     /// </summary>
+    /// <remarks>
+    /// Pressed again while the fetch is still on its way, it turns them off: the fetch is called off
+    /// and its answer dropped. Otherwise a second press — Ctrl+H twice, quickly — started a second
+    /// fetch rather than changing its mind, and both landed showing them.
+    /// </remarks>
     /// <returns>False when the fetch couldn't be made, so the caller can say why.</returns>
     public async Task<bool> ToggleCompletedAsync(CancellationToken ct = default)
     {
-        if (ShowingCompleted)
+        CancellationTokenSource? fetching = null;
+
+        lock (_publishing)
         {
-            ShowingCompleted = false;
-            CompletedTruncated = false;
+            if (_fetchingCompleted is { } underway)
+            {
+                underway.Cancel();
+                _fetchingCompleted = null;
+                return true;
+            }
+
+            if (ShowingCompleted)
+            {
+                ShowingCompleted = false;
+                CompletedTruncated = false;
+            }
+            else
+            {
+                fetching = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                _fetchingCompleted = fetching;
+            }
+        }
+
+        if (fetching is null)
+        {
             _engine.ClearCompleted();
             Publish();
             return true;
@@ -845,10 +961,23 @@ public sealed class MainPresenter
 
         try
         {
-            var fetch = await _engine.FetchCompletedAsync(ct);
-            CompletedTruncated = fetch.Truncated;
-            ShowingCompleted = true;
-            NoteReachable(true);
+            var fetch = await _engine.FetchCompletedAsync(fetching.Token);
+
+            lock (_publishing)
+            {
+                NoteReachable(true);
+
+                // Turned off while it was on its way: the answer is for a question nobody's asking.
+                if (!fetching.IsCancellationRequested)
+                {
+                    CompletedTruncated = fetch.Truncated;
+                    ShowingCompleted = true;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (fetching.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // Called off by the second press, which has already said what it did.
         }
         catch (TodoistRateLimitException ex)
         {
@@ -861,16 +990,50 @@ public sealed class MainPresenter
         {
             // Nothing to show and no way to get it. Left off rather than switched on and empty,
             // which would read as "you have completed nothing".
-            NoteReachable(false);
+            lock (_publishing)
+                NoteReachable(false);
+
             return false;
         }
         finally
         {
+            bool abandoned;
+            lock (_publishing)
+            {
+                if (_fetchingCompleted == fetching)
+                    _fetchingCompleted = null;
+
+                // Only while nothing has been asked for since: a third press may have a fetch of
+                // its own on the way, and this one's leavings mustn't clear that.
+                abandoned = fetching.IsCancellationRequested && _fetchingCompleted is null && !ShowingCompleted;
+            }
+
+            if (abandoned)
+                _engine.ClearCompleted();
+
+            fetching.Dispose();
+
             // A rejected token propagates from here too, and the status has to say so.
             Publish();
         }
 
         return true;
+    }
+
+    /// <summary>The fetch of completed tasks still on its way, or null when there's none.</summary>
+    private CancellationTokenSource? _fetchingCompleted;
+
+    /// <summary>
+    /// Whether completed tasks are on their way, so a press that will call the fetch off isn't
+    /// announced as one starting it.
+    /// </summary>
+    public bool FetchingCompleted
+    {
+        get
+        {
+            lock (_publishing)
+                return _fetchingCompleted is not null;
+        }
     }
 
     /// <summary>Reopens a completed task, moving it back among the active ones.</summary>
@@ -907,9 +1070,13 @@ public sealed class MainPresenter
     /// <param name="key">The sidebar row it was opened from, which a favourited project has two of</param>
     private void Open(ViewSelection selection, string key)
     {
-        Selection = selection;
-        SelectedKey = key;
-        SearchQuery = string.Empty;
+        lock (_publishing)
+        {
+            Selection = selection;
+            SelectedKey = key;
+            SearchQuery = string.Empty;
+        }
+
         Remember(key);
         Publish();
     }
@@ -1071,7 +1238,13 @@ public sealed class MainPresenter
     /// again once the first sync is back — see <see cref="SettleRestore"/>.
     /// </remarks>
     /// <param name="key">The sidebar key that was saved, or null when nothing was</param>
-    public void RestoreView(string? key) => _unconfirmedRestore = SelectByKey(key);
+    public void RestoreView(string? key)
+    {
+        var restored = SelectByKey(key);
+
+        lock (_publishing)
+            _unconfirmedRestore = restored;
+    }
 
     /// <summary>
     /// Whether a restart reopened a view from the cache, and no sync has come back since to say
@@ -1105,6 +1278,26 @@ public sealed class MainPresenter
     }
 
     /// <summary>
+    /// Whether the account still holds the project, section, label or filter a view is of.
+    /// </summary>
+    /// <remarks>
+    /// An archived project or section counts as gone, as it does in the sidebar: its tasks aren't
+    /// shown, and nothing should be filed into it. A smart view is always there.
+    /// </remarks>
+    /// <param name="view">The view to look for</param>
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>False when what it's of has gone</returns>
+    private static bool StillHeld(ViewSelection view, ModelSnapshot snapshot) => view switch
+    {
+        { View: not null } => true,
+        { ProjectId: { } id } => snapshot.Projects.Any(p => p.Id == id && !p.IsArchived),
+        { SectionId: { } id } => snapshot.Sections.Any(s => s.Id == id && !s.IsArchived),
+        { LabelName: { } name } => snapshot.Labels.Any(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)),
+        { FilterId: { } id } => snapshot.Filters.Any(f => f.Id == id),
+        _ => true,
+    };
+
+    /// <summary>
     /// Moves the selection onto the id the server has given a project or section made here.
     /// </summary>
     /// <remarks>
@@ -1129,6 +1322,40 @@ public sealed class MainPresenter
         // project opened from its copy under Favourites stays on that row.
         Selection = renamed;
         SelectedKey = RenamedKey(SelectedKey);
+    }
+
+    /// <summary>
+    /// Puts the folded tasks and the ones just ticked off under the ids the server has given them.
+    /// </summary>
+    /// <remarks>
+    /// A task made here goes by an id of our own until the sync that sends it comes back. Held
+    /// under the old one, a task folded offline unfolded after that sync, and the folds saved for
+    /// the next start named a task nobody has; a new task just ticked off dropped off the list
+    /// before its moment was up. Done as the ids arrive, since the engine only remembers a rename
+    /// for so long.
+    /// </remarks>
+    private void FollowRenameInTasks()
+    {
+        foreach (var id in _collapsed.ToList())
+        {
+            if (_engine.Resolve(id) is var renamed && renamed != id)
+            {
+                _collapsed.Remove(id);
+                _collapsed.Add(renamed);
+            }
+        }
+
+        foreach (var (id, ticked) in _ticked.ToList())
+        {
+            var renamed = _engine.Resolve(id);
+            var under = ticked.Under.Select(_engine.Resolve).ToList();
+
+            if (renamed == id && under.SequenceEqual(ticked.Under, StringComparer.Ordinal))
+                continue;
+
+            _ticked.Remove(id);
+            _ticked[renamed] = ticked with { Under = under };
+        }
     }
 
     /// <summary>The start of each sidebar key that carries an id the server can rename.</summary>
@@ -1190,7 +1417,9 @@ public sealed class MainPresenter
 
     public void Search(string query)
     {
-        SearchQuery = query ?? string.Empty;
+        lock (_publishing)
+            SearchQuery = query ?? string.Empty;
+
         Republish();
     }
 
@@ -1293,12 +1522,14 @@ public sealed class MainPresenter
     /// <remarks>
     /// Read from the count the sync already keeps, rather than by asking for the comments and
     /// counting them: that builds a row for each one and formats its date, which is a great deal of
-    /// work for a number, and this is asked on every render.
+    /// work for a number, and this is asked on every render. Off the snapshot the last publish took,
+    /// too, rather than a fresh one, which projects every task in the account; every change to a
+    /// comment publishes, so it's the count on screen.
     /// </remarks>
     /// <param name="ownerId">The task or project to count for</param>
     /// <returns>How many it has, and none for anything not held</returns>
     public int CommentCountOn(string? ownerId)
-        => ownerId is null ? 0 : _engine.Snapshot().CommentCounts.GetValueOrDefault(ownerId);
+        => ownerId is not null && _projectedFrom is { } snapshot ? snapshot.CommentCounts.GetValueOrDefault(ownerId) : 0;
 
     /// <summary>
     /// The comments on a task or a project, oldest first and ready to draw.
@@ -1359,10 +1590,13 @@ public sealed class MainPresenter
     }
 
     /// <summary>Rewrites a comment.</summary>
-    /// <returns>False when there was nothing left to say, which is a delete rather than an edit</returns>
+    /// <returns>
+    /// False when there was nothing left to say, which is a delete rather than an edit, or when
+    /// what it's on can't be commented on now
+    /// </returns>
     public bool EditComment(string id, string content)
     {
-        if (string.IsNullOrWhiteSpace(content))
+        if (string.IsNullOrWhiteSpace(content) || !CanChangeComment(id))
             return false;
 
         _engine.EditComment(id, content.Trim());
@@ -1373,12 +1607,36 @@ public sealed class MainPresenter
     }
 
     /// <summary>Removes a comment. Not undoable — Todoist has no undelete.</summary>
-    public void DeleteComment(string id)
+    /// <returns>False when what it's on can't be commented on now, so nothing was removed</returns>
+    public bool DeleteComment(string id)
     {
+        if (!CanChangeComment(id))
+            return false;
+
         _engine.DeleteComment(id);
 
         History.Note(Strings.HistoryCommentDeleted, $"comment:delete:{id}");
         Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a comment can be changed: what it's on can be commented on at all.
+    /// </summary>
+    /// <remarks>
+    /// The pane goes read-only for a task out of the archive, or while the token's been turned away,
+    /// but a key reaching the presenter some other way mustn't get round that. Asked here as well,
+    /// on the same terms as <see cref="CanCommentOn"/>.
+    /// </remarks>
+    /// <param name="id">The comment</param>
+    /// <returns>False as well for a comment the account doesn't hold</returns>
+    private bool CanChangeComment(string id)
+    {
+        var held = _engine.Resolve(id);
+        var owner = _engine.RawResource(ResourceType.Notes, held)?["item_id"]?.ToString()
+                    ?? _engine.RawResource(ResourceType.ProjectNotes, held)?["project_id"]?.ToString();
+
+        return CanCommentOn(owner);
     }
 
     // ---- Attachments ---------------------------------------------------------------------------
@@ -1536,7 +1794,7 @@ public sealed class MainPresenter
 
         History.Note(
             date is { } day
-                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture))
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, DisplayDates.DayMonth(day, CultureInfo.CurrentCulture))
                 : string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueCleared, named),
             $"due:{id}");
 
@@ -1566,7 +1824,7 @@ public sealed class MainPresenter
             return false;
 
         History.Note(
-            string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture)),
+            string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, DisplayDates.DayMonth(day, CultureInfo.CurrentCulture)),
             $"due:{id}");
 
         Publish();
@@ -1702,7 +1960,7 @@ public sealed class MainPresenter
 
         History.Note(
             date is { } day
-                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture))
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineSet, named, DisplayDates.DayMonth(day, CultureInfo.CurrentCulture))
                 : string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineCleared, named),
             $"deadline:{id}");
 
@@ -1736,10 +1994,23 @@ public sealed class MainPresenter
 
     /// <summary>When the first of them is due to go, or null when the list holds none.</summary>
     public DateTimeOffset? LingerEnds
-        => _ticked.Count == 0 ? null : _ticked.Values.Min(t => t.At) + Lingers;
+    {
+        get
+        {
+            lock (_publishing)
+                return _ticked.Count == 0 ? null : _ticked.Values.Min(t => t.At) + Lingers;
+        }
+    }
 
     /// <summary>Whether anything ticked off is being kept on the list for the moment.</summary>
-    public bool Lingering => _ticked.Count > 0;
+    public bool Lingering
+    {
+        get
+        {
+            lock (_publishing)
+                return _ticked.Count > 0;
+        }
+    }
 
     /// <summary>
     /// Drops what has been ticked off long enough, and publishes what's left.
@@ -1747,9 +2018,9 @@ public sealed class MainPresenter
     /// <returns>True when something went, so the caller knows the list moved</returns>
     public bool DropTicked()
     {
-        var now = _clock.UtcNow;
         lock (_publishing)
         {
+            var now = _clock.UtcNow;
             var gone = _ticked.Where(t => now - t.Value.At >= Lingers).Select(t => t.Key).ToList();
 
             if (gone.Count == 0)
@@ -1778,7 +2049,7 @@ public sealed class MainPresenter
     /// it: the next task would slide up under the pointer, and a second click meant to put the
     /// first one back would tick that one off instead.
     /// </remarks>
-    /// <returns>Their ids</returns>
+    /// <returns>Their ids. Asked holding <see cref="_publishing"/>, as everything reading the list is</returns>
     private HashSet<string> Kept()
         => _ticked.SelectMany(t => t.Value.Under.Prepend(t.Key)).ToHashSet(StringComparer.Ordinal);
 
@@ -1796,10 +2067,11 @@ public sealed class MainPresenter
 
         // Kept on the list for a moment, so a slip of the mouse doesn't take a task off the screen
         // with nothing said about where it went. Not a recurring one, which moves on to its next
-        // date rather than being ticked off, and has nothing to keep.
-        if (_engine.CompleteItem(id) is { } under)
+        // date rather than being ticked off, and has nothing to keep. Both under the lock, so a
+        // publish from the sync can't catch it finished and not yet kept, and drop it from the list.
+        lock (_publishing)
         {
-            lock (_publishing)
+            if (_engine.CompleteItem(id) is { } under)
                 _ticked[id] = new Ticked(_clock.UtcNow, under);
         }
 
@@ -1861,7 +2133,8 @@ public sealed class MainPresenter
                 _engine.CanMoveItem(id, -1),
                 _engine.CanMoveItem(id, 1),
                 _engine.Holds(id),
-                TodoistLinkFor(id) is not null);
+                TodoistLinkFor(id) is not null,
+                _engine.CanNestUnder(id));
 
     /// <summary>
     /// Where a task's page is in the Todoist web app.
@@ -2219,8 +2492,11 @@ public sealed class MainPresenter
         // A label view is held by name, so a rename moves it. Without this the selection names a
         // label the account no longer has: nothing highlighted, and an outline that empties itself
         // the moment the server carries the rename across to the tasks.
-        if (string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
-            Selection = ViewSelection.OfLabel(newName);
+        lock (_publishing)
+        {
+            if (string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
+                Selection = ViewSelection.OfLabel(newName);
+        }
 
         Publish();
     }
@@ -2250,8 +2526,11 @@ public sealed class MainPresenter
             _engine.DeleteLabel(label.Id);
 
         // Don't leave the outline showing a label that no longer exists.
-        if (string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
-            Selection = ViewSelection.Default;
+        lock (_publishing)
+        {
+            if (string.Equals(Selection.LabelName, name, StringComparison.OrdinalIgnoreCase))
+                Selection = ViewSelection.Default;
+        }
 
         Publish();
     }
@@ -2300,10 +2579,13 @@ public sealed class MainPresenter
         History.Note(named is null ? Strings.HistoryProjectDeletedUnnamed : string.Format(CultureInfo.CurrentCulture, Strings.HistoryProjectDeleted, named), $"project:delete:{id}");
 
         // Don't leave the outline pointed at something that no longer exists.
-        if ((Selection.ProjectId is { } selected && doomed.Contains(selected))
-            || (Selection.SectionId is { } section && doomedSections.Contains(section)))
+        lock (_publishing)
         {
-            Selection = ViewSelection.Default;
+            if ((Selection.ProjectId is { } selected && doomed.Contains(selected))
+                || (Selection.SectionId is { } section && doomedSections.Contains(section)))
+            {
+                Selection = ViewSelection.Default;
+            }
         }
 
         Publish();
@@ -2488,28 +2770,53 @@ public sealed class MainPresenter
 
         History.Note(named is null ? Strings.HistorySectionDeletedUnnamed : string.Format(CultureInfo.CurrentCulture, Strings.HistorySectionDeleted, named), $"section:delete:{id}");
 
-        if (Selection.SectionId == id)
-            Selection = ViewSelection.Default;
+        lock (_publishing)
+        {
+            if (Selection.SectionId == id)
+                Selection = ViewSelection.Default;
+        }
 
         Publish();
     }
 
     // ---- Building the view ---------------------------------------------------------------------
 
-    private string? SectionProjectId()
-        => Selection.SectionId is { } id
+    private string? SectionProjectId(ViewSelection view)
+        => view.SectionId is { } id
             ? _engine.Snapshot().Sections.FirstOrDefault(s => s.Id == id)?.ProjectId
             : null;
 
+    /// <summary>
+    /// Reads capture text and finds the project and section it names.
+    /// </summary>
+    /// <remarks>
+    /// A name that finds no place, or more than one, stays in the title as it was typed, the way
+    /// Todoist keeps an unknown <c>#word</c>: "Fix issue #42" is a title, not a project called 42.
+    /// The names are left on the parse so the preview can say why the word stayed.
+    /// </remarks>
     private (QuickAddParse Parse, string? ProjectId, string? SectionId) Resolve(string text)
     {
         var parse = _parser.Parse(text, _engine.DateSettings);
+        var (projectId, sectionId) = Place(parse);
 
-        // Every word was a token, so there is no task text left. Keep the raw input rather than
-        // creating a blank task the server would reject and silently discard.
-        if (string.IsNullOrWhiteSpace(parse.Content))
-            parse = parse with { Content = text.Trim() };
+        parse = parse with
+        {
+            Content = parse.TitleKeeping(project: projectId is null, section: sectionId is null),
+        };
 
+        return (Unblank(parse, text), projectId, sectionId);
+    }
+
+    /// <summary>
+    /// Keeps the raw input where every word was a token and no task text is left, rather than
+    /// creating a blank task the server would reject and silently discard.
+    /// </summary>
+    private static QuickAddParse Unblank(QuickAddParse parse, string text)
+        => string.IsNullOrWhiteSpace(parse.Content) ? parse with { Content = text.Trim() } : parse;
+
+    /// <summary>The project and section a parse names, where each names exactly one.</summary>
+    private (string? ProjectId, string? SectionId) Place(QuickAddParse parse)
+    {
         // An ambiguous name is treated as unresolved: filing the task under whichever project
         // happened to be enumerated first would be a guess.
         string? projectId = null;
@@ -2542,7 +2849,7 @@ public sealed class MainPresenter
             }
         }
 
-        return (parse, projectId, sectionId);
+        return (projectId, sectionId);
     }
 
     /// <summary>Re-reads the model and republishes. Call after anything that mutates the engine.</summary>
@@ -2568,11 +2875,18 @@ public sealed class MainPresenter
             // is in it under the server's id by now, and under the old one it would read as gone.
             FollowRename();
             FollowRenameInRecent();
+            FollowRenameInTasks();
 
             // After the sidebar, which is what it's checked against, and before the path and the
             // rows, which follow from wherever it leaves the selection.
             if (_unconfirmedRestore && _lastSyncedAt is not null)
                 SettleRestore();
+
+            // A place deleted by a sync — on the phone, say — left an empty view of nothing, and a
+            // capture made from it was filed against an id the account no longer has. Fallen back
+            // the way deleting it here does.
+            if (!StillHeld(Selection, snapshot))
+                Selection = ViewSelection.Default;
 
             _viewPath = ViewPath.For(Selection, snapshot);
 
@@ -3166,7 +3480,13 @@ public sealed class MainPresenter
     /// rearranging themselves on a restart that changed nothing.
     /// </remarks>
     public IReadOnlyList<string> CollapsedTasks
-        => _collapsed.OrderBy(id => id, StringComparer.Ordinal).ToList();
+    {
+        get
+        {
+            lock (_publishing)
+                return _collapsed.OrderBy(id => id, StringComparer.Ordinal).ToList();
+        }
+    }
 
     /// <summary>
     /// Puts back the folds a previous session left.
@@ -3179,10 +3499,12 @@ public sealed class MainPresenter
     /// <param name="ids">The tasks that were folded when the window last closed</param>
     public void RestoreCollapsed(IEnumerable<string> ids)
     {
+        var restored = ids.ToList();
+
         lock (_publishing)
         {
             _collapsed.Clear();
-            foreach (var id in ids)
+            foreach (var id in restored)
                 _collapsed.Add(id);
         }
 
@@ -3193,7 +3515,11 @@ public sealed class MainPresenter
     /// <summary>Whether this task's sub-tasks are being kept out of sight.</summary>
     /// <param name="id">The task to ask about</param>
     /// <returns>True when its sub-tasks are hidden</returns>
-    public bool IsCollapsed(string id) => _collapsed.Contains(id);
+    public bool IsCollapsed(string id)
+    {
+        lock (_publishing)
+            return _collapsed.Contains(id);
+    }
 
     /// <summary>
     /// Hides or shows what is filed under a task.
@@ -3223,12 +3549,30 @@ public sealed class MainPresenter
     /// <remarks>
     /// Neither is offered where the view is grouped by day: it's laid out flat, so nothing on
     /// screen has anything under it, and an entry that did nothing visible would be worse than
-    /// one that's plainly unavailable.
+    /// one that's plainly unavailable. Nor during a search, for the same reason: the results are
+    /// flat, and the rows a fold would act on are the view's, hidden behind them.
     /// </remarks>
-    public bool CanCollapseAll => !Grouping && _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+    public bool CanCollapseAll
+    {
+        get
+        {
+            lock (_publishing)
+                return Foldable && _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+        }
+    }
 
     /// <inheritdoc cref="CanCollapseAll" />
-    public bool CanExpandAll => !Grouping && _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+    public bool CanExpandAll
+    {
+        get
+        {
+            lock (_publishing)
+                return Foldable && _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+        }
+    }
+
+    /// <summary>Whether the rows on screen are the view's outline, which folding acts on.</summary>
+    private bool Foldable => !Grouping && !Searching;
 
     /// <summary>
     /// Folds, or unfolds, every task in the view that has anything under it.
@@ -3251,6 +3595,11 @@ public sealed class MainPresenter
 
         lock (_publishing)
         {
+            // Nothing on screen to fold. Folding the view hidden behind a search would change a
+            // list nobody's looking at, and it would turn up changed when the search was let go.
+            if (!Foldable)
+                return false;
+
             foreach (var row in _allRows)
                 if (row.HasChildren)
                     changed |= collapsed ? _collapsed.Add(row.Id) : _collapsed.Remove(row.Id);
@@ -3275,9 +3624,18 @@ public sealed class MainPresenter
     /// <returns>The nearest ancestor still on screen, or null when there is none</returns>
     public string? NearestShown(string id)
     {
+        // Both lists from the one publish: the sync's can replace either of them in between.
+        IReadOnlyList<TaskRow> all;
+        IReadOnlyList<TaskRow> rows;
+        lock (_publishing)
+        {
+            all = _allRows;
+            rows = Rows;
+        }
+
         var at = -1;
-        for (var i = 0; i < _allRows.Count; i++)
-            if (_allRows[i].Id == id)
+        for (var i = 0; i < all.Count; i++)
+            if (all[i].Id == id)
             {
                 at = i;
                 break;
@@ -3286,19 +3644,19 @@ public sealed class MainPresenter
         if (at < 0)
             return null;
 
-        var shown = Rows.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
-        var depth = _allRows[at].Depth;
+        var shown = rows.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var depth = all[at].Depth;
 
         // Backwards up the chain rather than to the first shallower row: that one is the parent,
         // and the parent can be folded away itself.
         for (var i = at - 1; i >= 0; i--)
         {
-            if (_allRows[i].Depth >= depth)
+            if (all[i].Depth >= depth)
                 continue;
 
-            depth = _allRows[i].Depth;
-            if (shown.Contains(_allRows[i].Id))
-                return _allRows[i].Id;
+            depth = all[i].Depth;
+            if (shown.Contains(all[i].Id))
+                return all[i].Id;
         }
 
         return null;
@@ -3357,7 +3715,9 @@ public sealed class MainPresenter
     /// </remarks>
     public void SortBy(TaskColumn column)
     {
-        Sort = Sort.Clicked(column);
+        lock (_publishing)
+            Sort = Sort.Clicked(column);
+
         Republish();
     }
 
@@ -3365,10 +3725,14 @@ public sealed class MainPresenter
     /// <returns>False when it was already in it, so the caller can leave things be.</returns>
     public bool ClearSort()
     {
-        if (Sort.IsDefault)
-            return false;
+        lock (_publishing)
+        {
+            if (Sort.IsDefault)
+                return false;
 
-        Sort = TaskSort.Default;
+            Sort = TaskSort.Default;
+        }
+
         Republish();
         return true;
     }
@@ -3526,7 +3890,7 @@ public sealed class MainPresenter
                 // Said while the row is still there, which is the moment it's any use: a task
                 // ticked off by mistake is one keystroke from coming back, and this is where the
                 // app says what's going on.
-                Lingering ? string.Format(CultureInfo.CurrentCulture, Strings.StatusTickedOff, _shortcutText(AppCommand.Undo)) : null,
+                _ticked.Count > 0 ? string.Format(CultureInfo.CurrentCulture, Strings.StatusTickedOff, _shortcutText(AppCommand.Undo)) : null,
 
                 CompletedTruncated ? Strings.StatusCompletedTruncated : null,
                 SyncStatus.Describe(),

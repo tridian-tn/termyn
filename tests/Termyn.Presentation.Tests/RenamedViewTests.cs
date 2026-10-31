@@ -1,3 +1,4 @@
+using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
@@ -67,6 +68,90 @@ public class RenamedViewTests
 
         Assert.Equal(ViewSelection.OfSection("s1"), presenter.Selection);
         Assert.Equal(SidebarKeys.For(SidebarKind.Section, "s1"), presenter.SelectedKey);
+    }
+
+    /// <summary>The server taking every write, and naming each new task in turn from the ids given.</summary>
+    private static Func<IReadOnlyList<Command>, SyncResponse> NamingTasks(string[] ids, params ResourceChange[] changes)
+        => commands => new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = changes,
+            SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            TempIdMapping = commands
+                .Where(c => c is { Type: "item_add", TempId: not null })
+                .Select((c, i) => (c.TempId!, ids[i]))
+                .ToDictionary(p => p.Item1, p => p.Item2),
+        };
+
+    [Fact]
+    public async Task A_task_folded_before_the_server_named_it_stays_folded()
+    {
+        var (presenter, api) = Seeded();
+        await presenter.CaptureAsync("Plan #Work", TestContext.Current.CancellationToken);
+        presenter.Select(ViewSelection.OfProject("p1"));
+        var parent = presenter.Rows.Single().Id;
+        presenter.AddSubtask(parent, "Step");
+        presenter.SetCollapsed(parent, true);
+
+        api.Next = NamingTasks(
+            ["i1", "i2"],
+            Json.Change("items", "i1", """{"id":"i1","content":"Plan","project_id":"p1","child_order":1}"""),
+            Json.Change("items", "i2", """{"id":"i2","content":"Step","project_id":"p1","parent_id":"i1","child_order":1}"""));
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        // Held under the old id, it unfolded, and the folds saved for next time named nothing.
+        Assert.True(presenter.IsCollapsed("i1"));
+        Assert.Equal(["i1"], presenter.CollapsedTasks);
+        Assert.True(presenter.Rows.Single().Collapsed);
+    }
+
+    [Fact]
+    public async Task A_new_task_just_ticked_off_keeps_its_moment_when_the_server_names_it()
+    {
+        var (presenter, api) = Seeded();
+        presenter.Select(ViewSelection.OfProject("p1"));
+        await presenter.CaptureAsync("Post the letter", TestContext.Current.CancellationToken);
+        presenter.Complete(presenter.Rows.Single().Id);
+
+        api.Next = NamingTasks(
+            ["i1"],
+            Json.Change("items", "i1", """{"id":"i1","content":"Post the letter","project_id":"p1","checked":true,"child_order":1}"""));
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(presenter.Lingering);
+        Assert.Equal("i1", Assert.Single(presenter.Rows).Id);
+    }
+
+    [Fact]
+    public async Task A_project_deleted_by_a_sync_while_it_was_open_falls_back_to_today()
+    {
+        // Deleted on the phone. Left selected, the view showed nothing and a capture made from it
+        // was filed against an id the account no longer has.
+        var (presenter, api) = Seeded();
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        api.Next = _ => new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("projects", "p1")] };
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.Default, presenter.Selection);
+        Assert.Equal(ViewSelection.Default.Key, presenter.SelectedKey);
+    }
+
+    [Fact]
+    public async Task A_section_deleted_by_a_sync_while_it_was_open_falls_back_to_today()
+    {
+        var (presenter, api) = Seeded();
+        presenter.AddSection("Later", "p1");
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["section_add"] = "s1" },
+            Json.Change("sections", "s1", """{"id":"s1","name":"Later","project_id":"p1","section_order":1}"""));
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+        presenter.Select(ViewSelection.OfSection("s1"));
+
+        api.Next = _ => new SyncResponse { SyncToken = "s2", Changes = [Json.Deleted("sections", "s1")] };
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.Default, presenter.Selection);
     }
 
     [Fact]

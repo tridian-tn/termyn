@@ -37,6 +37,16 @@ public sealed class OutboxCommand
     /// <summary>Consecutive syncs in which the server returned no verdict for this command.</summary>
     public int NoVerdictRounds { get; set; }
 
+    /// <summary>
+    /// When it may next be sent, after the server refused it for now or didn't answer; null when it
+    /// can go whenever.
+    /// </summary>
+    /// <remarks>
+    /// Not stored. A restart sends it again straight away, which is one try sooner than it would
+    /// have had and no more.
+    /// </remarks>
+    public DateTimeOffset? RetryAt { get; set; }
+
     public OutboxState State { get; set; } = OutboxState.Pending;
     public string? LastError { get; set; }
 }

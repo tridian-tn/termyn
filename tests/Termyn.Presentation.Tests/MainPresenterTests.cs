@@ -139,11 +139,59 @@ public class MainPresenterTests
     [Fact]
     public async Task Capture_of_only_tokens_keeps_the_raw_text_rather_than_creating_a_blank_task()
     {
-        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
 
         await presenter.CaptureAsync("#Work p1", TestContext.Current.CancellationToken);
 
         Assert.Equal("#Work p1", presenter.Rows.Single().Content);
+    }
+
+    [Fact]
+    public async Task An_unknown_project_stays_in_the_title_and_the_task_goes_where_you_are()
+    {
+        // Todoist keeps an unknown #word in the title. "Fix issue #42" is a task about issue 42,
+        // and the preview used to promise the Inbox while the capture went to the open view.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        var preview = presenter.Preview("Fix issue #42");
+        Assert.Equal("Fix issue #42", preview.Parse.Content);
+        Assert.False(preview.ProjectResolved);
+
+        await presenter.CaptureAsync("Fix issue #42", TestContext.Current.CancellationToken);
+
+        var row = presenter.Rows.Single();
+        Assert.Equal("Fix issue #42", row.Content);
+        Assert.Equal("Work", row.Project);
+    }
+
+    [Fact]
+    public async Task A_phone_number_typed_into_a_capture_stays_on_the_task()
+    {
+        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+
+        Assert.DoesNotContain("needs a connection", presenter.PreviewText("Call John +447700900123"));
+
+        await presenter.CaptureAsync("Call John +447700900123", TestContext.Current.CancellationToken);
+
+        Assert.Equal("Call John +447700900123", presenter.Rows.Single().Content);
+    }
+
+    [Fact]
+    public async Task An_unknown_section_stays_in_the_title_where_it_was_typed()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
+
+        await presenter.CaptureAsync("Read /dev/null docs #Work", TestContext.Current.CancellationToken);
+
+        var row = presenter.Rows.Single(r => r.Project == "Work");
+        Assert.Equal("Read /dev/null docs", row.Content);
     }
 
     [Fact]
@@ -233,10 +281,15 @@ public class MainPresenterTests
     [Fact]
     public void Preview_shows_the_text_the_task_would_actually_be_created_with()
     {
-        var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work"}""");
+        var presenter = NewPresenter(new FakeApi(), store);
 
         // Every word was a token, so the raw text is kept rather than creating a blank task.
         Assert.Equal("#Work p1", presenter.Preview("#Work p1").Parse.Content);
+
+        // A project there's no such thing as is kept in the title, as the capture would keep it.
+        Assert.Equal("Task #Nope", presenter.Preview("Task #Nope p1").Parse.Content);
     }
 
     [Fact]
@@ -438,11 +491,50 @@ public class MainPresenterTests
     [Fact]
     public async Task Syncing_with_writes_still_queued_asks_for_another_round()
     {
+        // More than one round carries, all taken.
+        var api = new FakeApi
+        {
+            Next = commands => new SyncResponse
+            {
+                SyncToken = "s1",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            },
+        };
+        var presenter = NewPresenter(api, SeededStore());
+        for (var i = 0; i < 101; i++)
+            presenter.Rename("i1", $"B{i}");
+
+        Assert.True((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
+    }
+
+    [Fact]
+    public async Task A_write_left_unanswered_doesnt_ask_for_another_round_straight_away()
+    {
+        // Coming straight back for it spent all its attempts in seconds and rolled the change back.
+        // It waits for the loop's own clock instead.
         var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
         var presenter = NewPresenter(api, SeededStore());
         presenter.Rename("i1", "B");
 
-        Assert.True((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued); // no verdict yet, so it stays queued
+        Assert.False((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
+        Assert.Contains("1 pending", presenter.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_write_refused_for_now_doesnt_ask_for_another_round_straight_away()
+    {
+        var api = new FakeApi
+        {
+            Next = commands => new SyncResponse
+            {
+                SyncToken = "s1",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "42", "Service unavailable", 503)),
+            },
+        };
+        var presenter = NewPresenter(api, SeededStore());
+        presenter.Rename("i1", "B");
+
+        Assert.False((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
     }
 
     [Fact]
