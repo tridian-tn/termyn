@@ -198,19 +198,20 @@ public class ViewPathTests
     // ---- When the model can't answer ---------------------------------------------------------------
 
     [Fact]
-    public void A_view_of_something_that_is_no_longer_there_reads_as_nothing()
+    public void A_view_of_something_that_is_no_longer_there_falls_back_to_today()
     {
-        // A project deleted by a sync while it was open. Better an empty line than a step naming
-        // something the account doesn't hold, which would go nowhere when followed.
+        // A project deleted by a sync while it was open. Rather than a path naming something the
+        // account doesn't hold, or an empty view of nothing, the window goes back to Today.
         var presenter = NewPresenter(Store());
 
         presenter.Select(ViewSelection.OfProject("gone"));
 
-        Assert.Empty(presenter.Breadcrumbs);
+        Assert.Equal(ViewSelection.Default, presenter.Selection);
+        Assert.Equal("Today", Reads(presenter));
     }
 
     [Fact]
-    public void A_label_the_account_no_longer_holds_reads_as_nothing_either()
+    public void A_label_the_account_no_longer_holds_falls_back_too()
     {
         // A label is selected by name rather than by id, so nothing about the selection goes stale
         // on its own when one is deleted — which made this the one kind of view that would have gone
@@ -219,7 +220,7 @@ public class ViewPathTests
 
         presenter.Select(ViewSelection.OfLabel("deleted"));
 
-        Assert.Empty(presenter.Breadcrumbs);
+        Assert.Equal("Today", Reads(presenter));
     }
 
     [Fact]

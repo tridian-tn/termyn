@@ -123,6 +123,38 @@ public class RenamedViewTests
     }
 
     [Fact]
+    public async Task A_project_deleted_by_a_sync_while_it_was_open_falls_back_to_today()
+    {
+        // Deleted on the phone. Left selected, the view showed nothing and a capture made from it
+        // was filed against an id the account no longer has.
+        var (presenter, api) = Seeded();
+        presenter.Select(ViewSelection.OfProject("p1"));
+
+        api.Next = _ => new SyncResponse { SyncToken = "s1", Changes = [Json.Deleted("projects", "p1")] };
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.Default, presenter.Selection);
+        Assert.Equal(ViewSelection.Default.Key, presenter.SelectedKey);
+    }
+
+    [Fact]
+    public async Task A_section_deleted_by_a_sync_while_it_was_open_falls_back_to_today()
+    {
+        var (presenter, api) = Seeded();
+        presenter.AddSection("Later", "p1");
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["section_add"] = "s1" },
+            Json.Change("sections", "s1", """{"id":"s1","name":"Later","project_id":"p1","section_order":1}"""));
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+        presenter.Select(ViewSelection.OfSection("s1"));
+
+        api.Next = _ => new SyncResponse { SyncToken = "s2", Changes = [Json.Deleted("sections", "s1")] };
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.Default, presenter.Selection);
+    }
+
+    [Fact]
     public async Task Opened_from_Favourites_it_stays_on_the_Favourites_row()
     {
         // The project is two rows, and the one it was opened from is the one to come back to.

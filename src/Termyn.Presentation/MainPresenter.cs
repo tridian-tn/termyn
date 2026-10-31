@@ -1140,6 +1140,26 @@ public sealed class MainPresenter
     }
 
     /// <summary>
+    /// Whether the account still holds the project, section, label or filter a view is of.
+    /// </summary>
+    /// <remarks>
+    /// An archived project or section counts as gone, as it does in the sidebar: its tasks aren't
+    /// shown, and nothing should be filed into it. A smart view is always there.
+    /// </remarks>
+    /// <param name="view">The view to look for</param>
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>False when what it's of has gone</returns>
+    private static bool StillHeld(ViewSelection view, ModelSnapshot snapshot) => view switch
+    {
+        { View: not null } => true,
+        { ProjectId: { } id } => snapshot.Projects.Any(p => p.Id == id && !p.IsArchived),
+        { SectionId: { } id } => snapshot.Sections.Any(s => s.Id == id && !s.IsArchived),
+        { LabelName: { } name } => snapshot.Labels.Any(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)),
+        { FilterId: { } id } => snapshot.Filters.Any(f => f.Id == id),
+        _ => true,
+    };
+
+    /// <summary>
     /// Moves the selection onto the id the server has given a project or section made here.
     /// </summary>
     /// <remarks>
@@ -2693,6 +2713,12 @@ public sealed class MainPresenter
             // rows, which follow from wherever it leaves the selection.
             if (_unconfirmedRestore && _lastSyncedAt is not null)
                 SettleRestore();
+
+            // A place deleted by a sync — on the phone, say — left an empty view of nothing, and a
+            // capture made from it was filed against an id the account no longer has. Fallen back
+            // the way deleting it here does.
+            if (!StillHeld(Selection, snapshot))
+                Selection = ViewSelection.Default;
 
             _viewPath = ViewPath.For(Selection, snapshot);
 
