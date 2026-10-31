@@ -140,6 +140,73 @@ public class SubtaskCreationTests
         Assert.Null(presenter.AddSubtask("no such task", "Write it up"));
     }
 
+    [Fact]
+    public void Text_that_is_nothing_but_tokens_is_kept_rather_than_sent_blank()
+    {
+        // The same guard a capture has: a blank task is one the server rejects and drops.
+        var presenter = Seeded();
+
+        var row = Added(presenter, presenter.AddSubtask("a", "p1 @errand"));
+
+        Assert.Equal("p1 @errand", row.Content);
+    }
+
+    [Fact]
+    public void A_repeat_is_refused_as_a_capture_refuses_one()
+    {
+        // Filed as a one-off with the repeat left in its title, it was a task nobody asked for.
+        var presenter = Seeded();
+        var before = _engine.Snapshot().Items.Count;
+
+        var refused = Assert.Throws<CaptureRefusedException>(() => presenter.AddSubtask("a", "Water plants every day"));
+
+        Assert.Equal(Strings.CaptureNoRepeat, refused.Message);
+        Assert.Equal(before, _engine.Snapshot().Items.Count);
+    }
+
+    [Fact]
+    public void A_reminder_typed_with_it_is_set()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("user_plan_limits", "user_plan_limits", """{"current":{"plan_name":"pro","reminders":true}}""");
+        store.PutResource("items", "a", """{"id":"a","content":"Parent","child_order":1}""");
+        var presenter = All(store);
+
+        var id = presenter.AddSubtask("a", "Call the hotel !30m");
+
+        Assert.Equal("Call the hotel", Added(presenter, id).Content);
+        Assert.Equal(id, _engine.Snapshot().Reminders.Single().ItemId);
+    }
+
+    [Fact]
+    public void A_finished_task_takes_no_sub_task()
+    {
+        var presenter = Seeded();
+        presenter.Complete("a");
+
+        Assert.False(presenter.AbilitiesFor("a").CanAddSubtask);
+        Assert.Null(presenter.AddSubtask("a", "Too late"));
+    }
+
+    [Fact]
+    public void A_task_at_todoists_deepest_takes_no_sub_task_whatever_its_indent_on_screen()
+    {
+        // Four levels under a top-level task is as deep as Todoist goes. Searched for, the deepest
+        // sits at the left with nothing above it, and the row's indent said there was room.
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "d0", """{"id":"d0","content":"Top","child_order":1}""");
+        for (var i = 1; i <= 4; i++)
+            store.PutResource("items", $"d{i}", $$"""{"id":"d{{i}}","content":"Level {{i}}","parent_id":"d{{i - 1}}","child_order":1}""");
+        var presenter = All(store);
+        presenter.Search("Level 4");
+
+        Assert.Equal(0, presenter.Rows.Single().Depth);
+        Assert.False(presenter.AbilitiesFor("d4").CanAddSubtask);
+        Assert.True(presenter.AbilitiesFor("d3").CanAddSubtask);
+        Assert.Null(presenter.AddSubtask("d4", "Too deep"));
+        Assert.NotNull(presenter.AddSubtask("d3", "Just fits"));
+    }
+
     private MainPresenter NewPresenter(InMemorySnapshotStore store)
     {
         _engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));

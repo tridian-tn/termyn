@@ -88,13 +88,19 @@ public enum AppCommand
 /// Whether Todoist has a page for it. False for a task made here that a sync hasn't taken to the
 /// server yet, which Todoist has never heard of
 /// </param>
+/// <param name="CanAddSubtask">
+/// Whether a sub-task can be added under it: it's still open, and not already as deep as Todoist
+/// goes. Its real depth, not its indent on screen, which is nought for a task whose parent isn't in
+/// the view
+/// </param>
 public sealed record TaskAbilities(
     bool CanIndent = false,
     bool CanOutdent = false,
     bool CanMoveUp = false,
     bool CanMoveDown = false,
     bool CanMoveTo = false,
-    bool CanShowInTodoist = false)
+    bool CanShowInTodoist = false,
+    bool CanAddSubtask = false)
 {
     /// <summary>No task in hand, so nothing is on offer.</summary>
     public static readonly TaskAbilities None = new();
@@ -235,16 +241,6 @@ public static class Commands
     public static bool IsTaskCommand(AppCommand command)
         => command is >= AppCommand.ToggleComplete and <= AppCommand.Delete;
 
-    /// <summary>
-    /// How deep sub-tasks may go, which is where the New sub-task entry stops being offered.
-    /// </summary>
-    /// <remarks>
-    /// Todoist takes four levels below a top-level task, so a task at that depth can hold nothing
-    /// further. The engine holds the same number for the indent path and refuses a move that would
-    /// pass it; this is the half that greys the entry rather than letting it be picked and fail.
-    /// </remarks>
-    private const int MaxSubtaskDepth = 4;
-
     /// <summary>The commands that act on whichever row the sidebar is on.</summary>
     public static bool IsSelectionCommand(AppCommand command)
         => command is >= AppCommand.RenameSelection and <= AppCommand.MoveSelectionDown;
@@ -329,10 +325,11 @@ public static class Commands
 
             // Not on a task that is finished with — a sub-task of one would be work filed under
             // something already ticked off, where nothing on screen would ever show it as due — and
-            // not on one already as deep as Todoist will hold.
+            // not on one already as deep as Todoist will hold. Asked of the model rather than the
+            // row, whose indent is only how deep it sits in this view.
             AppCommand.NewSubtask => new CommandState(
                 Strings.CommandNewSubtask,
-                context.Task is { Completed: false, Depth: < MaxSubtaskDepth }),
+                task is { Completed: false } && can.CanAddSubtask),
 
             // Named for what is selected, because "Rename" over a sidebar holding projects,
             // sections and labels doesn't say which of the three is about to change.

@@ -626,12 +626,7 @@ public sealed class MainPresenter
 
         var (parse, projectId, sectionId) = Resolve(text);
 
-        // A repeat is Todoist's to read, and the grammar here can't tell where "every monday" ends
-        // and the task's own words resume. Rather than file a one-off with the repeat left in the
-        // title, the capture is refused and the words are handed back for the user to sort out.
-        if (parse.IsRecurrence)
-            throw new CaptureRefusedException(Strings.CaptureNoRepeat);
-
+        Refuse(parse);
         parse = Dated(parse, start);
 
         // With no place named, or none found for what was named — the words stayed in the title —
@@ -645,13 +640,50 @@ public sealed class MainPresenter
             sectionId = view.SectionId;
         }
 
-        var id = _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId));
+        Add(parse, projectId, sectionId);
 
-        // A reminder the text named with "!" is set onto the new task's id, queued after its
-        // item_add so the server has the task before the reminder points at it. The plan is
-        // re-checked before each — a capture can name several and the cap counts them one by one, so
-        // checking once would queue ones over it — and sending one the plan refuses is the thing the
-        // reminder UI is built never to do. Each add is held in the model, so the next check sees it.
+        // Said from the text rather than from the model: the words the user typed are the ones that
+        // go in, and a new id each time so two captures are never folded into one.
+        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAdded, text.Trim()), $"capture:{Guid.NewGuid():N}");
+
+        Publish();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Turns away a capture the grammar reads but can't honour, with the reason to show.
+    /// </summary>
+    /// <remarks>
+    /// A repeat is Todoist's to read, and the grammar here can't tell where "every monday" ends and
+    /// the task's own words resume. Rather than file a one-off with the repeat left in the title,
+    /// the capture is refused and the words are handed back for the user to sort out.
+    /// </remarks>
+    /// <param name="parse">What the grammar made of the text</param>
+    private static void Refuse(QuickAddParse parse)
+    {
+        if (parse.IsRecurrence)
+            throw new CaptureRefusedException(Strings.CaptureNoRepeat);
+    }
+
+    /// <summary>
+    /// Queues a task read from capture text, and the reminders its "!" named.
+    /// </summary>
+    /// <remarks>
+    /// Each reminder is set onto the new task's id, queued after its item_add so the server has the
+    /// task before the reminder points at it. The plan is re-checked before each — a capture can
+    /// name several and the cap counts them one by one, so checking once would queue ones over it —
+    /// and sending one the plan refuses is the thing the reminder UI is built never to do. Each add
+    /// is held in the model, so the next check sees it.
+    /// </remarks>
+    /// <param name="parse">What the grammar made of the text, already refused or let through</param>
+    /// <param name="projectId">The project it goes in, or null for the Inbox</param>
+    /// <param name="sectionId">The section it goes in, or null for none</param>
+    /// <param name="parentId">The task it goes under, or null for none</param>
+    /// <returns>The new task's id</returns>
+    private string Add(QuickAddParse parse, string? projectId, string? sectionId, string? parentId = null)
+    {
+        var id = _engine.AddItem(ItemFields.ForAdd(parse, projectId, sectionId, parentId));
+
         foreach (var reminder in parse.Reminders)
         {
             if (!CanAddReminder())
@@ -671,12 +703,7 @@ public sealed class MainPresenter
             }
         }
 
-        // Said from the text rather than from the model: the words the user typed are the ones that
-        // go in, and a new id each time so two captures are never folded into one.
-        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAdded, text.Trim()), $"capture:{Guid.NewGuid():N}");
-
-        Publish();
-        return Task.CompletedTask;
+        return id;
     }
 
     /// <summary>
@@ -724,22 +751,31 @@ public sealed class MainPresenter
     ///
     /// A folded parent is opened, since a sub-task added into one would otherwise be created out of
     /// sight — the one way this can appear to have done nothing at all.
+    ///
+    /// Otherwise it's a capture, and goes by a capture's rules: a repeat is refused, the "!"
+    /// reminders are set, and text that was nothing but tokens is kept whole rather than sent blank.
     /// </remarks>
     /// <param name="parentId">The task the new one goes under</param>
     /// <param name="text">What was typed, in the quick-add grammar</param>
-    /// <returns>The new task's id, or null when there was nothing to add or nowhere to put it</returns>
+    /// <returns>
+    /// The new task's id, or null when there was nothing to add, nowhere to put it, or the parent
+    /// can't take one: it's finished, or already as deep as Todoist goes
+    /// </returns>
+    /// <exception cref="CaptureRefusedException">The text names a repeat, which only the server reads</exception>
     public string? AddSubtask(string parentId, string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
         var snapshot = _engine.Snapshot();
-        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent)
+        if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !TakesSubtask(parentId, snapshot))
             return null;
 
+        var parse = Unblank(Placed(_parser.Parse(text, _engine.DateSettings)), text);
+        Refuse(parse);
+
         var under = Named(parentId);
-        var parse = Placed(_parser.Parse(text, _engine.DateSettings));
-        var id = _engine.AddItem(ItemFields.ForAdd(parse, parent.ProjectId, parent.SectionId, parentId));
+        var id = Add(parse, parent.ProjectId, parent.SectionId, parentId);
 
         lock (_publishing)
             _collapsed.Remove(parentId);
@@ -1966,7 +2002,39 @@ public sealed class MainPresenter
                 _engine.CanMoveItem(id, -1),
                 _engine.CanMoveItem(id, 1),
                 _engine.Holds(id),
-                TodoistLinkFor(id) is not null);
+                TodoistLinkFor(id) is not null,
+                _projectedFrom is { } snapshot && TakesSubtask(id, snapshot));
+
+    /// <summary>
+    /// Whether a task can have a sub-task added under it.
+    /// </summary>
+    /// <remarks>
+    /// Not under one that's finished — the sub-task would be work filed under something already
+    /// ticked off — nor under one already at Todoist's deepest. Its depth in the account, which the
+    /// row can't say: a task whose parent isn't in the view, in a search or under Upcoming's days,
+    /// sits at the left whatever is above it.
+    /// </remarks>
+    /// <param name="id">The task the sub-task would go under</param>
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>True when a sub-task can go under it</returns>
+    private static bool TakesSubtask(string id, ModelSnapshot snapshot)
+    {
+        var byId = new Dictionary<string, TaskItem>(StringComparer.Ordinal);
+        foreach (var item in snapshot.Items)
+            byId.TryAdd(item.Id, item);
+
+        if (!byId.TryGetValue(id, out var parent) || parent.Completed)
+            return false;
+
+        // Walked up, and stopped at anything already passed: a parent cycle is the account's data,
+        // not something to trust.
+        var depth = 0;
+        var seen = new HashSet<string>(StringComparer.Ordinal) { id };
+        for (var up = parent.ParentId; up is not null && seen.Add(up); up = byId.GetValueOrDefault(up)?.ParentId)
+            depth++;
+
+        return depth < SyncEngine.MaxDepth;
+    }
 
     /// <summary>
     /// Where a task's page is in the Todoist web app.

@@ -21,7 +21,7 @@ public class MenuTests
         TaskAbilities? can = null,
         bool completed = false,
         int depth = 0)
-        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true), Schedule: Days);
+        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true, true), Schedule: Days);
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -319,9 +319,10 @@ public class MenuTests
     {
         // Four levels below a top-level task is what Todoist takes, so a task already at four can
         // hold nothing further. Greyed rather than offered and refused, since the refusal would
-        // come back from the server long after the click.
-        using var shallow = BuildTaskMenu(OnTask(depth: 3));
-        using var deepest = BuildTaskMenu(OnTask(depth: 4));
+        // come back from the server long after the click. The model says how deep it is: the row's
+        // indent is only its depth in this view, nought for one whose parent isn't in it.
+        using var shallow = BuildTaskMenu(OnTask(depth: 3, can: new TaskAbilities(CanAddSubtask: true)));
+        using var deepest = BuildTaskMenu(OnTask(depth: 0, can: new TaskAbilities(CanAddSubtask: false)));
 
         Assert.True(Find(shallow, "New sub-task…").Enabled);
         Assert.False(Find(deepest, "New sub-task…").Enabled);
