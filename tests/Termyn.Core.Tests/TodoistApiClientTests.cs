@@ -107,6 +107,14 @@ public class TodoistApiClientTests
         Assert.True(Assert.IsType<TodoistNetworkException>(await running).Unreachable);
     }
 
+    [Fact]
+    public void The_shared_client_leaves_the_bounds_to_each_call()
+    {
+        using var http = TodoistHttp.CreateClient();
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
+    }
+
     /// <summary>A body or a file that arrives a byte at a time, steadily, for as long as it lasts.</summary>
     private sealed class TricklingStream(int bytes, TimeSpan gap) : Stream
     {

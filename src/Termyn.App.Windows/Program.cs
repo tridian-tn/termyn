@@ -48,13 +48,13 @@ internal static class Program
         // promised a bound that was never in force. The update check bounds its own read; the
         // Todoist body is the account's own data and is parsed straight off the stream.
         //
-        // The timeout is likewise only half of one — it stops applying once the headers arrive, so
-        // each caller puts a deadline on its own read as well.
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // No overall timeout: it would span an upload's body and cut off a large file. Each caller
+        // bounds its own calls instead (TodoistHttp says more).
+        using var http = TodoistHttp.CreateClient();
         ITodoistApi api = new TodoistApiClient(http);
         ISecretStore secrets = new DpapiSecretStore(paths);
 
-        // The same HttpClient as the API: one connection pool, one timeout, one place to configure.
+        // The same HttpClient as the API: one connection pool, one place to configure.
         // The Todoist token rides on each request rather than on the client, so nothing of the
         // account's goes to GitHub with this.
         var updates = new GitHubReleaseCheck(http);
