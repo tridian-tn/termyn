@@ -1551,10 +1551,13 @@ public sealed class MainPresenter
     }
 
     /// <summary>Rewrites a comment.</summary>
-    /// <returns>False when there was nothing left to say, which is a delete rather than an edit</returns>
+    /// <returns>
+    /// False when there was nothing left to say, which is a delete rather than an edit, or when
+    /// what it's on can't be commented on now
+    /// </returns>
     public bool EditComment(string id, string content)
     {
-        if (string.IsNullOrWhiteSpace(content))
+        if (string.IsNullOrWhiteSpace(content) || !CanChangeComment(id))
             return false;
 
         _engine.EditComment(id, content.Trim());
@@ -1565,12 +1568,36 @@ public sealed class MainPresenter
     }
 
     /// <summary>Removes a comment. Not undoable — Todoist has no undelete.</summary>
-    public void DeleteComment(string id)
+    /// <returns>False when what it's on can't be commented on now, so nothing was removed</returns>
+    public bool DeleteComment(string id)
     {
+        if (!CanChangeComment(id))
+            return false;
+
         _engine.DeleteComment(id);
 
         History.Note(Strings.HistoryCommentDeleted, $"comment:delete:{id}");
         Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a comment can be changed: what it's on can be commented on at all.
+    /// </summary>
+    /// <remarks>
+    /// The pane goes read-only for a task out of the archive, or while the token's been turned away,
+    /// but a key reaching the presenter some other way mustn't get round that. Asked here as well,
+    /// on the same terms as <see cref="CanCommentOn"/>.
+    /// </remarks>
+    /// <param name="id">The comment</param>
+    /// <returns>False as well for a comment the account doesn't hold</returns>
+    private bool CanChangeComment(string id)
+    {
+        var held = _engine.Resolve(id);
+        var owner = _engine.RawResource(ResourceType.Notes, held)?["item_id"]?.ToString()
+                    ?? _engine.RawResource(ResourceType.ProjectNotes, held)?["project_id"]?.ToString();
+
+        return CanCommentOn(owner);
     }
 
     // ---- Attachments ---------------------------------------------------------------------------
