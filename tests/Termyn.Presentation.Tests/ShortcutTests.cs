@@ -104,13 +104,13 @@ public class ShortcutTests
     [Theory]
     [InlineData(None, Key.Insert, AppCommand.NewTask)]
     [InlineData(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject)]
-    public void Keys_a_text_box_has_a_use_for_are_answered_only_in_the_lists(HotkeyModifiers modifiers, Key key, AppCommand expected)
+    public void Keys_a_text_box_has_a_use_for_are_answered_everywhere_but_a_text_box(HotkeyModifiers modifiers, Key key, AppCommand expected)
     {
         // Window-wide, Insert opened a new task instead of toggling overtype in a text box, and
         // Ctrl+Alt+Shift+N — AltGr+Shift+N on a Polish keyboard — swallowed the "Ń" being typed.
+        // Held to the two lists instead, they stopped working from the comments list too.
         Assert.Equal(AppCommand.None, In(ShortcutScope.Window, modifiers, key));
-        Assert.Equal(expected, In(ShortcutScope.Outline, modifiers, key));
-        Assert.Equal(expected, In(ShortcutScope.Sidebar, modifiers, key));
+        Assert.Equal(expected, In(ShortcutScope.OutsideText, modifiers, key));
     }
 
     [Theory]

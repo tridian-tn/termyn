@@ -14,6 +14,13 @@ public enum ShortcutScope
 
     /// <summary>With the sidebar focused.</summary>
     Sidebar,
+
+    /// <summary>
+    /// Anywhere in the window except a box being typed in, where the keys mean something to the
+    /// text. Wider than the two lists: a key that only fails in a text box shouldn't also stop
+    /// working from the comments list or a description being read.
+    /// </summary>
+    OutsideText,
 }
 
 /// <summary>One keystroke the app answers to, what it asks for, and where.</summary>
@@ -120,16 +127,14 @@ public static class Shortcuts
         Bind(Alt, Key.Down, AppCommand.NextView, Window),
         Bind(Ctrl, Key.Comma, AppCommand.Settings, Window),
 
-        // In either list, and not window-wide, where they'd fire over every box being typed in:
-        // Insert toggles overtype there, and Ctrl+Alt+Shift+N is AltGr+Shift+N on a Polish
-        // keyboard, which types "Ń". Last, so a menu still prints Ctrl+N for a new task.
-        Bind(None, Key.Insert, AppCommand.NewTask, Outline),
-        Bind(None, Key.Insert, AppCommand.NewTask, Sidebar),
+        // Anywhere but a box being typed in, where they'd fire over the typing: Insert toggles
+        // overtype there, and Ctrl+Alt+Shift+N is AltGr+Shift+N on a Polish keyboard, which types
+        // "Ń". Last, so a menu still prints Ctrl+N for a new task.
+        Bind(None, Key.Insert, AppCommand.NewTask, OutsideText),
 
         // Moved off Ctrl+Shift+N, which now adds a sub-task to whatever the outline is on. A new
         // project is the rarer of the two by a long way, and it keeps the shape of the shortcut.
-        Bind(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject, Outline),
-        Bind(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject, Sidebar),
+        Bind(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject, OutsideText),
     ];
 
     /// <summary>

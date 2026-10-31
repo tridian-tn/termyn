@@ -3888,11 +3888,27 @@ internal sealed class MainForm : Form
         }
 
         var command = CommandFor(keyData, ShortcutScope.Window);
+        if (command == AppCommand.None && !Typing())
+            command = CommandFor(keyData, ShortcutScope.OutsideText);
+
         if (command == AppCommand.None)
             return base.ProcessCmdKey(ref msg, keyData);
 
         Run(command);
         return true;
+    }
+
+    /// <summary>
+    /// Whether the focus is in a box that takes typing, where keys like Insert and AltGr+Shift+N
+    /// belong to the text. A read-only one is only being read, so the window's keys still apply.
+    /// </summary>
+    private bool Typing()
+    {
+        Control? focused = ActiveControl;
+        while (focused is ContainerControl { ActiveControl: { } inner })
+            focused = inner;
+
+        return focused is TextBoxBase { ReadOnly: false } or ComboBox { DropDownStyle: not ComboBoxStyle.DropDownList };
     }
 
     /// <summary>Shows or hides completed tasks, fetching them the first time they're asked for.</summary>
