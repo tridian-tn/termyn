@@ -320,10 +320,7 @@ public sealed class MarkdownRendering
             switch (block)
             {
                 case HeadingBlock heading:
-                    // One size for H1 and a smaller one for everything below it: Todoist's editor only
-                    // offers two levels, and pasted markdown can go deeper than it is worth drawing.
-                    var larger = heading.Level <= 1 ? 0.5f : heading.Level == 2 ? 0.25f : 0.1f;
-                    Paragraph(heading.Inline, new RenderedStyle(Bold: true, Larger: larger, Indent: indent));
+                    Paragraph(heading.Inline, new RenderedStyle(Bold: true, Larger: Larger(heading), Indent: indent));
                     break;
 
                 case ParagraphBlock paragraph:
@@ -360,6 +357,14 @@ public sealed class MarkdownRendering
             }
         }
 
+        /// <summary>
+        /// How much bigger a heading is drawn. One size for H1 and a smaller one for everything
+        /// below it: Todoist's editor only offers two levels, and pasted markdown can go deeper than
+        /// it is worth drawing.
+        /// </summary>
+        private static float Larger(HeadingBlock heading)
+            => heading.Level <= 1 ? 0.5f : heading.Level == 2 ? 0.25f : 0.1f;
+
         private void List(ListBlock list, int indent)
         {
             var number = list.OrderedStart is { Length: > 0 } start && int.TryParse(start, out var first) ? first : 1;
@@ -378,17 +383,37 @@ public sealed class MarkdownRendering
                 {
                     // The marker leads the item's first line and the rest follows hanging under it,
                     // which is what makes a wrapped item read as one thing.
-                    if (lead && child is ParagraphBlock paragraph)
+                    if (lead)
                     {
-                        Add(bullet, line with { Muted = true }, endsLine: false);
-                        Paragraph(paragraph.Inline, line);
                         lead = false;
-                        continue;
+
+                        switch (child)
+                        {
+                            case ParagraphBlock paragraph:
+                                Add(bullet, line with { Muted = true }, endsLine: false);
+                                Paragraph(paragraph.Inline, line);
+                                continue;
+
+                            case HeadingBlock heading:
+                                Add(bullet, line with { Muted = true }, endsLine: false);
+                                Paragraph(heading.Inline, line with { Bold = true, Larger = Larger(heading) });
+                                continue;
+
+                            // Anything else — a fence, a quote, a list straight inside the item —
+                            // can't share a line with it, so the marker has one of its own rather
+                            // than going missing, and "2." doesn't read as the first.
+                            default:
+                                Add(bullet.TrimEnd(), line with { Muted = true });
+                                break;
+                        }
                     }
 
                     Block(child, indent + 1);
-                    lead = false;
                 }
+
+                // An item with nothing in it, "- " on its own: still an item, and still marked.
+                if (lead)
+                    Add(bullet.TrimEnd(), line with { Muted = true });
             }
         }
 

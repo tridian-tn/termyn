@@ -116,6 +116,23 @@ public class MarkdownRenderingTests
     }
 
     [Fact]
+    public void An_item_that_does_not_open_with_words_keeps_its_marker()
+    {
+        // The marker was only drawn ahead of a paragraph, so an empty item lost its bullet and a
+        // heading in a numbered list lost its number — and the next one read as the first.
+        Assert.Equal(2, Render("-\n- second").Text.Count(c => c == '•'));
+
+        var numbered = Render("1. # Title\n2. Next");
+        Assert.Contains("1. Title", numbered.Text);
+        Assert.Contains("2. Next", numbered.Text);
+        Assert.True(RunOf(numbered, "Title").Style.Bold);
+
+        var fenced = Render("1. first\n2. ```\n   code\n   ```");
+        Assert.Contains("2.", fenced.Text);
+        Assert.Contains("code", fenced.Text);
+    }
+
+    [Fact]
     public void A_numbered_list_starts_where_it_says_it_does()
     {
         var text = Render("3. third\n4. fourth").Text;
