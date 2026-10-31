@@ -340,4 +340,8 @@
     <value>Termyn couldn't switch accounts, so the last account is still held.</value>
     <comment>Heading of the alert when switching account couldn't finish. The error itself follows.</comment>
   </data>
+  <data name="SyncStillRunning" xml:space="preserve">
+    <value>A sync was still running and didn't stop in time. Open Termyn again and try once more.</value>
+    <comment>Shown under SwitchAccountFailed when a sync wouldn't finish, so the last account's data couldn't be removed safely. Termyn quits after it.</comment>
+  </data>
 </root>

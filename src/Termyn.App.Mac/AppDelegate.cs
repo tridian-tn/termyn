@@ -100,7 +100,7 @@ public sealed class AppDelegate : NSApplicationDelegate
         // The loop's wait says nothing about the first sync, which the window started. One still
         // writing to the cache keeps it open: the process closes it on the way out, which is safer
         // than closing it under the write.
-        if (_presenter is null || _presenter.WaitForSyncs(TimeSpan.FromSeconds(5)))
+        if (_presenter is null || WaitForSyncs(_presenter, TimeSpan.FromSeconds(5)))
             _store?.Dispose();
         else
             _log.Warn("A sync was still running at quit. The cache was left for the process to close.");
@@ -154,6 +154,24 @@ public sealed class AppDelegate : NSApplicationDelegate
         _engine!.Queued -= _scheduler!.NotifyWrite;
         _scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
+        // The loop's wait says nothing about the first sync, which the window started, and the
+        // switch wipes the cache that sync writes to. One that won't finish leaves everything as it
+        // is, and the app goes, as Windows does: carrying on would put a second sync on the account
+        // beside it.
+        if (!WaitForSyncs(_presenter!, TimeSpan.FromSeconds(15)))
+        {
+            _log.Error("Switching account couldn't finish: a sync was still running, so the last account is still held.");
+            new NSAlert
+            {
+                AlertStyle = NSAlertStyle.Warning,
+                MessageText = Strings.SwitchAccountFailed,
+                InformativeText = Strings.SyncStillRunning,
+            }.RunModal();
+
+            NSApplication.SharedApplication.Terminate(this);
+            return;
+        }
+
         try
         {
             _presenter!.Reconnect(next.Token, next.UserId);
@@ -178,6 +196,31 @@ public sealed class AppDelegate : NSApplicationDelegate
 
         OpenMainWindow();
         leaving.Close();
+    }
+
+    /// <summary>
+    /// Waits for the presenter's syncs to finish, keeping the main run loop turning meanwhile.
+    /// </summary>
+    /// <remarks>
+    /// The window's first sync was started on the main thread, so what's left of it comes back to
+    /// the main thread to run. Blocked outright, the wait could only ever time out.
+    /// </remarks>
+    /// <param name="presenter">The presenter whose syncs to wait for</param>
+    /// <param name="timeout">How long to wait at most</param>
+    /// <returns>False when one was still running at the end of it</returns>
+    private static bool WaitForSyncs(MainPresenter presenter, TimeSpan timeout)
+    {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+
+        while (!presenter.WaitForSyncs(TimeSpan.FromMilliseconds(50)))
+        {
+            if (waited.Elapsed >= timeout)
+                return false;
+
+            NSRunLoop.Current.RunUntil(NSDate.FromTimeIntervalSinceNow(0.05));
+        }
+
+        return true;
     }
 
     /// <summary>The running version, as a release tag is written.</summary>
