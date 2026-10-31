@@ -647,6 +647,10 @@
 {0}</value>
     <comment>Message when signing out fails. {0} is the error's own text.</comment>
   </data>
+  <data name="SyncStillRunning" xml:space="preserve">
+    <value>A sync was still running and didn't stop in time. Start Termyn again and try once more.</value>
+    <comment>The reason given in the sign-out or switch-account failure message when a background sync didn't stop as Termyn closed.</comment>
+  </data>
   <data name="MainReconnect" xml:space="preserve">
     <value>Todoist turned your token away. Click here to reconnect; until then nothing can be changed.</value>
     <comment>Status bar when Todoist refuses the stored token. Clicking the status bar opens the token dialog.</comment>

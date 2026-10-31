@@ -190,7 +190,8 @@ internal static class Program
 
         var auth = new AuthPresenter(api, secrets);
 
-        using var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
+        var store = new SqliteSnapshotStore(Path.Combine(paths.CacheDirectory, "cache.db"));
+        using var storeHeld = new Held(store);
 
         if (store.Rebuilt)
             log.Warn("The cache couldn't be read and was started again from nothing. Anything queued went with it.");
@@ -223,7 +224,8 @@ internal static class Program
         // Its own file beside the cache rather than a table in it: the cache is thrown away and
         // rebuilt whenever it can't be read, and a record of what the user did has no business
         // going with it. It does go with the account, which the presenter sees to.
-        using var history = new SqliteHistoryStore(Path.Combine(paths.CacheDirectory, "history.db"));
+        var history = new SqliteHistoryStore(Path.Combine(paths.CacheDirectory, "history.db"));
+        using var historyHeld = new Held(history);
 
         // A first run should find both empty. They aren't if a rejected token kept them for an
         // account whose cache has since gone, unreadable or deleted, and the token just given could
@@ -249,7 +251,8 @@ internal static class Program
             fetcher: new AttachmentFetcher(api, secrets, attachments, new ZoneIdentifierMarker(log)),
             history: history,
             log: log);
-        var scheduler = new SyncScheduler(presenter.SyncAsync, settings.Cadence);
+        var syncs = new SyncsInFlight(presenter.SyncAsync);
+        var scheduler = new SyncScheduler(syncs.RunAsync, settings.Cadence);
 
         // Said once, here, rather than at every place a write is made. The engine queues all of
         // them through one method and tells us from there, so a new kind of write cannot be added
@@ -279,6 +282,32 @@ internal static class Program
         finally
         {
             scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        // The loop gives a sync five seconds to notice it's been called off, then stops waiting. One
+        // still going is using the cache, so it's given longer, though not for ever. If it still
+        // hasn't finished, nothing is closed or wiped under it: the files are left for the process
+        // to close as it ends, and it does end, since a next session would open them a second time.
+        if (!syncs.WaitUntilIdle(TimeSpan.FromSeconds(15)))
+        {
+            storeHeld.Abandoned = true;
+            historyHeld.Abandoned = true;
+            log.Warn("A sync was still running after the loop stopped. The cache and history were left for the process to close.");
+
+            if (signedOut)
+            {
+                log.Error(switchTo is null
+                    ? "Signing out couldn't finish, so the account is still signed in."
+                    : "Switching account couldn't finish, so the last account is still held.");
+
+                MessageBox.Show(
+                    string.Format(CultureInfo.CurrentCulture, switchTo is null ? Strings.SignOutFailed : Strings.SwitchAccountFailed, Strings.SyncStillRunning),
+                    "Termyn",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            return false;
         }
 
         if (!signedOut)
@@ -340,6 +369,64 @@ internal static class Program
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Disposes what it holds when the session ends, unless shutdown found something still using it.
+    /// </summary>
+    /// <param name="held">The store to dispose</param>
+    private sealed class Held(IDisposable held) : IDisposable
+    {
+        /// <summary>Set when a sync may still be using it, so it's left for the process to close.</summary>
+        public bool Abandoned { get; set; }
+
+        public void Dispose()
+        {
+            if (!Abandoned)
+                held.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The sync the loop has running, if any, so shutdown can tell whether one outlived the loop.
+    /// </summary>
+    /// <remarks>
+    /// The loop stops waiting for a sync after a few seconds and doesn't say whether it finished,
+    /// and the cache it writes to is closed — or wiped, on signing out — straight after.
+    /// </remarks>
+    /// <param name="sync">One sync, as the loop runs it</param>
+    private sealed class SyncsInFlight(Func<CancellationToken, Task<SyncOutcome>> sync)
+    {
+        private readonly Lock _gate = new();
+        private readonly ManualResetEventSlim _idle = new(initialState: true);
+        private int _running;
+
+        public async Task<SyncOutcome> RunAsync(CancellationToken ct)
+        {
+            lock (_gate)
+            {
+                _running++;
+                _idle.Reset();
+            }
+
+            try
+            {
+                return await sync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    if (--_running == 0)
+                        _idle.Set();
+                }
+            }
+        }
+
+        /// <summary>Waits for the sync running, if there is one, to finish.</summary>
+        /// <param name="timeout">The longest to wait</param>
+        /// <returns>False when one was still running at the end of it</returns>
+        public bool WaitUntilIdle(TimeSpan timeout) => _idle.Wait(timeout);
     }
 
     private static bool Has(string[] args, string flag)
