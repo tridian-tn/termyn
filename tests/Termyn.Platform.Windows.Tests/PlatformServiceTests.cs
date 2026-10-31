@@ -215,6 +215,25 @@ public class TrayNotifierTests
     }
 
     [Fact]
+    public void A_menu_filled_as_it_opens_is_shown_even_though_it_started_empty()
+    {
+        // WinForms raises the opening already cancelled for an empty strip, which made the first
+        // right-click on a menu filled at that moment do nothing at all.
+        using var tray = new TrayNotifier();
+        tray.MenuOpening += () => tray.SetCommands([new NotifierCommand("Open Termyn", () => { })]);
+
+        Assert.True(tray.RaiseMenuOpening());
+    }
+
+    [Fact]
+    public void A_menu_left_empty_is_not_shown()
+    {
+        using var tray = new TrayNotifier();
+
+        Assert.False(tray.RaiseMenuOpening());
+    }
+
+    [Fact]
     public void Replacing_the_menu_lets_go_of_what_it_held()
     {
         // The menu is rebuilt whenever the views it offers change, so anything it drops here would

@@ -706,6 +706,23 @@ public class MenuTests
         }
     }
 
+    [WinFormsFact]
+    public void The_first_right_click_on_a_task_shows_its_menu()
+    {
+        // The menu is empty until it opens, and WinForms raises the opening of an empty strip
+        // already cancelled — so filling it there without saying so again showed nothing at all.
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"Ship it","project_id":"p1","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-task-menu.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+        TestWindow.Find<OutlineView>(window).SelectId("a");
+
+        Assert.True(window.OpenTaskMenu());
+    }
+
     private static IReadOnlyList<MenuEntry> Group(string heading)
         => Menus.Bar.Single(e => e.Heading == heading).Children ?? [];
 

@@ -3095,6 +3095,21 @@ internal sealed class MainForm : Form
         }
 
         Refill(_taskMenu.Items, Menus.TaskContext);
+
+        // Said again rather than left as it came: WinForms raises this already cancelled when the
+        // strip is empty, which it is until the first opening fills it.
+        e.Cancel = _taskMenu.Items.Count == 0;
+    }
+
+    /// <summary>
+    /// Opens the task menu the way a right-click does, for a test with no pointer to click with.
+    /// </summary>
+    /// <returns>Whether the menu would be shown</returns>
+    internal bool OpenTaskMenu()
+    {
+        var opening = new CancelEventArgs(_taskMenu.Items.Count == 0);
+        OnTaskMenuOpening(_taskMenu, opening);
+        return !opening.Cancel;
     }
 
     /// <summary>The menu bar, one top-level heading per group, each refilled as it opens.</summary>
