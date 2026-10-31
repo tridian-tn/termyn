@@ -15,8 +15,93 @@ namespace Termyn.App.Windows;
 
 internal static class Program
 {
+    /// <summary>
+    /// Where an exception nothing else caught is written down. Null until the log exists, which is a
+    /// few lines into <see cref="Main"/>.
+    /// </summary>
+    private static FileLog? _log;
+
+    /// <summary>True while the box saying so is up, so a failure behind it is logged rather than stacked.</summary>
+    private static bool _reporting;
+
     [STAThread]
     private static void Main(string[] args)
+    {
+        // First of all, so nothing from here on can end the process without a line in the log. Before
+        // any window, too: the framework only takes the mode while none exists.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => OnUiException(e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => OnDying(e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            _log?.Warn("A background task failed and nothing was waiting for it.", e.Exception);
+            e.SetObserved();
+        };
+
+        // What throws before the message loop is running — building the window, the token dialog —
+        // isn't the UI thread's to catch, and would otherwise go straight to the crash dialog.
+        try
+        {
+            Run(args);
+        }
+        catch (Exception ex)
+        {
+            _log?.Error("Termyn failed and has to close.", ex);
+            Tell(Strings.UnexpectedErrorClosing, _log?.Path ?? ex.Message, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>
+    /// Something thrown on the UI thread that nothing caught. Written down and said, and the app
+    /// carries on: everything the user does goes through the outbox, so a handler that fell over
+    /// part-way has left nothing half-written behind it.
+    /// </summary>
+    /// <param name="ex">What was thrown</param>
+    private static void OnUiException(Exception ex)
+    {
+        _log?.Error("Something nothing expected went wrong on the UI thread. Termyn carried on.", ex);
+
+        // One box at a time. A failure that repeats — in a paint, say — would otherwise pile them up
+        // faster than they could be closed.
+        if (_reporting)
+            return;
+
+        _reporting = true;
+        try
+        {
+            Tell(Strings.UnexpectedError, _log?.Path ?? ex.Message, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _reporting = false;
+        }
+    }
+
+    /// <summary>
+    /// Something thrown on another thread that nothing caught. The runtime ends the process once
+    /// this returns, so all that can be done is to say why in the log first.
+    /// </summary>
+    /// <param name="ex">What was thrown, when it was an exception at all</param>
+    private static void OnDying(Exception? ex)
+        => _log?.Error("Something nothing expected went wrong off the UI thread, and Termyn is ending.", ex);
+
+    /// <summary>Puts up a box about a failure, without letting that become a failure of its own.</summary>
+    /// <param name="format">What to say, with {0} for where the details are</param>
+    /// <param name="details">The log's path, or the error itself when there's no log yet</param>
+    /// <param name="icon">How serious it is</param>
+    private static void Tell(string format, string details, MessageBoxIcon icon)
+    {
+        try
+        {
+            MessageBox.Show(string.Format(CultureInfo.CurrentCulture, format, details), "Termyn", MessageBoxButtons.OK, icon);
+        }
+        catch (Exception ex)
+        {
+            _log?.Warn("The box saying something went wrong couldn't be shown.", ex);
+        }
+    }
+
+    private static void Run(string[] args)
     {
         var quickAdd = Has(args, "--quick-add");
         var tray = quickAdd || Has(args, "--tray");
@@ -37,6 +122,7 @@ internal static class Program
         // Early, so anything that goes wrong from here on has somewhere to go. Nothing of the
         // account's is ever written to it — see ILog.
         var log = new FileLog(paths);
+        _log = log;
         log.Info($"Termyn {AppVersion.Tag} starting on {Environment.OSVersion.VersionString}, .NET {Environment.Version}.");
 
         // Before any window exists, which is the only time the framework will take it.

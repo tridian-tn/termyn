@@ -2575,30 +2575,48 @@ internal sealed class MainForm : Form
         if (picker.ShowDialog(this) != DialogResult.OK)
             return;
 
-        var file = new FileInfo(picker.FileName);
-
-        if (!_presenter.AllowsUploadOf(file.Length))
-        {
-            MessageBox.Show(
-                this,
-                string.Format(CultureInfo.CurrentCulture, Strings.AttachTooBig, file.Name, file.Length / (1024 * 1024), _presenter.UploadLimitMb),
-                "Termyn",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            return;
-        }
-
+        var path = picker.FileName;
+        var name = Path.GetFileName(path);
         using var transfer = new CancellationTokenSource();
-        _transfer = transfer;
-        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.Uploading, file.Name);
 
+        // Everything inside, the file's size included: an async void handler has nothing above it to
+        // catch what gets out, and a file can vanish between being picked and being read.
         try
         {
-            await _presenter.AddCommentWithFileAsync(CommentsOwner, _comments.Draft, file.FullName, transfer.Token);
+            var size = new FileInfo(path).Length;
+
+            if (!_presenter.AllowsUploadOf(size))
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format(CultureInfo.CurrentCulture, Strings.AttachTooBig, name, size / (1024 * 1024), _presenter.UploadLimitMb),
+                    "Termyn",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            _transfer = transfer;
+            _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.Uploading, name);
+
+            var posted = await _presenter.AddCommentWithFileAsync(CommentsOwner, _comments.Draft, path, transfer.Token);
 
             // Only once it has landed. Clearing the box first would lose what was typed alongside a
-            // file whose upload then failed.
-            _comments.ClearDraft();
+            // file whose upload then failed, or whose task went while it was on its way.
+            if (posted)
+            {
+                _comments.ClearDraft();
+            }
+            else
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format(CultureInfo.CurrentCulture, Strings.AttachOwnerGone, name),
+                    "Termyn",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+
             RefreshComments();
         }
         catch (OperationCanceledException)
@@ -2610,15 +2628,23 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(
                 this,
-                string.Format(CultureInfo.CurrentCulture, Strings.UploadFailed, file.Name, ex.Message),
+                string.Format(CultureInfo.CurrentCulture, Strings.UploadFailed, name, ex.Message),
                 "Termyn",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
+        catch (Exception ex)
+        {
+            // Anything else, such as the cache refusing the write. The box keeps the words either way.
+            Report(ex);
+        }
         finally
         {
-            _transfer = null;
-            _comments.Progress = null;
+            if (ReferenceEquals(_transfer, transfer))
+            {
+                _transfer = null;
+                _comments.Progress = null;
+            }
         }
     }
 
@@ -4014,22 +4040,30 @@ internal sealed class MainForm : Form
 
     // ---- Plumbing ------------------------------------------------------------------------------
 
+    /// <remarks>
+    /// Each step guarded on its own, since this runs from an async void handler with nothing above
+    /// it to catch: a layout that can't be put back is no reason not to load, and a load that fails
+    /// is no reason not to start syncing.
+    /// </remarks>
     private async Task LoadAsync()
     {
-        // Restored here rather than in the constructor: before the splitter is parented and sized it
-        // clamps the distance against the container's default width and silently sticks there.
-        var least = AtScale(StartupLayout.SidebarLeast);
-        _split.SplitterDistance = Math.Clamp(
-            _settings.View.SidebarWidth ?? AtScale(StartupLayout.SidebarWidth),
-            least,
-            Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
-        ApplyPanelSizes();
+        Guarded(() =>
+        {
+            // Restored here rather than in the constructor: before the splitter is parented and sized
+            // it clamps the distance against the container's default width and silently sticks there.
+            var least = AtScale(StartupLayout.SidebarLeast);
+            _split.SplitterDistance = Math.Clamp(
+                _settings.View.SidebarWidth ?? AtScale(StartupLayout.SidebarWidth),
+                least,
+                Math.Max(least, ClientSize.Width - AtScale(StartupLayout.OutlineLeast)));
+            ApplyPanelSizes();
 
-        // After the sidebar, whose width decides what the outline is left with.
-        _outline.LayColumns(_savedColumns);
+            // After the sidebar, whose width decides what the outline is left with.
+            _outline.LayColumns(_savedColumns);
+        });
 
         await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
-        _scheduler.Start();
+        Guarded(_scheduler.Start);
     }
 
     private void Guarded(Action action)
