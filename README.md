@@ -72,7 +72,8 @@ The Mac app also needs:
    rebuilt app counts as a new one to the Keychain, which asks once whether it may read the token,
    quoting that name; Always Allow settles it.
 
-CI builds and tests the portable projects on macOS as well as Windows, and builds the Mac app.
+CI builds and tests the portable projects on macOS (Apple Silicon and Intel) and Linux as well as
+Windows, and builds the Mac app for both Mac architectures. A release tag packages it too.
 
 ## What it does
 
