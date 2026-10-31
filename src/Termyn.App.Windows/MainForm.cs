@@ -106,6 +106,12 @@ internal sealed class MainForm : Form
     /// </remarks>
     private bool _syncingSearch;
 
+    /// <summary>Holds a search back until the typing pauses.</summary>
+    private readonly System.Windows.Forms.Timer _searchIdle;
+
+    /// <summary>How many times the panel has followed the selection, so a render can tell it already has.</summary>
+    private int _follows;
+
     /// <summary>The row filled in while the tree hasn't got the focus, so it can be cleared again.</summary>
     private TreeNode? _markedRow;
     private readonly OutlineView _outline;
@@ -293,13 +299,24 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
 
+        // Each search renders the whole outline, which is work nobody is waiting on between two
+        // letters of a word still being typed.
+        _searchIdle = new System.Windows.Forms.Timer { Interval = 150 };
+        _searchIdle.Tick += (_, _) => SendSearch();
+
         _search = new SearchBox { Dock = DockStyle.Top, PlaceholderText = Strings.SearchPlaceholder };
         _search.TextChanged += (_, _) =>
         {
             if (_syncingSearch)
                 return;
 
-            Guarded(() => _presenter.Search(_search.Text));
+            _searchIdle.Stop();
+
+            // Emptied in one go, by the cross or Escape, rather than typed: nothing more is coming.
+            if (_search.TextLength == 0)
+                SendSearch();
+            else
+                _searchIdle.Start();
         };
 
         _sidebar = new SidebarTree
@@ -677,6 +694,7 @@ internal sealed class MainForm : Form
             _shell.Instance.SignalReceived -= OnInstanceSignal;
 
         _renderIdle.Dispose();
+        _searchIdle.Dispose();
         _saveIdle.Dispose();
         _tickedIdle.Dispose();
         _quickAdd?.AllowClose();
@@ -927,6 +945,7 @@ internal sealed class MainForm : Form
     /// <param name="key">The sidebar key of the view to open</param>
     private void OpenFromTray(string key)
     {
+        FlushSearch();
         if (_presenter.SelectByKey(key))
         {
             _sidebarKey = key;
@@ -1520,14 +1539,20 @@ internal sealed class MainForm : Form
         // and the words that were typed have to go with it — left up they would sit there filtering
         // nothing. Assigning what is already there raises nothing, so on every other render this is
         // a comparison.
-        _syncingSearch = true;
-        try
+        //
+        // Not while a search is still waiting to be sent, though: the presenter is a few letters
+        // behind the box then, and catching up would take the letters back off it.
+        if (!_searchIdle.Enabled)
         {
-            _search.Text = _presenter.SearchQuery;
-        }
-        finally
-        {
-            _syncingSearch = false;
+            _syncingSearch = true;
+            try
+            {
+                _search.Text = _presenter.SearchQuery;
+            }
+            finally
+            {
+                _syncingSearch = false;
+            }
         }
 
         // Before the rows, so the header's arrow and the order beneath it are put up together.
@@ -1540,10 +1565,13 @@ internal sealed class MainForm : Form
             l => Theme.ToColor(l.Value),
             StringComparer.OrdinalIgnoreCase);
 
+        var follows = _follows;
         _outline.Rows = _presenter.Rows;
 
-        // After the rows, which is what decides whether the selected task is still there.
-        FollowSelection();
+        // After the rows, which is what decides whether the selected task is still there. Only if
+        // taking them didn't already: a selection that moved has been followed on the way.
+        if (_follows == follows)
+            FollowSelection();
 
         // After the rows as well: whether there's anything left to fold or unfold is read off them.
         // Every fold republishes the rows, so this is the one place that needs to ask.
@@ -1834,6 +1862,29 @@ internal sealed class MainForm : Form
         crumbs.TabStop = false;
     }
 
+    /// <summary>Hands the presenter what's in the search box.</summary>
+    private void SendSearch()
+    {
+        _searchIdle.Stop();
+        Guarded(() => _presenter.Search(_search.Text));
+    }
+
+    /// <summary>
+    /// Sends a search still waiting on the typing to pause, ahead of opening another view.
+    /// </summary>
+    /// <remarks>
+    /// Opening a view drops the search. One sent after it would put the words back over the view
+    /// just opened, rather than being dropped with it.
+    /// </remarks>
+    private void FlushSearch()
+    {
+        if (_searchIdle.Enabled)
+            SendSearch();
+    }
+
+    /// <summary>Whether a search is waiting on the typing to pause, for a test.</summary>
+    internal bool SearchPending => _searchIdle.Enabled;
+
     private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
     {
         if (e.Link?.LinkData is ViewSelection target)
@@ -1850,6 +1901,7 @@ internal sealed class MainForm : Form
             return;
 
         _sidebarKey = node.Key;
+        FlushSearch();
 
         // By key, not by selection: a favourited project is two rows, and telling the presenter only
         // which view to open would leave it believing the copy down in the tree was the one clicked.
@@ -1863,6 +1915,7 @@ internal sealed class MainForm : Form
     /// </summary>
     private void SwitchView(int offset)
     {
+        FlushSearch();
         if (!_presenter.SelectAdjacent(offset))
             return;
 
@@ -1872,6 +1925,7 @@ internal sealed class MainForm : Form
 
     private void GoTo(ViewSelection selection)
     {
+        FlushSearch();
         _sidebarKey = selection.Key;
         Guarded(() => _presenter.Select(selection));
         Highlight();
@@ -2142,6 +2196,7 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void FollowSelection()
     {
+        _follows++;
         FollowSelectionForDescription();
         FollowSelectionForComments();
 
