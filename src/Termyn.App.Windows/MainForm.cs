@@ -815,6 +815,9 @@ internal sealed class MainForm : Form
             WindowState = FormWindowState.Normal;
         Activate();
         BringToFront();
+
+        // A dialog the window is waiting on is what can take input, so it's what comes forward.
+        OpenDialog()?.Activate();
     }
 
     /// <summary>
@@ -889,11 +892,36 @@ internal sealed class MainForm : Form
             () => OnUi(RestoreWindow),
             () => OnUi(() => Guarded(QuickAdd.Summon)),
             () => _scheduler.RequestNow(),
-            () => OnUi(() => Guarded(OpenSettings)),
-            () => OnUi(() => _ = CheckForUpdatesAsync()),
-            () => OnUi(Exit),
-            key => OnUi(() => Guarded(() => OpenFromTray(key)))));
+            () => OnUi(() => UnlessModal(() => Guarded(OpenSettings))),
+            () => OnUi(() => UnlessModal(() => _ = CheckForUpdatesAsync())),
+            () => OnUi(() => UnlessModal(Exit)),
+            key => OnUi(() => UnlessModal(() => Guarded(() => OpenFromTray(key))))));
     }
+
+    /// <summary>
+    /// Runs something the tray asked for, unless one of the window's dialogs is up, in which case
+    /// that dialog is brought forward instead.
+    /// </summary>
+    /// <remarks>
+    /// The tray's menu still works while a dialog has the window, and what it offers doesn't wait:
+    /// a second Settings opened over the first, a view changed under a dialog about a task in it,
+    /// or the window closed out from under a dialog that then went on to write to it.
+    /// </remarks>
+    /// <param name="action">What was asked for</param>
+    private static void UnlessModal(Action action)
+    {
+        if (OpenDialog() is { } dialog)
+        {
+            dialog.Activate();
+            return;
+        }
+
+        action();
+    }
+
+    /// <summary>The dialog the window is waiting on, or null when there isn't one.</summary>
+    private static Form? OpenDialog()
+        => Application.OpenForms.OfType<Form>().FirstOrDefault(f => f is { Modal: true, Visible: true });
 
     /// <summary>Opens the window on a view the tray offered.</summary>
     /// <param name="key">The sidebar key of the view to open</param>
@@ -1069,10 +1097,24 @@ internal sealed class MainForm : Form
     private void ShowAbout()
         => AboutBox.Show(this, _shell.Paths, message => _status.Text = message);
 
+    /// <summary>True while the settings dialog is up, so a second can't be opened over it.</summary>
+    private bool _inSettings;
+
     private void OpenSettings()
     {
-        if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is { } amended)
-            ApplySettings(amended);
+        if (_inSettings)
+            return;
+
+        _inSettings = true;
+        try
+        {
+            if (SettingsForm.Edit(this, _settings, _theme, _presenter.ClearDownloads) is { } amended)
+                ApplySettings(amended);
+        }
+        finally
+        {
+            _inSettings = false;
+        }
     }
 
     /// <summary>
