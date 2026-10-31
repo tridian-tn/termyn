@@ -130,6 +130,9 @@ jobs:
           fi
           dotnet build src/Termyn.App.Mac "${args[@]}"
 
+      # -debug in the name for as long as this is a Debug build, so nobody downloading it takes it
+      # for a finished one. Drop it when the job goes back to Release.
+      #
       # ditto rather than zip: it keeps the bundle's symlinks, extended attributes and resource
       # forks, which a plain zip flattens into an app that won't open.
       - name: Package
@@ -144,7 +147,7 @@ jobs:
             exit 1
           fi
           mkdir -p artifacts
-          ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/Termyn-$version-macos-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/Termyn-$version-macos-arm64-debug.zip"
 
       - name: Keep it
         if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
@@ -152,7 +155,7 @@ jobs:
         with:
           name: termyn-mac
           if-no-files-found: error
-          path: artifacts/*-macos-arm64.zip
+          path: artifacts/*-macos-arm64-debug.zip
 
   # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
   # only made every run a minute longer. The release job waits on both, and on the Mac build, so
@@ -236,7 +239,7 @@ jobs:
         run: |
           # Off the environment, not templated into the script — same reasoning as the packaging job.
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $missing = @('setup.exe', 'portable.zip', 'macos-arm64.zip') |
+          $missing = @('setup.exe', 'portable.zip', 'macos-arm64-debug.zip') |
             ForEach-Object { Join-Path 'artifacts' "Termyn-$version-$_" } |
             Where-Object { -not (Test-Path $_) }
 
@@ -275,4 +278,4 @@ jobs:
             gh release create $tag --draft --title "Termyn $tag" --generate-notes
           }
 
-          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip, artifacts/*-macos-arm64.zip) --clobber
+          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip, artifacts/*-macos-arm64-debug.zip) --clobber

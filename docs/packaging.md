@@ -41,7 +41,7 @@ signed yet: somebody should look before these are downloadable. Run
 the release real, or delete the draft to abandon it.
 
 The tag packages the Mac app as well, for Apple Silicon only, as
-`Termyn-<version>-macos-arm64.zip`, and the release waits for it. It's a Debug build for now: the
+`Termyn-<version>-macos-arm64-debug.zip`, and the release waits for it. It's a Debug build for now: the
 runner's Xcode is older than the one the macOS workload's Release build needs (see the comment on
 the `build-mac-app` job). It's unsigned and not notarised, so Gatekeeper refuses it on a
 double-click; opening the app from the context menu once gets past that.
