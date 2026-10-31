@@ -68,8 +68,9 @@ The Mac app also needs:
    open src/Termyn.App.Mac/bin/Debug/net10.0-macos/osx-arm64/Termyn.app
    ```
 
-   The token is kept in your login Keychain, as an item named Termyn. A rebuilt app counts as a
-   new one to the Keychain, which asks once whether it may read the token; Always Allow settles it.
+   The token is kept in your login Keychain, as an item named "Termyn – Todoist API token". A
+   rebuilt app counts as a new one to the Keychain, which asks once whether it may read the token,
+   quoting that name; Always Allow settles it.
 
 CI builds and tests the portable projects on macOS as well as Windows, and builds the Mac app.
 
