@@ -37,7 +37,9 @@ public class CommentTests
                 ("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}"""),
                 ("notes", "n1", """{"id":"n1","item_id":"i1","content":"said","posted_at":"2026-08-12T08:30:00Z"}"""));
 
-            Assert.Equal("Aug 12, 2026 9:30 AM", Assert.Single(presenter.CommentsOn("i1")).Posted);
+            Assert.Equal(
+                Meridiem.AsWritten("Aug 12, 2026 9:30 AM", CultureInfo.CurrentCulture),
+                Assert.Single(presenter.CommentsOn("i1")).Posted);
         }
         finally
         {
