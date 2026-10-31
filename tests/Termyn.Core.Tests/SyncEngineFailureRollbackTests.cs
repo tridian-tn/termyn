@@ -171,12 +171,14 @@ public class SyncEngineFailureRollbackTests
     {
         // No verdict at the ceiling is the same outcome as a rejection: it isn't going to land.
         var store = Seeded();
-        var (engine, api) = Engine(store);
+        var clock = new FixedClock(new DateOnly(2026, 7, 31));
+        var (engine, api) = Engine(store, clock: clock);
 
         engine.DeleteProject("p1");
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(1));
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(engine.Snapshot().Projects);
@@ -189,12 +191,14 @@ public class SyncEngineFailureRollbackTests
         // It may well have been applied, and there is no prior to go back to — dropping it would
         // throw away the user's own text on a guess.
         var store = new InMemorySnapshotStore();
-        var (engine, api) = Engine(store);
+        var clock = new FixedClock(new DateOnly(2026, 7, 31));
+        var (engine, api) = Engine(store, clock: clock);
 
         engine.AddItem(new JsonObject { ["content"] = "Written offline" });
         api.Next = _ => new SyncResponse { SyncToken = "s2" };
 
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        clock.Advance(TimeSpan.FromMinutes(1));
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(["Written offline"], engine.Snapshot().Items.Select(i => i.Content));
@@ -765,10 +769,10 @@ public class SyncEngineFailureRollbackTests
         return store;
     }
 
-    private static (SyncEngine Engine, FakeApi Api) Engine(InMemorySnapshotStore store, int attemptCeiling = 2)
+    private static (SyncEngine Engine, FakeApi Api) Engine(InMemorySnapshotStore store, int attemptCeiling = 2, FixedClock? clock = null)
     {
         var api = new FakeApi();
-        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)), attemptCeiling: attemptCeiling);
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, clock ?? new FixedClock(new DateOnly(2026, 7, 31)), attemptCeiling: attemptCeiling);
         engine.Load();
         return (engine, api);
     }

@@ -424,7 +424,7 @@ public sealed class MainPresenter
         }
 
         // Only ask for another round while the network is answering, or the loop would spin.
-        return new SyncOutcome(!IsOffline && pause is null && _engine.PendingCount > 0, pause);
+        return new SyncOutcome(!IsOffline && pause is null && _engine.WritesDue, pause);
     }
 
     /// <summary>

@@ -438,11 +438,50 @@ public class MainPresenterTests
     [Fact]
     public async Task Syncing_with_writes_still_queued_asks_for_another_round()
     {
+        // More than one round carries, all taken.
+        var api = new FakeApi
+        {
+            Next = commands => new SyncResponse
+            {
+                SyncToken = "s1",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
+            },
+        };
+        var presenter = NewPresenter(api, SeededStore());
+        for (var i = 0; i < 101; i++)
+            presenter.Rename("i1", $"B{i}");
+
+        Assert.True((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
+    }
+
+    [Fact]
+    public async Task A_write_left_unanswered_doesnt_ask_for_another_round_straight_away()
+    {
+        // Coming straight back for it spent all its attempts in seconds and rolled the change back.
+        // It waits for the loop's own clock instead.
         var api = new FakeApi { Response = new SyncResponse { SyncToken = "s1" } };
         var presenter = NewPresenter(api, SeededStore());
         presenter.Rename("i1", "B");
 
-        Assert.True((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued); // no verdict yet, so it stays queued
+        Assert.False((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
+        Assert.Contains("1 pending", presenter.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_write_refused_for_now_doesnt_ask_for_another_round_straight_away()
+    {
+        var api = new FakeApi
+        {
+            Next = commands => new SyncResponse
+            {
+                SyncToken = "s1",
+                SyncStatus = commands.ToDictionary(c => c.Uuid, _ => new CommandResult(false, "42", "Service unavailable", 503)),
+            },
+        };
+        var presenter = NewPresenter(api, SeededStore());
+        presenter.Rename("i1", "B");
+
+        Assert.False((await presenter.SyncAsync(TestContext.Current.CancellationToken)).MoreQueued);
     }
 
     [Fact]

@@ -299,6 +299,36 @@ public sealed class SyncEngine
         get { lock (_gate) return _outbox.Count(c => c.State == OutboxState.Failed); }
     }
 
+    /// <summary>
+    /// Whether a queued write is ready to go now, so whatever drives the loop knows to come straight
+    /// back rather than waiting for its clock.
+    /// </summary>
+    /// <remarks>
+    /// Not the same as <see cref="PendingCount"/> being above nought. A write the server refused for
+    /// now, or didn't answer, is left a while before it goes again, and coming straight back for it
+    /// was what spent all its attempts in a few seconds.
+    /// </remarks>
+    public bool WritesDue
+    {
+        get { lock (_gate) return Due().Any(); }
+    }
+
+    /// <summary>
+    /// The queued writes that may go now: everything pending, up to the first that's being left a
+    /// while. Called with the lock held.
+    /// </summary>
+    /// <remarks>
+    /// Up to it rather than around it, because writes go in the order they were made. One sent ahead
+    /// of a write it builds on would be refused for naming something that isn't there yet.
+    /// </remarks>
+    private IEnumerable<OutboxCommand> Due()
+    {
+        var now = _clock.UtcNow;
+        return _outbox
+            .Where(c => c.State == OutboxState.Pending)
+            .TakeWhile(c => c.RetryAt is not { } at || at <= now);
+    }
+
     public IReadOnlyList<OutboxCommand> Outbox
     {
         get { lock (_gate) return _outbox.ToList(); }
@@ -429,7 +459,7 @@ public sealed class SyncEngine
             token = TokenOrThrow();
             syncToken = Model.SyncToken;
             generation = _generation;
-            pending = _outbox.Where(c => c.State == OutboxState.Pending).Take(MaxCommandsPerSync).ToList();
+            pending = Due().Take(MaxCommandsPerSync).ToList();
             commands = pending.Select(c => new Command(c.Type, c.Uuid, c.TempId, ParseArgs(c))).ToList();
 
             // Once a command is on the wire, undoing it locally would diverge from the server.
@@ -3394,16 +3424,23 @@ public sealed class SyncEngine
             if (!syncStatus.TryGetValue(cmd.Uuid, out var result))
             {
                 // No verdict: keep it pending, but count the rounds so a command the server never
-                // reports on cannot block its resource forever.
+                // reports on cannot block its resource forever, and leave it a while before asking
+                // again, so the rounds are spread out rather than spent in seconds.
                 cmd.NoVerdictRounds++;
                 if (cmd.NoVerdictRounds >= _attemptCeiling)
+                {
                     Fail(cmd, Strings.NoResultForChange);
+                }
                 else
+                {
+                    cmd.RetryAt = RetryAfter(cmd.NoVerdictRounds);
                     _store.UpdateCommand(cmd);
+                }
                 continue;
             }
 
             cmd.NoVerdictRounds = 0;
+            cmd.RetryAt = null;
 
             if (result.Ok)
             {
@@ -3420,16 +3457,24 @@ public sealed class SyncEngine
 
             // What kind of change it was and what the server said about it. Never its arguments:
             // those carry what the user typed.
-            _log?.Warn($"Todoist refused {cmd.Type} (uuid {cmd.Uuid}, attempt {cmd.Attempts}): {cmd.LastError}");
+            _log?.Warn($"Todoist refused {cmd.Type} (uuid {cmd.Uuid}, attempt {cmd.Attempts}, status {result.HttpCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}): {cmd.LastError}");
+
+            var transient = Transient(result);
 
             // A refused create is given up on straight away, as it always was: asking again for
             // something the server has said no to gains nothing. Failed now rather than cancelled,
-            // though. Cancelled, it took what the user had typed with it.
-            if (IsCreate(cmd) || cmd.Attempts >= _attemptCeiling)
+            // though. Cancelled, it took what the user had typed with it. Not one refused for now,
+            // which is tried again like anything else.
+            if ((IsCreate(cmd) && !transient) || cmd.Attempts >= _attemptCeiling)
             {
                 Fail(cmd, cmd.LastError);
                 continue;
             }
+
+            // Refused for now: left a while, longer each time, so the attempts aren't all spent in
+            // the seconds a busy server takes to recover. Any other refusal goes again next round.
+            if (transient)
+                cmd.RetryAt = RetryAfter(cmd.Attempts);
 
             _store.UpdateCommand(cmd);
 
@@ -3438,6 +3483,31 @@ public sealed class SyncEngine
         }
 
         Resend(reordered, unmoved);
+    }
+
+    /// <summary>
+    /// Whether a refusal is the server asking to be tried again later rather than saying no.
+    /// </summary>
+    /// <remarks>
+    /// A 429 or a 5xx. Any other refusal, a 4xx or one that gave no status, keeps the path it always
+    /// had: tried again next round until the ceiling.
+    /// </remarks>
+    private static bool Transient(CommandResult result) => result.HttpCode is 429 or >= 500;
+
+    /// <summary>How long a write that has been refused for now, or not answered, is left before it goes again.</summary>
+    private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(15);
+
+    /// <summary>The longest a write is left between tries, however many it has had.</summary>
+    private static readonly TimeSpan LongestRetry = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// When a write refused for now may next go: <see cref="FirstRetry"/>, doubling with each try.
+    /// </summary>
+    /// <param name="tries">How many times in a row it has been refused for now, or gone unanswered</param>
+    private DateTimeOffset RetryAfter(int tries)
+    {
+        var wait = FirstRetry * Math.Pow(2, Math.Clamp(tries - 1, 0, 16));
+        return _clock.UtcNow + (wait > LongestRetry ? LongestRetry : wait);
     }
 
     /// <summary>
