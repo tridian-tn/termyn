@@ -27,7 +27,35 @@ internal sealed class SidebarController : NSViewController
     /// </summary>
     private bool _rendering;
 
-    public SidebarController(Action<string> select) => _select = select;
+    private readonly TaskCommands _commands;
+
+    public SidebarController(Action<string> select, TaskCommands commands)
+    {
+        _select = select;
+        _commands = commands;
+    }
+
+    /// <summary>
+    /// ⌘Z here takes back the last tick or delete too, the same as over the list: undo is the
+    /// account's, not the list's, and the sidebar is where the focus often is.
+    /// </summary>
+    /// <remarks>Answered here because the window would otherwise hand it to its own undo manager.</remarks>
+    [Export("undo:")]
+    private void Undo(NSObject sender) => _commands.Run(Presentation.AppCommand.Undo, null);
+
+    [Export("redo:")]
+    private void Redo(NSObject sender)
+    {
+        // Nothing: there's no redo below the window, and validation keeps this greyed.
+    }
+
+    [Export("validateMenuItem:")]
+    private bool ValidateMenuItem(NSMenuItem item) => item.Action?.Name switch
+    {
+        "undo:" => _commands.State(Presentation.AppCommand.Undo, null).Enabled,
+        "redo:" => false,
+        _ => true,
+    };
 
     public override void LoadView()
     {

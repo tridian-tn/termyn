@@ -46,8 +46,38 @@ public class ConcurrencyTests
         Assert.Null(failure);
     }
 
+    [Fact]
+    public async Task Ticking_off_and_folding_while_a_background_sync_publishes_does_not_throw()
+    {
+        // Each publish reads what's been ticked off and what's folded while it builds the outline.
+        // Both used to be changed on the window's thread with nothing keeping the publish out.
+        // Fifty of them, so a publish spends long enough reading the set for a change to land
+        // in the middle of it. With one, the read is over before anything can collide.
+        var presenter = Churning(out var cts, steady: 50);
+        var steady = Enumerable.Range(0, 50).Select(i => $"steady{i}").ToList();
+
+        var failure = await RaceAsync(presenter, cts, () =>
+        {
+            foreach (var id in steady)
+            {
+                if (presenter.Rows.FirstOrDefault(r => r.Id == id) is { Completed: true })
+                    presenter.Reopen(id);
+                else
+                    presenter.Complete(id);
+
+                presenter.SetCollapsed(id, !presenter.IsCollapsed(id));
+            }
+
+            presenter.DropTicked();
+            presenter.FoldAll(presenter.Rows.Count % 2 == 0);
+        });
+
+        Assert.Null(failure);
+    }
+
     /// <summary>An engine whose every sync adds a fresh batch of tasks and tombstones the last one.</summary>
-    private static MainPresenter Churning(out CancellationTokenSource cts)
+    /// <param name="steady">How many tasks besides "stable" are there throughout, as steady0, steady1…</param>
+    private static MainPresenter Churning(out CancellationTokenSource cts, int steady = 0)
     {
         var round = 0;
         var api = new FakeApi
@@ -66,6 +96,8 @@ public class ConcurrencyTests
 
         var store = new InMemorySnapshotStore();
         store.PutResource("items", "stable", """{"id":"stable","content":"Stable","child_order":0}""");
+        for (var i = 0; i < steady; i++)
+            store.PutResource("items", $"steady{i}", $$"""{"id":"steady{{i}}","content":"Steady {{i}}","child_order":{{i + 1}}}""");
 
         var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" });
         engine.Load();

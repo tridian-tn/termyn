@@ -65,7 +65,7 @@
     <comment>Button under the unreadable-filter notice that opens the filter in Todoist's web app.</comment>
   </data>
   <data name="ReconnectNeeded" xml:space="preserve">
-    <value>Todoist turned the saved token away, so nothing is syncing. Reconnecting arrives in a later version.</value>
+    <value>Todoist turned the saved token away, so nothing is syncing and nothing can be changed until it's reconnected.</value>
     <comment>Banner above the task list when Todoist has rejected the stored token. The tasks below are still shown from the local copy.</comment>
   </data>
   <data name="SyncFailed" xml:space="preserve">
@@ -199,5 +199,145 @@
   <data name="MenuProjectPage" xml:space="preserve">
     <value>Termyn on GitHub</value>
     <comment>Help menu item that opens Termyn's project page.</comment>
+  </data>
+  <data name="MenuNewTask" xml:space="preserve">
+    <value>New Task</value>
+    <comment>File menu item and toolbar label: opens the box for adding a task.</comment>
+  </data>
+  <data name="MenuTask" xml:space="preserve">
+    <value>Task</value>
+    <comment>Title of the Task menu, which holds what can be done to the selected task.</comment>
+  </data>
+  <data name="MarkCompleted" xml:space="preserve">
+    <value>Mark as Completed</value>
+    <comment>Task menu item that ticks the selected task off. Reminders' wording for the same action.</comment>
+  </data>
+  <data name="MarkIncomplete" xml:space="preserve">
+    <value>Mark as Incomplete</value>
+    <comment>Task menu item that puts a ticked-off task back. Reminders' wording for the same action.</comment>
+  </data>
+  <data name="Rename" xml:space="preserve">
+    <value>Rename</value>
+    <comment>Task menu item that edits the selected task's name in place.</comment>
+  </data>
+  <data name="DueDate" xml:space="preserve">
+    <value>Due Date…</value>
+    <comment>Task menu item that opens the due-date popover for the selected task.</comment>
+  </data>
+  <data name="MenuSchedule" xml:space="preserve">
+    <value>Schedule</value>
+    <comment>Task submenu with the days a task can be put on at a click.</comment>
+  </data>
+  <data name="DueToday" xml:space="preserve">
+    <value>Today</value>
+    <comment>Schedule submenu item and due-date button: due today.</comment>
+  </data>
+  <data name="DueTomorrow" xml:space="preserve">
+    <value>Tomorrow</value>
+    <comment>Schedule submenu item and due-date button: due tomorrow.</comment>
+  </data>
+  <data name="DueWeekend" xml:space="preserve">
+    <value>This Weekend</value>
+    <comment>Schedule submenu item and due-date button: due on the day the account's weekend starts.</comment>
+  </data>
+  <data name="DueNextWeek" xml:space="preserve">
+    <value>Next Week</value>
+    <comment>Schedule submenu item and due-date button: due on the day the account calls next week.</comment>
+  </data>
+  <data name="DueNone" xml:space="preserve">
+    <value>No Date</value>
+    <comment>Schedule submenu item and due-date button: takes the due date off.</comment>
+  </data>
+  <data name="MenuPriority" xml:space="preserve">
+    <value>Priority</value>
+    <comment>Task submenu with the four priorities.</comment>
+  </data>
+  <data name="PriorityN" xml:space="preserve">
+    <value>Priority {0}</value>
+    <comment>Priority submenu item. {0} is 1 to 4, 1 being the highest, as Todoist numbers them.</comment>
+  </data>
+  <data name="ShowInTodoist" xml:space="preserve">
+    <value>Show in Todoist</value>
+    <comment>Task menu item that opens the selected task in Todoist's web app.</comment>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>Delete</value>
+    <comment>Task menu item that deletes the selected task. Not confirmed: Undo brings it back.</comment>
+  </data>
+  <data name="NothingToUndo" xml:space="preserve">
+    <value>Nothing to undo</value>
+    <comment>Window subtitle when Undo is pressed with nothing it can take back.</comment>
+  </data>
+  <data name="ShowInTodoistNotYet" xml:space="preserve">
+    <value>This task hasn't reached Todoist yet.</value>
+    <comment>Window subtitle when Show in Todoist is asked for a task that hasn't been synced, so Todoist has no page for it.</comment>
+  </data>
+  <data name="ChangeFailed" xml:space="preserve">
+    <value>Couldn't make that change: {0}</value>
+    <comment>Window subtitle when a change to a task couldn't be made here. {0} is the error's own message.</comment>
+  </data>
+  <data name="NewTaskTip" xml:space="preserve">
+    <value>Add a task</value>
+    <comment>Tooltip of the toolbar button that opens the box for adding a task.</comment>
+  </data>
+  <data name="FailedOne" xml:space="preserve">
+    <value>1 change couldn't be saved.</value>
+    <comment>Banner above the task list when Todoist refused one change for good.</comment>
+  </data>
+  <data name="FailedMany" xml:space="preserve">
+    <value>{0} changes couldn't be saved.</value>
+    <comment>Banner above the task list when Todoist refused several changes for good. {0} is how many.</comment>
+  </data>
+  <data name="FailedReview" xml:space="preserve">
+    <value>Review…</value>
+    <comment>Button in the banner about refused changes; opens the list of them.</comment>
+  </data>
+  <data name="FailedTitle" xml:space="preserve">
+    <value>Changes That Couldn't Be Saved</value>
+    <comment>Heading of the sheet that lists the changes Todoist refused.</comment>
+  </data>
+  <data name="FailedDismiss" xml:space="preserve">
+    <value>Dismiss</value>
+    <comment>Button beside a refused change: forgets it, putting the task back the way Todoist has it.</comment>
+  </data>
+  <data name="Done" xml:space="preserve">
+    <value>Done</value>
+    <comment>Button that closes the sheet listing refused changes.</comment>
+  </data>
+  <data name="TokenOutOfReach" xml:space="preserve">
+    <value>Waiting to read the Todoist token from your Keychain…</value>
+    <comment>Window subtitle while the token is stored but can't be read yet: the Keychain is locked or its access prompt hasn't been answered. Syncing carries on by itself once it can.</comment>
+  </data>
+  <data name="ReconnectButton" xml:space="preserve">
+    <value>Reconnect…</value>
+    <comment>Button in the banner shown when Todoist has turned the saved token away; asks for a new one.</comment>
+  </data>
+  <data name="MenuReconnect" xml:space="preserve">
+    <value>Reconnect to Todoist…</value>
+    <comment>Application menu item that asks for a new token. Enabled only while Todoist has turned the saved one away.</comment>
+  </data>
+  <data name="ReconnectHeading" xml:space="preserve">
+    <value>Reconnect to Todoist</value>
+    <comment>Bold heading of the sheet that asks for a new token after Todoist turned the saved one away.</comment>
+  </data>
+  <data name="ReconnectExplanation" xml:space="preserve">
+    <value>Todoist turned the saved token away, which happens when it's been regenerated. Paste the current one to carry on; anything changed meanwhile is sent once it's accepted.</value>
+    <comment>Explains why a new token is being asked for, under the reconnect sheet's heading.</comment>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>Cancel</value>
+    <comment>Button that gives up on reconnecting, or on switching account.</comment>
+  </data>
+  <data name="SwitchAccountTitle" xml:space="preserve">
+    <value>Switch to a different Todoist account?</value>
+    <comment>Heading of the question asked when a pasted token belongs to a different account from the one held.</comment>
+  </data>
+  <data name="SwitchAccount" xml:space="preserve">
+    <value>Switch Account</value>
+    <comment>Button that forgets this account's local copy and goes on with the other account's token.</comment>
+  </data>
+  <data name="SwitchAccountFailed" xml:space="preserve">
+    <value>Termyn couldn't switch accounts, so the last account is still held.</value>
+    <comment>Heading of the alert when switching account couldn't finish. The error itself follows.</comment>
   </data>
 </root>

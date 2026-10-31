@@ -139,6 +139,18 @@ public class TickedOffTests
     }
 
     [Fact]
+    public void The_way_back_is_written_the_way_the_window_writes_it()
+    {
+        // A Mac window's undo is ⌘Z, and a line telling its user to press Ctrl+Z would be wrong.
+        var (presenter, _) = Seeded(shortcutText: c => c == AppCommand.Undo ? "⌘Z" : string.Empty);
+
+        presenter.Complete("a");
+
+        Assert.Contains("ticked off · ⌘Z puts it back", presenter.Status);
+        Assert.DoesNotContain("Ctrl", presenter.Status);
+    }
+
+    [Fact]
     public void The_window_is_told_when_there_is_something_to_wait_for()
     {
         // What the window hangs its timer off, so an idle one ticks for nothing.
@@ -293,7 +305,12 @@ public class TickedOffTests
     /// <param name="withSubTasks">Whether "a" has a sub-task, with one of its own</param>
     /// <param name="due">A day both tasks are due, or null for none</param>
     /// <param name="recurring">Whether "a" repeats</param>
-    private static (MainPresenter Presenter, FixedClock Clock) Seeded(bool withSubTasks = false, string? due = null, bool recurring = false)
+    /// <param name="shortcutText">How the window writes shortcuts, or null for the table's own wording</param>
+    private static (MainPresenter Presenter, FixedClock Clock) Seeded(
+        bool withSubTasks = false,
+        string? due = null,
+        bool recurring = false,
+        Func<AppCommand, string>? shortcutText = null)
     {
         var dated = due is null ? string.Empty : $$""","due":{"date":"{{due}}"}""";
         var repeats = recurring ? ""","due":{"date":"2026-07-31","is_recurring":true,"string":"every day"}""" : dated;
@@ -313,7 +330,7 @@ public class TickedOffTests
         var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, clock);
         engine.Load();
 
-        var presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+        var presenter = new MainPresenter(engine, new QuickAddParser(clock), clock, shortcutText: shortcutText);
         presenter.Select(ViewSelection.Of(SmartView.All));
 
         return (presenter, clock);

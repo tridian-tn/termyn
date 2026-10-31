@@ -7,6 +7,15 @@ namespace Termyn.Presentation.Tests;
 public class AuthPresenterTests
 {
     [Fact]
+    public void A_token_out_of_reach_is_still_a_token_so_it_isnt_asked_for_again()
+    {
+        // Asking would only store a second copy of what the Keychain already holds behind its prompt.
+        Assert.True(new AuthPresenter(new FakeApi(), new FakeSecrets { Stored = "tok", Unreachable = true }).HasStoredToken);
+        Assert.True(new AuthPresenter(new FakeApi(), new FakeSecrets { Stored = "tok" }).HasStoredToken);
+        Assert.False(new AuthPresenter(new FakeApi(), new FakeSecrets { Stored = null }).HasStoredToken);
+    }
+
+    [Fact]
     public async Task Valid_token_is_stored()
     {
         var secrets = new FakeSecrets { Stored = null };

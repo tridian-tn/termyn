@@ -1235,6 +1235,32 @@ public class SyncEngineTests
     }
 
     [Fact]
+    public async Task A_token_out_of_reach_at_the_start_is_still_the_accounts_and_is_used_once_it_can_be_read()
+    {
+        // A locked Keychain, or one waiting on its access prompt, holds the token as surely as an
+        // open one. Reading that as no token put the account on hold, read-only, behind a notice
+        // that Todoist had turned the token away — which it hadn't.
+        var held = new InMemorySnapshotStore();
+        held.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var secrets = new FakeSecrets { Stored = "tok", Unreachable = true };
+        var engine = new SyncEngine(new FakeApi(), held, secrets);
+        engine.Load();
+
+        Assert.False(engine.AwaitingToken);
+
+        // Out of reach, a sync has nothing to send with — and stops there, without putting the
+        // account on hold either.
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+        Assert.False(engine.AwaitingToken);
+
+        secrets.Unreachable = false;
+        await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(engine.AwaitingToken);
+        Assert.Equal("tok", secrets.Stored);
+    }
+
+    [Fact]
     public async Task The_same_accounts_token_goes_on_with_the_cache_and_sends_what_was_held()
     {
         var api = new FakeApi();

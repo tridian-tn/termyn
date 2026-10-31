@@ -203,19 +203,26 @@ public sealed class MainPresenter
     /// file works without one, which is what lets the presenter be tested without a download folder.
     /// </param>
     /// <param name="log">Where sync trouble is written down, or null to write none of it down.</param>
+    /// <param name="shortcutText">
+    /// How the window writes a command's shortcut, for the status line that names one. Optional:
+    /// without it, the shortcut table's own wording, which is a Windows keyboard's. A Mac window
+    /// passes its own, so the line reads ⌘Z rather than Ctrl+Z.
+    /// </param>
     public MainPresenter(
         SyncEngine engine,
         QuickAddParser parser,
         IClock? clock = null,
         AttachmentFetcher? fetcher = null,
         IHistoryStore? history = null,
-        ILog? log = null)
+        ILog? log = null,
+        Func<AppCommand, string>? shortcutText = null)
     {
         _engine = engine;
         _parser = parser;
         _clock = clock ?? new SystemClock();
         _fetcher = fetcher;
         _log = log;
+        _shortcutText = shortcutText ?? Shortcuts.ShortcutFor;
         History = new ActionHistory(history, _clock);
 
         // The history quotes the account's tasks by name, so it goes whenever the account's cache
@@ -228,6 +235,8 @@ public sealed class MainPresenter
     private readonly AttachmentFetcher? _fetcher;
 
     private readonly ILog? _log;
+
+    private readonly Func<AppCommand, string> _shortcutText;
 
     /// <summary>Raised whenever the sidebar, rows or status have been refreshed.</summary>
     public event Action? RowsChanged;
@@ -705,7 +714,8 @@ public sealed class MainPresenter
         var parse = Placed(_parser.Parse(text, _engine.DateSettings));
         var id = _engine.AddItem(ItemFields.ForAdd(parse, parent.ProjectId, parent.SectionId, parentId));
 
-        _collapsed.Remove(parentId);
+        lock (_publishing)
+            _collapsed.Remove(parentId);
 
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryAddedUnder, parse.Content, under), $"subtask:{id}");
 
@@ -870,7 +880,8 @@ public sealed class MainPresenter
         _engine.ReopenItem(id);
 
         // Put back on purpose, so there's nothing left to keep it on the list for.
-        _ticked.Remove(id);
+        lock (_publishing)
+            _ticked.Remove(id);
 
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryReopened, named), $"reopen:{id}");
         Publish();
@@ -1716,6 +1727,11 @@ public sealed class MainPresenter
     private sealed record Ticked(DateTimeOffset At, IReadOnlyList<string> Under);
 
     /// <summary>What's been ticked off lately, so it can be kept on the list a while.</summary>
+    /// <remarks>
+    /// Changed only under <see cref="_publishing"/>. Every publish reads it there, and a background
+    /// sync publishes from its own thread while a tick happens on the window's; a plain dictionary
+    /// changed under a reader can throw, or hand the reader a torn view of itself.
+    /// </remarks>
     private readonly Dictionary<string, Ticked> _ticked = [];
 
     /// <summary>When the first of them is due to go, or null when the list holds none.</summary>
@@ -1732,13 +1748,16 @@ public sealed class MainPresenter
     public bool DropTicked()
     {
         var now = _clock.UtcNow;
-        var gone = _ticked.Where(t => now - t.Value.At >= Lingers).Select(t => t.Key).ToList();
+        lock (_publishing)
+        {
+            var gone = _ticked.Where(t => now - t.Value.At >= Lingers).Select(t => t.Key).ToList();
 
-        if (gone.Count == 0)
-            return false;
+            if (gone.Count == 0)
+                return false;
 
-        foreach (var id in gone)
-            _ticked.Remove(id);
+            foreach (var id in gone)
+                _ticked.Remove(id);
+        }
 
         // The whole outline rather than the filter over it: which tasks are in the list at all is
         // what has changed, and that is decided when the rows are built.
@@ -1779,7 +1798,10 @@ public sealed class MainPresenter
         // with nothing said about where it went. Not a recurring one, which moves on to its next
         // date rather than being ticked off, and has nothing to keep.
         if (_engine.CompleteItem(id) is { } under)
-            _ticked[id] = new Ticked(_clock.UtcNow, under);
+        {
+            lock (_publishing)
+                _ticked[id] = new Ticked(_clock.UtcNow, under);
+        }
 
         History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryCompleted, named), $"complete:{id}");
         Publish();
@@ -1806,8 +1828,11 @@ public sealed class MainPresenter
             // off a second before vanish because something else was taken back.
             var open = _engine.Snapshot().Items.Where(i => !i.Completed).Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
 
-            foreach (var reopened in _ticked.Keys.Where(open.Contains).ToList())
-                _ticked.Remove(reopened);
+            lock (_publishing)
+            {
+                foreach (var reopened in _ticked.Keys.Where(open.Contains).ToList())
+                    _ticked.Remove(reopened);
+            }
 
             // Its own line rather than rubbing out the one before it. Taking something back is a
             // thing that was done, and a list that quietly forgot it would be the less true account.
@@ -2012,7 +2037,10 @@ public sealed class MainPresenter
             return false;
 
         if (onto)
-            _collapsed.Remove(target.Id);
+        {
+            lock (_publishing)
+                _collapsed.Remove(target.Id);
+        }
 
         // A line of its own each time. Nudges by key run together because three presses are one
         // move, but each drop is a whole move made with one gesture.
@@ -3122,6 +3150,9 @@ public sealed class MainPresenter
     /// An id stays here after whatever was under it has gone — outdented, or deleted. Nothing reads
     /// it while the row has no children, and if the task is given sub-tasks again they start hidden,
     /// which is the last thing that was asked for.
+    ///
+    /// Changed only under <see cref="_publishing"/>, for the same reason as the ticked-off tasks:
+    /// the outline is built from it there, and that can be a background sync's publish.
     /// </remarks>
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
 
@@ -3148,9 +3179,12 @@ public sealed class MainPresenter
     /// <param name="ids">The tasks that were folded when the window last closed</param>
     public void RestoreCollapsed(IEnumerable<string> ids)
     {
-        _collapsed.Clear();
-        foreach (var id in ids)
-            _collapsed.Add(id);
+        lock (_publishing)
+        {
+            _collapsed.Clear();
+            foreach (var id in ids)
+                _collapsed.Add(id);
+        }
 
         if (_projectedFrom is not null)
             Republish();
@@ -3173,8 +3207,11 @@ public sealed class MainPresenter
     /// <returns>False when it was already that way, so the caller can leave the list alone</returns>
     public bool SetCollapsed(string id, bool collapsed)
     {
-        if (!(collapsed ? _collapsed.Add(id) : _collapsed.Remove(id)))
-            return false;
+        lock (_publishing)
+        {
+            if (!(collapsed ? _collapsed.Add(id) : _collapsed.Remove(id)))
+                return false;
+        }
 
         Republish();
         return true;
@@ -3212,9 +3249,12 @@ public sealed class MainPresenter
     {
         var changed = false;
 
-        foreach (var row in _allRows)
-            if (row.HasChildren)
-                changed |= collapsed ? _collapsed.Add(row.Id) : _collapsed.Remove(row.Id);
+        lock (_publishing)
+        {
+            foreach (var row in _allRows)
+                if (row.HasChildren)
+                    changed |= collapsed ? _collapsed.Add(row.Id) : _collapsed.Remove(row.Id);
+        }
 
         if (changed)
             Republish();
@@ -3486,7 +3526,7 @@ public sealed class MainPresenter
                 // Said while the row is still there, which is the moment it's any use: a task
                 // ticked off by mistake is one keystroke from coming back, and this is where the
                 // app says what's going on.
-                Lingering ? string.Format(CultureInfo.CurrentCulture, Strings.StatusTickedOff, Shortcuts.ShortcutFor(AppCommand.Undo)) : null,
+                Lingering ? string.Format(CultureInfo.CurrentCulture, Strings.StatusTickedOff, _shortcutText(AppCommand.Undo)) : null,
 
                 CompletedTruncated ? Strings.StatusCompletedTruncated : null,
                 SyncStatus.Describe(),
