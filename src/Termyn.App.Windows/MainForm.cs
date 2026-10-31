@@ -1069,6 +1069,7 @@ internal sealed class MainForm : Form
                             || amended.HotkeyBinding != _settings.HotkeyBinding;
         var cadenceChanged = amended.SyncMode != _settings.SyncMode
                              || amended.ClampedInterval != _settings.ClampedInterval;
+        var cacheChanged = amended.AttachmentCache != _settings.AttachmentCache;
 
         // Collected rather than each written straight to the label: four of these can happen in one
         // save, and the last to run used to be the only one the user saw — including the one saying
@@ -1108,7 +1109,8 @@ internal sealed class MainForm : Form
 
         // Straight away rather than at the next start: tightening the caps and then finding the
         // cache still over them until tomorrow is not what the setting appears to promise.
-        if (amended.AttachmentCache != _settings.AttachmentCache)
+        // Compared before the settings were replaced, like the rest: by now the two are the same.
+        if (cacheChanged)
             _presenter.SetDownloadLimits(amended.AttachmentCache);
 
         // Saved last, so the theme and hotkey are applied even when the file can't be written.

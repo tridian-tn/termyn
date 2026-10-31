@@ -173,6 +173,22 @@ public sealed class DownloadAttachmentTests : IDisposable
     }
 
     [WinFormsFact]
+    public async Task Tightening_the_cache_in_settings_sweeps_it_straight_away()
+    {
+        // Not at the next start: the window compared the new limits with the settings it had just
+        // replaced them with, so the two always matched and nothing was ever applied.
+        using var window = Window(new AppSettings());
+        var cache = Path.Combine(_folder, "cache");
+        Directory.CreateDirectory(cache);
+        var held = Path.Combine(cache, "held.bin");
+        await File.WriteAllBytesAsync(held, new byte[2 * 1024 * 1024], TestContext.Current.CancellationToken);
+
+        window.ApplySettings(new AppSettings { AttachmentCacheMb = 1 });
+
+        Assert.False(File.Exists(held), "the cache was left over its new limit");
+    }
+
+    [WinFormsFact]
     public async Task A_name_the_folder_already_had_is_numbered_in_what_is_said_and_shown()
     {
         // The original name would send the user, and Explorer, to the file that was already there.
