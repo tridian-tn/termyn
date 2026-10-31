@@ -408,8 +408,10 @@ public sealed class SyncEngine
             if (unsendable > 0)
                 _log?.Warn($"{unsendable} queued changes couldn't be read and will never be sent.");
 
-            // An account left behind by a rejected token, with no token yet to go on with it.
-            _awaitingToken = _secrets.GetToken() is null && HoldsAnything;
+            // An account left behind by a rejected token, with no token yet to go on with it. Not
+            // one whose token is there but out of reach — a Keychain still waiting to be unlocked
+            // or allowed: that's the account signed in as ever, and the next sync will find it.
+            _awaitingToken = !_secrets.ReadToken().Stored && HoldsAnything;
         }
     }
 

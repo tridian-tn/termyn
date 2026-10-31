@@ -32,8 +32,11 @@ public sealed class AuthPresenter
         _secrets = secrets;
     }
 
-    /// <summary>True when a token is already stored, so the token dialog can be skipped.</summary>
-    public bool HasStoredToken => !string.IsNullOrEmpty(_secrets.GetToken());
+    /// <summary>
+    /// True when a token is already stored, so the token dialog can be skipped — including one
+    /// that's there but can't be read just now, which asking for again would only duplicate.
+    /// </summary>
+    public bool HasStoredToken => _secrets.ReadToken() is { Stored: true } read && read.Token != string.Empty;
 
     /// <summary>
     /// Validates the token with a probe and, if accepted, stores it securely. An unvalidated token

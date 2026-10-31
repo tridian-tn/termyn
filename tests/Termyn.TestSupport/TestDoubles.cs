@@ -48,7 +48,12 @@ public sealed class FakeSecrets : ISecretStore
 {
     public string? Stored = "tok";
 
-    public string? GetToken() => Stored;
+    /// <summary>Whether the stored token is there but out of reach, as a locked Keychain's is.</summary>
+    public bool Unreachable;
+
+    public string? GetToken() => Unreachable ? null : Stored;
+
+    public TokenRead ReadToken() => Unreachable ? new(null, Unreachable: Stored is not null) : new(Stored);
     public void SetToken(string token) => Stored = token;
     public void ClearToken() => Stored = null;
 }
