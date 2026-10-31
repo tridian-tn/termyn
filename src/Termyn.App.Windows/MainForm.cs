@@ -2424,11 +2424,35 @@ internal sealed class MainForm : Form
     /// <summary>
     /// Fetches a comment's file if it isn't already here, and hands it to the desktop.
     /// </summary>
-    private async void OnAttachmentOpened(string commentId)
+    /// <remarks>
+    /// A file of a kind that runs something is asked about first, with No as the default: the
+    /// name is whatever a collaborator called it, and the desktop would run "invoice.scr" on the
+    /// one click. Saving a copy isn't asked about, since nothing's run by that.
+    ///
+    /// Guarded throughout, since nothing above an async void handler would catch what it threw.
+    /// </remarks>
+    private async void OnAttachmentOpened(string commentId) => await GuardedAsync(async () =>
     {
-        if (await FetchFileAsync(commentId, _presenter.FetchAttachmentAsync, Strings.FileOpenFailed) is { } path)
-            OpenFile(path);
-    }
+        if (await FetchFileAsync(commentId, _presenter.FetchAttachmentAsync, Strings.FileOpenFailed) is not { } fetched)
+            return;
+
+        var (path, file) = fetched;
+
+        var name = DownloadName.Safe(file.FileName);
+        if (FileRisk.RunsCode(path) && !(AskBeforeRunning?.Invoke(name) ?? Confirm(string.Format(CultureInfo.CurrentCulture, Strings.OpenRunnableConfirm, name))))
+            return;
+
+        if (!OpenFile(path) && !IsDisposed)
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.FileNotOpened, name);
+    });
+
+    /// <summary>
+    /// Asks whether to open a file that runs something, given its name. A property so a test can
+    /// answer without a box appearing; null, as the window leaves it, asks the user.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<string, bool>? AskBeforeRunning { get; set; }
 
     /// <summary>
     /// Hands a fetched file to the desktop to open. A property so a test can see it asked for without
@@ -2451,19 +2475,21 @@ internal sealed class MainForm : Form
     /// next download. When Explorer can't be got to show the file, the status bar says so, since
     /// otherwise the setting would just appear not to work.
     /// </remarks>
-    private async void OnAttachmentDownloaded(string commentId)
+    private async void OnAttachmentDownloaded(string commentId) => await GuardedAsync(async () =>
     {
         var folder = _shell.Paths.DownloadsDirectory;
 
-        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is not { } path)
+        if (await FetchFileAsync(commentId, (file, progress, ct) => _presenter.SaveAttachmentAsync(file, folder, progress, ct), Strings.FileSaveFailed) is not { } fetched)
             return;
+
+        var path = fetched.Path;
 
         var name = Path.GetFileName(path);
         _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSaved, name);
 
         if (_settings.ShowAfterDownloading && !await ShowInFolder(path) && !IsDisposed)
             _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.AttachmentSavedNotShown, name);
-    }
+    });
 
     /// <summary>
     /// Opens Explorer with a saved file selected, answering whether it could. A property so a test can
@@ -2484,8 +2510,8 @@ internal sealed class MainForm : Form
     /// <param name="commentId">The comment whose file is wanted</param>
     /// <param name="fetch">What getting it means: into the cache to open, or a copy into a folder</param>
     /// <param name="failed">What to say if it goes wrong with nothing more particular to say</param>
-    /// <returns>Where the file is, or null when it isn't anywhere, having already said why</returns>
-    private async Task<string?> FetchFileAsync(
+    /// <returns>Where the file is and which it is, or null when it isn't anywhere, having already said why</returns>
+    private async Task<(string Path, FileAttachment File)?> FetchFileAsync(
         string commentId,
         Func<FileAttachment, IProgress<long>, CancellationToken, Task<FetchResult>> fetch,
         string failed)
@@ -2498,21 +2524,25 @@ internal sealed class MainForm : Form
 
         using var transfer = new CancellationTokenSource();
         _transfer = transfer;
-        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.DownloadStarting, file.FileName);
+
+        // Shown as it would be saved, so a name can't use invisible characters to read as some
+        // other kind of file while it's coming in.
+        var name = DownloadName.Safe(file.FileName);
+        _comments.Progress = string.Format(CultureInfo.CurrentCulture, Strings.DownloadStarting, name);
 
         try
         {
             var progress = new Progress<long>(read => _comments.Progress =
                 file.FileSize > 0
-                    ? string.Format(CultureInfo.CurrentCulture, Strings.DownloadPercent, file.FileName, read * 100 / file.FileSize)
-                    : string.Format(CultureInfo.CurrentCulture, Strings.DownloadKilobytes, file.FileName, read / 1024));
+                    ? string.Format(CultureInfo.CurrentCulture, Strings.DownloadPercent, name, read * 100 / file.FileSize)
+                    : string.Format(CultureInfo.CurrentCulture, Strings.DownloadKilobytes, name, read / 1024));
 
             var result = await fetch(file, progress, transfer.Token);
 
             switch (result.Outcome)
             {
                 case FetchOutcome.Ready when result.Path is { } path:
-                    return path;
+                    return (path, file);
 
                 case FetchOutcome.Cancelled:
                     return null;

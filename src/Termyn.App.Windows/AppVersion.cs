@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -82,17 +83,64 @@ internal static class AppVersion
     /// <remarks>
     /// Only ever called with a path this app wrote into its own cache, which is what makes shell
     /// execution acceptable here: the name came from an account, but the path did not — the cache
-    /// keys files by a hash of their url and allows an extension only after checking it.
+    /// keys files by a hash of their url and allows an extension only after checking it. Whether
+    /// that extension is one that runs something is the caller's to ask the user about first.
+    ///
+    /// A kind of file nothing on the machine opens is offered to Windows' own "open with" box
+    /// rather than thrown on: the shell refuses it with an exception, and the caller is an event
+    /// handler nothing above is watching.
     /// </remarks>
     /// <param name="path">A file in the attachment cache</param>
-    /// <returns>False when there is no such file, so the caller can say so</returns>
+    /// <returns>False when there is no such file or nothing could be got to open it, so the caller can say so</returns>
     public static bool OpenFile(string path)
     {
         if (!File.Exists(path))
             return false;
 
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-        return true;
+        try
+        {
+            using var started = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            return true;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == NoAssociation)
+        {
+            return OpenWith(path);
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == Cancelled)
+        {
+            // Turned down at a prompt Windows put up, SmartScreen's included. That's an answer.
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The shell's error for a kind of file with nothing set to open it.</summary>
+    private const int NoAssociation = 1155;
+
+    /// <summary>The shell's error for a prompt the user turned down.</summary>
+    private const int Cancelled = 1223;
+
+    /// <summary>Asks the user what to open a file with, in Windows' own box for it.</summary>
+    /// <param name="path">A file there's no program set to open</param>
+    /// <returns>False when even that couldn't be shown</returns>
+    private static bool OpenWith(string path)
+    {
+        try
+        {
+            using var started = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, Verb = "openas", ErrorDialog = true });
+            return true;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == Cancelled)
+        {
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

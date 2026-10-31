@@ -823,6 +823,16 @@ It can't be brought back — Todoist has no undelete.</value>
     <value>The file couldn't be opened.</value>
     <comment>Message when a downloaded attachment couldn't be opened.</comment>
   </data>
+  <data name="FileNotOpened" xml:space="preserve">
+    <value>{0} was downloaded but couldn't be opened.</value>
+    <comment>Status bar when a downloaded attachment couldn't be handed to any program, not even through Windows' "open with" box. {0} is the file's name.</comment>
+  </data>
+  <data name="OpenRunnableConfirm" xml:space="preserve">
+    <value>Are you sure you want to open {0}?
+
+It's a kind of file that can run programs on this computer. Only open it if you know who attached it and were expecting it.</value>
+    <comment>Confirmation before opening an attachment that's a program, script, installer or shortcut. {0} is the file's name. The default answer is No.</comment>
+  </data>
   <data name="FileSaveFailed" xml:space="preserve">
     <value>The file couldn't be saved.</value>
     <comment>Message when an attachment couldn't be saved to the Downloads folder.</comment>
