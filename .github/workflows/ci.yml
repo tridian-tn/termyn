@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-test:
-    name: build & test
+    name: build & test (Windows)
     runs-on: windows-latest
 
     steps:
