@@ -1166,6 +1166,40 @@ public sealed class MainPresenter
         SelectedKey = RenamedKey(SelectedKey);
     }
 
+    /// <summary>
+    /// Puts the folded tasks and the ones just ticked off under the ids the server has given them.
+    /// </summary>
+    /// <remarks>
+    /// A task made here goes by an id of our own until the sync that sends it comes back. Held
+    /// under the old one, a task folded offline unfolded after that sync, and the folds saved for
+    /// the next start named a task nobody has; a new task just ticked off dropped off the list
+    /// before its moment was up. Done as the ids arrive, since the engine only remembers a rename
+    /// for so long.
+    /// </remarks>
+    private void FollowRenameInTasks()
+    {
+        foreach (var id in _collapsed.ToList())
+        {
+            if (_engine.Resolve(id) is var renamed && renamed != id)
+            {
+                _collapsed.Remove(id);
+                _collapsed.Add(renamed);
+            }
+        }
+
+        foreach (var (id, ticked) in _ticked.ToList())
+        {
+            var renamed = _engine.Resolve(id);
+            var under = ticked.Under.Select(_engine.Resolve).ToList();
+
+            if (renamed == id && under.SequenceEqual(ticked.Under, StringComparer.Ordinal))
+                continue;
+
+            _ticked.Remove(id);
+            _ticked[renamed] = ticked with { Under = under };
+        }
+    }
+
     /// <summary>The start of each sidebar key that carries an id the server can rename.</summary>
     private static readonly string[] Renameable =
     [
@@ -2653,6 +2687,7 @@ public sealed class MainPresenter
             // is in it under the server's id by now, and under the old one it would read as gone.
             FollowRename();
             FollowRenameInRecent();
+            FollowRenameInTasks();
 
             // After the sidebar, which is what it's checked against, and before the path and the
             // rows, which follow from wherever it leaves the selection.
