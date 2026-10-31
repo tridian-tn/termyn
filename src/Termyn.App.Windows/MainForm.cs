@@ -2972,7 +2972,7 @@ internal sealed class MainForm : Form
         {
             e.Handled = true;
             e.SuppressKeyPress = true;
-            PutDescriptionBack(_history.Redo());
+            PutDescriptionBack(_history.Redo(_description.Text, _description.SelectionStart));
         }
     }
 
