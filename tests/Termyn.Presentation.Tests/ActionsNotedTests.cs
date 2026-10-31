@@ -53,6 +53,7 @@ public class ActionsNotedTests
     [Fact]
     public void Setting_a_due_date_says_the_day_it_was_set_to()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = Seeded();
 
         presenter.SetDue("t1", new DateOnly(2026, 8, 15));
@@ -152,16 +153,21 @@ public class ActionsNotedTests
     }
 
     [Fact]
-    public void The_history_and_the_row_agree_about_a_due_date()
+    public void The_history_writes_a_day_the_way_the_region_does()
     {
-        // Both written in the invariant culture, since what is being reproduced is the server's own
-        // wording. Read from a different one they would disagree about the same day.
+        // The line is Termyn's own words, in the user's language, so its day is the region's — as
+        // Upcoming's day headings are — and not the server's wording the due column reproduces.
+        using var american = new CultureScope("en-US");
         var presenter = Seeded();
 
         presenter.SetDue("t1", new DateOnly(2026, 8, 15));
+        Assert.Equal("Set “Plan the week” due Aug 15", Newest(presenter));
 
-        Assert.Contains("15 Aug", Newest(presenter));
-        Assert.Equal("15 Aug", presenter.Rows.Single(r => r.Id == "t1").Due);
+        presenter.SetDeadline("t1", new DateOnly(2026, 8, 20));
+        Assert.Equal("Set “Plan the week” to finish by Aug 20", Newest(presenter));
+
+        presenter.Reschedule("t1", new DateOnly(2026, 8, 16));
+        Assert.Equal("Set “Plan the week” due Aug 16", Newest(presenter));
     }
 
     [Fact]

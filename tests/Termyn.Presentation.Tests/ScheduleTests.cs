@@ -175,6 +175,7 @@ public class ScheduleTests
     [Fact]
     public void Moving_a_task_is_noted_in_what_has_been_done()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = NewPresenter(Store()).Presenter;
 
         presenter.Reschedule("plain", new DateOnly(2026, 11, 2));

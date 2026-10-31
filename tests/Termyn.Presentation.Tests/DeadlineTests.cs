@@ -147,6 +147,7 @@ public class DeadlineTests
     [Fact]
     public void Setting_and_clearing_are_written_down_in_what_youve_done()
     {
+        using var british = new CultureScope("en-GB");
         var presenter = Presenter(Task("i1", "Ship it"), Task("i2", "Something else"));
 
         presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
@@ -162,6 +163,7 @@ public class DeadlineTests
     {
         // The same work on the same task, the way a run of description edits is: the list keeps
         // the wording it ended up with rather than every step on the way there.
+        using var british = new CultureScope("en-GB");
         var presenter = Presenter(Task("i1", "Ship it"));
 
         presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));

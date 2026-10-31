@@ -1728,7 +1728,7 @@ public sealed class MainPresenter
 
         History.Note(
             date is { } day
-                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture))
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, DisplayDates.DayMonth(day, CultureInfo.CurrentCulture))
                 : string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueCleared, named),
             $"due:{id}");
 
@@ -1758,7 +1758,7 @@ public sealed class MainPresenter
             return false;
 
         History.Note(
-            string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture)),
+            string.Format(CultureInfo.CurrentCulture, Strings.HistoryDueSet, named, DisplayDates.DayMonth(day, CultureInfo.CurrentCulture)),
             $"due:{id}");
 
         Publish();
@@ -1894,7 +1894,7 @@ public sealed class MainPresenter
 
         History.Note(
             date is { } day
-                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineSet, named, day.ToString("d MMM", CultureInfo.InvariantCulture))
+                ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineSet, named, DisplayDates.DayMonth(day, CultureInfo.CurrentCulture))
                 : string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeadlineCleared, named),
             $"deadline:{id}");
 
