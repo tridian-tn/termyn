@@ -384,10 +384,16 @@ public class DayBoxTests
     {
         // Saudi Arabia's Umm al-Qura calendar runs from 1900 to 2077. Formatting outside it threw, and
         // the box describes its day as it opens, so a deadline from an old import couldn't be opened.
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
         var was = System.Globalization.CultureInfo.CurrentCulture;
         try
         {
-            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ar-SA");
+            System.Globalization.CultureInfo.CurrentCulture = saudi;
 
             Assert.NotEmpty(DayBoxText.ForDeadline(DayReading.On(new DateOnly(1600, 5, 1)), english: true).Says);
             Assert.NotEmpty(DayBoxText.ForDue(DayReading.On(new DateOnly(2100, 1, 1), new TimeOnly(9, 0))).Says);

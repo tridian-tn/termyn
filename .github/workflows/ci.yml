@@ -32,16 +32,30 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.slnx -c Release --no-build
 
-  # The projects below the UI, on a Mac. They target plain net10.0 so a native macOS client can be
-  # built on them, and this is what says they still build and pass there, on Apple Silicon and
-  # with the ICU region data macOS brings rather than Windows'. Termyn.Portable.slnf leaves out the
+  # The projects below the UI, away from Windows. They target plain net10.0 so a native macOS client
+  # can be built on them, and this is what says they still build and pass there: on a Mac, with the
+  # ICU region data macOS brings rather than Windows', and on Linux, whose file system is
+  # case-sensitive and whose ICU is another build again. Termyn.Portable.slnf leaves out the
   # Windows projects: they target net10.0-windows, and their tests need a Windows desktop.
+  #
+  # The Mac leg keeps the name this job had before it was a matrix, so a required check that names
+  # it still finds it.
   #
   # Not something the packaging waits on. Mac support is still being built, and the Windows
   # release doesn't ship anything this job builds that the job above hasn't already tested.
-  build-test-macos:
-    name: build & test (macOS, portable)
-    runs-on: macos-latest
+  build-test-portable:
+    name: build & test (${{ matrix.name }}, portable)
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      # One platform failing says nothing about the others, and seeing all of them is the point.
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-latest
+          - name: Linux
+            runner: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -61,22 +75,29 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
 
-  # The native Mac app, built and nothing more: it has no tests of its own yet, and the code below
+  # The native Mac app, built for Apple Silicon. It has no tests of its own yet, and the code below
   # it is tested by the job above. Its own job because it needs the macOS workload and Xcode, which
   # the portable projects don't, and installing the workload is most of what this job spends.
   #
   # The projects build with ValidateXcodeVersion off, since a workload names one exact Xcode and
-  # the runner image's default moves on its own schedule. Not something the packaging waits on.
+  # the runner image's default moves on its own schedule.
   #
   # Debug rather than Release, because of the Xcode on the runner. The workload wants the macOS 27
   # SDK, which comes with Xcode 27.1, and the macos-26 image's newest is 26.6. A Release build trims
   # the app and writes its Objective-C registrations at build time, and both read that SDK's
-  # headers, so it fails (MT0179). A Debug build does neither — it registers at launch — so it
+  # headers, so it fails (MT0179). A Debug build does neither (it registers at launch), so it
   # still compiles every project and makes the .app, which is what this job is here to say. Back to
   # Release once the image carries an Xcode the workload accepts.
+  #
+  # On a v* tag it also packages the app, stamped with the tag, for the release job to attach. That
+  # is the same Debug build, for the reason above, and unsigned: Gatekeeper refuses it until it's
+  # opened from the context menu. Not done on other runs, where nothing would use it.
   build-mac-app:
     name: build (macOS app)
     runs-on: macos-latest
+
+    env:
+      RID: osx-arm64
 
     steps:
       - name: Checkout
@@ -90,12 +111,55 @@ jobs:
       - name: Install the macOS workload
         run: dotnet workload install macos
 
+      # The version is read off the environment rather than templated into the script, as in the
+      # Windows packaging: a tag name git accepts can hold characters a shell would act on. Plain
+      # numbers only, as there: CFBundleVersion is read by macOS as numbers, and a release tag that
+      # isn't is caught here rather than shipped as an app that sorts wrongly.
       - name: Build
-        run: dotnet build src/Termyn.App.Mac -c Debug
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(-c Debug -r "$RID")
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
+              echo "::error::Version '$version' is not plain numbers; the app can't be stamped with it."
+              exit 1
+            fi
+            args+=("-p:Version=$version")
+          fi
+          dotnet build src/Termyn.App.Mac "${args[@]}"
+
+      # -debug in the name for as long as this is a Debug build, so nobody downloading it takes it
+      # for a finished one. Drop it when the job goes back to Release.
+      #
+      # ditto rather than zip: it keeps the bundle's symlinks, extended attributes and resource
+      # forks, which a plain zip flattens into an app that won't open.
+      - name: Package
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          app="src/Termyn.App.Mac/bin/Debug/net10.0-macos/$RID/Termyn.app"
+          if [[ ! -d "$app" ]]; then
+            echo "::error::No app at $app"
+            exit 1
+          fi
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/Termyn-$version-macos-arm64-debug.zip"
+
+      - name: Keep it
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: termyn-mac
+          if-no-files-found: error
+          path: artifacts/*-macos-arm64-debug.zip
 
   # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
-  # only made every run a minute longer. The release job waits on both, so nothing is attached to a
-  # release unless the suite passed too.
+  # only made every run a minute longer. The release job waits on both, and on the Mac build, so
+  # nothing is attached to a release unless the suite passed too.
   package:
     name: package
     runs-on: windows-latest
@@ -147,7 +211,9 @@ jobs:
   release:
     name: release
     runs-on: windows-latest
-    needs: [ build-test, package ]
+    # The Mac build too, so a tag gives one release with every platform in it, or none: a draft
+    # missing the Mac app would read as a release that has one.
+    needs: [ build-test, package, build-mac-app ]
     if: startsWith(github.ref, 'refs/tags/v')
 
     # Only this job, and only on a tag. The packaging above runs on every pull request, including
@@ -156,22 +222,24 @@ jobs:
       contents: write
 
     steps:
-      - name: Take the artefacts the packaging job built
+      # Every artefact the run kept, Windows and Mac, into the one folder.
+      - name: Take the artefacts the packaging jobs built
         uses: actions/download-artifact@v8
         with:
-          name: termyn-artefacts
+          pattern: termyn-*
+          merge-multiple: true
           path: artifacts
 
-      # The packaging job stamps both filenames and the assembly with the tag, so the tag and the
+      # The packaging jobs stamp every filename and the app with the tag, so the tag and the
       # artefacts agree by construction. This is here to catch that packaging didn't drop one of
       # them silently — half a release, downloaded by whoever clicked the link first, is worse than
       # one that stops here.
-      - name: Check both artefacts are here
+      - name: Check every artefact is here
         shell: pwsh
         run: |
           # Off the environment, not templated into the script — same reasoning as the packaging job.
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $missing = @('setup.exe', 'portable.zip') |
+          $missing = @('setup.exe', 'portable.zip', 'macos-arm64-debug.zip') |
             ForEach-Object { Join-Path 'artifacts' "Termyn-$version-$_" } |
             Where-Object { -not (Test-Path $_) }
 
@@ -210,4 +278,4 @@ jobs:
             gh release create $tag --draft --title "Termyn $tag" --generate-notes
           }
 
-          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip) --clobber
+          gh release upload $tag (Get-ChildItem artifacts/*-setup.exe, artifacts/*-portable.zip, artifacts/*-macos-arm64-debug.zip) --clobber
