@@ -34,7 +34,8 @@ public sealed class AppDelegate : NSApplicationDelegate
     private SyncEngine? _engine;
     private MainPresenter? _presenter;
     private SyncScheduler? _scheduler;
-    private TokenWindowController? _tokenWindow;
+    private AuthPresenter? _auth;
+    private NSWindow? _tokenWindow;
     private MainWindowController? _mainWindow;
 
     public override void DidFinishLaunching(NSNotification notification)
@@ -61,12 +62,15 @@ public sealed class AppDelegate : NSApplicationDelegate
 
         // As on Windows, the cache decides what having no token means: with nothing held it's a
         // first start; over an account it's a token Todoist turned away, and the window opens on
-        // that account read-only.
-        var auth = new AuthPresenter(api, secrets);
-        if (!auth.HasStoredToken && !_engine.AwaitingToken)
+        // that account read-only. A token the Keychain holds but won't hand over yet counts as
+        // a token: the window opens as usual and syncs once it can.
+        _auth = new AuthPresenter(api, secrets);
+        if (!_auth.HasStoredToken && !_engine.AwaitingToken)
         {
-            _tokenWindow = new TokenWindowController(auth, _log, OpenMainWindow);
-            _tokenWindow.ShowWindow(this);
+            var asking = new TokenController(_auth, _log, reconnecting: false);
+            asking.Connected += OpenMainWindow;
+            _tokenWindow = asking.InWindow();
+            _tokenWindow.MakeKeyAndOrderFront(this);
         }
         else
         {
@@ -98,18 +102,71 @@ public sealed class AppDelegate : NSApplicationDelegate
     {
         var engine = _engine!;
 
-        _presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()), log: _log);
-        _scheduler = new SyncScheduler(_presenter.SyncAsync, _settings.Cadence);
+        // The status line names the undo key, so it's told how a Mac writes one.
+        _presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()), log: _log, shortcutText: MacShortcuts.Text);
+        // Every sync that gets through had a token to send, which the window wants to hear when
+        // it's been waiting for the Keychain to hand one over.
+        var presenter = _presenter;
+        _scheduler = new SyncScheduler(
+            async ct =>
+            {
+                var outcome = await presenter.SyncAsync(ct);
+                _mainWindow?.Synced();
+                return outcome;
+            },
+            _settings.Cadence);
 
-        // Nothing writes yet, but the engine is told about the loop the way the Windows app tells
-        // it, so the first command that queues a change is heard without anything changing here.
+        // Every change queued is a reason to sync soon, as on Windows.
         engine.Queued += _scheduler.NotifyWrite;
 
-        _mainWindow = new MainWindowController(_presenter, _scheduler, _log);
+        _mainWindow = new MainWindowController(_presenter, _scheduler, _auth!, _log, SwitchAccount);
         _mainWindow.ShowWindow(this);
         _mainWindow.Start(_settings.View.SelectedKey);
         _tokenWindow?.Close();
         _tokenWindow = null;
+    }
+
+    /// <summary>
+    /// Forgets this account and goes on with another's token, once the user has agreed to.
+    /// </summary>
+    /// <remarks>
+    /// A sign-out followed by a sign-in, as on Windows: the sync loop is stopped first, so nothing
+    /// can sync on the token while it's swapped, and the window starts over on the new account,
+    /// in its default view. The old window goes only once the new one is up, since closing the last
+    /// window quits.
+    /// </remarks>
+    /// <param name="next">The other account's token, already accepted by Todoist</param>
+    private void SwitchAccount(TokenCheck next)
+    {
+        var leaving = _mainWindow!;
+        leaving.Stop();
+        _engine!.Queued -= _scheduler!.NotifyWrite;
+        _scheduler.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        try
+        {
+            _presenter!.Reconnect(next.Token, next.UserId);
+            _log.Info("Switched to another account. The last one's cache and queue are gone.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The new token is stored only once the cache is empty, so this leaves the last account
+            // held, still waiting for a token of its own — which the window opens on.
+            _log.Error("Switching account couldn't finish, so the last account is still held.", ex);
+            new NSAlert
+            {
+                AlertStyle = NSAlertStyle.Warning,
+                MessageText = Strings.SwitchAccountFailed,
+                InformativeText = ex.Message,
+            }.RunModal();
+        }
+
+        // The last account's view, folds and labels mean nothing to the next one.
+        _settings = _settings with { View = _settings.View.WithoutAccount() };
+        _settingsStore?.Save(_settings);
+
+        OpenMainWindow();
+        leaving.Close();
     }
 
     /// <summary>The running version, as a release tag is written.</summary>

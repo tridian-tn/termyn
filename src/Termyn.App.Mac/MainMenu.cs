@@ -18,6 +18,7 @@ internal static class MainMenu
     public const string ShowInbox = "showInbox:";
     public const string SyncNow = "syncNow:";
     public const string OpenProjectPage = "openProjectPage:";
+    public const string Reconnect = "reconnect:";
 
     public static NSMenu Build()
     {
@@ -35,6 +36,10 @@ internal static class MainMenu
             // No Settings window yet. An item with no action is disabled, which says it'll be here
             // without pretending it does anything.
             new NSMenuItem(Strings.MenuSettings, ",") { KeyEquivalentModifierMask = NSEventModifierMask.CommandKeyMask },
+
+            // Account matters sit with Settings, as they do in Mail. Enabled only while Todoist
+            // has turned the token away.
+            Item(Strings.MenuReconnect, Reconnect),
             NSMenuItem.SeparatorItem,
             new NSMenuItem(Strings.MenuServices) { Submenu = services },
             NSMenuItem.SeparatorItem,
@@ -44,7 +49,14 @@ internal static class MainMenu
             NSMenuItem.SeparatorItem,
             Item(Strings.MenuQuit, "terminate:", "q"));
 
+        // New Task runs through the same path as the Task menu, so it's validated the same way:
+        // greyed while Todoist has turned the token away.
+        var newTask = Item(Strings.MenuNewTask, TaskMenu.Action, "n");
+        newTask.Tag = (int)Presentation.AppCommand.NewTask;
+
         Add(bar, Strings.MenuFile,
+            newTask,
+            NSMenuItem.SeparatorItem,
             Item(Strings.MenuClose, "performClose:", "w"));
 
         Add(bar, Strings.MenuEdit,
@@ -67,6 +79,10 @@ internal static class MainMenu
             Item(Strings.MenuSyncNow, SyncNow, "r"),
             NSMenuItem.SeparatorItem,
             Item(Strings.MenuShowSidebar, "toggleSidebar:", "s", NSEventModifierMask.CommandKeyMask | NSEventModifierMask.ControlKeyMask));
+
+        // What can be done to the selected task, between View and Window as an app's own menus are.
+        var task = TaskMenu.Build(Strings.MenuTask);
+        bar.AddItem(new NSMenuItem(task.Title) { Submenu = task });
 
         var window = Add(bar, Strings.MenuWindow,
             Item(Strings.MenuMinimize, "performMiniaturize:", "m"),

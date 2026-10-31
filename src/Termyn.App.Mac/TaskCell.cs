@@ -1,4 +1,5 @@
 using System.Globalization;
+using ObjCRuntime;
 using Termyn.Core.Settings;
 using Termyn.Presentation;
 
@@ -12,12 +13,16 @@ namespace Termyn.App.Mac;
 /// red, the project's dot, each label in its own colour. On a selected row all of it gives way to
 /// the selection's text colour — the accent behind it is what the row is saying, and a second
 /// colour over it says less, which is the same rule <see cref="OutlineCells"/> keeps on Windows.
+///
+/// The circle is a button, so clicking it ticks the task off without taking the selection with it,
+/// the way the Windows box doesn't. The name is a label until it's renamed, when it becomes the
+/// field it's edited in, where it stands — as Finder renames a file.
 /// </remarks>
 internal sealed class TaskCell : NSTableCellView
 {
     private const int IndentPerLevel = 22;
 
-    private readonly NSImageView _circle = new();
+    private readonly NSButton _circle = new() { Bordered = false, Title = string.Empty, ImagePosition = NSCellImagePosition.ImageOnly };
     private readonly NSTextField _title = NSTextField.CreateLabel(string.Empty);
     private readonly NSTextField _detail = NSTextField.CreateLabel(string.Empty);
     private readonly NSLayoutConstraint _indent;
@@ -26,9 +31,19 @@ internal sealed class TaskCell : NSTableCellView
     private IReadOnlyDictionary<string, Rgb> _labelColours = new Dictionary<string, Rgb>();
     private DateOnly _today;
 
+    /// <summary>Where a rename that's open reports back to, or null when there's none.</summary>
+    private Action<string?>? _renamed;
+
     public TaskCell(string identifier)
     {
         Identifier = identifier;
+
+        _circle.SetButtonType(NSButtonType.MomentaryChange);
+        _circle.Activated += (_, _) =>
+        {
+            if (_row is { } row)
+                Toggle?.Invoke(row.Id);
+        };
 
         _circle.SymbolConfiguration = NSImageSymbolConfiguration.Create(NSFontTextStyle.Body.GetConstant()!, NSImageSymbolScale.Large);
         _circle.SetContentHuggingPriorityForOrientation(750, NSLayoutConstraintOrientation.Horizontal);
@@ -86,6 +101,9 @@ internal sealed class TaskCell : NSTableCellView
         return cell;
     }
 
+    /// <summary>What clicking the circle does, given the task's id.</summary>
+    public Action<string>? Toggle { get; set; }
+
     public void Show(TaskRow row, IReadOnlyDictionary<string, Rgb> labelColours, DateOnly today)
     {
         _row = row;
@@ -121,6 +139,7 @@ internal sealed class TaskCell : NSTableCellView
             done ? "checkmark.circle.fill" : "circle",
             done ? Strings.Completed : OutlineCells.PriorityTip(row));
         _circle.ContentTintColor = done ? NSColor.TertiaryLabel : Palette.Priority(row.Priority);
+        _circle.ToolTip = done ? Strings.MarkIncomplete : Strings.MarkCompleted;
 
         _title.StringValue = row.Content;
         _title.TextColor = done ? NSColor.TertiaryLabel : NSColor.Label;
@@ -129,6 +148,68 @@ internal sealed class TaskCell : NSTableCellView
         var detail = Detail(row, done);
         _detail.AttributedStringValue = detail;
         _detail.Hidden = detail.Length == 0;
+    }
+
+    /// <summary>
+    /// Opens the name for editing where it stands, with all of it selected.
+    /// </summary>
+    /// <param name="renamed">
+    /// Told once, when the editing ends: the new name on Return or a click elsewhere, or null on Esc
+    /// </param>
+    public void BeginRename(Action<string?> renamed)
+    {
+        if (_row is null || Window is null)
+            return;
+
+        _renamed = renamed;
+        _title.Editable = true;
+        _title.Selectable = true;
+        _title.Delegate = new Renaming(this);
+        Window.MakeFirstResponder(_title);
+        _title.CurrentEditor?.SelectAll(this);
+    }
+
+    /// <summary>Puts the name back to a label and says how the editing ended.</summary>
+    private void EndRename(string? text)
+    {
+        if (_renamed is not { } renamed)
+            return;
+
+        // Let go before anything else, so ending the editing below doesn't come back round here.
+        _renamed = null;
+        _title.Delegate = null!;
+        _title.AbortEditing();
+        _title.Editable = false;
+        _title.Selectable = false;
+        Draw();
+
+        renamed(text);
+    }
+
+    /// <summary>
+    /// The name's field while it's being renamed: Return keeps the new name, Esc keeps the old one,
+    /// and clicking away keeps the new one, as Finder does.
+    /// </summary>
+    private sealed class Renaming(TaskCell cell) : NSTextFieldDelegate
+    {
+        public override bool DoCommandBySelector(NSControl control, NSTextView textView, Selector commandSelector)
+        {
+            switch (commandSelector.Name)
+            {
+                case "cancelOperation:":
+                    cell.EndRename(null);
+                    return true;
+
+                case "insertNewline:":
+                    cell.EndRename(textView.Value);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        public override void EditingEnded(NSNotification notification) => cell.EndRename(cell._title.StringValue);
     }
 
     /// <summary>The line under the name: when, which project, which labels, and any conversation.</summary>
