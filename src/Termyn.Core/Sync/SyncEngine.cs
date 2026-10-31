@@ -2794,16 +2794,19 @@ public sealed class SyncEngine
 
     private void RevertLocked(OutboxCommand cmd)
     {
+        // Letting a create go takes away what it made, and with it everything queued on top, as a
+        // refused one used to be cancelled.
+        if (IsCreate(cmd))
+        {
+            CascadeCancel(cmd);
+            return;
+        }
+
         // A failed one was rolled back when it failed, and letting it go is only taking it off the
         // count. Rolled back again, it'd put its prior back over whatever's happened since — a
         // later write that landed, typically the same change made again — and the server would
         // never say otherwise.
-        if (IsCreate(cmd))
-        {
-            if (cmd.TempId is { } temp)
-                RemoveObject(temp);
-        }
-        else if (cmd.State != OutboxState.Failed)
+        if (cmd.State != OutboxState.Failed)
             RestorePriors(cmd);
 
         _outbox.Remove(cmd);
@@ -3384,8 +3387,9 @@ public sealed class SyncEngine
 
         foreach (var cmd in sent)
         {
-            if (!_outbox.Contains(cmd))
-                continue; // already cancelled by an earlier cascade this round
+            // Already settled by an earlier one this round: failed along with a create it built on.
+            if (!_outbox.Contains(cmd) || cmd.State != OutboxState.Pending)
+                continue;
 
             if (!syncStatus.TryGetValue(cmd.Uuid, out var result))
             {
@@ -3418,13 +3422,10 @@ public sealed class SyncEngine
             // those carry what the user typed.
             _log?.Warn($"Todoist refused {cmd.Type} (uuid {cmd.Uuid}, attempt {cmd.Attempts}): {cmd.LastError}");
 
-            if (IsCreate(cmd))
-            {
-                CascadeCancel(cmd);
-                continue;
-            }
-
-            if (cmd.Attempts >= _attemptCeiling)
+            // A refused create is given up on straight away, as it always was: asking again for
+            // something the server has said no to gains nothing. Failed now rather than cancelled,
+            // though. Cancelled, it took what the user had typed with it.
+            if (IsCreate(cmd) || cmd.Attempts >= _attemptCeiling)
             {
                 Fail(cmd, cmd.LastError);
                 continue;
@@ -3476,8 +3477,10 @@ public sealed class SyncEngine
     /// A delete is the one that hurts — the resource stays gone locally while the account still has
     /// it, and a label quietly missing from a dozen tasks is not something anyone would spot.
     /// The command stays in the outbox, failed, so the count still tells the user something went
-    /// wrong. Creates are left alone: an <c>_add</c> the server never ruled on may well have been
-    /// applied, and dropping the local copy would throw away what the user typed.
+    /// wrong. Creates are left alone, refused or never ruled on: dropping the local copy would throw
+    /// away what the user typed, and one never ruled on may well have been applied. It stays on
+    /// screen and in the list of failures until it's dismissed, which is when it goes
+    /// (<see cref="RevertLocked"/>). What was queued on top of it fails with it.
     /// </remarks>
     private void Fail(OutboxCommand cmd, string? error)
     {
@@ -3493,6 +3496,63 @@ public sealed class SyncEngine
 
         // Nothing left to reverse, and the barrier it may have recorded should no longer stop Undo.
         ForgetUndoable(cmd.Uuid);
+
+        if (IsCreate(cmd))
+            FailBuiltOn(cmd);
+    }
+
+    /// <summary>
+    /// Fails everything still queued that names what a failed create made, and anything that names
+    /// those in turn.
+    /// </summary>
+    /// <remarks>
+    /// They can't land: the server never gave the thing they name a real id. Left pending they'd be
+    /// refused to the ceiling one by one, and an edit to the new task rolled back on the way would
+    /// take its typing off a task that's being kept.
+    ///
+    /// Kept rather than undone, as the create is. A move, close or reorder is put back all the same,
+    /// as a cancelled one is (<see cref="CascadeCancel"/>), since it can reach things the server does
+    /// have — a real task moved into a project that was never made.
+    /// </remarks>
+    /// <param name="create">The create that failed</param>
+    private void FailBuiltOn(OutboxCommand create)
+    {
+        var dead = new HashSet<string>(StringComparer.Ordinal);
+        if (create.TempId is { } root)
+            dead.Add(root);
+
+        var failed = new List<OutboxCommand>();
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (var c in _outbox)
+            {
+                if (c.State != OutboxState.Pending || failed.Contains(c) || !ReferencesAny(c, dead))
+                    continue;
+
+                failed.Add(c);
+                if (IsCreate(c) && c.TempId is { } temp)
+                    dead.Add(temp);
+                grew = true;
+            }
+        }
+        while (grew);
+
+        // Latest first, for the reason CascadeCancel gives.
+        foreach (var c in failed.OrderByDescending(c => c.Seq))
+        {
+            c.State = OutboxState.Failed;
+            c.LastError ??= create.LastError;
+
+            _log?.Warn($"Gave up on {c.Type} (uuid {c.Uuid}) with the {create.Type} it builds on (uuid {create.Uuid}).");
+
+            if (c.Type is "item_move" or "item_close" || Reorder.For(c.Type) is not null)
+                RestorePriors(c);
+
+            _store.UpdateCommand(c);
+            ForgetUndoable(c.Uuid);
+        }
     }
 
     private void ApplyServerChanges(SyncResponse response)
@@ -3590,7 +3650,7 @@ public sealed class SyncEngine
 
     private void CascadeCancel(OutboxCommand createCommand)
     {
-        // Cancel the failed create, everything that referenced it, and — transitively — anything that
+        // Cancel the create, everything that referenced it, and — transitively — anything that
         // referenced those, so a whole offline-built subtree rolls back in one go.
         var doomedIds = new HashSet<string>();
         if (createCommand.TempId is { } rootTemp)
@@ -3625,13 +3685,13 @@ public sealed class SyncEngine
         // server will never be told about it — a task indented under one whose add was refused is
         // left under a parent that isn't there, and one ticked off with it stays ticked. So they're
         // put back the way a refused one's are. After the removals, so nothing's written to a task
-        // that's going anyway.
+        // that's going anyway. Not one that has failed: that was put back when it did.
         //
         // Latest first, so a task two of them moved goes back where the earlier one found it. The
         // later one's priors have it where the earlier one put it, which can be under a task that's
         // just gone.
         foreach (var d in doomed.OrderByDescending(c => c.Seq))
-            if (d.Type is "item_move" or "item_close" || Reorder.For(d.Type) is not null)
+            if (d.State == OutboxState.Pending && (d.Type is "item_move" or "item_close" || Reorder.For(d.Type) is not null))
                 RestorePriors(d);
 
         _store.DeleteCommands(doomed.Select(c => c.Uuid).ToList());

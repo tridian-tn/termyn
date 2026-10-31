@@ -811,6 +811,10 @@ public class SyncEngineTests
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
 
+        // Failed rather than cancelled, keeping the new task until the failure is let go.
+        Assert.Contains(engine.Snapshot().Items, i => i.Id == temp);
+        engine.DismissRefusedAdds();
+
         // The reorder went with the failed create, so the server never hears about it: the local
         // positions must go back rather than silently diverging.
         var items = engine.Snapshot().Items.ToDictionary(i => i.Id);
@@ -976,6 +980,11 @@ public class SyncEngineTests
             return Resp("s1", status: (parentAdd.Uuid, false));
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        // Kept, all three, and failed with the parent rather than left to be refused one by one.
+        Assert.Equal(3, engine.Snapshot().Items.Count);
+        Assert.Equal(3, engine.FailedCount);
+        engine.DismissRefusedAdds();
 
         Assert.Equal(0, engine.PendingCount);
         Assert.Empty(engine.Snapshot().Items);

@@ -236,6 +236,7 @@ public class StructureReorderTests
             return Resp("s1", status: (add.Uuid, false));
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         var order = engine.Snapshot().Projects.ToDictionary(p => p.Id, p => p.ChildOrder);
         Assert.Equal(1, order["a"]);

@@ -491,6 +491,7 @@ public class SyncEngineStructureTests
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         Assert.DoesNotContain(engine.Snapshot().Items, i => i.Content == "Added offline");
         Assert.Equal("p", engine.Snapshot().Items.Single(i => i.Id == "a").ProjectId);
@@ -512,6 +513,11 @@ public class SyncEngineStructureTests
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+
+        // Put back as soon as the add fails, and gone from the count once it is let go.
+        Assert.Null(engine.Snapshot().Items.Single(i => i.Id == "x").ParentId);
+        Assert.Equal(2, engine.FailedCount);
+        engine.DismissRefusedAdds();
 
         var x = engine.Snapshot().Items.Single(i => i.Id == "x");
         Assert.Null(x.ParentId);
@@ -588,6 +594,8 @@ public class SyncEngineStructureTests
         restarted.Load();
         api.Next = commands => new SyncResponse { SyncToken = "s3", SyncStatus = Refused(commands) };
         await restarted.SyncAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(3, restarted.FailedCount);
+        restarted.DismissRefusedAdds();
 
         var x = restarted.Snapshot().Items.Single(i => i.Id == "x");
         Assert.Null(x.ParentId);
@@ -693,6 +701,7 @@ public class SyncEngineStructureTests
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         var x = Assert.Single(engine.Snapshot().Items);
         Assert.Null(x.ParentId);
@@ -723,6 +732,7 @@ public class SyncEngineStructureTests
             TempIdMapping = new Dictionary<string, string> { [moved] = "real" },
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         var task = Assert.Single(engine.Snapshot().Items);
         Assert.Equal("real", task.Id);
@@ -749,6 +759,7 @@ public class SyncEngineStructureTests
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         var x = Assert.Single(engine.Snapshot().Items);
         Assert.Equal("x", x.Id);
@@ -773,6 +784,8 @@ public class SyncEngineStructureTests
 
         api.Next = commands => new SyncResponse { SyncToken = "s2", SyncStatus = Refused(commands) };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(engine.Snapshot().Items, i => i.Id == added);
+        engine.DismissRefusedAdds();
 
         Assert.Equal("r", Assert.Single(engine.Snapshot().Items).Id);
         Assert.Equal(0, engine.PendingCount);
@@ -1067,6 +1080,7 @@ public class SyncEngineStructureTests
                 c => c.Type == "section_add" ? new CommandResult(false, "ERR", "rejected") : new CommandResult(true, null, null)),
         };
         await engine.SyncAsync(TestContext.Current.CancellationToken);
+        engine.DismissRefusedAdds();
 
         var x = Assert.Single(engine.Snapshot().Items, i => i.Id == "x");
         Assert.Equal("p", x.ProjectId);
