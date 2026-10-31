@@ -67,6 +67,13 @@ jobs:
   #
   # The projects build with ValidateXcodeVersion off, since a workload names one exact Xcode and
   # the runner image's default moves on its own schedule. Not something the packaging waits on.
+  #
+  # Debug rather than Release, because of the Xcode on the runner. The workload wants the macOS 27
+  # SDK, which comes with Xcode 27.1, and the macos-26 image's newest is 26.6. A Release build trims
+  # the app and writes its Objective-C registrations at build time, and both read that SDK's
+  # headers, so it fails (MT0179). A Debug build does neither — it registers at launch — so it
+  # still compiles every project and makes the .app, which is what this job is here to say. Back to
+  # Release once the image carries an Xcode the workload accepts.
   build-mac-app:
     name: build (macOS app)
     runs-on: macos-latest
@@ -84,7 +91,7 @@ jobs:
         run: dotnet workload install macos
 
       - name: Build
-        run: dotnet build src/Termyn.App.Mac -c Release
+        run: dotnet build src/Termyn.App.Mac -c Debug
 
   # Alongside the tests rather than after them: it builds with -SkipTests, so waiting for the suite
   # only made every run a minute longer. The release job waits on both, so nothing is attached to a
