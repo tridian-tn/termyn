@@ -40,7 +40,33 @@ public sealed class DpapiSecretStore : ISecretStore
     {
         var bytes = Encoding.UTF8.GetBytes(token);
         var encrypted = ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(_tokenPath, encrypted);
+
+        // Written beside and moved into place, so a crash or a full disk part-way leaves the old
+        // token or the new one, never a truncated blob that decrypts to nothing and signs the user
+        // out. Beside rather than in %TEMP%, so the move is a rename on the same volume.
+        var temporary = _tokenPath + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temporary, encrypted);
+            File.Move(temporary, _tokenPath, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(temporary);
+            throw;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Holds nothing the real file doesn't, and is written over by the next save.
+        }
     }
 
     public void ClearToken()
