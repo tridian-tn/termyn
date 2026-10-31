@@ -173,7 +173,12 @@ public class DisplayDatesTests
     public void A_day_the_regions_calendar_cant_hold_is_written_the_invariant_way()
     {
         // Saudi Arabia's Umm al-Qura calendar runs from 1900 to 2077, and formatting outside it throws.
-        var saudi = CultureInfo.GetCultureInfo("ar-SA");
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
         var old = new DateTime(1600, 5, 1, 9, 30, 0);
 
         Assert.Equal("May 1", DisplayDates.DayMonth(DateOnly.FromDateTime(old), saudi));

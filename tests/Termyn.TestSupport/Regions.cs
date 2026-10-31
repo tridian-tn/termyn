@@ -3,8 +3,9 @@ using System.Globalization;
 namespace Termyn.TestSupport;
 
 /// <summary>
-/// English regions with the date and time patterns written out, so a row checked word for word
-/// reads the same whichever version of ICU the machine has.
+/// Regions with what ICU varies pinned down: English ones with the date and time patterns written
+/// out, so a row checked word for word reads the same whichever version of ICU the machine has, and
+/// a Saudi one with its calendar set.
 /// </summary>
 /// <remarks>
 /// A region's patterns are ICU's data, and they move between versions: newer ones drop the comma
@@ -28,6 +29,17 @@ public static class Regions
     public static CultureInfo American { get; } = Pinned("en-US", "dddd, MMMM d, yyyy", "MMMM d", "h:mm tt");
 
     /// <summary>
+    /// Saudi Arabian Arabic on the Umm al-Qura calendar, which runs only from 1900 to 2077, or null
+    /// where this machine's ICU doesn't offer that calendar for the region.
+    /// </summary>
+    /// <remarks>
+    /// Set rather than taken as the region's default, which isn't the same everywhere: Windows and
+    /// macOS give ar-SA Umm al-Qura, and Linux's ICU gives it the Gregorian calendar, which holds
+    /// any year. A test of a day the region's calendar can't hold needs one that can't.
+    /// </remarks>
+    public static CultureInfo? UmmAlQura { get; } = OnUmmAlQura();
+
+    /// <summary>
     /// Text with the no-break spaces ICU writes in places as plain ones.
     /// </summary>
     /// <remarks>
@@ -38,6 +50,16 @@ public static class Regions
     /// <returns>The text with plain spaces</returns>
     public static string Spaced(string text)
         => text.Replace(' ', ' ').Replace(' ', ' ');
+
+    private static CultureInfo? OnUmmAlQura()
+    {
+        var culture = (CultureInfo)CultureInfo.GetCultureInfo("ar-SA").Clone();
+        if (culture.OptionalCalendars.OfType<UmAlQuraCalendar>().FirstOrDefault() is not { } calendar)
+            return null;
+
+        culture.DateTimeFormat.Calendar = calendar;
+        return CultureInfo.ReadOnly(culture);
+    }
 
     private static CultureInfo Pinned(string name, string longDate, string monthDay, string shortTime)
     {
