@@ -38,6 +38,18 @@ public class DetailHeaderTests
     }
 
     [WinFormsFact]
+    public void An_ampersand_in_a_name_is_a_character_and_not_an_accelerator()
+    {
+        using var header = Header();
+        header.Subject = "Task: Books & Papers";
+
+        var name = header.Controls.OfType<Label>().Single();
+
+        Assert.Equal("Task: Books & Papers", name.Text);
+        Assert.False(name.UseMnemonic, "the line would eat the ampersand");
+    }
+
+    [WinFormsFact]
     public void The_name_is_drawn_and_stays_inside_the_strip()
     {
         // Ink on the line, and none of it below the rule. A name long enough to need more room than

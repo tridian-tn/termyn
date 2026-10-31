@@ -55,6 +55,9 @@ internal sealed class QuickAddForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(4, 6, 4, 0),
             AutoEllipsis = true,
+
+            // What's typed, read back: "R&D" has to come back as typed.
+            UseMnemonic = false,
         };
 
         Controls.Add(_preview);

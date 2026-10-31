@@ -26,6 +26,9 @@ internal sealed class LabelPickerForm : Form
             Size = new Size(332, 20),
             AutoEllipsis = true,
             ForeColor = SystemColors.GrayText,
+
+            // The task's own name, in which an ampersand is a character rather than an access key.
+            UseMnemonic = false,
         };
 
         _list = new CheckedListBox

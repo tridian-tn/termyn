@@ -66,6 +66,9 @@ internal sealed class ReminderForm : Form
             Size = new Size(372, 20),
             AutoEllipsis = true,
             ForeColor = SystemColors.GrayText,
+
+            // The task's own name, in which an ampersand is a character rather than an access key.
+            UseMnemonic = false,
         };
 
         _existing = new ListBox { Location = new Point(14, 38), Size = new Size(372, 150), IntegralHeight = false };

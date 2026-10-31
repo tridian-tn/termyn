@@ -101,6 +101,16 @@ public class ViewHeaderTests : IDisposable
         return ink;
     }
 
+    [WinFormsFact]
+    public void An_ampersand_in_the_path_is_a_character_and_not_an_accelerator()
+    {
+        // The steps are the account's names. Read as a mnemonic, "R&D" lost its ampersand and every
+        // link after it was a character out.
+        using var header = Header();
+
+        Assert.False(header.Crumbs.UseMnemonic);
+    }
+
     // ---- Where the buttons sit -----------------------------------------------------------------
 
     [WinFormsFact]

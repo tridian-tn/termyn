@@ -375,6 +375,10 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Top,
             Padding = new Padding(8, 4, 8, 4),
             Visible = false,
+
+            // It quotes the filter, which is the account's text: an ampersand read as a mnemonic
+            // vanished, and moved the link off the words it was meant to cover.
+            UseMnemonic = false,
         };
         _unsupported.LinkClicked += (_, _) => OpenTodoist();
 
@@ -552,6 +556,9 @@ internal sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(8, 0, 0, 0),
             Text = Strings.MainLoading,
+
+            // What it says often names something of the account's: a file, a project, a filter.
+            UseMnemonic = false,
         };
 
         // The failed count and a rejected token are the only parts of the status there is anything
@@ -1569,7 +1576,7 @@ internal sealed class MainForm : Form
         // Never nothing: a control measured before it has been laid out has no width yet, and a
         // wrap width of zero measures every word onto a line of its own.
         var room = Math.Max(1, width - padding.Horizontal);
-        var wrapped = TextRenderer.MeasureText(text, font, new Size(room, 0), TextFormatFlags.WordBreak);
+        var wrapped = TextRenderer.MeasureText(text, font, new Size(room, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
 
         return wrapped.Height + padding.Vertical;
     }

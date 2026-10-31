@@ -49,6 +49,9 @@ internal sealed class DetailHeader : Panel
             AutoEllipsis = true,
             Padding = new Padding(6, 0, 6, 0),
             TextAlign = ContentAlignment.MiddleLeft,
+
+            // The account's text, so "R&D" is a name and not an underlined D.
+            UseMnemonic = false,
         };
 
         Controls.Add(_name);

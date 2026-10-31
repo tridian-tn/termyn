@@ -84,6 +84,9 @@ internal sealed class CommentsView : UserControl
             AutoSize = false,
             Height = 18,
             TextAlign = ContentAlignment.MiddleLeft,
+
+            // A transfer's progress names its file, in which an ampersand is a character.
+            UseMnemonic = false,
         };
 
         _attach = new LinkLabel
@@ -480,7 +483,7 @@ internal sealed class CommentsView : UserControl
             _comments[e.Index].Body,
             _list.Font,
             new Size(TextWidth, int.MaxValue),
-            TextFormatFlags.WordBreak).Height;
+            TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
 
         e.ItemHeight = meta + body + (Gap * 2);
     }
@@ -500,7 +503,7 @@ internal sealed class CommentsView : UserControl
         var muted = selected ? _theme.OnAccent : _theme.Muted;
 
         var meta = new Rectangle(e.Bounds.X + Gap, e.Bounds.Y + Gap, TextWidth, _list.Font.Height);
-        TextRenderer.DrawText(e.Graphics, comment.Meta, _list.Font, meta, muted, TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(e.Graphics, comment.Meta, _list.Font, meta, muted, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
 
         var body = new Rectangle(
             e.Bounds.X + Gap,
@@ -508,7 +511,7 @@ internal sealed class CommentsView : UserControl
             TextWidth,
             e.Bounds.Height - _list.Font.Height - (Gap * 2));
 
-        TextRenderer.DrawText(e.Graphics, comment.Body, _list.Font, body, text, TextFormatFlags.WordBreak);
+        TextRenderer.DrawText(e.Graphics, comment.Body, _list.Font, body, text, TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
     }
 
     // ---- Keys -----------------------------------------------------------------------------------

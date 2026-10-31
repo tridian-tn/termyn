@@ -51,6 +51,10 @@ internal sealed class ViewHeader : Panel
             TextAlign = ContentAlignment.MiddleLeft,
             LinkBehavior = LinkBehavior.HoverUnderline,
             UseCompatibleTextRendering = false,
+
+            // The steps are the account's names. Read as mnemonics, an ampersand in one vanished and
+            // every link after it was measured a character out.
+            UseMnemonic = false,
         };
 
         Tools = new ToolStrip
