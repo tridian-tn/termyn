@@ -1,3 +1,4 @@
+using System.Globalization;
 using Termyn.Presentation;
 
 // Both namespaces have a Label, and in a form file the control is what it should mean.
@@ -183,7 +184,16 @@ internal sealed class QuickAddForm : Form
 
         e.SuppressKeyPress = true;
 
-        await Add(_capture.Text);
+        // An async void handler has nothing above it to catch what gets out, and putting the box
+        // back up after a failure can fail in its turn.
+        try
+        {
+            await Add(_capture.Text);
+        }
+        catch (Exception ex)
+        {
+            Failed?.Invoke(ex);
+        }
     }
 
     /// <summary>
@@ -219,20 +229,49 @@ internal sealed class QuickAddForm : Form
         {
             // Not a failure — a capture the app won't make. The words come back with the reason in
             // place of the preview, so the user can change them rather than hunt for what went wrong.
-            Summon(start);
-            _capture.Text = text;
-            _capture.SelectionStart = text.Length;
-            _preview.Text = refused.Message;
+            GiveBack(text, start, refused.Message, shownReason: true);
         }
         catch (Exception ex)
         {
             // Nothing was created anywhere, so the typing comes back rather than being lost, and
             // with it whatever New task had started it with.
             Failed?.Invoke(ex);
-            Summon(start);
-            _capture.Text = text;
-            _capture.SelectionStart = text.Length;
+            GiveBack(text, start, ex.Message, shownReason: false);
         }
+    }
+
+    /// <summary>
+    /// Puts words that weren't captured back in the box, unless the box has since been brought back
+    /// for another task.
+    /// </summary>
+    /// <remarks>
+    /// The hotkey can summon the box again while a capture is still out, and a second task part-way
+    /// typed isn't to be written over by the first. The first one's words go in a message instead,
+    /// where they can still be read and copied.
+    /// </remarks>
+    /// <param name="text">The words that weren't captured</param>
+    /// <param name="start">What New task had started them with</param>
+    /// <param name="reason">Why they weren't</param>
+    /// <param name="shownReason">Whether to put the reason in place of the preview</param>
+    private void GiveBack(string text, string? start, string reason, bool shownReason)
+    {
+        if (Visible && Adds(_capture.Text) && _capture.Text != text)
+        {
+            MessageBox.Show(
+                this,
+                string.Format(CultureInfo.CurrentCulture, Strings.QuickAddNotAdded, text.Trim(), reason),
+                Strings.QuickAddTitle,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        Summon(start);
+        _capture.Text = text;
+        _capture.SelectionStart = text.Length;
+
+        if (shownReason)
+            _preview.Text = reason;
     }
 
     private void UpdatePreview() => _preview.Text = _presenter.PreviewText(_capture.Text);

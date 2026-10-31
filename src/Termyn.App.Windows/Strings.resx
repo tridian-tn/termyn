@@ -105,6 +105,14 @@
     <value>Termyn — quick add</value>
     <comment>Title bar of the small window the global hotkey opens for adding a task.</comment>
   </data>
+  <data name="QuickAddNotAdded" xml:space="preserve">
+    <value>This task wasn't added:
+
+{0}
+
+{1}</value>
+    <comment>Message from the quick-add window when an earlier task failed after the window was opened again for another one. {0} is the earlier task as it was typed and {1} the reason it wasn't added.</comment>
+  </data>
   <data name="SettingsTitle" xml:space="preserve">
     <value>Termyn — settings</value>
     <comment>Title bar of the settings dialog.</comment>
