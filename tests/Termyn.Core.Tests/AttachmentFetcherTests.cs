@@ -266,10 +266,14 @@ public sealed class AttachmentFetcherTests : IDisposable
         Assert.Equal(Path.Combine(_downloads, "agenda (1).pdf"), result.Path);
     }
 
-    [Fact]
-    public async Task A_name_carrying_a_path_is_saved_in_the_folder_all_the_same()
+    [Theory]
+    [InlineData(@"..\..\agenda.pdf")]
+    [InlineData("../../agenda.pdf")]
+    public async Task A_name_carrying_a_path_is_saved_in_the_folder_all_the_same(string name)
     {
-        var result = await Fetcher().SaveAsync(File(name: @"..\..\agenda.pdf"), _downloads, ct: TestContext.Current.CancellationToken);
+        // Both separators, since a backslash is only a separator on Windows: on macOS and Linux the
+        // first is an ordinary name and only the second would climb out of the folder.
+        var result = await Fetcher().SaveAsync(File(name: name), _downloads, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Ready, result.Outcome);
         Assert.Equal(_downloads, Path.GetDirectoryName(result.Path));
