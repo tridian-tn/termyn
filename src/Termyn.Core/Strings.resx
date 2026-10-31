@@ -50,6 +50,10 @@
   <data name="DownloadFailedPartWay" xml:space="preserve">
     <value>The download from Todoist failed part-way.</value>
   </data>
+  <data name="UnsafeFileAddress" xml:space="preserve">
+    <value>The file's address isn't a secure web address, so Termyn won't download from it.</value>
+    <comment>An attachment whose url is plain http, relative or malformed. Shown after "Todoist wouldn't hand over (file)."</comment>
+  </data>
   <data name="UnexpectedUploadResponse" xml:space="preserve">
     <value>Todoist returned an unexpected upload response.</value>
   </data>

@@ -233,6 +233,7 @@ public class TextCatalogueTests
         Assert.Equal("Todoist returned an unexpected completed-tasks response.", Strings.UnexpectedCompletedResponse);
         Assert.Equal("Todoist returned an unreadable completed-tasks response.", Strings.UnreadableCompletedResponse);
         Assert.Equal("The download from Todoist failed part-way.", Strings.DownloadFailedPartWay);
+        Assert.Equal("The file's address isn't a secure web address, so Termyn won't download from it.", Strings.UnsafeFileAddress);
         Assert.Equal("Todoist returned an unexpected upload response.", Strings.UnexpectedUploadResponse);
         Assert.Equal("Todoist returned an unreadable upload response.", Strings.UnreadableUploadResponse);
         Assert.Equal("Todoist returned HTTP {0}.", Strings.UnexpectedHttpStatus);

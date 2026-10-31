@@ -26,7 +26,25 @@ public class TodoistNetworkException : Exception
     public int? Status { get; }
 
     /// <summary>Whether nothing answered at all — no connection, or a request that timed out.</summary>
-    public bool Unreachable => Status is null;
+    public virtual bool Unreachable => Status is null;
+}
+
+/// <summary>
+/// Raised before anything is sent, when a url isn't one the client is willing to fetch from.
+/// </summary>
+/// <remarks>
+/// A network failure by type only so that callers already mapping those show it as a failure rather
+/// than letting it escape. Nothing was tried, so it is never reported as being offline.
+/// </remarks>
+public sealed class TodoistUnsafeAddressException : TodoistNetworkException
+{
+    public TodoistUnsafeAddressException(string message)
+        : base(message)
+    {
+    }
+
+    /// <inheritdoc />
+    public override bool Unreachable => false;
 }
 
 /// <summary>

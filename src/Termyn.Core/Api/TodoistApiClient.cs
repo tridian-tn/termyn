@@ -178,14 +178,29 @@ public sealed class TodoistApiClient : ITodoistApi
     // ---- Attachments -------------------------------------------------------------------------------
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The url is whatever the comment carries, so the token goes only to Todoist's own hosts
+    /// (<see cref="TodoistHosts.MayCarryToken"/>). A file linked from anywhere else over https is
+    /// fetched without it, and anything that isn't https is refused before a request is made. A
+    /// redirect can't carry the token on either: the handler drops the header when it follows one.
+    /// </remarks>
     public async Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default)
     {
+        if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps)
+            throw new TodoistUnsafeAddressException(Strings.UnsafeFileAddress);
+
+        var authorised = TodoistHosts.MayCarryToken(url);
+
         using var deadline = Deadline(ct);
-        using var req = new HttpRequestMessage(HttpMethod.Get, fileUrl);
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        if (authorised)
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var resp = await SendRawAsync(req, deadline.Token, ct);
-        RejectBadToken(resp);
+
+        // Somebody else's server turning us away says nothing about a token it was never sent.
+        if (authorised)
+            RejectBadToken(resp);
         EnsureReachable(resp);
 
         try
