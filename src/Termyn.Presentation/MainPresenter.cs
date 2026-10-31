@@ -882,17 +882,39 @@ public sealed class MainPresenter
     /// them — and turning it off drops the fetch, since nothing would ever tell it that it had gone
     /// stale.
     /// </summary>
+    /// <remarks>
+    /// Pressed again while the fetch is still on its way, it turns them off: the fetch is called off
+    /// and its answer dropped. Otherwise a second press — Ctrl+H twice, quickly — started a second
+    /// fetch rather than changing its mind, and both landed showing them.
+    /// </remarks>
     /// <returns>False when the fetch couldn't be made, so the caller can say why.</returns>
     public async Task<bool> ToggleCompletedAsync(CancellationToken ct = default)
     {
-        if (ShowingCompleted)
+        CancellationTokenSource? fetching = null;
+
+        lock (_publishing)
         {
-            lock (_publishing)
+            if (_fetchingCompleted is { } underway)
+            {
+                underway.Cancel();
+                _fetchingCompleted = null;
+                return true;
+            }
+
+            if (ShowingCompleted)
             {
                 ShowingCompleted = false;
                 CompletedTruncated = false;
             }
+            else
+            {
+                fetching = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                _fetchingCompleted = fetching;
+            }
+        }
 
+        if (fetching is null)
+        {
             _engine.ClearCompleted();
             Publish();
             return true;
@@ -900,14 +922,23 @@ public sealed class MainPresenter
 
         try
         {
-            var fetch = await _engine.FetchCompletedAsync(ct);
+            var fetch = await _engine.FetchCompletedAsync(fetching.Token);
 
             lock (_publishing)
             {
-                CompletedTruncated = fetch.Truncated;
-                ShowingCompleted = true;
                 NoteReachable(true);
+
+                // Turned off while it was on its way: the answer is for a question nobody's asking.
+                if (!fetching.IsCancellationRequested)
+                {
+                    CompletedTruncated = fetch.Truncated;
+                    ShowingCompleted = true;
+                }
             }
+        }
+        catch (OperationCanceledException) when (fetching.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // Called off by the second press, which has already said what it did.
         }
         catch (TodoistRateLimitException ex)
         {
@@ -927,11 +958,43 @@ public sealed class MainPresenter
         }
         finally
         {
+            bool abandoned;
+            lock (_publishing)
+            {
+                if (_fetchingCompleted == fetching)
+                    _fetchingCompleted = null;
+
+                // Only while nothing has been asked for since: a third press may have a fetch of
+                // its own on the way, and this one's leavings mustn't clear that.
+                abandoned = fetching.IsCancellationRequested && _fetchingCompleted is null && !ShowingCompleted;
+            }
+
+            if (abandoned)
+                _engine.ClearCompleted();
+
+            fetching.Dispose();
+
             // A rejected token propagates from here too, and the status has to say so.
             Publish();
         }
 
         return true;
+    }
+
+    /// <summary>The fetch of completed tasks still on its way, or null when there's none.</summary>
+    private CancellationTokenSource? _fetchingCompleted;
+
+    /// <summary>
+    /// Whether completed tasks are on their way, so a press that will call the fetch off isn't
+    /// announced as one starting it.
+    /// </summary>
+    public bool FetchingCompleted
+    {
+        get
+        {
+            lock (_publishing)
+                return _fetchingCompleted is not null;
+        }
     }
 
     /// <summary>Reopens a completed task, moving it back among the active ones.</summary>

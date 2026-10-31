@@ -35,6 +35,55 @@ public class CompletedViewTests
     }
 
     [Fact]
+    public async Task Toggling_again_while_they_are_on_their_way_turns_them_off()
+    {
+        // Ctrl+H twice, quickly. The second press used to start a second fetch rather than change
+        // its mind, and both landed showing them.
+        var api = new HeldCompleted(WithCompleted(Done("c1", "Book dentist")));
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today));
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        var first = presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
+        Assert.True(presenter.FetchingCompleted);
+
+        Assert.True(await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken));
+        Assert.True(await first);
+
+        Assert.False(presenter.FetchingCompleted);
+        Assert.False(presenter.ShowingCompleted);
+        Assert.DoesNotContain(presenter.Rows, r => r.Id == "c1");
+        Assert.Equal(1, api.Fetches);
+    }
+
+    /// <summary>A server whose completed fetch waits until it's called off.</summary>
+    private sealed class HeldCompleted(FakeApi inner) : ITodoistApi
+    {
+        public int Fetches;
+
+        public async Task<CompletedPage> GetCompletedAsync(string token, CompletedQuery query, CancellationToken ct = default)
+        {
+            Fetches++;
+            await Task.Delay(Timeout.Infinite, ct);
+            return await inner.GetCompletedAsync(token, query, ct);
+        }
+
+        public Task<SyncResponse> SyncAsync(string token, string syncToken, IReadOnlyList<string> resourceTypes, IReadOnlyList<Command> commands, CancellationToken ct = default)
+            => inner.SyncAsync(token, syncToken, resourceTypes, commands, ct);
+
+        public Task<TokenProbe> ValidateTokenAsync(string token, CancellationToken ct = default) => inner.ValidateTokenAsync(token, ct);
+
+        public Task DownloadAsync(string token, string fileUrl, Stream destination, IProgress<long>? progress = null, CancellationToken ct = default)
+            => inner.DownloadAsync(token, fileUrl, destination, progress, ct);
+
+        public Task<System.Text.Json.Nodes.JsonObject> UploadAsync(string token, Stream content, string fileName, CancellationToken ct = default)
+            => inner.UploadAsync(token, content, fileName, ct);
+
+        public Task DeleteUploadAsync(string token, string fileUrl, CancellationToken ct = default) => inner.DeleteUploadAsync(token, fileUrl, ct);
+    }
+
+    [Fact]
     public async Task Toggling_off_drops_them_without_another_round_trip()
     {
         var api = WithCompleted(Done("c1", "Book dentist"));
