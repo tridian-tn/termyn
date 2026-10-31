@@ -96,10 +96,6 @@ public static class Shortcuts
 
         // Anywhere in the window.
         Bind(Ctrl, Key.N, AppCommand.NewTask, Window),
-        Bind(None, Key.Insert, AppCommand.NewTask, Window),
-        // Moved off Ctrl+Shift+N, which now adds a sub-task to whatever the outline is on. A new
-        // project is the rarer of the two by a long way, and it keeps the shape of the shortcut.
-        Bind(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject, Window),
         Bind(None, Key.F5, AppCommand.SyncNow, Window),
         Bind(Ctrl, Key.H, AppCommand.ToggleCompleted, Window),
         // F4 shows and hides the panel; F6 and F7 pick which of its tabs is in front.
@@ -123,6 +119,17 @@ public static class Shortcuts
         Bind(Alt, Key.Up, AppCommand.PreviousView, Window),
         Bind(Alt, Key.Down, AppCommand.NextView, Window),
         Bind(Ctrl, Key.Comma, AppCommand.Settings, Window),
+
+        // In either list, and not window-wide, where they'd fire over every box being typed in:
+        // Insert toggles overtype there, and Ctrl+Alt+Shift+N is AltGr+Shift+N on a Polish
+        // keyboard, which types "Ń". Last, so a menu still prints Ctrl+N for a new task.
+        Bind(None, Key.Insert, AppCommand.NewTask, Outline),
+        Bind(None, Key.Insert, AppCommand.NewTask, Sidebar),
+
+        // Moved off Ctrl+Shift+N, which now adds a sub-task to whatever the outline is on. A new
+        // project is the rarer of the two by a long way, and it keeps the shape of the shortcut.
+        Bind(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject, Outline),
+        Bind(Ctrl | Alt | Shift, Key.N, AppCommand.NewProject, Sidebar),
     ];
 
     /// <summary>
