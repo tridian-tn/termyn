@@ -32,7 +32,7 @@ public class CommentTests
         var was = CultureInfo.CurrentCulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            CultureInfo.CurrentCulture = Regions.American;
             var presenter = Seeded(
                 ("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}"""),
                 ("notes", "n1", """{"id":"n1","item_id":"i1","content":"said","posted_at":"2026-08-12T08:30:00Z"}"""));
