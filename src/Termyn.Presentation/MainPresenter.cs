@@ -3449,14 +3449,15 @@ public sealed class MainPresenter
     /// <remarks>
     /// Neither is offered where the view is grouped by day: it's laid out flat, so nothing on
     /// screen has anything under it, and an entry that did nothing visible would be worse than
-    /// one that's plainly unavailable.
+    /// one that's plainly unavailable. Nor during a search, for the same reason: the results are
+    /// flat, and the rows a fold would act on are the view's, hidden behind them.
     /// </remarks>
     public bool CanCollapseAll
     {
         get
         {
             lock (_publishing)
-                return !Grouping && _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
+                return Foldable && _allRows.Any(r => r.HasChildren && !_collapsed.Contains(r.Id));
         }
     }
 
@@ -3466,9 +3467,12 @@ public sealed class MainPresenter
         get
         {
             lock (_publishing)
-                return !Grouping && _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
+                return Foldable && _allRows.Any(r => r.HasChildren && _collapsed.Contains(r.Id));
         }
     }
+
+    /// <summary>Whether the rows on screen are the view's outline, which folding acts on.</summary>
+    private bool Foldable => !Grouping && !Searching;
 
     /// <summary>
     /// Folds, or unfolds, every task in the view that has anything under it.
@@ -3491,6 +3495,11 @@ public sealed class MainPresenter
 
         lock (_publishing)
         {
+            // Nothing on screen to fold. Folding the view hidden behind a search would change a
+            // list nobody's looking at, and it would turn up changed when the search was let go.
+            if (!Foldable)
+                return false;
+
             foreach (var row in _allRows)
                 if (row.HasChildren)
                     changed |= collapsed ? _collapsed.Add(row.Id) : _collapsed.Remove(row.Id);

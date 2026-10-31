@@ -258,6 +258,23 @@ public class SubtaskFoldingTests
         Assert.True(presenter.CanExpandAll);
     }
 
+    [Fact]
+    public void Folding_everything_waits_while_a_search_is_on()
+    {
+        // The results are flat, so nothing on screen folds. The rows it walked were the view's,
+        // hidden behind the search, which came back folded once the search was let go.
+        var presenter = Nested();
+        presenter.Search("Parent");
+
+        Assert.False(presenter.CanCollapseAll);
+        Assert.False(presenter.FoldAll(collapsed: true));
+
+        presenter.Search(string.Empty);
+
+        Assert.Empty(presenter.CollapsedTasks);
+        Assert.True(presenter.CanCollapseAll);
+    }
+
     // ---- What gets written down ----------------------------------------------------------------
 
     [Fact]
