@@ -1,0 +1,13 @@
+{
+  "solution": {
+    "path": "Termyn.slnx",
+    "projects": [
+      "src/Termyn.Core/Termyn.Core.csproj",
+      "src/Termyn.Presentation/Termyn.Presentation.csproj",
+      "tests/Termyn.TestSupport/Termyn.TestSupport.csproj",
+      "tests/Termyn.Core.Tests/Termyn.Core.Tests.csproj",
+      "tests/Termyn.Presentation.Tests/Termyn.Presentation.Tests.csproj",
+      "tests/Termyn.Perf.Tests/Termyn.Perf.Tests.csproj"
+    ]
+  }
+}

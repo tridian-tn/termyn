@@ -22,6 +22,42 @@ it be patched on its own schedule.
 
 To produce an installer or a portable zip, see [docs/packaging.md](docs/packaging.md).
 
+### On a Mac
+
+> **Mac support is under development.** There is no Mac app yet. What builds on macOS today is
+> everything below the UI — `Core`, `Presentation` and their tests — which a native client is
+> being built on. `Termyn.slnx` itself doesn't build there, since the Windows projects target
+> `net10.0-windows`.
+
+1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) for your Mac's
+   architecture (Arm64 for Apple Silicon). It goes in `/usr/local/share/dotnet`, and `dotnet` is on
+   the `PATH` in terminals opened after the install, not in ones already open.
+2. Build and test the portable projects through the solution filter that leaves the Windows ones
+   out:
+
+   ```bash
+   dotnet test --solution Termyn.Portable.slnf
+   ```
+
+The native client will also need:
+
+3. **Xcode**, the full app from the App Store rather than the Command Line Tools alone, in the
+   version the macOS workload asks for (Xcode 27 for workload 27.0). Open it once to let it finish
+   installing, then point the command-line tools at it:
+
+   ```bash
+   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+   ```
+
+4. **The macOS workload.** `sudo` doesn't search the `PATH` your shell has, so `dotnet` is named in
+   full:
+
+   ```bash
+   sudo /usr/local/share/dotnet/dotnet workload install macos
+   ```
+
+CI builds and tests the portable projects on macOS as well as Windows.
+
 ## What it does
 
 Tasks, with the outline Todoist has: projects and sub-projects, sections, labels, saved filters,

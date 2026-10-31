@@ -32,6 +32,35 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.slnx -c Release --no-build
 
+  # The projects below the UI, on a Mac. They target plain net10.0 so a native macOS client can be
+  # built on them, and this is what says they still build and pass there, on Apple Silicon and
+  # with the ICU region data macOS brings rather than Windows'. Termyn.Portable.slnf leaves out the
+  # Windows projects: they target net10.0-windows, and their tests need a Windows desktop.
+  #
+  # Not something the packaging waits on. Mac support is still being built, and the Windows
+  # release doesn't ship anything this job builds that the job above hasn't already tested.
+  build-test-macos:
+    name: build & test (macOS, portable)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Termyn.Portable.slnf
+
+      - name: Build
+        run: dotnet build Termyn.Portable.slnf -c Release --no-restore
+
+      - name: Test
+        run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
+
   package:
     name: package
     runs-on: windows-latest
