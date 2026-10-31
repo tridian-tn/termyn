@@ -18,7 +18,22 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
 {
     private const string SyncTokenKey = "sync_token";
 
-    private readonly SqliteConnection _conn;
+    /// <summary>
+    /// The shape of the tables this build writes, kept in <c>PRAGMA user_version</c>.
+    /// </summary>
+    /// <remarks>
+    /// So a later build that changes a table can tell an older file from its own and bring it up to
+    /// date, rather than finding out from "no such column" at startup. Raise it with each change and
+    /// add the step to <see cref="Migrate"/>. A file from a newer build than this one can't be read
+    /// with any confidence and is set aside like a corrupt one.
+    ///
+    /// 0 is a file from before versions were kept, or a new one. 1 is the tables below, which is
+    /// what 0 meant too once its outbox had <c>no_verdict</c>.
+    /// </remarks>
+    private const int SchemaVersion = 1;
+
+    private readonly string _path;
+    private SqliteConnection _conn;
 
     /// <summary>
     /// The two SQLite codes that mean the file will never be readable, whatever we do.
@@ -50,17 +65,22 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
     /// Worth saying out loud rather than recovering quietly: the outbox lives in the same file, so
     /// anything queued and not yet sent went with it. Everything else comes back on the first sync.
     /// </remarks>
-    public bool Rebuilt { get; }
+    /// <remarks>
+    /// Set by the constructor, or later by <see cref="Load"/> when the file opened but a page of it
+    /// turned out unreadable — so ask after loading.
+    /// </remarks>
+    public bool Rebuilt { get; private set; }
 
     public SqliteSnapshotStore(string databasePath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+        _path = databasePath;
 
         try
         {
             _conn = Open(databasePath);
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode is Corrupt or NotADatabase)
+        catch (Exception ex) when (Unreadable(ex))
         {
             // A cache is a cache: everything in it can be fetched again, and the one thing that
             // can't — the outbox — is already lost with the file. Refusing to start is the worst of
@@ -71,6 +91,29 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             _conn = Open(databasePath);
             Rebuilt = true;
         }
+    }
+
+    /// <summary>Whether a failure means the file will never be readable, rather than not just now.</summary>
+    private static bool Unreadable(Exception ex)
+        => ex is SchemaTooNewException
+           || (ex is SqliteException sqlite && (sqlite.SqliteErrorCode & 0xFF) is Corrupt or NotADatabase);
+
+    /// <summary>A cache written by a newer build, whose tables this one can't vouch for.</summary>
+    private sealed class SchemaTooNewException(long version)
+        : Exception($"The cache is at schema version {version}, newer than this build's {SchemaVersion}.");
+
+    /// <summary>
+    /// Puts the file aside and starts an empty one in its place, for a corrupt page found after it
+    /// had opened.
+    /// </summary>
+    private void Rebuild()
+    {
+        // Or the handle stays on the file, and nothing can move it out of the way.
+        _conn.Dispose();
+        SetAside(_path);
+
+        _conn = Open(_path);
+        Rebuilt = true;
     }
 
     /// <summary>Opens the database and puts the schema in it, disposing the connection if it can't.</summary>
@@ -92,12 +135,7 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             // Overwrite deleted content rather than leaving it readable in freed pages, so purging a
             // previous account's tasks actually removes them.
             Execute(conn, "PRAGMA secure_delete=ON;");
-            Execute(conn, """
-                CREATE TABLE IF NOT EXISTS resources (type TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id));
-                CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, no_verdict INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL, last_error TEXT);
-                CREATE TABLE IF NOT EXISTS deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
-                """);
+            Migrate(conn);
 
             return conn;
         }
@@ -107,6 +145,50 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             conn.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Brings the tables up to <see cref="SchemaVersion"/>, all at once or not at all.
+    /// </summary>
+    /// <remarks>
+    /// The tables are made in their current shape first, which is all a new file needs. A step for
+    /// an older one only adds what it lacks — a column added with a default, say — so the outbox
+    /// it holds comes through rather than being lost with a rebuild.
+    /// </remarks>
+    /// <exception cref="SchemaTooNewException">The file is from a newer build.</exception>
+    private static void Migrate(SqliteConnection conn)
+    {
+        var version = Convert.ToInt64(Scalar(conn, "PRAGMA user_version;"), System.Globalization.CultureInfo.InvariantCulture);
+        if (version > SchemaVersion)
+            throw new SchemaTooNewException(version);
+
+        using var tx = conn.BeginTransaction();
+
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS resources (type TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id));
+            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, no_verdict INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL, last_error TEXT);
+            CREATE TABLE IF NOT EXISTS deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
+            """, tx);
+
+        // Unversioned files from before the outbox counted rounds without a verdict.
+        if (version < 1 && !HasColumn(conn, tx, "outbox", "no_verdict"))
+            Execute(conn, "ALTER TABLE outbox ADD COLUMN no_verdict INTEGER NOT NULL DEFAULT 0;", tx);
+
+        if (version != SchemaVersion)
+            Execute(conn, $"PRAGMA user_version = {SchemaVersion};", tx);
+
+        tx.Commit();
+    }
+
+    private static bool HasColumn(SqliteConnection conn, SqliteTransaction tx, string table, string column)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT 1 FROM pragma_table_info($table) WHERE name = $column";
+        cmd.Parameters.AddWithValue("$table", table);
+        cmd.Parameters.AddWithValue("$column", column);
+        return cmd.ExecuteScalar() is not null;
     }
 
     /// <summary>
@@ -138,7 +220,26 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         }
     }
 
+    /// <remarks>
+    /// A page found corrupt while reading is the same as a file that wouldn't open: the file is set
+    /// aside and an empty cache comes back, with <see cref="Rebuilt"/> saying so. The scan is the
+    /// first thing to touch most of the file, so without this a bad page past the schema stopped
+    /// the app starting every time.
+    /// </remarks>
     public StoredSnapshot Load()
+    {
+        try
+        {
+            return Read();
+        }
+        catch (SqliteException ex) when (Unreadable(ex))
+        {
+            Rebuild();
+            return new StoredSnapshot();
+        }
+    }
+
+    private StoredSnapshot Read()
     {
         var resources = new List<StoredResource>();
         using (var cmd = _conn.CreateCommand())
@@ -397,10 +498,18 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
 
     private void Execute(string sql) => Execute(_conn, sql);
 
-    private static void Execute(SqliteConnection conn, string sql)
+    private static void Execute(SqliteConnection conn, string sql, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    private static object? Scalar(SqliteConnection conn, string sql)
     {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteScalar();
     }
 }

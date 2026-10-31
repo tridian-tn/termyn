@@ -1,5 +1,7 @@
+using System.Buffers.Binary;
 using Microsoft.Data.Sqlite;
 using Termyn.Core.Sync;
+using Termyn.TestSupport;
 
 namespace Termyn.Core.Tests;
 
@@ -50,6 +52,155 @@ public class CorruptCacheTests : IDisposable
         File.WriteAllBytes(Path, bytes);
     }
 
+    /// <summary>
+    /// Writes a sound database and then spoils one page of its task rows — a leaf of the resources
+    /// table, well past the header and the schema.
+    /// </summary>
+    /// <remarks>
+    /// So the file opens, as one with a bad sector in the middle does, and only the scan that loads
+    /// it finds the damage. Found by following the table's root page to its last child rather than
+    /// by guessing an offset, so it is the table's own page that's spoiled and not an index's.
+    /// </remarks>
+    private void WriteCorruptDataPage()
+    {
+        using (var store = new SqliteSnapshotStore(Path))
+            for (var i = 0; i < 500; i++)
+                store.PutResource("items", $"i{i}", $$"""{"id":"i{{i}}","content":"padding padding padding"}""");
+
+        long root, pageSize;
+        using (var conn = Connect())
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT rootpage FROM sqlite_master WHERE name = 'resources'";
+            root = (long)cmd.ExecuteScalar()!;
+            cmd.CommandText = "PRAGMA page_size";
+            pageSize = (long)cmd.ExecuteScalar()!;
+        }
+
+        var bytes = File.ReadAllBytes(Path);
+        var rootAt = (int)((root - 1) * pageSize);
+
+        // 5 is an interior page of a table, whose last four header bytes name its right-most child.
+        Assert.Equal(5, bytes[rootAt]);
+        var leaf = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(rootAt + 8, 4));
+
+        bytes.AsSpan((int)((leaf - 1) * pageSize), (int)pageSize).Fill(0x5A);
+        File.WriteAllBytes(Path, bytes);
+    }
+
+    [Fact]
+    public void A_corrupt_page_found_while_loading_starts_again_from_nothing()
+    {
+        // The file opens, so the check on opening it passes, and the scan that loads it used to
+        // throw out of startup on every launch.
+        WriteCorruptDataPage();
+
+        using var store = new SqliteSnapshotStore(Path);
+        Assert.False(store.Rebuilt);
+
+        var snapshot = store.Load();
+
+        Assert.True(store.Rebuilt);
+        Assert.Empty(snapshot.Resources);
+        Assert.Equal("*", snapshot.SyncToken);
+        Assert.True(File.Exists(Path + ".corrupt"));
+
+        // And what replaced it works.
+        store.PutResource("items", "a", """{"id":"a"}""");
+        Assert.Single(store.Load().Resources);
+    }
+
+    [Fact]
+    public void An_engine_over_a_cache_with_a_corrupt_page_still_starts()
+    {
+        WriteCorruptDataPage();
+
+        using var store = new SqliteSnapshotStore(Path);
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets());
+
+        engine.Load();
+
+        Assert.Empty(engine.Snapshot().Items);
+        Assert.Equal("*", engine.SyncToken);
+    }
+
+    // ---- Schema versions ---------------------------------------------------------------------------
+
+    [Fact]
+    public void A_new_cache_says_which_version_of_the_tables_it_has()
+    {
+        using (new SqliteSnapshotStore(Path))
+        {
+        }
+
+        Assert.Equal(1L, UserVersion());
+    }
+
+    [Fact]
+    public void A_cache_from_before_versions_were_kept_is_brought_up_to_date_with_its_outbox()
+    {
+        // Its outbox has no no_verdict column. Read as it was, that failed with "no such column";
+        // rebuilt, it would lose what was waiting to be sent.
+        Sql("""
+            CREATE TABLE resources (type TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id));
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, state INTEGER NOT NULL, last_error TEXT);
+            CREATE TABLE deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
+            INSERT INTO outbox (uuid, type, args, attempts, state) VALUES ('u1', 'item_update', '{"id":"i1"}', 2, 0);
+            INSERT INTO meta (key, value) VALUES ('sync_token', 's1');
+            """);
+
+        using var store = new SqliteSnapshotStore(Path);
+        var snapshot = store.Load();
+
+        Assert.False(store.Rebuilt);
+        Assert.Equal("s1", snapshot.SyncToken);
+        var queued = Assert.Single(snapshot.Outbox);
+        Assert.Equal("u1", queued.Uuid);
+        Assert.Equal(2, queued.Attempts);
+        Assert.Equal(0, queued.NoVerdictRounds);
+        Assert.Equal(1L, UserVersion());
+    }
+
+    [Fact]
+    public void A_cache_from_a_newer_build_is_set_aside_rather_than_misread()
+    {
+        // Its tables may not be the ones this build knows, and guessing would fail on some column
+        // later or, worse, read the wrong one. It is only a cache.
+        using (var store = new SqliteSnapshotStore(Path))
+            store.SaveSync([new StoredResource("items", "a", """{"id":"a"}""")], [], "s1");
+        Sql("PRAGMA user_version = 99;");
+
+        using var reopened = new SqliteSnapshotStore(Path);
+
+        Assert.True(reopened.Rebuilt);
+        Assert.Empty(reopened.Load().Resources);
+        Assert.True(File.Exists(Path + ".corrupt"));
+    }
+
+    private SqliteConnection Connect()
+    {
+        var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path, Pooling = false }.ToString());
+        conn.Open();
+        return conn;
+    }
+
+    private void Sql(string sql)
+    {
+        using var conn = Connect();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    private long UserVersion()
+    {
+        using var conn = Connect();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA user_version";
+        return (long)cmd.ExecuteScalar()!;
+    }
+
     [Fact]
     public void A_file_that_is_not_a_database_is_started_again_from_nothing()
     {
@@ -78,6 +229,8 @@ public class CorruptCacheTests : IDisposable
     [Fact]
     public void A_cache_that_is_merely_unavailable_is_not_thrown_away()
     {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows locks a file against another opener; elsewhere the open succeeds");
+
         // The important limit. Something else holding the file, a read-only directory, a lock that
         // is about to clear — none of those means the cache is bad, and rebuilding for them would
         // lose the outbox to a problem that was going to resolve itself. It is a worse failure than
@@ -94,6 +247,8 @@ public class CorruptCacheTests : IDisposable
     [Fact]
     public void A_cache_locked_and_then_released_still_has_everything_in_it()
     {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows locks a file against another opener; elsewhere the open succeeds");
+
         // And the point of the limit: the file that was refused is still there afterwards, with the
         // account and anything queued still in it.
         using (var store = new SqliteSnapshotStore(Path))
