@@ -176,13 +176,39 @@ end;
 
 { ---- Closing a running instance ---------------------------------------------------------------- }
 
-{ Termyn lives in the tray, so it is very likely running during an upgrade or an uninstall. Files in
-  use would otherwise force a reboot to finish. }
-function CloseRunningTermyn(): Boolean;
+{ Whether Termyn is still running. Asked of tasklist, since Inno has no way of its own to ask: find
+  answers 0 only when the name is in what tasklist printed. }
+function TermynRunning(): Boolean;
 var
   ResultCode: Integer;
 begin
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM "{#AppExe}" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := Exec(ExpandConstant('{cmd}'), '/C tasklist /FI "IMAGENAME eq {#AppExe}" /NH | find /I "{#AppExe}"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+{ Termyn lives in the tray, so it is very likely running during an upgrade or an uninstall. Files in
+  use would otherwise force a reboot to finish.
+
+  Asked to close first, the way the taskbar would, so it saves the window's state and closes its
+  cache rather than being cut off mid-write. Without /F, taskkill sends the window WM_CLOSE, which
+  Termyn takes as leaving rather than going to the tray, even while it's hidden there. Forced only
+  if that hasn't worked in five seconds: a sync that won't stop, or a dialog left open. }
+function CloseRunningTermyn(): Boolean;
+var
+  ResultCode: Integer;
+  Waited: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM "{#AppExe}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  Waited := 0;
+  while TermynRunning() and (Waited < 5000) do
+  begin
+    Sleep(250);
+    Waited := Waited + 250;
+  end;
+
+  if TermynRunning() then
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM "{#AppExe}" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   { Give the shell a moment to release the tray icon and the file handles. }
   Sleep(700);
