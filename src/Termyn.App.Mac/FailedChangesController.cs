@@ -25,7 +25,10 @@ internal sealed class FailedChangesController(MainPresenter presenter, TaskComma
         title.Font = NSFont.BoldSystemFontOfSize(NSFont.SystemFontSize + 2)!;
 
         _list.TranslatesAutoresizingMaskIntoConstraints = false;
-        var document = new FlippedView();
+
+        // Sized by its constraints, and not left to the autoresizing mask a view starts with, which
+        // would hold it at nothing and crush the rows inside to match.
+        var document = new FlippedView { TranslatesAutoresizingMaskIntoConstraints = false };
         document.AddSubview(_list);
         var scroll = new NSScrollView
         {
@@ -57,6 +60,8 @@ internal sealed class FailedChangesController(MainPresenter presenter, TaskComma
             _list.TopAnchor.ConstraintEqualTo(document.TopAnchor),
             _list.LeadingAnchor.ConstraintEqualTo(document.LeadingAnchor),
             _list.WidthAnchor.ConstraintEqualTo(scroll.ContentView.WidthAnchor),
+            document.TopAnchor.ConstraintEqualTo(scroll.ContentView.TopAnchor),
+            document.LeadingAnchor.ConstraintEqualTo(scroll.ContentView.LeadingAnchor),
             document.WidthAnchor.ConstraintEqualTo(scroll.ContentView.WidthAnchor),
             document.BottomAnchor.ConstraintEqualTo(_list.BottomAnchor),
         ]);
@@ -108,6 +113,9 @@ internal sealed class FailedChangesController(MainPresenter presenter, TaskComma
             row.Spacing = 12;
             _list.AddArrangedSubview(row);
             row.WidthAnchor.ConstraintEqualTo(_list.WidthAnchor).Active = true;
+
+            // At the row's far edge whatever the words beside it need, so the buttons line up.
+            dismiss.TrailingAnchor.ConstraintEqualTo(row.TrailingAnchor).Active = true;
         }
     }
 
