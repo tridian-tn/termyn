@@ -47,6 +47,9 @@ internal sealed class MainWindowController : NSWindowController
     private NSTimer? _lingering;
     private NSPopover? _popover;
     private string? _notice;
+
+    /// <summary>The rows there were when the notice was said, which it's taken to be about.</summary>
+    private IReadOnlyList<TaskRow>? _noticeRows;
     private NSObject? _activated;
     private NSObject? _woke;
 
@@ -59,7 +62,7 @@ internal sealed class MainWindowController : NSWindowController
     /// <param name="switchAccount">Forgets this account for another's token, once the user has agreed</param>
     public MainWindowController(MainPresenter presenter, SyncScheduler scheduler, AuthPresenter auth, ILog log, Action<TokenCheck> switchAccount)
         : base(new NSWindow(
-            new CGRect(0, 0, 980, 640),
+            new CGRect(0, 0, 1180, 640),
             NSWindowStyle.Titled | NSWindowStyle.Closable | NSWindowStyle.Miniaturizable
                 | NSWindowStyle.Resizable | NSWindowStyle.FullSizeContentView,
             NSBackingStore.Buffered,
@@ -74,6 +77,9 @@ internal sealed class MainWindowController : NSWindowController
         {
             OpenDue = OpenDue,
             OpenNewTask = OpenNewTask,
+            OpenNewSubtask = OpenNewSubtask,
+            OpenLabels = OpenLabels,
+            OpenMoveTo = OpenMoveTo,
         };
         _sidebar = new SidebarController(key => _presenter.SelectByKey(key), _commands);
         _tasks = new TaskListController(_commands);
@@ -101,7 +107,7 @@ internal sealed class MainWindowController : NSWindowController
         // The frame AppKit saved last time, or a sensible one centred on a first launch.
         if (!window.SetFrameUsingName(FrameName))
         {
-            window.SetContentSize(new CGSize(980, 640));
+            window.SetContentSize(new CGSize(1180, 640));
             window.Center();
         }
 
@@ -383,6 +389,7 @@ internal sealed class MainWindowController : NSWindowController
     private void Say(string notice)
     {
         _notice = notice;
+        _noticeRows = _presenter.Rows;
         RenderStatus();
     }
 
@@ -392,7 +399,10 @@ internal sealed class MainWindowController : NSWindowController
         _tasks.Render(_presenter.Rows, _presenter.LabelColours, _presenter.UnsupportedFilter, _presenter.Today, _presenter.Sort);
 
         // A fresh publish is the model moving on, so whatever was said about the last one has passed.
-        _notice = null;
+        // Not the render of the publish it was said about, which is often still on its way: "Moved
+        // to Work, which this view doesn't show" is said about the very rows this is about to show.
+        if (!ReferenceEquals(_presenter.Rows, _noticeRows))
+            _notice = null;
         RenderStatus();
         Linger();
     }
@@ -514,12 +524,26 @@ internal sealed class MainWindowController : NSWindowController
     }
 
     /// <summary>Opens the due-date popover beside the task's row.</summary>
-    private void OpenDue(string id)
-    {
-        if (_tasks.AnchorFor(id) is not { } anchor)
-            return;
+    private void OpenDue(string id) => ShowBeside(id, new DueController(_presenter, _commands, id, ClosePopover));
 
-        Popover(new DueController(_presenter, _commands, id, ClosePopover)).Show(anchor.Rect, anchor.View, NSRectEdge.MaxYEdge);
+    /// <summary>Opens the labels popover beside the task's row.</summary>
+    private void OpenLabels(string id) => ShowBeside(id, new LabelsController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the move popover beside the task's row.</summary>
+    private void OpenMoveTo(string id) => ShowBeside(id, new MoveToController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the new-task popover beside a task's row, to add a sub-task to it.</summary>
+    private void OpenNewSubtask(string id)
+    {
+        var content = new NewTaskController(_presenter, _log, ClosePopover, id, _commands.Added);
+        content.Prepare();
+        ShowBeside(id, content);
+    }
+
+    private void ShowBeside(string id, NSViewController content)
+    {
+        if (_tasks.AnchorFor(id) is { } anchor)
+            Popover(content).Show(anchor.Rect, anchor.View, NSRectEdge.MaxYEdge);
     }
 
     /// <summary>
