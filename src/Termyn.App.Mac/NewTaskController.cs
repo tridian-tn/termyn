@@ -13,8 +13,22 @@ namespace Termyn.App.Mac;
 /// The same box as the Windows quick-add, driven the same way: filled in with the view's own
 /// project or label where it has one, the caret put in front of that so what's typed reads first,
 /// and what Todoist won't take from a quick-add said in place rather than lost.
+///
+/// Opened on a task it adds a sub-task to it, saying which at the top. The words are still quick-add
+/// words, so a priority or a day can be typed, but where it goes isn't up for discussion: a sub-task
+/// lives in its parent's project, so there's no preview of where it's headed.
 /// </remarks>
-internal sealed class NewTaskController(MainPresenter presenter, ILog log, Action close) : NSViewController
+/// <param name="presenter">What the task is added through</param>
+/// <param name="log">Where a failure is written</param>
+/// <param name="close">Closes the popover</param>
+/// <param name="parentId">The task to add a sub-task to, or null for a task of its own</param>
+/// <param name="added">Told the new sub-task's id</param>
+internal sealed class NewTaskController(
+    MainPresenter presenter,
+    ILog log,
+    Action close,
+    string? parentId = null,
+    Action<string>? added = null) : NSViewController
 {
     private readonly NSTextField _field = new();
     private readonly NSTextField _preview = NSTextField.CreateWrappingLabel(string.Empty);
@@ -33,7 +47,7 @@ internal sealed class NewTaskController(MainPresenter presenter, ILog log, Actio
         _preview.Font = NSFont.SystemFontOfSize(NSFont.SmallSystemFontSize)!;
         _preview.PreferredMaxLayoutWidth = 380;
 
-        var stack = NSStackView.FromViews([_field, _preview]);
+        var stack = NSStackView.FromViews(parentId is null ? [_field, _preview] : [Under(), _field, _preview]);
         stack.Orientation = NSUserInterfaceLayoutOrientation.Vertical;
         stack.Alignment = NSLayoutAttribute.Leading;
         stack.Spacing = 6;
@@ -41,10 +55,30 @@ internal sealed class NewTaskController(MainPresenter presenter, ILog log, Actio
         View = stack;
     }
 
+    /// <summary>The line saying which task a sub-task is going under.</summary>
+    private NSTextField Under()
+    {
+        var parent = presenter.Rows.FirstOrDefault(r => r.Id == parentId && !r.IsHeading)?.Content ?? string.Empty;
+        var under = NSTextField.CreateLabel(string.Format(CultureInfo.CurrentCulture, Strings.SubtaskUnder, parent));
+        under.Font = NSFont.BoldSystemFontOfSize(NSFont.SystemFontSize)!;
+        under.LineBreakMode = NSLineBreakMode.TruncatingTail;
+        under.PreferredMaxLayoutWidth = 380;
+        under.SetContentCompressionResistancePriority(250, NSLayoutConstraintOrientation.Horizontal);
+        under.WidthAnchor.ConstraintLessThanOrEqualTo(380).Active = true;
+        return under;
+    }
+
     /// <summary>Fills the box in for the view on screen, ready to be shown.</summary>
     public void Prepare()
     {
         _ = View;
+
+        if (parentId is not null)
+        {
+            _field.PlaceholderString = Strings.SubtaskPlaceholder;
+            return;
+        }
+
         _start = presenter.NewTaskText(presenter.Selection);
         _field.StringValue = _start is null ? string.Empty : " " + _start;
         _field.PlaceholderString = CapturePreviewText.Hint(presenter.CaptureReadsDays);
@@ -65,6 +99,9 @@ internal sealed class NewTaskController(MainPresenter presenter, ILog log, Actio
 
     private void ShowPreview()
     {
+        if (parentId is not null)
+            return;
+
         _preview.StringValue = presenter.PreviewText(_field.StringValue);
         _preview.TextColor = NSColor.SecondaryLabel;
     }
@@ -91,7 +128,23 @@ internal sealed class NewTaskController(MainPresenter presenter, ILog log, Actio
         _adding = true;
         try
         {
-            await presenter.CaptureAsync(text, _start?.Trim());
+            if (parentId is { } parent)
+            {
+                // Null when the parent has stopped being able to take one since the popover opened.
+                // Left open, so the words aren't lost along with it.
+                if (presenter.AddSubtask(parent, text) is not { } id)
+                {
+                    Problem(Strings.SubtaskRefused);
+                    return;
+                }
+
+                added?.Invoke(id);
+            }
+            else
+            {
+                await presenter.CaptureAsync(text, _start?.Trim());
+            }
+
             close();
         }
         catch (CaptureRefusedException refused)

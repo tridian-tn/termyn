@@ -20,13 +20,14 @@ namespace Termyn.App.Mac;
 internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<string> say)
 {
     /// <summary>
-    /// The task commands this window offers. The rest of <see cref="Menus.TaskContext"/> — labels,
-    /// moving, nesting, deadlines, reminders — comes in a later version.
+    /// The task commands this window offers. The rest of <see cref="Menus.TaskContext"/> —
+    /// deadlines and reminders — comes in a later version.
     /// </summary>
     public static readonly IReadOnlySet<AppCommand> Offered = new HashSet<AppCommand>
     {
         AppCommand.ToggleComplete,
         AppCommand.Rename,
+        AppCommand.NewSubtask,
         AppCommand.Due,
         AppCommand.DueToday,
         AppCommand.DueTomorrow,
@@ -37,6 +38,12 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         AppCommand.Priority2,
         AppCommand.Priority3,
         AppCommand.Priority4,
+        AppCommand.Labels,
+        AppCommand.Indent,
+        AppCommand.Outdent,
+        AppCommand.MoveUp,
+        AppCommand.MoveDown,
+        AppCommand.MoveTo,
         AppCommand.ShowInTodoist,
         AppCommand.Delete,
     };
@@ -49,6 +56,18 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
 
     /// <summary>Opens the new-task popover. Set by the window.</summary>
     public Action? OpenNewTask { get; set; }
+
+    /// <summary>Opens the new-task popover on a task, to add a sub-task to it. Set by the window.</summary>
+    public Action<string>? OpenNewSubtask { get; set; }
+
+    /// <summary>Opens the labels popover on a task. Set by the window.</summary>
+    public Action<string>? OpenLabels { get; set; }
+
+    /// <summary>Opens the popover that moves a task to another project or section. Set by the window.</summary>
+    public Action<string>? OpenMoveTo { get; set; }
+
+    /// <summary>Puts the selection on a task once the rows it's in have arrived. Set by the task list.</summary>
+    public Action<string>? SelectWhenShown { get; set; }
 
     /// <summary>What the presenter would say of a command over this task, as the menus read it.</summary>
     /// <param name="command">The command</param>
@@ -68,6 +87,13 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         // Reminders' words, since a ticked box is the same idea there.
         AppCommand.ToggleComplete => task is { Completed: true } ? Strings.MarkIncomplete : Strings.MarkCompleted,
         AppCommand.Rename => Strings.Rename,
+        AppCommand.NewSubtask => Strings.NewSubtask,
+        AppCommand.Labels => Strings.Labels,
+        AppCommand.Indent => Strings.Indent,
+        AppCommand.Outdent => Strings.Outdent,
+        AppCommand.MoveUp => Strings.MoveUp,
+        AppCommand.MoveDown => Strings.MoveDown,
+        AppCommand.MoveTo => Strings.MoveTo,
         AppCommand.Due => Strings.DueDate,
         AppCommand.DueToday => Strings.DueToday,
         AppCommand.DueTomorrow => Strings.DueTomorrow,
@@ -131,6 +157,43 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
                 BeginRename?.Invoke(id);
                 break;
 
+            case AppCommand.NewSubtask:
+                OpenNewSubtask?.Invoke(id);
+                break;
+
+            case AppCommand.Labels:
+                OpenLabels?.Invoke(id);
+                break;
+
+            case AppCommand.Indent:
+                Guarded(() =>
+                {
+                    if (!presenter.Indent(id))
+                        say(Refusal(command, id)!);
+                });
+                break;
+
+            case AppCommand.Outdent:
+                Guarded(() =>
+                {
+                    if (!presenter.Outdent(id))
+                        say(Refusal(command, id)!);
+                });
+                break;
+
+            case AppCommand.MoveUp:
+            case AppCommand.MoveDown:
+                Guarded(() =>
+                {
+                    if (!presenter.Move(id, command == AppCommand.MoveUp ? -1 : 1))
+                        say(Refusal(command, id)!);
+                });
+                break;
+
+            case AppCommand.MoveTo:
+                OpenMoveTo?.Invoke(id);
+                break;
+
             case AppCommand.Due:
                 OpenDue?.Invoke(id);
                 break;
@@ -172,8 +235,152 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         }
     }
 
+    /// <summary>
+    /// Says why a key got no answer, when it's one of the commands that can be refused for a reason
+    /// worth knowing.
+    /// </summary>
+    /// <remarks>
+    /// The menu greys these when they can't run, which is right for the menu but leaves the key with
+    /// nothing to do: AppKit won't send a disabled item's action, so ⌘] on a task with nothing above
+    /// it would otherwise just beep. The list asks this first. A turned-away token greys them too,
+    /// but that's said by the banner, and has nothing to do with where the task sits.
+    /// </remarks>
+    /// <param name="command">The command the key belongs to</param>
+    /// <param name="taskId">The selected task, or null for none</param>
+    /// <returns>True when it was explained, which is the key dealt with</returns>
+    public bool Explain(AppCommand command, string? taskId)
+    {
+        if (taskId is null
+            || presenter.ReconnectNeeded
+            || State(command, taskId).Enabled
+            || Refusal(command, taskId) is not { } why)
+        {
+            return false;
+        }
+
+        say(why);
+        return true;
+    }
+
+    /// <summary>
+    /// Why a command can't be done to a task. For indenting, which of the two reasons it is, since
+    /// they send the reader different places: one is "not here" and the other is "not ever", as on
+    /// Windows.
+    /// </summary>
+    private string? Refusal(AppCommand command, string id) => command switch
+    {
+        AppCommand.Indent => presenter.IndentTooDeep(id) ? Strings.IndentTooDeep : Strings.IndentNothingAbove,
+        AppCommand.Outdent => Strings.IndentTopLevel,
+        AppCommand.MoveUp or AppCommand.MoveDown => Strings.MoveAtEnd,
+        AppCommand.MoveTo => Strings.MoveCompletedRefused,
+        _ => null,
+    };
+
+    /// <summary>
+    /// What a task is called now, given what it may once have been called: one added a moment ago
+    /// is renamed when the sync hears what the server calls it.
+    /// </summary>
+    public string CurrentIdOf(string id) => presenter.CurrentIdOf(id);
+
     /// <summary>Renames a task, once its name has been edited where it stands.</summary>
     public void Rename(string id, string name) => Guarded(() => presenter.Rename(id, name));
+
+    /// <summary>
+    /// Gives a task the labels ticked in the picker, making any the account doesn't have yet.
+    /// </summary>
+    /// <remarks>
+    /// Closing the picker unchanged is not an edit: writing anyway would queue a command that owns
+    /// the task until it lands, and a web-side edit arriving meanwhile would be dropped for nothing.
+    /// A name the task already wears is left alone even if the account doesn't list it, since the
+    /// picker carries those so they aren't stripped, not so they're adopted.
+    ///
+    /// Compared with what the picker opened on rather than the task's row, which a sync can take out
+    /// of the view while the picker's open, and what was ticked still stands.
+    /// </remarks>
+    /// <param name="id">The task</param>
+    /// <param name="opened">The labels it had when the picker opened</param>
+    /// <param name="picked">Every label it should have</param>
+    public void SetLabels(string id, IReadOnlyList<string> opened, IReadOnlyList<string> picked)
+    {
+        if (picked.Count == opened.Count && !picked.Except(opened, StringComparer.OrdinalIgnoreCase).Any())
+            return;
+
+        Guarded(() =>
+        {
+            var known = presenter.Labels.Select(l => l.Name).ToList();
+            var fresh = picked
+                .Where(p => !known.Contains(p, StringComparer.OrdinalIgnoreCase))
+                .Where(p => !opened.Contains(p, StringComparer.OrdinalIgnoreCase));
+
+            foreach (var name in fresh)
+                presenter.AddLabel(name);
+
+            presenter.SetLabels(id, picked);
+        });
+    }
+
+    /// <summary>
+    /// Moves a task somewhere else, and stays on it if the view still shows it, or says where it
+    /// went if not.
+    /// </summary>
+    /// <remarks>
+    /// False from the presenter means something changed while the picker was open: it won't
+    /// confirm the place the task already sits, so what's gone is the task or where it was going.
+    /// </remarks>
+    /// <param name="id">The task</param>
+    /// <param name="destination">Where to</param>
+    public void MoveTo(string id, MoveDestination destination) => Guarded(() =>
+    {
+        if (!presenter.MoveTo(id, destination))
+            say(Strings.MoveTargetGone);
+        else if (Row(CurrentIdOf(id)) is not null)
+            SelectWhenShown?.Invoke(id);
+        else
+            say(string.Format(CultureInfo.CurrentCulture, Strings.MovedNotShown, destination.Path));
+    });
+
+    /// <summary>
+    /// Stays on a sub-task just added if the view shows it, or says it won't. A row that never
+    /// appears reads as a task that was never created.
+    /// </summary>
+    /// <param name="id">The new task</param>
+    public void Added(string id)
+    {
+        if (Row(CurrentIdOf(id)) is not null)
+            SelectWhenShown?.Invoke(id);
+        else
+            say(Strings.AddedNotShown);
+    }
+
+    /// <summary>Whether a dragged task can go where the pointer is, so the pointer can say so.</summary>
+    public bool CanDrop(string id, DropTarget target) => presenter.CanDrop(id, target);
+
+    /// <summary>Puts a dragged task down, or says that something changed while it was being dragged.</summary>
+    /// <returns>True when it moved</returns>
+    public bool Drop(string id, DropTarget target)
+    {
+        var dropped = false;
+
+        // Only when it was turned away. One that threw has already said what went wrong.
+        if (Guarded(() => dropped = presenter.Drop(id, target)) && !dropped)
+            say(Strings.DragTaskFailed);
+        return dropped;
+    }
+
+    /// <summary>Whether a dragged task can be moved to a row of the sidebar.</summary>
+    public bool CanDropTaskOn(string id, SidebarNode node) => presenter.CanDropTaskOn(id, node);
+
+    /// <summary>Moves a dragged task to a project or section in the sidebar.</summary>
+    /// <returns>True when it moved</returns>
+    public bool DropTaskOn(string id, SidebarNode node)
+    {
+        var dropped = false;
+
+        // Only when it was turned away. One that threw has already said what went wrong.
+        if (Guarded(() => dropped = presenter.DropTaskOn(id, node)) && !dropped)
+            say(Strings.DragTaskFailed);
+        return dropped;
+    }
 
     /// <summary>How the list is ordered, for the header's arrow and the ticks in Sort By.</summary>
     public TaskSort Sort => presenter.Sort;

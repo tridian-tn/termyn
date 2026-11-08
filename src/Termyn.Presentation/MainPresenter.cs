@@ -806,6 +806,10 @@ public sealed class MainPresenter
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
+        // By its name now. A parent added a moment ago can be renamed by a sync while the sub-task
+        // is being typed, and under the old name nothing finds it to file the new one beneath.
+        parentId = _engine.Resolve(parentId);
+
         var snapshot = _engine.Snapshot();
         if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !_engine.CanNestUnder(parentId))
             return null;
@@ -2168,6 +2172,10 @@ public sealed class MainPresenter
     }
 
     /// <summary>Makes a task a child of the one above it.</summary>
+    /// <remarks>
+    /// A task indented under one that's folded unfolds it, the way adding a sub-task does. Left
+    /// folded, the task would vanish as it landed, and the selection with it.
+    /// </remarks>
     public bool Indent(string id)
     {
         var named = Named(id);
@@ -2175,6 +2183,13 @@ public sealed class MainPresenter
 
         if (indented)
         {
+            var moved = _engine.Resolve(id);
+            if (_engine.Snapshot().Items.FirstOrDefault(i => i.Id == moved)?.ParentId is { } parent)
+            {
+                lock (_publishing)
+                    _collapsed.Remove(parent);
+            }
+
             History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryIndented, named), $"nest:{id}");
             Publish();
         }

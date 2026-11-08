@@ -432,4 +432,104 @@
     <value>Choose how the tasks are ordered</value>
     <comment>Tooltip on the toolbar's Sort button.</comment>
   </data>
+  <data name="NewSubtask" xml:space="preserve">
+    <value>New Sub-task…</value>
+    <comment>Task menu item that adds a sub-task under the selected task.</comment>
+  </data>
+  <data name="Labels" xml:space="preserve">
+    <value>Labels…</value>
+    <comment>Task menu item that opens the labels popover.</comment>
+  </data>
+  <data name="Indent" xml:space="preserve">
+    <value>Indent</value>
+    <comment>Task menu item that files the task under the one above it.</comment>
+  </data>
+  <data name="Outdent" xml:space="preserve">
+    <value>Outdent</value>
+    <comment>Task menu item that lifts a sub-task out one level.</comment>
+  </data>
+  <data name="MoveUp" xml:space="preserve">
+    <value>Move Up</value>
+    <comment>Task menu item that moves the task up past its neighbour.</comment>
+  </data>
+  <data name="MoveDown" xml:space="preserve">
+    <value>Move Down</value>
+    <comment>Task menu item that moves the task down past its neighbour.</comment>
+  </data>
+  <data name="MoveTo" xml:space="preserve">
+    <value>Move To…</value>
+    <comment>Task menu item that opens the popover for moving the task to another project or section.</comment>
+  </data>
+  <data name="IndentTopLevel" xml:space="preserve">
+    <value>Already at the top level.</value>
+    <comment>Said in the subtitle when a task at the top level can't be outdented.</comment>
+  </data>
+  <data name="IndentTooDeep" xml:space="preserve">
+    <value>Todoist holds four levels of sub-task, and this is as deep as it goes.</value>
+    <comment>Said in the subtitle when a task is already as deep as Todoist allows.</comment>
+  </data>
+  <data name="IndentNothingAbove" xml:space="preserve">
+    <value>Nothing above it to indent under.</value>
+    <comment>Said in the subtitle when there's no task above to indent under.</comment>
+  </data>
+  <data name="MoveAtEnd" xml:space="preserve">
+    <value>Already at the end of its list.</value>
+    <comment>Said in the subtitle when a task can't move any further up or down.</comment>
+  </data>
+  <data name="MoveCompletedRefused" xml:space="preserve">
+    <value>Tasks from the completed history can't be moved.</value>
+    <comment>Said in the subtitle when Move To is asked of an archived completed task.</comment>
+  </data>
+  <data name="MoveTargetGone" xml:space="preserve">
+    <value>Not moved — the task or where it was going is no longer there.</value>
+    <comment>Said in the subtitle when something changed while the Move To popover was open.</comment>
+  </data>
+  <data name="MovedNotShown" xml:space="preserve">
+    <value>Moved to {0}, which this view doesn't show.</value>
+    <comment>Said in the subtitle after a move takes the task out of the view. {0} is the path to where it went.</comment>
+  </data>
+  <data name="AddedNotShown" xml:space="preserve">
+    <value>Added, but this view doesn't show it.</value>
+    <comment>Said in the subtitle when a new sub-task doesn't belong in the view on screen.</comment>
+  </data>
+  <data name="DragTaskFailed" xml:space="preserve">
+    <value>Couldn't move the task there. Something changed while it was being dragged.</value>
+    <comment>Said in the subtitle when a drop is refused.</comment>
+  </data>
+  <data name="SubtaskUnder" xml:space="preserve">
+    <value>Under: {0}</value>
+    <comment>Line at the top of the new sub-task popover. {0} is the parent task's name.</comment>
+  </data>
+  <data name="SubtaskPlaceholder" xml:space="preserve">
+    <value>Sub-task</value>
+    <comment>Placeholder in the new sub-task popover's field.</comment>
+  </data>
+  <data name="MovePlaceholder" xml:space="preserve">
+    <value>Project or Section</value>
+    <comment>Placeholder in the Move To popover's search field.</comment>
+  </data>
+  <data name="MoveButton" xml:space="preserve">
+    <value>Move</value>
+    <comment>Button that confirms the Move To popover.</comment>
+  </data>
+  <data name="MoveKindProject" xml:space="preserve">
+    <value>project</value>
+    <comment>Marks a row of the Move To popover as a project.</comment>
+  </data>
+  <data name="MoveKindSection" xml:space="preserve">
+    <value>section</value>
+    <comment>Marks a row of the Move To popover as a section.</comment>
+  </data>
+  <data name="LabelsPlaceholder" xml:space="preserve">
+    <value>Find or Add a Label</value>
+    <comment>Placeholder in the labels popover's search field.</comment>
+  </data>
+  <data name="LabelsNew" xml:space="preserve">
+    <value>New Label “{0}”</value>
+    <comment>Last row of the labels popover when what's typed isn't a label yet. {0} is what's been typed.</comment>
+  </data>
+  <data name="SubtaskRefused" xml:space="preserve">
+    <value>This task can't take a sub-task any more.</value>
+    <comment>Said in the new sub-task popover when the parent was finished or nested too deep while it was open.</comment>
+  </data>
 </root>

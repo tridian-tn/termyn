@@ -30,14 +30,27 @@ internal enum TaskViewStyle
 /// arrow is drawn from what it says. AppKit's own sort descriptors aren't used, so there's one
 /// place the sort is kept rather than two to keep in step.
 ///
+/// A task can be dragged in either, to put it beside another or under it, or out to the sidebar to
+/// move it there. What each drop does is <see cref="OutlineDrop"/>'s to work out from where the
+/// pointer is, and the presenter's to allow, as on Windows.
+///
 /// The keys are the list's own, as Finder's are its own: Space ticks the selected task off, Return
 /// renames it, ⌫ deletes it, and → and ← open and fold a task's sub-tasks. Everything else goes
 /// through the menus, which the window validates.
 /// </remarks>
 internal sealed class TaskListController : NSViewController
 {
+    /// <summary>What a dragged task is carried as, by its id, for the list and the sidebar to read.</summary>
+    public const string TaskDragType = "net.tridian.termyn.task";
+
     /// <summary>Where the choice of list or table is kept between launches.</summary>
     private const string StyleKey = "TaskViewStyle";
+
+    /// <summary>Where it's kept that the Task column has had its first fit to the window.</summary>
+    private const string FittedKey = "TaskColumnFitted";
+
+    /// <summary>How narrow the Task column goes before the table scrolls sideways instead.</summary>
+    private const int TaskColumnLeast = 160;
 
     /// <summary>The table's columns, in the order they start in. Task is always first.</summary>
     public static readonly IReadOnlyList<TaskColumn> Columns =
@@ -81,12 +94,19 @@ internal sealed class TaskListController : NSViewController
     /// <summary>A render that arrived while a rename was open, to be shown when it closes.</summary>
     private Action? _heldBack;
 
+    /// <summary>A task to put the selection on when the rows it's just landed in arrive.</summary>
+    private string? _wanted;
+
+    /// <summary>Where the drag over the list would land, as last worked out from the pointer.</summary>
+    private DropTarget? _dropTarget;
+
     public TaskListController(TaskCommands commands)
     {
         _commands = commands;
         _commands.BeginRename = BeginRename;
-        _list = new TaskTable(command => _commands.Run(command, SelectedId), Arrow);
-        _grid = new TaskTable(command => _commands.Run(command, SelectedId), Arrow);
+        _commands.SelectWhenShown = id => _wanted = id;
+        _list = new TaskTable(command => _commands.Run(command, SelectedId), Arrow, command => _commands.Explain(command, SelectedId));
+        _grid = new TaskTable(command => _commands.Run(command, SelectedId), Arrow, command => _commands.Explain(command, SelectedId));
         _style = NSUserDefaults.StandardUserDefaults.StringForKey(StyleKey) == nameof(TaskViewStyle.Table)
             ? TaskViewStyle.Table
             : TaskViewStyle.List;
@@ -112,6 +132,12 @@ internal sealed class TaskListController : NSViewController
         _list.DoubleAction = new Selector("renameClicked:");
 
         LoadGrid();
+
+        foreach (var table in new[] { _list, _grid })
+        {
+            table.RegisterForDraggedTypes([TaskDragType]);
+            table.SetDraggingSourceOperationMask(NSDragOperation.Move, isLocal: true);
+        }
 
         // Both kept in the one place, one hidden, rather than in the stack: a stack takes a hidden
         // view out of the window altogether, and the constraints that sized it go with it.
@@ -186,7 +212,7 @@ internal sealed class TaskListController : NSViewController
                 Width = StartupLayout.ColumnWidth(each),
                 MinWidth = each switch
                 {
-                    TaskColumn.Content => 160,
+                    TaskColumn.Content => TaskColumnLeast,
                     TaskColumn.Priority => 28,
                     _ => 60,
                 },
@@ -278,6 +304,8 @@ internal sealed class TaskListController : NSViewController
         _style = style;
         NSUserDefaults.StandardUserDefaults.SetString(style.ToString(), StyleKey);
         ShowStyle();
+        View.LayoutSubtreeIfNeeded();
+        FitOnce();
 
         // Nothing selected stays nothing selected. The table coming into view still holds whatever
         // was selected when it was last shown, and Space or ⌫ would act on that unseen choice.
@@ -296,6 +324,41 @@ internal sealed class TaskListController : NSViewController
         _gridScroll!.Hidden = _style != TaskViewStyle.Table;
     }
 
+    public override void ViewDidLayout()
+    {
+        base.ViewDidLayout();
+        FitOnce();
+    }
+
+    /// <summary>
+    /// Gives the Task column what the others leave of the table, the first time it's shown, so every
+    /// column shows without scrolling, as the Windows outline does on its first run. From then on
+    /// AppKit keeps the widths, and the Task column takes up any change in the window's.
+    /// </summary>
+    private void FitOnce()
+    {
+        if (_style != TaskViewStyle.Table || NSUserDefaults.StandardUserDefaults.BoolForKey(FittedKey))
+            return;
+
+        if (FitTaskColumn())
+            NSUserDefaults.StandardUserDefaults.SetBool(true, FittedKey);
+    }
+
+    /// <summary>Sizes the Task column to what the columns showing beside it leave of the table.</summary>
+    /// <returns>False when the table hasn't been given a width yet</returns>
+    private bool FitTaskColumn()
+    {
+        var room = _gridScroll!.ContentView.Bounds.Width;
+        if (room <= 0 || Column(TaskColumn.Content) is not { } task)
+            return false;
+
+        // Measured rather than added up, since the table's style has margins of its own. What's over
+        // or short of the room is the Task column's to give up or take.
+        _grid.Tile();
+        task.Width = (nfloat)Math.Max(TaskColumnLeast, task.Width - (_grid.Frame.Width - room));
+        return true;
+    }
+
     /// <summary>Whether a column of the table is showing.</summary>
     public bool IsShown(TaskColumn column) => Column(column) is { Hidden: false };
 
@@ -306,7 +369,10 @@ internal sealed class TaskListController : NSViewController
     public void ToggleColumn(TaskColumn column)
     {
         if (column != TaskColumn.Content && Column(column) is { } found)
+        {
             found.Hidden = !found.Hidden;
+            FitTaskColumn();
+        }
     }
 
     /// <summary>Shows every column of the table again.</summary>
@@ -314,6 +380,8 @@ internal sealed class TaskListController : NSViewController
     {
         foreach (var column in _grid.TableColumns())
             column.Hidden = false;
+
+        FitTaskColumn();
     }
 
     private NSTableColumn? Column(TaskColumn column) => _grid.FindTableColumn(new NSString(column.ToString()));
@@ -382,7 +450,9 @@ internal sealed class TaskListController : NSViewController
         }
 
         var index = (int)Current.SelectedRow;
-        var selected = SelectedId;
+        var selected = _wanted ?? SelectedId;
+        var reveal = _wanted is not null || OnScreen(index);
+        _wanted = null;
 
         _rows = rows;
         _labelColours = labelColours;
@@ -395,8 +465,18 @@ internal sealed class TaskListController : NSViewController
 
         if (selected is not null)
         {
-            if (IndexOf(selected) is { } again)
+            // Under the name it has now if it's not here under the old one, which for a task added a
+            // moment ago means the sync's just heard what the server calls it. Same task, same
+            // selection, and not to be mistaken for one that's gone.
+            if ((IndexOf(selected) ?? IndexOf(_commands.CurrentIdOf(selected))) is { } again)
+            {
                 Current.SelectRow(again, byExtendingSelection: false);
+
+                // Followed if it's what was being looked at, so a task nudged past the edge of the
+                // window doesn't go out of sight. Left alone if the list's been scrolled away from it.
+                if (reveal && again != index)
+                    Current.ScrollRowToVisible(again);
+            }
             else if (Nearest(index) is { } next)
                 Current.SelectRow(next, byExtendingSelection: false);
         }
@@ -409,26 +489,30 @@ internal sealed class TaskListController : NSViewController
         _emptyState.Hidden = rows.Count > 0;
     }
 
+    /// <summary>Whether a row of the table in use can be seen at the moment.</summary>
+    private bool OnScreen(int row)
+    {
+        if (row < 0)
+            return false;
+
+        var visible = Current.RowsInRect(Current.VisibleRect());
+        return row >= visible.Location && row < visible.Location + visible.Length;
+    }
+
     /// <summary>
-    /// Marks the column the table is sorted by with the arrow that says which way, and highlights
-    /// its header, as Finder marks the column a folder is sorted by. No column is marked while the
-    /// tasks are in Todoist's own order.
+    /// Marks the column the table is sorted by with the arrow that says which way. No column is
+    /// marked while the tasks are in Todoist's own order.
     /// </summary>
+    /// <remarks>
+    /// The arrow and nothing more. The table's highlighted column would have to be cleared with a
+    /// nil, which the binding throws on, and that would take the rest of the render with it.
+    /// </remarks>
     private void ShowSort(TaskSort sort)
     {
         var arrow = NSImage.ImageNamed(sort.Descending ? "NSDescendingSortIndicator" : "NSAscendingSortIndicator");
-        NSTableColumn? sorted = null;
 
         foreach (var column in _grid.TableColumns())
-        {
-            var mine = !sort.IsDefault && column.Identifier == sort.Column.ToString();
-            _grid.SetIndicatorImage(mine ? arrow : null, column);
-            if (mine)
-                sorted = column;
-        }
-
-        // Nil is AppKit's own "no column", which the binding doesn't say it takes.
-        _grid.HighlightedTableColumn = sorted!;
+            _grid.SetIndicatorImage(!sort.IsDefault && column.Identifier == sort.Column.ToString() ? arrow : null, column);
     }
 
     /// <summary>
@@ -529,6 +613,26 @@ internal sealed class TaskListController : NSViewController
 
         return true;
     }
+
+    /// <summary>
+    /// The drop the pointer is asking for over a table: which third of a row it's over, or the end
+    /// of the list in the empty space below the last one. Worked out here rather than taken from
+    /// what AppKit proposes, whose gap between two rows can't tell after a sub-task from before the
+    /// next task out, which are different places to land.
+    /// </summary>
+    private DropTarget? DropAt(NSTableView table, INSDraggingInfo info)
+    {
+        var point = table.ConvertPointFromView(info.DraggingLocation, null);
+        var row = (int)table.GetRow(point);
+        if (row < 0)
+            return OutlineDrop.Below(_rows);
+
+        var rect = table.RectForRow(row);
+        return OutlineDrop.Over(_rows, row, OutlineDrop.ZoneAt((int)(point.Y - rect.Y), (int)rect.Height));
+    }
+
+    /// <summary>The task being dragged, read back off the pasteboard.</summary>
+    public static string? DraggedTask(INSDraggingInfo info) => info.DraggingPasteboard.GetStringForType(TaskDragType);
 
     private void Select(int row)
     {
@@ -631,7 +735,7 @@ internal sealed class TaskListController : NSViewController
     /// The list's own keys, and a right-click that acts on the row clicked rather than whatever
     /// happened to be selected.
     /// </summary>
-    private sealed class TaskTable(Action<AppCommand> run, Func<bool, bool> arrow) : NSTableView
+    private sealed class TaskTable(Action<AppCommand> run, Func<bool, bool> arrow, Func<AppCommand, bool> explain) : NSTableView
     {
         private const string Space = " ";
         private const string Return = "\r";
@@ -660,6 +764,14 @@ internal sealed class TaskListController : NSViewController
                 base.KeyDown(theEvent);
         }
 
+        /// <summary>
+        /// Gets to a key before the menu does, to say why when the menu would turn it away without a
+        /// word. One that can run goes on to the menu as usual.
+        /// </summary>
+        public override bool PerformKeyEquivalent(NSEvent theEvent)
+            => (Window?.FirstResponder == this && MacShortcuts.CommandFor(theEvent) is { } command && explain(command))
+                || base.PerformKeyEquivalent(theEvent);
+
         /// <summary>Selects the row under the pointer first, as Mail and Finder do.</summary>
         public override NSMenu? MenuForEvent(NSEvent theEvent)
         {
@@ -674,6 +786,52 @@ internal sealed class TaskListController : NSViewController
     private sealed class Source(TaskListController owner) : NSTableViewDataSource
     {
         public override nint GetRowCount(NSTableView tableView) => owner._rows.Count;
+
+        /// <summary>
+        /// A task can be picked up in any view, since the sidebar can take it from any of them; it's
+        /// where it can be put down in the list that depends on the view. Not a finished one, whose
+        /// place stopped meaning anything when it was ticked off.
+        /// </summary>
+        public override INSPasteboardWriting GetPasteboardWriterForRow(NSTableView tableView, nint row)
+        {
+            var task = owner._rows[(int)row];
+            if (task.IsHeading || task.Completed)
+                return null!;
+
+            var item = new NSPasteboardItem();
+            item.SetStringForType(task.Id, TaskDragType);
+            return item;
+        }
+
+        public override NSDragOperation ValidateDrop(NSTableView tableView, INSDraggingInfo info, nint row, NSTableViewDropOperation dropOperation)
+        {
+            var target = owner.DropAt(tableView, info);
+            owner._dropTarget = target;
+
+            if (target is null || DraggedTask(info) is not { } id || !owner._commands.CanDrop(id, target))
+                return NSDragOperation.None;
+
+            // Marked where it will land: along the top or bottom of the row, or round it.
+            switch (target.Zone)
+            {
+                case DropZone.Onto:
+                    tableView.SetDropRowDropOperation(target.Row, NSTableViewDropOperation.On);
+                    break;
+
+                case DropZone.Before:
+                    tableView.SetDropRowDropOperation(target.Row, NSTableViewDropOperation.Above);
+                    break;
+
+                default:
+                    tableView.SetDropRowDropOperation(target.Row + 1, NSTableViewDropOperation.Above);
+                    break;
+            }
+
+            return NSDragOperation.Move;
+        }
+
+        public override bool AcceptDrop(NSTableView tableView, INSDraggingInfo info, nint row, NSTableViewDropOperation dropOperation)
+            => owner._dropTarget is { } target && DraggedTask(info) is { } id && owner._commands.Drop(id, target);
     }
 
     private sealed class Delegate(TaskListController owner) : NSTableViewDelegate

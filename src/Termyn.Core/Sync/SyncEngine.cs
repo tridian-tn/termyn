@@ -1422,6 +1422,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            parentId = Promoted(parentId);
+
             return Model.Get(ResourceType.Items, parentId) is { } json
                    && !Projections.ToTaskItem(json).Completed
                    && DepthOf(parentId) + 1 <= MaxDepth;
@@ -1701,6 +1703,12 @@ public sealed class SyncEngine
             var parent = Model.Get(ResourceType.Items, parentId) is { } parentJson
                 ? Projections.ToTaskItem(parentJson)
                 : null;
+
+            // Straight after the parent, so the task comes out where it was rather than going to the
+            // end of the list. Nowhere to put it beside a parent that's gone or finished, neither of
+            // which has a place among its siblings, so those carry on to the move below.
+            if (parent is { Completed: false } && Place(id, parentId, after: true, act: true))
+                return true;
 
             // Alongside the parent means the parent's own place: under its parent if it has one,
             // otherwise its section — moving to the project would evict the task from that section.

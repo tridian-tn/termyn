@@ -375,6 +375,31 @@ public class SubtaskFoldingTests
     }
 
     [Fact]
+    public void Indenting_under_a_folded_task_unfolds_it_so_the_task_stays_on_screen()
+    {
+        var presenter = Nested();
+        presenter.SetCollapsed("a", true);
+
+        Assert.True(presenter.Indent("d"));
+
+        Assert.False(presenter.IsCollapsed("a"));
+        Assert.Contains(presenter.Rows, r => r.Id == "d");
+        Assert.Equal(new[] { "Parent", "Child", "Grandchild", "Other", "Other child" }, Shown(presenter));
+    }
+
+    [Fact]
+    public void Indenting_leaves_other_folds_alone()
+    {
+        var presenter = Nested();
+        presenter.SetCollapsed("b", true);
+
+        Assert.True(presenter.Indent("d"));
+
+        Assert.True(presenter.IsCollapsed("b"));
+        Assert.Contains(presenter.Rows, r => r.Id == "d");
+    }
+
+    [Fact]
     public void The_fold_is_still_there_when_the_search_is_let_go()
     {
         var presenter = Nested();
