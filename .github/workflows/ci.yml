@@ -75,9 +75,9 @@ jobs:
       - name: Test
         run: dotnet test --solution Termyn.Portable.slnf -c Release --no-build
 
-  # The native Mac app, built for Apple Silicon. It has no tests of its own yet, and the code below
-  # it is tested by the job above. Its own job because it needs the macOS workload and Xcode, which
-  # the portable projects don't, and installing the workload is most of what this job spends.
+  # The native Mac app, built for Apple Silicon and tested. The code below it is tested by the job
+  # above. Its own job because it needs the macOS workload and Xcode, which the portable projects
+  # don't, and installing the workload is most of what this job spends.
   #
   # The projects build with ValidateXcodeVersion off, since a workload names one exact Xcode and
   # the runner image's default moves on its own schedule.
@@ -87,7 +87,8 @@ jobs:
   # the app and writes its Objective-C registrations at build time, and both read that SDK's
   # headers, so it fails (MT0179). A Debug build does neither (it registers at launch), so it
   # still compiles every project and makes the .app, which is what this job is here to say. Back to
-  # Release once the image carries an Xcode the workload accepts.
+  # Release once the image carries an Xcode the workload accepts. The tests build as an app too, so
+  # they're Debug for the same reason.
   #
   # On a v* tag it also packages the app, stamped with the tag, for the release job to attach. That
   # is the same Debug build, for the reason above, and unsigned: Gatekeeper refuses it until it's
@@ -129,6 +130,35 @@ jobs:
             args+=("-p:Version=$version")
           fi
           dotnet build src/Termyn.App.Mac "${args[@]}"
+
+          # With the same arguments: the tests build the app they reference into the same folder,
+          # so without the version they'd leave the Package step an app stamped 0.0.0.
+          dotnet build tests/Termyn.App.Mac.Tests "${args[@]}"
+          dotnet build tests/Termyn.Platform.Mac.Tests "${args[@]}"
+
+      # The Keychain tests use the default keychain, under a service of their own, and fail rather
+      # than prompt if it's locked. So the runner gets one that's open, made here and gone with it.
+      - name: Make a keychain for the tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          password="$(uuidgen)"
+          security create-keychain -p "$password" tests.keychain
+          security set-keychain-settings tests.keychain
+          security unlock-keychain -p "$password" tests.keychain
+          security list-keychains -d user -s tests.keychain
+          security default-keychain -d user -s tests.keychain
+
+      # Runs each test bundle's own executable, on a runner with a desktop session, since the tests
+      # use AppKit. The time limit is because what goes wrong with a run like this tends to be that
+      # it never finishes rather than that it fails.
+      - name: Test
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test --project tests/Termyn.App.Mac.Tests -c Debug -r "$RID" --no-build
+          dotnet test --project tests/Termyn.Platform.Mac.Tests -c Debug -r "$RID" --no-build
 
       # -debug in the name for as long as this is a Debug build, so nobody downloading it takes it
       # for a finished one. Drop it when the job goes back to Release.

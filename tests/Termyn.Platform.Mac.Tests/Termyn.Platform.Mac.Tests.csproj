@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\MacTestBundle.props" />
+
+  <PropertyGroup>
+    <ApplicationId>net.tridian.termyn.platform.tests</ApplicationId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Termyn.Platform.Mac\Termyn.Platform.Mac.csproj" />
+  </ItemGroup>
+
+</Project>

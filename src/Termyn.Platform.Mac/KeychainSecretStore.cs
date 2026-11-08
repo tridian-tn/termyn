@@ -21,8 +21,6 @@ namespace Termyn.Platform.Mac;
 /// </remarks>
 public sealed class KeychainSecretStore : ISecretStore
 {
-    private const string Service = "Termyn";
-
     private const string Account = "todoist-token";
 
     /// <summary>
@@ -39,7 +37,18 @@ public sealed class KeychainSecretStore : ISecretStore
 
     private readonly Lock _gate = new();
 
+    private readonly string _service;
+
     private string? _held;
+
+    public KeychainSecretStore()
+        : this("Termyn")
+    {
+    }
+
+    /// <summary>A store kept under another service, so the tests never touch the real item.</summary>
+    /// <param name="service">The service the item is filed under</param>
+    internal KeychainSecretStore(string service) => _service = service;
 
     public string? GetToken() => ReadToken().Token;
 
@@ -125,5 +134,5 @@ public sealed class KeychainSecretStore : ISecretStore
     }
 
     /// <summary>The item, by the two attributes that name it.</summary>
-    private static SecRecord Query() => new(SecKind.GenericPassword) { Service = Service, Account = Account };
+    private SecRecord Query() => new(SecKind.GenericPassword) { Service = _service, Account = Account };
 }
