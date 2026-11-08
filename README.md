@@ -9,6 +9,15 @@ WinForms on .NET 10, offline-first, keyboard-driven.
 Unofficial, and not affiliated with Doist. It talks to the public [Todoist](https://todoist.com) API
 with a token you supply.
 
+## Background
+
+This project came about because I had two motivations:
+
+1. For some time, I'd found Todoist a truly excellent task manager but valued the OS-native feel of alternatives such as Abstractspoon TodoList. When working, productivity and familiarity matter more to me than aesthetics. I wanted an OS-native client for Todoist.
+2. I've been a professional software engineer for almost 30 years, and am quite capable of building such an application, but I was intrigued by (and professionally obligated to explore) the new world of agentic development. What are the pitfalls? How good is the code? How does one safely delegate tasks to the agent without losing oversight of (and confidence in) the code produced? How *much* does one delegate? What *is* software engineering now? If I don't write code, what is my role? I needed a project where I could explore the process - and limits - of this.
+
+...and so Termyn was born. Development is intentionally agent-executed, by and large, but lead and managed by a human. This isn't a prescriptive approach - code can be contributed by a human or agent, as long as it's considered and reviewed. That's the point.
+
 ## Build & test
 
 ```bash
