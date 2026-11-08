@@ -175,6 +175,21 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
     /// <summary>Renames a task, once its name has been edited where it stands.</summary>
     public void Rename(string id, string name) => Guarded(() => presenter.Rename(id, name));
 
+    /// <summary>How the list is ordered, for the header's arrow and the ticks in Sort By.</summary>
+    public TaskSort Sort => presenter.Sort;
+
+    /// <summary>Orders the list by a column as a click on its header does: the one in use turns round.</summary>
+    public void SortBy(TaskColumn column) => Guarded(() => presenter.SortBy(column));
+
+    /// <summary>Orders the list exactly as an item in Sort By names it.</summary>
+    public void SortBy(TaskSort sort) => Guarded(() => presenter.SortBy(sort));
+
+    /// <summary>Hides or shows what is filed under a task.</summary>
+    public void Fold(string id, bool collapsed) => Guarded(() => presenter.SetCollapsed(id, collapsed));
+
+    /// <summary>Hides or shows what is filed under every task in the view.</summary>
+    public void FoldAll(bool collapsed) => Guarded(() => presenter.FoldAll(collapsed));
+
     /// <summary>
     /// Runs a change, and says what went wrong rather than throwing it out of a menu or a key.
     /// </summary>
@@ -219,6 +234,8 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         Abilities: presenter.AbilitiesFor(taskId),
         ShowingCompleted: presenter.ShowingCompleted,
         CanUndo: presenter.CanUndo,
+        CanExpandAll: presenter.CanExpandAll,
+        CanCollapseAll: presenter.CanCollapseAll,
         Sort: presenter.Sort,
         NewTaskText: presenter.NewTaskText(presenter.Selection),
         ReconnectNeeded: presenter.ReconnectNeeded,

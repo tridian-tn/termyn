@@ -26,6 +26,11 @@ internal sealed class MainWindowController : NSWindowController
     private const string FrameName = "Main";
     private const string NewTaskItemId = "NewTask";
     private const string SyncItemId = "Sync";
+    private const string StyleItemId = "ViewStyle";
+    private const string SortItemId = "Sort";
+
+    /// <summary>What the toolbar's list-or-table control sends when one of its two is chosen.</summary>
+    private const string StyleChosen = "styleChosen:";
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
@@ -81,7 +86,7 @@ internal sealed class MainWindowController : NSWindowController
         split.AddSplitViewItem(NSSplitViewItem.FromViewController(_tasks));
         split.SplitView.AutosaveName = "MainSplit";
 
-        _toolbar = new Toolbar();
+        _toolbar = new Toolbar(() => _tasks.Style);
         var window = Window;
         window.ContentViewController = split;
         window.MinSize = new CGSize(600, 380);
@@ -184,6 +189,58 @@ internal sealed class MainWindowController : NSWindowController
     [Export(NewTaskAction)]
     private void NewTaskClicked(NSObject sender) => _commands.Run(AppCommand.NewTask, null);
 
+    [Export(ViewMenus.ShowAsList)]
+    private void ShowAsList(NSObject sender) => ShowStyle(TaskViewStyle.List);
+
+    [Export(ViewMenus.ShowAsTable)]
+    private void ShowAsTable(NSObject sender) => ShowStyle(TaskViewStyle.Table);
+
+    [Export(StyleChosen)]
+    private void StyleClicked(NSToolbarItemGroup sender)
+        => ShowStyle(sender.SelectedIndex == (int)TaskViewStyle.Table ? TaskViewStyle.Table : TaskViewStyle.List);
+
+    /// <summary>Lays the tasks out as a list or a table, and has the toolbar's control say which.</summary>
+    private void ShowStyle(TaskViewStyle style)
+    {
+        _tasks.SetStyle(style);
+        if (_toolbar.StyleItem is { } group)
+            group.SelectedIndex = (int)_tasks.Style;
+    }
+
+    /// <summary>
+    /// Sorts by the column an item in Sort By names, the way the tasks already point — or from the
+    /// top, coming from Todoist's order — as Mail keeps its direction when the column changes.
+    /// </summary>
+    [Export(ViewMenus.SortBy)]
+    private void SortByColumn(NSMenuItem sender)
+        => _commands.SortBy(new TaskSort(ViewMenus.ColumnOf(sender), !_presenter.Sort.IsDefault && _presenter.Sort.Descending));
+
+    [Export(ViewMenus.SortAscending)]
+    private void SortAscending(NSObject sender)
+    {
+        if (!_presenter.Sort.IsDefault)
+            _commands.SortBy(_presenter.Sort with { Descending = false });
+    }
+
+    [Export(ViewMenus.SortDescending)]
+    private void SortDescending(NSObject sender)
+    {
+        if (!_presenter.Sort.IsDefault)
+            _commands.SortBy(_presenter.Sort with { Descending = true });
+    }
+
+    [Export(ViewMenus.ToggleColumn)]
+    private void ToggleColumn(NSMenuItem sender) => _tasks.ToggleColumn(ViewMenus.ColumnOf(sender));
+
+    [Export(ViewMenus.ShowAllColumns)]
+    private void ShowAllColumns(NSObject sender) => _tasks.ShowAllColumns();
+
+    [Export(ViewMenus.ExpandAll)]
+    private void ExpandAll(NSObject sender) => _tasks.FoldAll(collapsed: false);
+
+    [Export(ViewMenus.CollapseAll)]
+    private void CollapseAll(NSObject sender) => _tasks.FoldAll(collapsed: true);
+
     /// <summary>
     /// Fills in a task item as its menu is about to show — or its key is about to be pressed — and
     /// says whether it can run. Everything else this window answers can always run.
@@ -191,11 +248,56 @@ internal sealed class MainWindowController : NSWindowController
     [Export("validateMenuItem:")]
     private bool ValidateMenuItem(NSMenuItem item)
     {
-        if (item.Action?.Name == MainMenu.Reconnect)
-            return _presenter.ReconnectNeeded;
+        var sort = _presenter.Sort;
+        var table = _tasks.Style == TaskViewStyle.Table;
 
-        if (item.Action?.Name != TaskMenu.Action)
-            return true;
+        switch (item.Action?.Name)
+        {
+            case MainMenu.Reconnect:
+                return _presenter.ReconnectNeeded;
+
+            case ViewMenus.ShowAsList:
+                item.State = table ? NSCellStateValue.Off : NSCellStateValue.On;
+                return true;
+
+            case ViewMenus.ShowAsTable:
+                item.State = table ? NSCellStateValue.On : NSCellStateValue.Off;
+                return true;
+
+            // Sorting works in the list as well, which has no header to click.
+            case ViewMenus.SortBy:
+                item.State = sort.Column == ViewMenus.ColumnOf(item) ? NSCellStateValue.On : NSCellStateValue.Off;
+                return true;
+
+            case ViewMenus.SortAscending:
+                item.State = !sort.IsDefault && !sort.Descending ? NSCellStateValue.On : NSCellStateValue.Off;
+                return !sort.IsDefault;
+
+            case ViewMenus.SortDescending:
+                item.State = !sort.IsDefault && sort.Descending ? NSCellStateValue.On : NSCellStateValue.Off;
+                return !sort.IsDefault;
+
+            // The Task column is always there, ticked and greyed, as Finder's Name column is.
+            case ViewMenus.ToggleColumn:
+                var column = ViewMenus.ColumnOf(item);
+                item.State = _tasks.IsShown(column) ? NSCellStateValue.On : NSCellStateValue.Off;
+                return table && column != TaskColumn.Content;
+
+            case ViewMenus.ShowAllColumns:
+                return table && !_tasks.AllShown;
+
+            case ViewMenus.ExpandAll:
+                return _commands.State(AppCommand.ExpandAll, null).Enabled;
+
+            case ViewMenus.CollapseAll:
+                return _commands.State(AppCommand.CollapseAll, null).Enabled;
+
+            case TaskMenu.Action:
+                break;
+
+            default:
+                return true;
+        }
 
         var command = TaskMenu.CommandOf(item);
         var id = _tasks.SelectedId;
@@ -287,7 +389,7 @@ internal sealed class MainWindowController : NSWindowController
     private void Render()
     {
         _sidebar.Render(_presenter.Sidebar, _presenter.SelectedKey);
-        _tasks.Render(_presenter.Rows, _presenter.LabelColours, _presenter.UnsupportedFilter, _presenter.Today);
+        _tasks.Render(_presenter.Rows, _presenter.LabelColours, _presenter.UnsupportedFilter, _presenter.Today, _presenter.Sort);
 
         // A fresh publish is the model moving on, so whatever was said about the last one has passed.
         _notice = null;
@@ -453,19 +555,24 @@ internal sealed class MainWindowController : NSWindowController
     /// The toolbar: the sidebar's own toggle over the sidebar; over the list, + to add a task, as
     /// Reminders has it, and Sync, either side of the separator that tracks the sidebar's edge.
     /// </summary>
-    private sealed class Toolbar : NSToolbarDelegate
+    private sealed class Toolbar(Func<TaskViewStyle> style) : NSToolbarDelegate
     {
         private static readonly string[] Items =
         [
             NSToolbar.NSToolbarToggleSidebarItemIdentifier,
             NSToolbar.NSToolbarSidebarTrackingSeparatorItemIdentifier,
             NSToolbar.NSToolbarFlexibleSpaceItemIdentifier,
+            StyleItemId,
+            SortItemId,
             SyncItemId,
             NewTaskItemId,
         ];
 
         /// <summary>The + item, once the toolbar has made it, for the new-task popover to point from.</summary>
         public NSToolbarItem? NewTaskItem { get; private set; }
+
+        /// <summary>The list-or-table control, for the window to keep in step with the View menu.</summary>
+        public NSToolbarItemGroup? StyleItem { get; private set; }
 
         public override string[] AllowedItemIdentifiers(NSToolbar toolbar) => Items;
 
@@ -481,6 +588,33 @@ internal sealed class MainWindowController : NSWindowController
                 case NewTaskItemId:
                     NewTaskItem = Item(NewTaskItemId, "plus", Strings.MenuNewTask, Strings.NewTaskTip, NewTaskAction);
                     return NewTaskItem;
+
+                // A pair to choose between, in the order of the View menu's, as Finder's view
+                // control is.
+                case StyleItemId:
+                    StyleItem = NSToolbarItemGroup.Create(
+                        StyleItemId,
+                        [NSImage.GetSystemSymbol("list.bullet", Strings.MenuAsList)!, NSImage.GetSystemSymbol("tablecells", Strings.MenuAsTable)!],
+                        NSToolbarItemGroupSelectionMode.SelectOne,
+                        [Strings.MenuAsList, Strings.MenuAsTable],
+                        null,
+                        new ObjCRuntime.Selector(StyleChosen));
+                    StyleItem.Label = Strings.ToolbarView;
+                    StyleItem.ToolTip = Strings.ToolbarViewTip;
+                    StyleItem.SelectedIndex = (int)style();
+                    return StyleItem;
+
+                // The same Sort By the View menu has, so the list can be sorted from where the
+                // pointer is, and when there's no header to click.
+                case SortItemId:
+                    return new NSMenuToolbarItem(SortItemId)
+                    {
+                        Image = NSImage.GetSystemSymbol("arrow.up.arrow.down", Strings.ToolbarSort),
+                        Label = Strings.ToolbarSort,
+                        ToolTip = Strings.ToolbarSortTip,
+                        Menu = ViewMenus.SortByMenu(Strings.MenuSortBy),
+                        ShowsIndicator = true,
+                    };
 
                 default:
                     return new NSToolbarItem(itemIdentifier);

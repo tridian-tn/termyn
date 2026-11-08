@@ -213,6 +213,45 @@ public class SortingTests
     public void Clearing_a_sort_that_was_never_applied_changes_nothing()
         => Assert.False(Seeded().ClearSort());
 
+    // ---- Naming the order outright, as the Mac's Sort By menu does -----------------------------
+
+    [Fact]
+    public void Naming_a_column_and_direction_orders_it_as_two_clicks_would()
+    {
+        var named = Seeded();
+        Assert.True(named.SortBy(new TaskSort(TaskColumn.Priority, Descending: true)));
+
+        var clicked = Seeded();
+        clicked.SortBy(TaskColumn.Priority);
+        clicked.SortBy(TaskColumn.Priority);
+
+        Assert.Equal(clicked.Sort, named.Sort);
+        Assert.Equal(Contents(clicked), Contents(named));
+    }
+
+    [Fact]
+    public void Naming_the_order_already_in_use_changes_nothing()
+    {
+        var presenter = Seeded();
+        presenter.SortBy(new TaskSort(TaskColumn.Due));
+
+        Assert.False(presenter.SortBy(new TaskSort(TaskColumn.Due)));
+        Assert.False(Seeded().SortBy(TaskSort.Default));
+    }
+
+    [Fact]
+    public void Naming_no_column_is_the_account_order_whichever_way_it_points()
+    {
+        var presenter = Seeded();
+        var original = Contents(presenter);
+        presenter.SortBy(TaskColumn.Content);
+
+        Assert.True(presenter.SortBy(new TaskSort(TaskColumn.None, Descending: true)));
+
+        Assert.Equal(TaskSort.Default, presenter.Sort);
+        Assert.Equal(original, Contents(presenter));
+    }
+
     [Fact]
     public void A_sort_survives_a_sync_bringing_new_rows()
     {

@@ -344,4 +344,92 @@
     <value>A sync was still running and didn't stop in time. Open Termyn again and try once more.</value>
     <comment>Shown under SwitchAccountFailed when a sync wouldn't finish, so the last account's data couldn't be removed safely. Termyn quits after it.</comment>
   </data>
+  <data name="MenuAsList" xml:space="preserve">
+    <value>as List</value>
+    <comment>View menu item, and the toolbar's choice, that shows the tasks as a two-line list. Finder's wording for its view styles.</comment>
+  </data>
+  <data name="MenuAsTable" xml:space="preserve">
+    <value>as Table</value>
+    <comment>View menu item, and the toolbar's choice, that shows the tasks as a table with a column for each thing about a task.</comment>
+  </data>
+  <data name="MenuSortBy" xml:space="preserve">
+    <value>Sort By</value>
+    <comment>View menu submenu, and the toolbar button's menu, that orders the tasks by a column.</comment>
+  </data>
+  <data name="MenuColumns" xml:space="preserve">
+    <value>Columns</value>
+    <comment>View menu submenu, and the menu on the table's header, that hides and shows the table's columns.</comment>
+  </data>
+  <data name="MenuExpandAll" xml:space="preserve">
+    <value>Expand All</value>
+    <comment>View menu item that shows every task's sub-tasks in the view.</comment>
+  </data>
+  <data name="MenuCollapseAll" xml:space="preserve">
+    <value>Collapse All</value>
+    <comment>View menu item that hides every task's sub-tasks in the view.</comment>
+  </data>
+  <data name="SortTodoistOrder" xml:space="preserve">
+    <value>Todoist Order</value>
+    <comment>Sort By item that puts the tasks back in the order they have in Todoist.</comment>
+  </data>
+  <data name="SortAscending" xml:space="preserve">
+    <value>Ascending</value>
+    <comment>Sort By item that orders the chosen column from the top: earliest, most urgent, A to Z.</comment>
+  </data>
+  <data name="SortDescending" xml:space="preserve">
+    <value>Descending</value>
+    <comment>Sort By item that orders the chosen column the other way round.</comment>
+  </data>
+  <data name="ShowAllColumns" xml:space="preserve">
+    <value>Show All Columns</value>
+    <comment>Columns menu item that shows every column the table has hidden.</comment>
+  </data>
+  <data name="ColumnTask" xml:space="preserve">
+    <value>Task</value>
+    <comment>The table's column for the task's name.</comment>
+  </data>
+  <data name="ColumnPriority" xml:space="preserve">
+    <value>Priority</value>
+    <comment>The table's column for the task's priority, headed with a flag. Also the column's name in the menus and its header's tooltip.</comment>
+  </data>
+  <data name="ColumnProject" xml:space="preserve">
+    <value>Project</value>
+    <comment>The table's column for the task's project.</comment>
+  </data>
+  <data name="ColumnDue" xml:space="preserve">
+    <value>Due</value>
+    <comment>The table's column for the task's due date.</comment>
+  </data>
+  <data name="ColumnDeadline" xml:space="preserve">
+    <value>Deadline</value>
+    <comment>The table's column for the task's deadline.</comment>
+  </data>
+  <data name="ColumnLabels" xml:space="preserve">
+    <value>Labels</value>
+    <comment>The table's column for the task's labels.</comment>
+  </data>
+  <data name="ShowSubtasks" xml:space="preserve">
+    <value>Show Sub-tasks</value>
+    <comment>Tooltip on the triangle in front of a task whose sub-tasks are hidden.</comment>
+  </data>
+  <data name="HideSubtasks" xml:space="preserve">
+    <value>Hide Sub-tasks</value>
+    <comment>Tooltip on the triangle in front of a task whose sub-tasks are showing.</comment>
+  </data>
+  <data name="ToolbarView" xml:space="preserve">
+    <value>View</value>
+    <comment>Label of the toolbar control that chooses between the list and the table.</comment>
+  </data>
+  <data name="ToolbarViewTip" xml:space="preserve">
+    <value>Show the tasks as a list or as a table</value>
+    <comment>Tooltip on the toolbar control that chooses between the list and the table.</comment>
+  </data>
+  <data name="ToolbarSort" xml:space="preserve">
+    <value>Sort</value>
+    <comment>Label of the toolbar button whose menu orders the tasks.</comment>
+  </data>
+  <data name="ToolbarSortTip" xml:space="preserve">
+    <value>Choose how the tasks are ordered</value>
+    <comment>Tooltip on the toolbar's Sort button.</comment>
+  </data>
 </root>

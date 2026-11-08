@@ -71,10 +71,23 @@ internal static class MainMenu
         // ⌘1–3 for the views, as Mail and Reminders number theirs, and ⌃⌘S for the sidebar, which
         // is the shortcut every sidebar on macOS answers to. AppKit retitles the sidebar item Hide
         // Sidebar while the sidebar is showing, and adds Enter Full Screen to this menu itself.
+        //
+        // As List and as Table are Finder's words for the same choice. Finder has ⌘1–4 for its view
+        // styles, which here are the views themselves, so they take ⌃⌘ — the sidebar's modifiers.
+        // Expand All and Collapse All have no keys: → and ← do a task at a time, as in Finder.
         Add(bar, Strings.MenuView,
             Item(Strings.MenuToday, ShowToday, "1"),
             Item(Strings.MenuUpcoming, ShowUpcoming, "2"),
             Item(Strings.MenuInbox, ShowInbox, "3"),
+            NSMenuItem.SeparatorItem,
+            Item(Strings.MenuAsList, ViewMenus.ShowAsList, "1", NSEventModifierMask.CommandKeyMask | NSEventModifierMask.ControlKeyMask),
+            Item(Strings.MenuAsTable, ViewMenus.ShowAsTable, "2", NSEventModifierMask.CommandKeyMask | NSEventModifierMask.ControlKeyMask),
+            NSMenuItem.SeparatorItem,
+            new NSMenuItem(Strings.MenuSortBy) { Submenu = ViewMenus.SortByMenu(Strings.MenuSortBy) },
+            new NSMenuItem(Strings.MenuColumns) { Submenu = ViewMenus.ColumnsMenu(Strings.MenuColumns) },
+            NSMenuItem.SeparatorItem,
+            Item(Strings.MenuExpandAll, ViewMenus.ExpandAll),
+            Item(Strings.MenuCollapseAll, ViewMenus.CollapseAll),
             NSMenuItem.SeparatorItem,
             Item(Strings.MenuSyncNow, SyncNow, "r"),
             NSMenuItem.SeparatorItem,
