@@ -333,7 +333,7 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
     {
         if (!presenter.MoveTo(id, destination))
             say(Strings.MoveTargetGone);
-        else if (Row(id) is not null)
+        else if (Row(CurrentIdOf(id)) is not null)
             SelectWhenShown?.Invoke(id);
         else
             say(string.Format(CultureInfo.CurrentCulture, Strings.MovedNotShown, destination.Path));
@@ -346,7 +346,7 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
     /// <param name="id">The new task</param>
     public void Added(string id)
     {
-        if (Row(id) is not null)
+        if (Row(CurrentIdOf(id)) is not null)
             SelectWhenShown?.Invoke(id);
         else
             say(Strings.AddedNotShown);

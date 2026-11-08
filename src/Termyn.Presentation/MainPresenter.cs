@@ -806,6 +806,10 @@ public sealed class MainPresenter
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
+        // By its name now. A parent added a moment ago can be renamed by a sync while the sub-task
+        // is being typed, and under the old name nothing finds it to file the new one beneath.
+        parentId = _engine.Resolve(parentId);
+
         var snapshot = _engine.Snapshot();
         if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !_engine.CanNestUnder(parentId))
             return null;

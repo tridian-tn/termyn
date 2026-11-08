@@ -1422,6 +1422,8 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
+            parentId = Promoted(parentId);
+
             return Model.Get(ResourceType.Items, parentId) is { } json
                    && !Projections.ToTaskItem(json).Completed
                    && DepthOf(parentId) + 1 <= MaxDepth;
