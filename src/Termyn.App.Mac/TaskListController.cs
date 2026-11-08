@@ -279,8 +279,13 @@ internal sealed class TaskListController : NSViewController
         NSUserDefaults.StandardUserDefaults.SetString(style.ToString(), StyleKey);
         ShowStyle();
 
+        // Nothing selected stays nothing selected. The table coming into view still holds whatever
+        // was selected when it was last shown, and Space or ⌫ would act on that unseen choice.
         if (selected is not null && IndexOf(selected) is { } row)
             Select(row);
+        else
+            Current.DeselectAll(this);
+
         if (focused)
             View.Window?.MakeFirstResponder(Current);
     }

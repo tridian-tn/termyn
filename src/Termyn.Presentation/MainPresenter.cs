@@ -3736,10 +3736,15 @@ public sealed class MainPresenter
     public bool SortBy(TaskSort sort)
     {
         var wanted = sort.IsDefault ? TaskSort.Default : sort;
-        if (wanted == Sort)
-            return false;
 
-        Sort = wanted;
+        lock (_publishing)
+        {
+            if (wanted == Sort)
+                return false;
+
+            Sort = wanted;
+        }
+
         Republish();
         return true;
     }
