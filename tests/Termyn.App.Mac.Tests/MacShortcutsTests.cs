@@ -34,6 +34,8 @@ public class MacShortcutsTests
     {
         Assert.Equal("⌘N", MacShortcuts.Text(AppCommand.NewTask));
         Assert.Equal("⇧⌘N", MacShortcuts.Text(AppCommand.NewSubtask));
+        Assert.Equal("⇧⌘D", MacShortcuts.Text(AppCommand.Deadline));
+        Assert.Equal("⇧⌘R", MacShortcuts.Text(AppCommand.Reminders));
         Assert.Equal("⌥⌘1", MacShortcuts.Text(AppCommand.Priority1));
         Assert.Equal("⌘]", MacShortcuts.Text(AppCommand.Indent));
         Assert.Equal("⌘↩", MacShortcuts.Text(AppCommand.ToggleComplete));

@@ -1,5 +1,4 @@
 using System.Globalization;
-using ObjCRuntime;
 using Termyn.Core.Logging;
 using Termyn.Presentation;
 
@@ -41,7 +40,7 @@ internal sealed class NewTaskController(
 
     public override void LoadView()
     {
-        _field.Delegate = new Typing(this);
+        _field.Delegate = new FieldKeys(ShowPreview, Add, Finish);
         _field.WidthAnchor.ConstraintEqualTo(380).Active = true;
 
         _preview.Font = NSFont.SystemFontOfSize(NSFont.SmallSystemFontSize)!;
@@ -160,28 +159,6 @@ internal sealed class NewTaskController(
         finally
         {
             _adding = false;
-        }
-    }
-
-    private sealed class Typing(NewTaskController owner) : NSTextFieldDelegate
-    {
-        public override void Changed(NSNotification notification) => owner.ShowPreview();
-
-        public override bool DoCommandBySelector(NSControl control, NSTextView textView, Selector commandSelector)
-        {
-            switch (commandSelector.Name)
-            {
-                case "insertNewline:":
-                    owner.Add();
-                    return true;
-
-                case "cancelOperation:":
-                    owner.Finish();
-                    return true;
-
-                default:
-                    return false;
-            }
         }
     }
 }

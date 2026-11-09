@@ -33,6 +33,30 @@ public class TaskCommandsTests
     }
 
     [AppKitFact]
+    public void Deadline_and_Reminders_open_their_popovers_on_the_task()
+    {
+        var opened = new List<string>();
+        _commands.OpenDeadline = id => opened.Add("deadline " + id);
+        _commands.OpenReminders = id => opened.Add("reminders " + id);
+
+        _commands.Run(AppCommand.Deadline, "a");
+        _commands.Run(AppCommand.Reminders, "b");
+
+        Assert.Equal(["deadline a", "reminders b"], opened);
+        Assert.Equal("Deadline…", TaskCommands.Label(AppCommand.Deadline, _commands.State(AppCommand.Deadline, "a"), _commands.Row("a")));
+        Assert.Equal("Reminders…", TaskCommands.Label(AppCommand.Reminders, _commands.State(AppCommand.Reminders, "a"), _commands.Row("a")));
+    }
+
+    [AppKitFact]
+    public void Reminders_is_offered_on_a_plan_without_them()
+    {
+        // The popover is where the user can see what they'd be getting, and it won't let a save through.
+        var commands = FakeAccount.Commands(FakeAccount.Presenter(plan: ("free", false)));
+
+        Assert.True(commands.State(AppCommand.Reminders, "a").Enabled);
+    }
+
+    [AppKitFact]
     public void Taking_the_date_off_is_lit_only_on_a_task_with_one()
     {
         Assert.False(_commands.State(AppCommand.DueNone, "a").Enabled);

@@ -20,8 +20,8 @@ namespace Termyn.App.Mac;
 internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<string> say)
 {
     /// <summary>
-    /// The task commands this window offers. The rest of <see cref="Menus.TaskContext"/> —
-    /// deadlines and reminders — comes in a later version.
+    /// The task commands this window offers, which is all of <see cref="Menus.TaskContext"/>. One
+    /// added there stays out of the Mac's menus until it's listed here and <see cref="Run"/> answers it.
     /// </summary>
     public static readonly IReadOnlySet<AppCommand> Offered = new HashSet<AppCommand>
     {
@@ -34,11 +34,13 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         AppCommand.DueWeekend,
         AppCommand.DueNextWeek,
         AppCommand.DueNone,
+        AppCommand.Deadline,
         AppCommand.Priority1,
         AppCommand.Priority2,
         AppCommand.Priority3,
         AppCommand.Priority4,
         AppCommand.Labels,
+        AppCommand.Reminders,
         AppCommand.Indent,
         AppCommand.Outdent,
         AppCommand.MoveUp,
@@ -53,6 +55,12 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
 
     /// <summary>Opens the due-date popover on a task. Set by the window.</summary>
     public Action<string>? OpenDue { get; set; }
+
+    /// <summary>Opens the deadline popover on a task. Set by the window.</summary>
+    public Action<string>? OpenDeadline { get; set; }
+
+    /// <summary>Opens the reminders popover on a task. Set by the window.</summary>
+    public Action<string>? OpenReminders { get; set; }
 
     /// <summary>Opens the new-task popover. Set by the window.</summary>
     public Action? OpenNewTask { get; set; }
@@ -89,6 +97,8 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         AppCommand.Rename => Strings.Rename,
         AppCommand.NewSubtask => Strings.NewSubtask,
         AppCommand.Labels => Strings.Labels,
+        AppCommand.Deadline => Strings.Deadline,
+        AppCommand.Reminders => Strings.Reminders,
         AppCommand.Indent => Strings.Indent,
         AppCommand.Outdent => Strings.Outdent,
         AppCommand.MoveUp => Strings.MoveUp,
@@ -163,6 +173,16 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
 
             case AppCommand.Labels:
                 OpenLabels?.Invoke(id);
+                break;
+
+            case AppCommand.Deadline:
+                OpenDeadline?.Invoke(id);
+                break;
+
+            // Offered on a plan without reminders too: the popover is where the user can see what
+            // they'd be getting, and it won't let a save through.
+            case AppCommand.Reminders:
+                OpenReminders?.Invoke(id);
                 break;
 
             case AppCommand.Indent:
@@ -284,6 +304,18 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
 
     /// <summary>Renames a task, once its name has been edited where it stands.</summary>
     public void Rename(string id, string name) => Guarded(() => presenter.Rename(id, name));
+
+    /// <summary>
+    /// Sets or clears a task's deadline, or says why it couldn't be: the popover closes either way,
+    /// and a task that looks unchanged reads as a deadline that didn't take.
+    /// </summary>
+    /// <param name="id">The task</param>
+    /// <param name="day">The day, or null to clear it</param>
+    public void SetDeadline(string id, DateOnly? day) => Guarded(() =>
+    {
+        if (!presenter.SetDeadline(id, day))
+            say(Strings.DeadlineNotSet);
+    });
 
     /// <summary>
     /// Gives a task the labels ticked in the picker, making any the account doesn't have yet.

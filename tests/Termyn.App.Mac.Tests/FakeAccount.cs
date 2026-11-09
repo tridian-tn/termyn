@@ -18,9 +18,15 @@ internal static class FakeAccount
     private static readonly DateOnly Today = new(2026, 7, 31);
 
     /// <param name="api">The server to answer the presenter, for a test that means to sync</param>
-    public static MainPresenter Presenter(FakeApi? api = null)
+    /// <param name="plan">The plan the account is on, as a sync would say it, or null for none said yet</param>
+    /// <param name="prepare">Anything more the account should hold</param>
+    public static MainPresenter Presenter(FakeApi? api = null, (string Name, bool Reminders)? plan = null, Action<InMemorySnapshotStore>? prepare = null)
     {
         var store = new InMemorySnapshotStore();
+        if (plan is { } said)
+            store.PutResource("user_plan_limits", "user_plan_limits", $$$"""{"current":{"plan_name":"{{{said.Name}}}","reminders":{{{(said.Reminders ? "true" : "false")}}}}}""");
+
+        prepare?.Invoke(store);
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
         store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1}""");
         store.PutResource("labels", "l2", """{"id":"l2","name":"urgent","item_order":2}""");
