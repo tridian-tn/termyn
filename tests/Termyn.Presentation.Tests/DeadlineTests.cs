@@ -108,7 +108,7 @@ public class DeadlineTests
         // so saying it was set would be untrue.
         var presenter = Presenter(Task("i1", "Ship it"));
 
-        presenter.SetDeadline("gone", new DateOnly(2026, 8, 4));
+        Assert.False(presenter.SetDeadline("gone", new DateOnly(2026, 8, 4)));
 
         Assert.Empty(presenter.History.Recent());
     }

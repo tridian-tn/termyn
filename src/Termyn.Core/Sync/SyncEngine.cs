@@ -729,7 +729,8 @@ public sealed class SyncEngine
     }
 
     /// <summary>Applies changed fields to a task optimistically and queues an <c>item_update</c>.</summary>
-    public void UpdateItem(string id, JsonObject changes)
+    /// <returns>False when the task isn't held, with nothing queued</returns>
+    public bool UpdateItem(string id, JsonObject changes)
     {
         lock (_gate)
         {
@@ -738,7 +739,7 @@ public sealed class SyncEngine
             // Nothing held locally means the task is already gone; sending the edit anyway would
             // queue a command that can only fail until it poisons.
             if (Model.Get(ResourceType.Items, id) is not { } existing)
-                return;
+                return false;
 
             var prior = existing.ToJsonString();
             var updated = existing.DeepClone().AsObject();
@@ -750,6 +751,7 @@ public sealed class SyncEngine
 
             Persist("item_update", args, null, prior, [new StoredResource(ResourceType.Items, id, updated.ToJsonString())], []);
             Model.Upsert(ResourceType.Items, id, updated);
+            return true;
         }
     }
 

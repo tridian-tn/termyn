@@ -1970,11 +1970,11 @@ public sealed class MainPresenter
     public bool SetDeadline(string id, DateOnly? date)
     {
         id = _engine.Resolve(id);
-        if (!_engine.Holds(id))
-            return false;
 
+        // Asked of the write itself rather than beforehand: a sync can take the task away in between.
         var named = Named(id);
-        _engine.UpdateItem(id, new JsonObject { ["deadline"] = ItemFields.Deadline(date) });
+        if (!_engine.UpdateItem(id, new JsonObject { ["deadline"] = ItemFields.Deadline(date) }))
+            return false;
 
         History.Note(
             date is { } day
