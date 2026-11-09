@@ -259,7 +259,7 @@ public class RecurringAndReminderTests
     {
         var engine = Seeded();
 
-        engine.DeleteReminder("ghost");
+        Assert.False(engine.DeleteReminder("ghost"));
 
         Assert.Equal(0, engine.PendingCount);
     }

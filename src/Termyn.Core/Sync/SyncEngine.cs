@@ -2291,18 +2291,21 @@ public sealed class SyncEngine
         }
     }
 
-    public void DeleteReminder(string id)
+    /// <summary>Removes a reminder, and queues a <c>reminder_delete</c>.</summary>
+    /// <returns>False when it's already gone, with nothing queued</returns>
+    public bool DeleteReminder(string id)
     {
         lock (_gate)
         {
             id = Promoted(id);
 
             if (Model.Get(ResourceType.Reminders, id) is null)
-                return;
+                return false;
 
             // Through the shared path so the prior takes the form Load recognises as a barrier.
             // Recording one here alone would only hold until the app restarted.
             RemoveAll("reminder_delete", id, [new ResourceKey(ResourceType.Reminders, id)]);
+            return true;
         }
     }
 

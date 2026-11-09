@@ -1818,6 +1818,10 @@ public sealed class MainPresenter
     /// <returns>False when it's already due that day or isn't there, so nothing was written</returns>
     public bool Reschedule(string id, DateOnly day)
     {
+        // By its name now. A popover holds what it opened with, and a sync can rename a task added
+        // a moment ago while it's up.
+        id = _engine.Resolve(id);
+
         var snapshot = _engine.Snapshot();
         if (snapshot.Items.FirstOrDefault(i => i.Id == id) is not { } item
             || SmartViews.DueOn(item, snapshot.TimeZone) == day)
@@ -1957,8 +1961,18 @@ public sealed class MainPresenter
     public DateOnly Today => _engine.Today;
 
     /// <summary>Sets or, with a null date, clears the day a task has to be finished by.</summary>
-    public void SetDeadline(string id, DateOnly? date)
+    /// <param name="id">The task, by any name it has gone by</param>
+    /// <param name="date">The day, or null to clear it</param>
+    /// <returns>
+    /// False when the account doesn't hold the task, with nothing changed: one a sync has deleted,
+    /// or a finished one out of the history
+    /// </returns>
+    public bool SetDeadline(string id, DateOnly? date)
     {
+        id = _engine.Resolve(id);
+        if (!_engine.Holds(id))
+            return false;
+
         var named = Named(id);
         _engine.UpdateItem(id, new JsonObject { ["deadline"] = ItemFields.Deadline(date) });
 
@@ -1969,6 +1983,7 @@ public sealed class MainPresenter
             $"deadline:{id}");
 
         Publish();
+        return true;
     }
 
     /// <summary>
@@ -2392,6 +2407,21 @@ public sealed class MainPresenter
         return [.. RemindersFor(itemId).Select(r => new ReminderRow(r, zone))];
     }
 
+    /// <summary>
+    /// Whether a reminder can be set a number of minutes before a task is due, which needs a due
+    /// date with a time: Todoist has nothing to count back from otherwise.
+    /// </summary>
+    /// <param name="itemId">The task, by any name it has gone by</param>
+    /// <returns>True when it has a due time</returns>
+    public bool TakesRelativeReminder(string itemId)
+    {
+        itemId = _engine.Resolve(itemId);
+
+        var snapshot = _engine.Snapshot();
+        return snapshot.Items.FirstOrDefault(i => i.Id == itemId) is { } item
+            && SmartViews.DueTimeOf(item, snapshot.TimeZone) is not null;
+    }
+
     /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
     /// <returns>False when the plan won't take it, so the caller can say why rather than failing later.</returns>
     public bool AddRelativeReminder(string itemId, int minutesBefore)
@@ -2446,7 +2476,9 @@ public sealed class MainPresenter
 
     public void DeleteReminder(string id)
     {
-        _engine.DeleteReminder(id);
+        // One a sync has taken away meanwhile: there was nothing to remove, so nothing to note.
+        if (!_engine.DeleteReminder(id))
+            return;
 
         History.Note(Strings.HistoryReminderRemoved, $"reminder:delete:{id}");
         Publish();

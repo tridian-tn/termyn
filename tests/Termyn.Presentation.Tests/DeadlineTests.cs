@@ -102,6 +102,18 @@ public class DeadlineTests
     // ---- Setting one ---------------------------------------------------------------------------
 
     [Fact]
+    public void One_set_on_a_task_no_longer_held_isnt_noted_as_done()
+    {
+        // A finished task out of the history, or one a sync has deleted: the engine writes nothing,
+        // so saying it was set would be untrue.
+        var presenter = Presenter(Task("i1", "Ship it"));
+
+        presenter.SetDeadline("gone", new DateOnly(2026, 8, 4));
+
+        Assert.Empty(presenter.History.Recent());
+    }
+
+    [Fact]
     public void A_day_picked_is_set_as_the_deadline()
     {
         var presenter = Presenter(Task("i1", "Ship it"));

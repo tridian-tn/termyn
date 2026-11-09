@@ -4236,8 +4236,7 @@ internal sealed class MainForm : Form
         if (!answered || day == row.DeadlineOn)
             return false;
 
-        _presenter.SetDeadline(id, day);
-        return true;
+        return _presenter.SetDeadline(id, day);
     }
 
     /// <summary>Puts the deadline dialog up, which is what <see cref="AskForDeadline"/> is by default.</summary>
