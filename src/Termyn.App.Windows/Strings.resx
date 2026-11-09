@@ -253,6 +253,10 @@
     <value>Your plan hasn't synced yet.</value>
     <comment>Reminders dialog: the app doesn't know yet whether the account's plan allows reminders.</comment>
   </data>
+  <data name="RemindersNeedDueTime" xml:space="preserve">
+    <value>Reminding before it's due needs a due date with a time.</value>
+    <comment>Reminders dialog: the task has no due time for an offset to count back from.</comment>
+  </data>
   <data name="RemindersAtLimit" xml:space="preserve">
     <value>This plan is at its limit for reminders.</value>
     <comment>Reminders dialog: Todoist refused a new reminder because the plan allows no more.</comment>
