@@ -48,6 +48,12 @@ internal sealed class ReminderForm : Form
 
     private bool _wrote;
 
+    /// <summary>
+    /// Something the line is saying about the last thing tried, which a sync coming in shouldn't
+    /// take away from under someone reading it. Null when the line is free to say why something's greyed.
+    /// </summary>
+    private string? _notice;
+
     private ReminderForm(MainPresenter presenter, string itemId, string task)
     {
         _presenter = presenter;
@@ -191,6 +197,9 @@ internal sealed class ReminderForm : Form
     /// <summary>What the box for a moment suggests typing while it's empty.</summary>
     internal string Hint => _absolute.PlaceholderText;
 
+    /// <summary>What the list of reminders says, row by row.</summary>
+    internal IReadOnlyList<string> Listed => [.. _existing.Items.Cast<object>().Select(row => row.ToString() ?? string.Empty)];
+
     /// <summary>What the mouse is told over the writing controls.</summary>
     internal string Tip => _tips.GetToolTip(_writes) ?? string.Empty;
 
@@ -228,20 +237,72 @@ internal sealed class ReminderForm : Form
     /// <summary>Presses Remove, for a test with no dialog to click.</summary>
     internal void PressRemove() => InvokeOnClick(_remove, EventArgs.Empty);
 
+    /// <summary>
+    /// What the task is called now. One added a moment ago is renamed when a sync hears what the
+    /// server calls it, and the old name would find no reminders on it.
+    /// </summary>
+    private string CurrentId => _presenter.CurrentIdOf(_itemId);
+
+    /// <summary>Follows a sync for as long as there's a window to show it in.</summary>
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        _presenter.RowsChanged += OnRowsChanged;
+    }
+
+    /// <inheritdoc/>
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        _presenter.RowsChanged -= OnRowsChanged;
+        base.OnHandleDestroyed(e);
+    }
+
+    /// <summary>Something has changed, on whichever thread it finished on.</summary>
+    private void OnRowsChanged()
+    {
+        if (IsDisposed || !IsHandleCreated)
+            return;
+
+        if (!InvokeRequired)
+        {
+            CatchUp();
+            return;
+        }
+
+        try
+        {
+            BeginInvoke(CatchUp);
+        }
+        catch (InvalidOperationException)
+        {
+            // Closed between asking and posting. This is the sync's thread, and a dialog that has
+            // gone is no reason to fail the sync.
+        }
+    }
+
+    /// <summary>Puts the list and the controls right for how things stand now.</summary>
+    private void CatchUp()
+    {
+        Reload();
+        ShowWhatsOffered();
+    }
+
     private void AddRelative()
     {
-        // Asked again at the press: a sync runs while this is open, and may have taken away the due
-        // time the button was lit for. Todoist is expected to refuse the add, but only later on.
-        if (!_presenter.TakesRelativeReminder(_itemId))
+        // Asked again at the press, for a sync that has taken away the due time the button was lit
+        // for and whose news hasn't reached this thread yet. Todoist is expected to refuse the add,
+        // but only later on.
+        if (!_presenter.TakesRelativeReminder(CurrentId))
         {
+            _notice = null;
             ShowWhatsOffered();
             return;
         }
 
-        if (_presenter.AddRelativeReminder(_itemId, Offsets[_offset.SelectedIndex].Minutes))
+        if (_presenter.AddRelativeReminder(CurrentId, Offsets[_offset.SelectedIndex].Minutes))
             Wrote();
         else
-            _message.Text = Refusal();
+            Say(Refusal());
     }
 
     /// <summary>
@@ -260,18 +321,18 @@ internal sealed class ReminderForm : Form
         var verdict = DayBoxText.ForReminder(reading, _presenter.DatesInEnglish);
         if (!verdict.Accepted || reading.Day is not { } date)
         {
-            _message.Text = verdict.Says;
+            Say(verdict.Says);
             return;
         }
 
-        if (_presenter.AddAbsoluteReminder(_itemId, date, reading.Time ?? DayBoxText.ReminderTime))
+        if (_presenter.AddAbsoluteReminder(CurrentId, date, reading.Time ?? DayBoxText.ReminderTime))
         {
             _absolute.Clear();
             Wrote();
         }
         else
         {
-            _message.Text = Refusal();
+            Say(Refusal());
         }
     }
 
@@ -295,7 +356,7 @@ internal sealed class ReminderForm : Form
 
         // Asked of the account rather than the rows on screen: the outline only shows the current
         // view, so a task that is merely filtered out is still very much there.
-        return _presenter.HasTask(_itemId)
+        return _presenter.HasTask(CurrentId)
             ? Strings.RemindersAtLimit
             : Strings.RemindersTaskGone;
     }
@@ -318,8 +379,9 @@ internal sealed class ReminderForm : Form
     /// </remarks>
     private void ShowWhatsOffered()
     {
+        var id = CurrentId;
         var available = _presenter.RemindersAvailable;
-        var offsets = available && _presenter.TakesRelativeReminder(_itemId);
+        var offsets = available && _presenter.TakesRelativeReminder(id);
 
         _offset.Enabled = offsets;
         _add.Enabled = offsets;
@@ -328,28 +390,55 @@ internal sealed class ReminderForm : Form
 
         var reason = !available ? PlanReason()
             : offsets ? string.Empty
-            : _presenter.HasTask(_itemId) ? Strings.RemindersNeedDueTime
+            : _presenter.HasTask(id) ? Strings.RemindersNeedDueTime
             : Strings.RemindersTaskGone;
 
-        _message.Text = reason;
+        // With everything greyed, the plan is the only thing left worth saying.
+        _message.Text = available && _notice is { } notice ? notice : reason;
         _tips.SetToolTip(_writes, reason);
+    }
+
+    /// <summary>Says something about the last thing tried, in place of why anything's greyed.</summary>
+    /// <remarks>Whatever turned it down may also mean the controls no longer stand.</remarks>
+    /// <param name="notice">What to say</param>
+    private void Say(string notice)
+    {
+        _notice = notice;
+        ShowWhatsOffered();
     }
 
     private void Wrote()
     {
         _wrote = true;
-        Reload();
-        ShowWhatsOffered();
+        _notice = null;
+        CatchUp();
     }
 
+    /// <summary>
+    /// The reminders the task has now, keeping the selection and the scroll: a sync can arrive just
+    /// as someone reaches for Remove.
+    /// </summary>
     private void Reload()
     {
+        var selected = _existing.SelectedItem is ReminderRow row ? _presenter.CurrentIdOf(row.Reminder.Id) : null;
+        var top = _existing.TopIndex;
+
+        _existing.BeginUpdate();
         _existing.Items.Clear();
-        foreach (var row in _presenter.ReminderRowsFor(_itemId))
-            _existing.Items.Add(row);
+        foreach (var reminder in _presenter.ReminderRowsFor(CurrentId))
+            _existing.Items.Add(reminder);
 
         if (_existing.Items.Count == 0)
             _existing.Items.Add(Strings.RemindersNone);
+
+        for (var i = 0; i < _existing.Items.Count; i++)
+        {
+            if (_existing.Items[i] is ReminderRow { Reminder.Id: var id } && id == selected)
+                _existing.SelectedIndex = i;
+        }
+
+        _existing.TopIndex = Math.Min(top, _existing.Items.Count - 1);
+        _existing.EndUpdate();
 
         UpdateRemoveState();
     }
