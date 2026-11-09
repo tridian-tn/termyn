@@ -94,7 +94,7 @@ jobs:
   # is the same Debug build, for the reason above, and unsigned: Gatekeeper refuses it until it's
   # opened from the context menu. Not done on other runs, where nothing would use it.
   build-mac-app:
-    name: build (macOS app)
+    name: build & test (macOS app)
     runs-on: macos-latest
 
     env:
