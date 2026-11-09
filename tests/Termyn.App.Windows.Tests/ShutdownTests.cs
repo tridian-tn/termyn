@@ -19,8 +19,11 @@ public class ShutdownTests
 {
     private const string SettingsName = "termyn-shutdown-tests.json";
 
+    private const int WmClose = 0x0010;
     private const int WmQueryEndSession = 0x0011;
     private const int WmEndSession = 0x0016;
+    private const int WmSysCommand = 0x0112;
+    private const int ScClose = 0xF060;
 
     [DllImport("user32.dll")]
     private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
@@ -37,13 +40,40 @@ public class ShutdownTests
     [WinFormsFact]
     public void The_user_closing_the_quick_add_box_still_only_hides_it()
     {
-        // The next hotkey press has to find it already built.
+        // The next hotkey press has to find it already built. The X and Alt+F4 both reach the box
+        // as SC_CLOSE.
         using var box = TestWindow.QuickAdd();
-        _ = box.Handle;
 
-        box.Close();
+        SendMessage(box.Handle, WmSysCommand, ScClose, 0);
 
         Assert.False(box.IsDisposed);
+    }
+
+    [WinFormsFact]
+    public void A_close_sent_after_the_user_has_closed_the_box_really_closes_it()
+    {
+        // WinForms keeps the reason from the user's close and hands it to the next one, so a close
+        // sent by another program afterwards read as the user's and the box hid again.
+        using var box = TestWindow.QuickAdd();
+        SendMessage(box.Handle, WmSysCommand, ScClose, 0);
+
+        SendMessage(box.Handle, WmClose, 0, 0);
+
+        Assert.True(box.IsDisposed);
+    }
+
+    [WinFormsFact]
+    public void A_box_closed_from_outside_is_built_again()
+    {
+        using var window = TestWindow.Build(SettingsName);
+        var first = window.QuickAdd;
+
+        SendMessage(first.Handle, WmClose, 0, 0);
+        var second = window.QuickAdd;
+
+        Assert.True(first.IsDisposed);
+        Assert.NotSame(first, second);
+        Assert.False(second.IsDisposed);
     }
 
     [WinFormsFact]

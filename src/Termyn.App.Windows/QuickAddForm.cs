@@ -72,11 +72,46 @@ internal sealed class QuickAddForm : Form
         // hidden for as long as Termyn runs, and Windows names Termyn as preventing shutdown.
         FormClosing += (_, e) =>
         {
-            if (_shuttingDown || e.CloseReason != CloseReason.UserClosing)
+            if (_shuttingDown || !_userClosing)
                 return;
             e.Cancel = true;
             Hide();
         };
+    }
+
+    private const int WmSysCommand = 0x0112;
+    private const int ScClose = 0xF060;
+
+    /// <summary>Whether the close under way is the user's, from the X or Alt+F4.</summary>
+    private bool _userClosing;
+
+    /// <summary>
+    /// Notes when a close is the user's, so the box can hide for that one and close for any other.
+    /// </summary>
+    /// <remarks>
+    /// The X and Alt+F4 both arrive as SC_CLOSE, which Windows turns into the WM_CLOSE that raises
+    /// FormClosing before it returns. The close reason WinForms gives can't be used to tell: it's
+    /// kept from the last close and never reset, so once the user has closed the box a close sent
+    /// by another program afterwards reads as the user's too.
+    /// </remarks>
+    /// <param name="m">The message being handled</param>
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg != WmSysCommand || (m.WParam & 0xFFF0) != ScClose)
+        {
+            base.WndProc(ref m);
+            return;
+        }
+
+        _userClosing = true;
+        try
+        {
+            base.WndProc(ref m);
+        }
+        finally
+        {
+            _userClosing = false;
+        }
     }
 
     /// <summary>Raised after a task has been captured, so the caller can nudge the sync loop.</summary>

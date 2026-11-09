@@ -797,12 +797,13 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>The quick-add box, built on first use.</summary>
-    private QuickAddForm QuickAdd
+    /// <remarks>Internal so a test can see a box that's been closed replaced by a new one.</remarks>
+    internal QuickAddForm QuickAdd
     {
         get
         {
             // Built again if it's gone: the user closing the box only hides it, but a close from
-            // anywhere else is a real one.
+            // anywhere else is a real one, another program's included.
             if (_quickAdd is { IsDisposed: false })
                 return _quickAdd;
 
