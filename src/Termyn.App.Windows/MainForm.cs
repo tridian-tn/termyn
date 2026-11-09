@@ -705,8 +705,18 @@ internal sealed class MainForm : Form
         _quickAdd?.Dispose();
         _headerFont?.Dispose();
         _taskMenu.Dispose();
+
+        // Here rather than on closing, which is also Windows asking whether it may shut down. Any
+        // other app can still say no to that, and the window then carries on with its work.
+        _cts.Cancel();
         _cts.Dispose();
     }
+
+    /// <summary>
+    /// Whether the window has stopped the work it started, which it only does once it has closed.
+    /// </summary>
+    /// <remarks>Internal so a test can see that Windows asking about a shutdown leaves it running.</remarks>
+    internal bool Stopped => _cts.IsCancellationRequested;
 
     protected override void Dispose(bool disposing)
     {
@@ -722,6 +732,11 @@ internal sealed class MainForm : Form
     /// Closing leaves Termyn in the tray when that is what the user asked for, because the global
     /// hotkey only works while the process is alive. Exit from the tray menu closes for real.
     /// </summary>
+    /// <remarks>
+    /// Raised when Windows asks whether it may shut down, as well as for a close. That's only a
+    /// question, and another app can still refuse it, so nothing here may leave the window unable to
+    /// carry on; what ends its work waits for <see cref="Teardown"/>.
+    /// </remarks>
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
         // Before the state is written either way: closing to the tray leaves the window standing,
@@ -740,10 +755,9 @@ internal sealed class MainForm : Form
         SaveViewState();
 
         // The run still being added to is only in memory until now, so this is what stops the last
-        // thing somebody did going unrecorded.
+        // thing somebody did going unrecorded. Safe to carry on from: it writes what it holds, and
+        // the history goes on taking notes afterwards.
         _presenter.History.Dispose();
-
-        _cts.Cancel();
     }
 
     /// <summary>
@@ -787,7 +801,9 @@ internal sealed class MainForm : Form
     {
         get
         {
-            if (_quickAdd is not null)
+            // Built again if it's gone: the user closing the box only hides it, but a close from
+            // anywhere else is a real one.
+            if (_quickAdd is { IsDisposed: false })
                 return _quickAdd;
 
             _quickAdd = new QuickAddForm(_presenter, _theme);

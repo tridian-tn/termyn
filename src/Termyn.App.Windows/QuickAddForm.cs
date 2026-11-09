@@ -11,7 +11,8 @@ namespace Termyn.App.Windows;
 /// </summary>
 /// <remarks>
 /// Created once at startup and hidden rather than closed, because the hotkey has 100 ms to put it on
-/// screen and building a form is most of that. Closing it hides it; only shutdown disposes it.
+/// screen and building a form is most of that. The user closing it hides it; anything else closing
+/// it, Windows shutting down included, really does.
 /// </remarks>
 internal sealed class QuickAddForm : Form
 {
@@ -65,10 +66,13 @@ internal sealed class QuickAddForm : Form
 
         ApplyTheme(theme);
 
-        // Hidden, not destroyed: the next hotkey press has to find it already built.
+        // Hidden, not destroyed: the next hotkey press has to find it already built. Only when it's
+        // the user closing it, though. WinForms raises this when Windows asks whether it may shut
+        // down too, and a cancel then is the box refusing: once it's been summoned it sits there
+        // hidden for as long as Termyn runs, and Windows names Termyn as preventing shutdown.
         FormClosing += (_, e) =>
         {
-            if (_shuttingDown)
+            if (_shuttingDown || e.CloseReason != CloseReason.UserClosing)
                 return;
             e.Cancel = true;
             Hide();
