@@ -7,7 +7,8 @@ namespace Termyn.App.Windows;
 /// <summary>
 /// The reminders on a task. Reminders are a paid feature, so on a plan without them the controls
 /// that would write are shown disabled rather than hidden — the point is that the user can see what
-/// they'd be getting, and nothing here ever offers a save the server would refuse.
+/// they'd be getting, and nothing here ever offers a save the server would refuse. The same goes for
+/// the offsets on a task with no due time, which have nothing to count back from.
 /// </summary>
 internal sealed class ReminderForm : Form
 {
@@ -36,6 +37,7 @@ internal sealed class ReminderForm : Form
     private readonly MainPresenter _presenter;
     private readonly string _itemId;
     private readonly ListBox _existing;
+    private readonly Panel _writes;
     private readonly ComboBox _offset;
     private readonly TextBox _absolute;
     private readonly Button _add;
@@ -76,7 +78,7 @@ internal sealed class ReminderForm : Form
 
         // The writing controls live in a panel so the "why" can be attached to something that still
         // receives the mouse: a disabled control gets no messages, so a tooltip on it never shows.
-        var writes = new Panel { Location = new Point(14, 196), Size = new Size(372, 74) };
+        _writes = new Panel { Location = new Point(14, 196), Size = new Size(372, 74) };
 
         var beforePrompt = new Label { Text = Strings.RemindersRemindMe, Location = new Point(0, 4), Size = new Size(76, 20) };
         _offset = new ComboBox
@@ -98,7 +100,7 @@ internal sealed class ReminderForm : Form
         _addAbsolute = new Button { Text = Strings.RemindersAdd, Location = new Point(272, 37), Size = new Size(100, 29) };
         _addAbsolute.Click += (_, _) => AddAbsolute();
 
-        writes.Controls.AddRange([beforePrompt, _offset, _add, atPrompt, _absolute, _addAbsolute]);
+        _writes.Controls.AddRange([beforePrompt, _offset, _add, atPrompt, _absolute, _addAbsolute]);
 
         _remove = new Button { Text = Strings.RemindersRemove, Location = new Point(286, 278), Size = new Size(100, 29), Enabled = false };
         _remove.Click += (_, _) => Remove();
@@ -114,27 +116,10 @@ internal sealed class ReminderForm : Form
         CancelButton = close;
         AcceptButton = close;
 
-        Controls.AddRange([heading, _existing, writes, _remove, _message, close]);
-
-        if (!presenter.RemindersAvailable)
-        {
-            // Only the controls that would write are gated. Removing a reminder is not a paid
-            // operation, and a plan that lapsed leaves reminders behind that the user must be able
-            // to clear.
-            foreach (Control control in new Control[] { _offset, _add, _absolute, _addAbsolute })
-                control.Enabled = false;
-
-            // "Not allowed" and "not asked yet" both come through as unavailable, and telling a
-            // paying user to buy what they already have is worse than saying we don't know yet.
-            var reason = presenter.PlanName.Length == 0
-                ? Strings.RemindersPlanNotSynced
-                : UpgradeMessage;
-
-            _message.Text = reason;
-            _tips.SetToolTip(writes, reason);
-        }
+        Controls.AddRange([heading, _existing, _writes, _remove, _message, close]);
 
         Reload();
+        ShowWhatsOffered();
         FormClosed += (_, _) => _tips.Dispose();
     }
 
@@ -206,8 +191,53 @@ internal sealed class ReminderForm : Form
     /// <summary>What the box for a moment suggests typing while it's empty.</summary>
     internal string Hint => _absolute.PlaceholderText;
 
+    /// <summary>What the mouse is told over the writing controls.</summary>
+    internal string Tip => _tips.GetToolTip(_writes) ?? string.Empty;
+
+    /// <summary>Whether the list of offsets can be used.</summary>
+    internal bool OffsetChoiceEnabled => _offset.Enabled;
+
+    /// <summary>Whether the offset's Add can be pressed.</summary>
+    internal bool OffsetAddEnabled => _add.Enabled;
+
+    /// <summary>Whether the box for a moment can be typed in.</summary>
+    internal bool MomentBoxEnabled => _absolute.Enabled;
+
+    /// <summary>Whether the moment's Add can be pressed.</summary>
+    internal bool MomentAddEnabled => _addAbsolute.Enabled;
+
+    /// <summary>Whether Remove can be pressed.</summary>
+    internal bool RemoveEnabled => _remove.Enabled;
+
+    /// <summary>Chooses an offset and presses its Add, for a test with no dialog to click.</summary>
+    /// <remarks>
+    /// A click reaches a greyed button from here as it couldn't from the mouse, which is what lets a
+    /// test press one that was lit when it was last looked at.
+    /// </remarks>
+    /// <param name="choice">Where the offset is in the list</param>
+    internal void AddOffset(int choice)
+    {
+        _offset.SelectedIndex = choice;
+        InvokeOnClick(_add, EventArgs.Empty);
+    }
+
+    /// <summary>Selects a reminder in the list, for a test with no mouse.</summary>
+    /// <param name="row">Where the reminder is in the list</param>
+    internal void SelectReminder(int row) => _existing.SelectedIndex = row;
+
+    /// <summary>Presses Remove, for a test with no dialog to click.</summary>
+    internal void PressRemove() => InvokeOnClick(_remove, EventArgs.Empty);
+
     private void AddRelative()
     {
+        // Asked again at the press: a sync runs while this is open, and may have taken away the due
+        // time the button was lit for. Todoist is expected to refuse the add, but only later on.
+        if (!_presenter.TakesRelativeReminder(_itemId))
+        {
+            ShowWhatsOffered();
+            return;
+        }
+
         if (_presenter.AddRelativeReminder(_itemId, Offsets[_offset.SelectedIndex].Minutes))
             Wrote();
         else
@@ -261,7 +291,7 @@ internal sealed class ReminderForm : Form
     private string Refusal()
     {
         if (!_presenter.RemindersAvailable)
-            return _presenter.PlanName.Length == 0 ? Strings.RemindersPlanNotSynced : UpgradeMessage;
+            return PlanReason();
 
         // Asked of the account rather than the rows on screen: the outline only shows the current
         // view, so a task that is merely filtered out is still very much there.
@@ -270,11 +300,46 @@ internal sealed class ReminderForm : Form
             : Strings.RemindersTaskGone;
     }
 
+    /// <summary>
+    /// "Not allowed" and "not asked yet" both come through as unavailable, and telling a paying user
+    /// to buy what they already have is worse than saying we don't know yet.
+    /// </summary>
+    private string PlanReason()
+        => _presenter.PlanName.Length == 0 ? Strings.RemindersPlanNotSynced : UpgradeMessage;
+
+    /// <summary>
+    /// Greys what can't be done, and says why.
+    /// </summary>
+    /// <remarks>
+    /// Only the controls that would write are gated. Removing a reminder is not a paid operation, and
+    /// a plan that lapsed leaves reminders behind that the user must be able to clear. A task with no
+    /// due time still takes a moment of its own, which doesn't count back from anything: Todoist says
+    /// "the item should have a due date with time set in order to add a relative reminder".
+    /// </remarks>
+    private void ShowWhatsOffered()
+    {
+        var available = _presenter.RemindersAvailable;
+        var offsets = available && _presenter.TakesRelativeReminder(_itemId);
+
+        _offset.Enabled = offsets;
+        _add.Enabled = offsets;
+        _absolute.Enabled = available;
+        _addAbsolute.Enabled = available;
+
+        var reason = !available ? PlanReason()
+            : offsets ? string.Empty
+            : _presenter.HasTask(_itemId) ? Strings.RemindersNeedDueTime
+            : Strings.RemindersTaskGone;
+
+        _message.Text = reason;
+        _tips.SetToolTip(_writes, reason);
+    }
+
     private void Wrote()
     {
         _wrote = true;
-        _message.Text = string.Empty;
         Reload();
+        ShowWhatsOffered();
     }
 
     private void Reload()
