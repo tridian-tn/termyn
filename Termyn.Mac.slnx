@@ -10,5 +10,7 @@
     <Project Path="tests/Termyn.Core.Tests/Termyn.Core.Tests.csproj" />
     <Project Path="tests/Termyn.Presentation.Tests/Termyn.Presentation.Tests.csproj" />
     <Project Path="tests/Termyn.Perf.Tests/Termyn.Perf.Tests.csproj" />
+    <Project Path="tests/Termyn.Platform.Mac.Tests/Termyn.Platform.Mac.Tests.csproj" />
+    <Project Path="tests/Termyn.App.Mac.Tests/Termyn.App.Mac.Tests.csproj" />
   </Folder>
 </Solution>

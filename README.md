@@ -33,9 +33,11 @@ To produce an installer or a portable zip, see [docs/packaging.md](docs/packagin
 
 ### On a Mac
 
-> **Mac support is under development.** The native Mac app is read-only for now: it connects to
-> Todoist, shows the sidebar and the tasks in each view, and keeps them in sync. Nothing can be
-> changed from it yet. `Termyn.slnx` doesn't build on a Mac, since the Windows projects target
+> **Mac support is under development.** The native Mac app connects to Todoist, shows the sidebar
+> and each view's tasks as a list or a table, and keeps them in sync. Tasks can be added, edited,
+> ticked off, indented, moved and dragged, with their due dates, priorities and labels. It doesn't
+> yet have deadlines and reminders, descriptions and comments, search, editing in the sidebar, a
+> menu-bar item or settings. `Termyn.slnx` doesn't build on a Mac, since the Windows projects target
 > `net10.0-windows`; `Termyn.Mac.slnx` is the Mac's solution.
 
 1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) for your Mac's
@@ -81,8 +83,18 @@ The Mac app also needs:
    rebuilt app counts as a new one to the Keychain, which asks once whether it may read the token,
    quoting that name; Always Allow settles it.
 
-CI builds and tests the portable projects on macOS and Linux as well as Windows, and builds the Mac
-app. A release tag packages it too.
+6. Test everything the Mac builds, which runs in a logged-in session since the Mac tests use AppKit:
+
+   ```bash
+   dotnet test --solution Termyn.Mac.slnx
+   ```
+
+   The Keychain tests add a temporary item to your default keychain and remove it again, under a
+   service of their own (`net.tridian.termyn.tests`), so they never touch the app's token. They use
+   fakes rather than Todoist.
+
+CI builds and tests the portable projects on macOS and Linux as well as Windows, and builds and
+tests the Mac app. A release tag packages it too.
 
 ## What it does
 
@@ -114,10 +126,11 @@ The solution is split so the native clients share everything below the UI: the W
 | `src/Termyn.Platform.Windows` | `net10.0-windows` | Windows platform services (DPAPI token store, paths) |
 | `src/Termyn.App.Windows` | `net10.0-windows` | WinForms UI + composition root |
 | `src/Termyn.Platform.Mac` | `net10.0-macos` | Mac platform services (Keychain token store, paths) |
-| `src/Termyn.App.Mac` | `net10.0-macos` | AppKit UI + composition root (read-only, under development) |
+| `src/Termyn.App.Mac` | `net10.0-macos` | AppKit UI + composition root (under development) |
 | `tests/Termyn.TestSupport` | `net10.0` | Shared test doubles |
 | `tests/Termyn.Core.Tests`, `tests/Termyn.Presentation.Tests`, `tests/Termyn.Perf.Tests` | `net10.0` | xUnit tests over the portable core |
 | `tests/Termyn.Platform.Windows.Tests`, `tests/Termyn.App.Windows.Tests` | `net10.0-windows` | xUnit tests over the Windows layers |
+| `tests/Termyn.Platform.Mac.Tests`, `tests/Termyn.App.Mac.Tests` | `net10.0-macos` | xUnit tests over the Mac layers |
 
 `Core` and `Presentation` target `net10.0` (not `-windows`), so the compiler prevents any
 Windows-only API leaking into the portable core.

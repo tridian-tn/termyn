@@ -29,6 +29,9 @@ internal static class MacShortcuts
     private const string Up = "\uF700";
     private const string Down = "\uF701";
 
+    /// <summary>What a press of \u232B reports: delete, where a menu item is given backspace for the same key.</summary>
+    private const string BackspacePressed = "\u007F";
+
     private static readonly Dictionary<AppCommand, Equivalent> Table = new()
     {
         [AppCommand.NewTask] = new("n", Command),
@@ -60,10 +63,12 @@ internal static class MacShortcuts
         const NSEventModifierMask Modifiers = NSEventModifierMask.CommandKeyMask | NSEventModifierMask.ShiftKeyMask
             | NSEventModifierMask.AlternateKeyMask | NSEventModifierMask.ControlKeyMask;
 
+        var pressed = press.CharactersIgnoringModifiers == BackspacePressed ? Backspace : press.CharactersIgnoringModifiers;
+
         foreach (var (command, key) in Table)
         {
             if ((press.ModifierFlags & Modifiers) == key.Modifiers
-                && string.Equals(press.CharactersIgnoringModifiers, key.Key, StringComparison.OrdinalIgnoreCase))
+                && string.Equals(pressed, key.Key, StringComparison.OrdinalIgnoreCase))
             {
                 return command;
             }

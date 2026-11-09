@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\MacTestBundle.props" />
+
+  <PropertyGroup>
+    <ApplicationId>net.tridian.termyn.tests</ApplicationId>
+    <!-- A Release build of the app is for both architectures, with no one runtime to call its own,
+         so the SDK takes it for not self-contained and refuses the reference. Only its assembly is
+         used here, in a bundle with a runtime of its own. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <!-- The app is an executable too, so its runtimeconfig.json comes along with its assembly. The
+       workload leaves out a project's own, and warns that it can't place this one. -->
+  <Target Name="_LeaveOutTheAppsRuntimeConfig" BeforeTargets="_ComputePublishLocation">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'Termyn.runtimeconfig.json'" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Termyn.App.Mac\Termyn.App.Mac.csproj" />
+    <ProjectReference Include="..\Termyn.TestSupport\Termyn.TestSupport.csproj" />
+  </ItemGroup>
+
+</Project>
