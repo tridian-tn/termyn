@@ -49,7 +49,7 @@ public class LabelsControllerTests
 
         controller.ViewWillDisappear();
 
-        Assert.False(presenter.CanUndo);
+        Assert.Empty(presenter.History.Recent());
     }
 
     private static NSTableView Table(NSView view)

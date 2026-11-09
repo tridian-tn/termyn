@@ -532,4 +532,80 @@
     <value>This task can't take a sub-task any more.</value>
     <comment>Said in the new sub-task popover when the parent was finished or nested too deep while it was open.</comment>
   </data>
+  <data name="Deadline" xml:space="preserve">
+    <value>Deadline…</value>
+    <comment>Task menu item that opens the deadline popover for the selected task.</comment>
+  </data>
+  <data name="DeadlinePrompt" xml:space="preserve">
+    <value>Finish it by:</value>
+    <comment>Line above the field in the deadline popover.</comment>
+  </data>
+  <data name="DeadlineClear" xml:space="preserve">
+    <value>Clear Deadline</value>
+    <comment>Button in the deadline popover that takes the task's deadline off.</comment>
+  </data>
+  <data name="DeadlineNotSet" xml:space="preserve">
+    <value>Deadline not changed — the task is finished or no longer there.</value>
+    <comment>Said in the subtitle when a deadline can't be written because the account no longer holds the task.</comment>
+  </data>
+  <data name="Reminders" xml:space="preserve">
+    <value>Reminders…</value>
+    <comment>Task menu item that opens the reminders popover for the selected task.</comment>
+  </data>
+  <data name="RemindersNone" xml:space="preserve">
+    <value>No reminders on this task.</value>
+    <comment>Shown in the reminders popover's list when the task has none.</comment>
+  </data>
+  <data name="RemindersRemindMe" xml:space="preserve">
+    <value>Remind me:</value>
+    <comment>Label beside the list of offsets in the reminders popover.</comment>
+  </data>
+  <data name="RemindersOrOn" xml:space="preserve">
+    <value>Or on:</value>
+    <comment>Label beside the field for a moment of its own in the reminders popover.</comment>
+  </data>
+  <data name="RemindersAdd" xml:space="preserve">
+    <value>Add</value>
+    <comment>Button that adds a reminder in the reminders popover.</comment>
+  </data>
+  <data name="RemindersRemove" xml:space="preserve">
+    <value>Remove Reminder</value>
+    <comment>Tooltip and spoken name of the button that removes a reminder from the task.</comment>
+  </data>
+  <data name="RemindersAtTime" xml:space="preserve">
+    <value>At the Time It's Due</value>
+    <comment>Choice in the reminders popover: a reminder when the task falls due.</comment>
+  </data>
+  <data name="RemindersMinutesBefore" xml:space="preserve">
+    <value>{0} Minutes Before</value>
+    <comment>Choice in the reminders popover. {0} is a number of minutes.</comment>
+  </data>
+  <data name="RemindersHourBefore" xml:space="preserve">
+    <value>1 Hour Before</value>
+    <comment>Choice in the reminders popover.</comment>
+  </data>
+  <data name="RemindersDayBefore" xml:space="preserve">
+    <value>1 Day Before</value>
+    <comment>Choice in the reminders popover.</comment>
+  </data>
+  <data name="RemindersNeedDueTime" xml:space="preserve">
+    <value>Reminding before it's due needs a due date with a time.</value>
+    <comment>Said in the reminders popover when the task has no due time for an offset to count back from.</comment>
+  </data>
+  <data name="RemindersUpgrade" xml:space="preserve">
+    <value>Reminders need Todoist Pro.</value>
+    <comment>Said in the reminders popover on a plan without reminders.</comment>
+  </data>
+  <data name="RemindersPlanNotSynced" xml:space="preserve">
+    <value>Your plan hasn't synced yet.</value>
+    <comment>Said in the reminders popover when the app doesn't know yet whether the plan allows reminders.</comment>
+  </data>
+  <data name="RemindersAtLimit" xml:space="preserve">
+    <value>This plan is at its limit for reminders.</value>
+    <comment>Said in the reminders popover when the plan allows no more.</comment>
+  </data>
+  <data name="RemindersTaskGone" xml:space="preserve">
+    <value>That task is no longer here.</value>
+    <comment>Said in the reminders popover when the task was deleted or moved away while it was open.</comment>
+  </data>
 </root>

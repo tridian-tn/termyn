@@ -76,6 +76,8 @@ internal sealed class MainWindowController : NSWindowController
         _commands = new TaskCommands(presenter, log, Say)
         {
             OpenDue = OpenDue,
+            OpenDeadline = OpenDeadline,
+            OpenReminders = OpenReminders,
             OpenNewTask = OpenNewTask,
             OpenNewSubtask = OpenNewSubtask,
             OpenLabels = OpenLabels,
@@ -526,6 +528,12 @@ internal sealed class MainWindowController : NSWindowController
     /// <summary>Opens the due-date popover beside the task's row.</summary>
     private void OpenDue(string id) => ShowBeside(id, new DueController(_presenter, _commands, id, ClosePopover));
 
+    /// <summary>Opens the deadline popover beside the task's row.</summary>
+    private void OpenDeadline(string id) => ShowBeside(id, new DeadlineController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the reminders popover beside the task's row.</summary>
+    private void OpenReminders(string id) => ShowBeside(id, new RemindersController(_presenter, _commands, id, ClosePopover));
+
     /// <summary>Opens the labels popover beside the task's row.</summary>
     private void OpenLabels(string id) => ShowBeside(id, new LabelsController(_presenter, _commands, id, ClosePopover));
 
@@ -540,6 +548,12 @@ internal sealed class MainWindowController : NSWindowController
         ShowBeside(id, content);
     }
 
+    /// <summary>Runs a command on a task, for a test with no menu or key to reach it by.</summary>
+    internal void RunOnTask(AppCommand command, string id) => _commands.Run(command, id);
+
+    /// <summary>The popover opened last, for a test to look at. It may have closed since.</summary>
+    internal NSPopover? LastPopover => _popover;
+
     private void ShowBeside(string id, NSViewController content)
     {
         if (_tasks.AnchorFor(id) is { } anchor)
@@ -553,14 +567,34 @@ internal sealed class MainWindowController : NSWindowController
     private NSPopover Popover(NSViewController content)
     {
         _popover?.Close();
-        _popover = new NSPopover
+
+        var popover = new NSPopover
         {
             ContentViewController = content,
             Behavior = NSPopoverBehavior.Transient,
             Animates = true,
         };
-        _popover.Delegate = new Closing(() => Window.MakeFirstResponder(_tasks.FocusView));
-        return _popover;
+
+        popover.Delegate = new Closing(() => HandBackKeyboard(popover));
+
+        _popover = popover;
+        return popover;
+    }
+
+    /// <summary>Gives the list the keyboard once a popover has gone, if nothing else has taken it.</summary>
+    /// <remarks>
+    /// A popover says it's closed only once it's finished animating, and a lot can happen by then.
+    /// The next popover may have opened, or the click that closed this one may have landed in the
+    /// sidebar, and taking the keyboard from either would leave what's typed going somewhere else.
+    /// </remarks>
+    /// <param name="closed">The popover that closed</param>
+    private void HandBackKeyboard(NSPopover closed)
+    {
+        var newerPopover = _popover is not null && !ReferenceEquals(_popover, closed);
+        var movedOn = Window.FirstResponder is NSView view && view.Window == Window;
+
+        if (!newerPopover && !movedOn)
+            Window.MakeFirstResponder(_tasks.FocusView);
     }
 
     private void ClosePopover()

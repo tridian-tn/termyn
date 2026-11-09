@@ -35,9 +35,9 @@ To produce an installer or a portable zip, see [docs/packaging.md](docs/packagin
 
 > **Mac support is under development.** The native Mac app connects to Todoist, shows the sidebar
 > and each view's tasks as a list or a table, and keeps them in sync. Tasks can be added, edited,
-> ticked off, indented, moved and dragged, with their due dates, priorities and labels. It doesn't
-> yet have deadlines and reminders, descriptions and comments, search, editing in the sidebar, a
-> menu-bar item or settings. `Termyn.slnx` doesn't build on a Mac, since the Windows projects target
+> ticked off, indented, moved and dragged, with their due dates, deadlines, reminders, priorities and
+> labels. It doesn't yet have descriptions and comments, search, editing in the sidebar, a menu-bar
+> item or settings. `Termyn.slnx` doesn't build on a Mac, since the Windows projects target
 > `net10.0-windows`; `Termyn.Mac.slnx` is the Mac's solution.
 
 1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) for your Mac's

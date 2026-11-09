@@ -265,6 +265,33 @@ public class RecurringAndReminderTests
         Assert.Empty(presenter.RemindersFor("i1"));
     }
 
+    [Fact]
+    public void Removing_one_already_gone_isnt_noted_as_done()
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.DeleteReminder("ghost");
+
+        Assert.Empty(presenter.History.Recent());
+    }
+
+    [Theory]
+    [InlineData("""{"id":"i1","content":"Timed","project_id":"p1","child_order":1,"due":{"date":"2026-08-04T09:00:00"}}""", true)]
+    [InlineData("""{"id":"i1","content":"A day","project_id":"p1","child_order":1,"due":{"date":"2026-08-04"}}""", false)]
+    [InlineData("""{"id":"i1","content":"No date","project_id":"p1","child_order":1}""", false)]
+    public void A_reminder_before_its_due_needs_a_due_time(string item, bool takes)
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "i1", item);
+
+        Assert.Equal(takes, NewPresenter(store).TakesRelativeReminder("i1"));
+    }
+
+    [Fact]
+    public void A_task_not_held_takes_no_reminder_before_its_due()
+        => Assert.False(NewPresenter(Store()).TakesRelativeReminder("ghost"));
+
     // ---- Regressions -------------------------------------------------------------------------------
 
     [Fact]

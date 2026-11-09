@@ -159,7 +159,7 @@ public class SyncEngineTests
     {
         var engine = NewEngine(new FakeApi());
 
-        engine.UpdateItem("ghost", new JsonObject { ["content"] = "B" });
+        Assert.False(engine.UpdateItem("ghost", new JsonObject { ["content"] = "B" }));
 
         // The task is already gone; the command could only fail until it poisoned.
         Assert.Equal(0, engine.PendingCount);

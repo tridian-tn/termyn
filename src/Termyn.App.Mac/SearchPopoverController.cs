@@ -55,29 +55,12 @@ internal abstract class SearchPopoverController(Action close) : NSViewController
     {
         const int Margin = 14;
 
-        var name = NSTextField.CreateLabel(heading);
-        name.Font = NSFont.BoldSystemFontOfSize(NSFont.SystemFontSize)!;
-        name.LineBreakMode = NSLineBreakMode.TruncatingTail;
-        name.SetContentCompressionResistancePriority(250, NSLayoutConstraintOrientation.Horizontal);
+        var name = PopoverParts.Heading(heading);
 
         Field.PlaceholderString = placeholder;
         Field.Delegate = new Typing(this);
 
-        Table.AddColumn(new NSTableColumn("Row") { ResizingMask = NSTableColumnResizing.Autoresizing });
-        Table.HeaderView = null;
-        Table.Style = NSTableViewStyle.Plain;
-        Table.ColumnAutoresizingStyle = NSTableViewColumnAutoresizingStyle.FirstColumnOnly;
-        Table.RefusesFirstResponder = true;
-        Table.DataSource = source;
-        Table.Delegate = rows;
-
-        var scroll = new NSScrollView
-        {
-            DocumentView = Table,
-            HasVerticalScroller = true,
-            AutohidesScrollers = true,
-            BorderType = NSBorderType.BezelBorder,
-        };
+        var scroll = PopoverParts.List(Table, source, rows);
 
         var stack = NSStackView.FromViews(button is null ? [name, Field, scroll] : [name, Field, scroll, button]);
         stack.Orientation = NSUserInterfaceLayoutOrientation.Vertical;
