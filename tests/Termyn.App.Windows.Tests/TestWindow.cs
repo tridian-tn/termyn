@@ -11,7 +11,7 @@ using Termyn.TestSupport;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// A whole main window, over an account with nothing in it.
+/// A whole main window, over an account with nothing in it, and the quick-add box that goes with it.
 /// </summary>
 /// <remarks>
 /// The shell it needs is eight interfaces, and the record that carries them always said tests could
@@ -161,6 +161,27 @@ internal static class TestWindow
         // would see.
         window.CreateControl();
         return window;
+    }
+
+    /// <summary>A quick-add box over an empty account, which can't reach the server.</summary>
+    /// <returns>The box, realised but not shown, which the caller disposes</returns>
+    internal static QuickAddForm QuickAdd() => QuickAdd(new InMemorySnapshotStore(), out _, out _);
+
+    /// <summary>A quick-add box over an account, which can't reach the server.</summary>
+    /// <param name="store">What the account holds</param>
+    /// <param name="engine">The engine, to read what a capture added</param>
+    /// <param name="presenter">The presenter, to ask what a view starts a task with</param>
+    /// <returns>The box, realised but not shown, which the caller disposes</returns>
+    internal static QuickAddForm QuickAdd(InMemorySnapshotStore store, out SyncEngine engine, out MainPresenter presenter)
+    {
+        engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+        var clock = new SystemClock();
+        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+
+        var box = new QuickAddForm(presenter, Theme.From(ThemePalette.Light));
+        box.CreateControl();
+        return box;
     }
 
     /// <summary>
