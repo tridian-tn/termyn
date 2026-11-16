@@ -201,7 +201,7 @@ internal sealed class TaskListController : NSViewController
     /// The Task column stays first and takes up whatever the window's width leaves of the others,
     /// as Finder's Name column does; the rest can be resized, dragged into another order, or hidden,
     /// and AppKit keeps all of that by the table's autosave name. The widths it starts at are the
-    /// Windows outline's.
+    /// Windows outline's, with the date columns made wider for a region whose dates need it.
     /// </remarks>
     private void LoadGrid()
     {
@@ -209,7 +209,7 @@ internal sealed class TaskListController : NSViewController
         {
             var column = new NSTableColumn(each.ToString())
             {
-                Width = StartupLayout.ColumnWidth(each),
+                Width = StartWidth(each, CultureInfo.CurrentCulture, _grid.IntercellSpacing.Width),
                 MinWidth = each switch
                 {
                     TaskColumn.Content => TaskColumnLeast,
@@ -257,6 +257,28 @@ internal sealed class TaskListController : NSViewController
         // Last, once the columns are there for it to put back as they were.
         _grid.AutosaveName = "TaskColumns";
         _grid.AutosaveTableColumns = true;
+    }
+
+    /// <summary>
+    /// The width a column of the table starts at, before AppKit puts back any width it's kept.
+    /// </summary>
+    /// <remarks>
+    /// The Windows outline's, made wider for a date column when the region writes its longest dates
+    /// wider than that, as Spanish does with "28 de sept de 2027". It's never narrower than the
+    /// Windows outline's.
+    /// </remarks>
+    /// <param name="column">The column</param>
+    /// <param name="culture">The region its dates are written in</param>
+    /// <param name="spacing">The room the table leaves between columns, which comes out of each cell</param>
+    /// <returns>The width, in points</returns>
+    internal static nfloat StartWidth(TaskColumn column, CultureInfo culture, double spacing)
+    {
+        var width = StartupLayout.ColumnWidth(column);
+        var dates = StartupLayout.WidestDates(column, culture);
+        if (dates.Count == 0)
+            return width;
+
+        return (nfloat)Math.Max(width, dates.Max(date => GridCell.WidthFor(date)) + spacing);
     }
 
     private static NSScrollView Scroll(NSTableView table) => new()

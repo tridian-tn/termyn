@@ -15,6 +15,9 @@ namespace Termyn.App.Mac;
 /// </remarks>
 internal sealed class GridCell : NSTableCellView
 {
+    /// <summary>The space a cell leaves either side of its words, in points.</summary>
+    private const int Inset = 4;
+
     private readonly NSTextField _text = NSTextField.CreateLabel(string.Empty);
     private readonly NSImageView _flag = new();
 
@@ -27,7 +30,7 @@ internal sealed class GridCell : NSTableCellView
     {
         Identifier = identifier;
 
-        _text.Font = NSFont.GetPreferredFont(NSFontTextStyle.Body.GetConstant()!, new NSDictionary());
+        _text.Font = TextFont;
         _text.LineBreakMode = NSLineBreakMode.TruncatingTail;
         _text.SetContentCompressionResistancePriority(250, NSLayoutConstraintOrientation.Horizontal);
         _flag.SymbolConfiguration = NSImageSymbolConfiguration.Create(NSFontTextStyle.Body.GetConstant()!, NSImageSymbolScale.Small);
@@ -43,12 +46,33 @@ internal sealed class GridCell : NSTableCellView
 
         NSLayoutConstraint.ActivateConstraints(
         [
-            _text.LeadingAnchor.ConstraintEqualTo(LeadingAnchor, 4),
-            _text.TrailingAnchor.ConstraintLessThanOrEqualTo(TrailingAnchor, -4),
+            _text.LeadingAnchor.ConstraintEqualTo(LeadingAnchor, Inset),
+            _text.TrailingAnchor.ConstraintLessThanOrEqualTo(TrailingAnchor, -Inset),
             _text.CenterYAnchor.ConstraintEqualTo(CenterYAnchor),
             _flag.CenterXAnchor.ConstraintEqualTo(CenterXAnchor),
             _flag.CenterYAnchor.ConstraintEqualTo(CenterYAnchor),
         ]);
+    }
+
+    /// <summary>The font a cell writes its words in, the system's body text.</summary>
+    private static NSFont TextFont => NSFont.GetPreferredFont(NSFontTextStyle.Body.GetConstant()!, new NSDictionary());
+
+    /// <summary>
+    /// How wide a cell has to be to show some words without cutting them short.
+    /// </summary>
+    /// <remarks>
+    /// Measured with a label like the cell's own, so the label's padding is counted as well as the
+    /// space the cell leaves around it.
+    /// </remarks>
+    /// <param name="text">The words</param>
+    /// <returns>The cell's width, in points</returns>
+    public static double WidthFor(string text)
+    {
+        using var label = NSTextField.CreateLabel(text);
+        label.Font = TextFont;
+
+        double width = label.FittingSize.Width;
+        return Math.Ceiling(width) + (Inset * 2);
     }
 
     public void Show(TaskRow row, TaskColumn column, IReadOnlyDictionary<string, Rgb> labelColours, DateOnly today)
