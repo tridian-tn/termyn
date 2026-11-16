@@ -17,7 +17,11 @@ public sealed record SyncCadence(TimeSpan Interval, TimeSpan WriteDebounce)
 /// Hold off this long before trying again — the server asked us to. Nothing wakes the loop early
 /// out of a pause, since the reason for it is that requests are being refused.
 /// </param>
-public sealed record SyncOutcome(bool MoreQueued = false, TimeSpan? PauseFor = null)
+/// <param name="RetryIn">
+/// Come back after this long at the latest, even in manual mode, where nothing else would. Unlike a
+/// pause, a write or a request still brings the loop round sooner.
+/// </param>
+public sealed record SyncOutcome(bool MoreQueued = false, TimeSpan? PauseFor = null, TimeSpan? RetryIn = null)
 {
     public static readonly SyncOutcome Done = new();
 }
@@ -48,6 +52,9 @@ public sealed class SyncScheduler : IAsyncDisposable
 
     /// <summary>When the loop may next try, as a tick count. Zero when it isn't holding off.</summary>
     private long _pausedUntil;
+
+    /// <summary>When the last sync asked to be tried again by, as a tick count. Zero when it didn't.</summary>
+    private long _retryAt;
 
     /// <param name="sync">Performs one sync and says what the loop should do next.</param>
     public SyncScheduler(Func<CancellationToken, Task<SyncOutcome>> sync, SyncCadence? cadence = null)
@@ -150,10 +157,19 @@ public sealed class SyncScheduler : IAsyncDisposable
             TimeSpan wait;
             lock (_state)
             {
-                var remaining = _pausedUntil - Environment.TickCount64;
+                var now = Environment.TickCount64;
+                var remaining = _pausedUntil - now;
                 wait = remaining > 0
                     ? TimeSpan.FromMilliseconds(remaining)
                     : _writePending ? _cadence.WriteDebounce : _cadence.Interval;
+
+                // Sooner than the cadence would come round, and come round at all in manual mode,
+                // whose interval is infinite. Never sooner than a pause allows.
+                if (remaining <= 0 && _retryAt != 0)
+                {
+                    var retry = TimeSpan.FromMilliseconds(Math.Max(0, _retryAt - now));
+                    if (wait == Timeout.InfiniteTimeSpan || retry < wait) wait = retry;
+                }
             }
 
             try
@@ -179,6 +195,10 @@ public sealed class SyncScheduler : IAsyncDisposable
                 if (_writePending && Environment.TickCount64 - _writePendingAt < _cadence.WriteDebounce.TotalMilliseconds)
                     continue;
                 _writePending = false;
+
+                // Answered by this sync, whichever way it goes. Left over from the last one, a
+                // retry time already past would bring the loop straight back round after a failure.
+                _retryAt = 0;
             }
 
             try
@@ -187,8 +207,12 @@ public sealed class SyncScheduler : IAsyncDisposable
 
                 lock (_state)
                 {
+                    var now = Environment.TickCount64;
                     _pausedUntil = outcome.PauseFor is { Ticks: > 0 } pause
-                        ? Environment.TickCount64 + (long)pause.TotalMilliseconds
+                        ? now + (long)pause.TotalMilliseconds
+                        : 0;
+                    _retryAt = outcome.RetryIn is { Ticks: > 0 } retry
+                        ? now + (long)retry.TotalMilliseconds
                         : 0;
                 }
 

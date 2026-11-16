@@ -72,6 +72,32 @@ internal static class TestWindow
             new FakeSecrets { Stored = null });
 
     /// <summary>
+    /// A window over a signed-in account, whose token the test can put out of reach or take away,
+    /// and whose log it can read.
+    /// </summary>
+    /// <param name="settingsName">A file name of its own, so two suites can't share one</param>
+    /// <param name="store">What the account holds</param>
+    /// <param name="secrets">Where the token's kept</param>
+    /// <param name="log">The log the window writes to</param>
+    /// <param name="presenter">The presenter, for a test that needs to drive it</param>
+    /// <returns>The window, which the caller disposes</returns>
+    internal static MainForm WithSecrets(
+        string settingsName,
+        InMemorySnapshotStore store,
+        FakeSecrets secrets,
+        RecordingLog log,
+        out MainPresenter presenter)
+        => Build(
+            new SettingsStore(Path.Combine(Path.GetTempPath(), settingsName)),
+            new AppSettings(),
+            store,
+            new FakeApi(),
+            out _,
+            out presenter,
+            secrets,
+            log: log);
+
+    /// <summary>
     /// A window that starts the way the app does, from the settings the last one wrote.
     /// </summary>
     /// <param name="settingsPath">The settings file to read and write, which the caller deletes</param>
@@ -127,7 +153,8 @@ internal static class TestWindow
         out Notifier notifier,
         out MainPresenter presenter,
         FakeSecrets? secrets = null,
-        string? attachments = null)
+        string? attachments = null,
+        RecordingLog? log = null)
     {
         secrets ??= new FakeSecrets { Stored = "tok" };
         var engine = new SyncEngine(api, store, secrets);
@@ -153,7 +180,7 @@ internal static class TestWindow
             notifier,
             new Instance(),
             new GitHubReleaseCheck(Http),
-            new RecordingLog());
+            log ?? new RecordingLog());
 
         var window = new MainForm(presenter, scheduler, shell);
 

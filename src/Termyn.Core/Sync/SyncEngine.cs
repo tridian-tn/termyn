@@ -4179,24 +4179,44 @@ public sealed class SyncEngine
     /// <param name="rejected">The token the request went out with</param>
     private void ForgetRejectedToken(string rejected)
     {
-        if (_secrets.GetToken() != rejected)
-            return;
+        // One that can't be read just now can't be compared, and is taken to be the one that went:
+        // it's the stored token, so it's what the request was sent with unless a new one has since
+        // been saved, and a store that's just saved one can read it.
+        var stored = _secrets.ReadToken();
+        if (stored.Token is { } token ? token != rejected : !stored.Unreachable) return;
 
         _log?.Warn("Todoist rejected the token. It has been cleared; the account's cache and queued changes are kept for the next one.");
 
-        _secrets.ClearToken();
+        // On hold before the token's cleared, so a file another program won't let go of can't
+        // leave the account carrying on as if nothing had been rejected.
         _awaitingToken = true;
+        try
+        {
+            _secrets.ClearToken();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log?.Warn("The rejected token couldn't be deleted, so it's left for the next token to replace.", ex);
+        }
     }
 
     /// <summary>The stored token, for a request about to go out. Called with the lock held.</summary>
     /// <remarks>
-    /// No token here doesn't put the account on hold the way a rejection does. The secret store
-    /// answers null for a token file it can't read just now, a scanner holding it say, as well as for
-    /// one that isn't there, and only Todoist turning a token away is reason to ask for another.
+    /// No token here doesn't put the account on hold the way a rejection does: only Todoist turning
+    /// a token away is reason to ask for another. A token that's stored but can't be read just now,
+    /// a scanner holding its file say, is marked as such and says so, so a sync can wait for it and
+    /// anything the user asked for can say why it didn't happen.
     /// </remarks>
-    /// <exception cref="TodoistAuthException">There's no token, so there's nothing to send it with.</exception>
+    /// <exception cref="TodoistAuthException">There's no token to hand, so there's nothing to send it with.</exception>
     private string TokenOrThrow()
-        => _secrets.GetToken() ?? throw new TodoistAuthException(Strings.NotSignedIn);
+    {
+        var read = _secrets.ReadToken();
+        if (read.Token is { } token) return token;
+
+        throw read.Unreachable
+            ? new TodoistAuthException(Strings.TokenOutOfReach) { Unreachable = true }
+            : new TodoistAuthException(Strings.NotSignedIn);
+    }
 
     /// <summary>Whether anything at all is held: a resource, or a change waiting to be sent.</summary>
     private bool HoldsAnything => !Model.IsEmpty || _outbox.Count > 0;

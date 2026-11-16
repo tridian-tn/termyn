@@ -53,9 +53,18 @@ public sealed class FakeSecrets : ISecretStore
 
     public string? GetToken() => Unreachable ? null : Stored;
 
+    /// <summary>What clearing the token throws instead, as a file another program won't let go of does.</summary>
+    public Exception? ClearThrows;
+
     public TokenRead ReadToken() => Unreachable ? new(null, Unreachable: Stored is not null) : new(Stored);
     public void SetToken(string token) => Stored = token;
-    public void ClearToken() => Stored = null;
+
+    public void ClearToken()
+    {
+        if (ClearThrows is { } refusal) throw refusal;
+
+        Stored = null;
+    }
 }
 
 public sealed class FakeApi : ITodoistApi

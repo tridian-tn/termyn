@@ -1539,10 +1539,10 @@ internal sealed class MainForm : Form
         _status.Text = _presenter.Status;
 
         // Coloured by state, which is why the presenter hands back a status rather than a sentence:
-        // offline and reconnect are worth noticing, and everything else is not.
+        // offline, waiting and reconnect are worth noticing, and everything else is not.
         _status.ForeColor = _presenter.SyncStatus.State switch
         {
-            SyncState.Offline or SyncState.Paused => _theme.Accent,
+            SyncState.Offline or SyncState.Paused or SyncState.WaitingForToken => _theme.Accent,
             SyncState.ReconnectNeeded => Theme.ForPriority(Priority.P1),
             _ => _theme.Muted,
         };

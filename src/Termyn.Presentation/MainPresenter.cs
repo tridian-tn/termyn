@@ -207,6 +207,20 @@ public sealed class MainPresenter
 
     private bool _syncing;
 
+    /// <summary>Whether the last sync found the token stored but out of reach, so it couldn't go.</summary>
+    private bool _waitingForToken;
+
+    /// <summary>
+    /// How soon a sync that couldn't read the token is tried again, whatever the cadence.
+    /// </summary>
+    /// <remarks>
+    /// Sooner than the loop's own interval, since a scanner or a backup lets go of a file in seconds,
+    /// and in manual mode as well, which otherwise wouldn't come round until F5. It isn't polling
+    /// Todoist: until the token can be read, nothing is sent, and once it can, the retry is the sync
+    /// that was asked for going through.
+    /// </remarks>
+    internal static readonly TimeSpan TokenRetry = TimeSpan.FromSeconds(10);
+
     /// <param name="fetcher">
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
     /// file works without one, which is what lets the presenter be tested without a download folder.
@@ -447,6 +461,7 @@ public sealed class MainPresenter
         // never comes back has still written what was waiting.
         History.Flush();
 
+        var outOfReach = false;
         try
         {
             await _engine.SyncAsync(ct);
@@ -458,6 +473,13 @@ public sealed class MainPresenter
                 _pausedUntil = null;
                 _rateLimitStreak = 0;
             }
+        }
+        catch (TodoistAuthException ex) when (ex.Unreachable)
+        {
+            // Stored, but not to be had just now: another program has the file, or the Keychain is
+            // locked. Nothing's wrong with the account, so it's waited for rather than reported,
+            // and tried again soon. Nothing went out, so this says nothing about the network.
+            outOfReach = true;
         }
         catch (TodoistRateLimitException ex)
         {
@@ -474,7 +496,12 @@ public sealed class MainPresenter
         finally
         {
             lock (_publishing)
+            {
                 _syncing = false;
+
+                // Any other way out had the token to send, a rejection included, so the wait's over.
+                NoteTokenReach(outOfReach);
+            }
 
             // A rejected token propagates, so this has to publish on the way out too: otherwise the
             // status goes on saying it's syncing rather than asking for a token.
@@ -482,7 +509,29 @@ public sealed class MainPresenter
         }
 
         // Only ask for another round while the network is answering, or the loop would spin.
-        return new SyncOutcome(!IsOffline && pause is null && _engine.WritesDue, pause);
+        return new SyncOutcome(
+            !IsOffline && pause is null && !outOfReach && _engine.WritesDue,
+            pause,
+            outOfReach ? TokenRetry : null);
+    }
+
+    /// <summary>
+    /// Notes whether the last sync could read the token, and writes down the change.
+    /// </summary>
+    /// <remarks>
+    /// Only the change, as <see cref="NoteReachable"/> does, so a file held for a minute is a line
+    /// when the wait starts and one when it ends rather than one every time the loop comes round.
+    /// Called holding <see cref="_publishing"/>.
+    /// </remarks>
+    /// <param name="outOfReach">Whether the sync stopped because the token couldn't be read</param>
+    private void NoteTokenReach(bool outOfReach)
+    {
+        if (_waitingForToken == outOfReach) return;
+
+        _waitingForToken = outOfReach;
+        _log?.Info(outOfReach
+            ? "The token is stored but can't be read yet, so syncing waits for it."
+            : "Syncing has stopped waiting for the token.");
     }
 
     /// <summary>
@@ -3981,6 +4030,9 @@ public sealed class MainPresenter
         // recent thing that happened.
         if (ReconnectNeeded)
             return new SyncStatus(SyncState.ReconnectNeeded, null, null, pending, failed);
+
+        // Ahead of syncing, or each retry would flash "Syncing…" over it every few seconds.
+        if (_waitingForToken) return new SyncStatus(SyncState.WaitingForToken, null, null, pending, failed);
 
         if (_syncing)
             return new SyncStatus(SyncState.Syncing, null, null, pending, failed);

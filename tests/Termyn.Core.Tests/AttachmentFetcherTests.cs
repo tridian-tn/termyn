@@ -163,6 +163,21 @@ public sealed class AttachmentFetcherTests : IDisposable
         var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Offline, result.Outcome);
+        Assert.Contains("Termyn isn't signed in", result.Message);
+        Assert.Empty(_api.Downloaded);
+    }
+
+    [Fact]
+    public async Task A_token_out_of_reach_says_so_rather_than_that_Termyn_isnt_signed_in()
+    {
+        // Another program has the token's file, so it'll come back by itself; signing in again
+        // isn't the answer, and it's what "isn't signed in" sent the user off to do.
+        _secrets.Unreachable = true;
+
+        var result = await Fetcher().FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Offline, result.Outcome);
+        Assert.Contains("the saved Todoist token can't be read just now", result.Message);
         Assert.Empty(_api.Downloaded);
     }
 

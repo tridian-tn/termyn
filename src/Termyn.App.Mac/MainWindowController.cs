@@ -53,12 +53,6 @@ internal sealed class MainWindowController : NSWindowController
     private NSObject? _activated;
     private NSObject? _woke;
 
-    /// <summary>
-    /// Set while the last sync found the token stored but out of reach — the Keychain locked, or
-    /// its access prompt unanswered — and cleared by the first sync that gets through.
-    /// </summary>
-    private bool _waitingForToken;
-
     /// <param name="switchAccount">Forgets this account for another's token, once the user has agreed</param>
     public MainWindowController(MainPresenter presenter, SyncScheduler scheduler, AuthPresenter auth, ILog log, Action<TokenCheck> switchAccount)
         : base(new NSWindow(
@@ -138,19 +132,17 @@ internal sealed class MainWindowController : NSWindowController
 
         try
         {
+            // A token out of reach doesn't throw: the presenter says it's waiting, and the loop
+            // tries again.
             await _presenter.LoadAsync(_cts.Token);
-            Synced();
         }
         catch (OperationCanceledException)
         {
             return;
         }
-        catch (TodoistAuthException)
+        catch (TodoistAuthException) when (_presenter.ReconnectNeeded)
         {
-            // Turned away, which the presenter says from here on; or out of reach, which is said
-            // until it can be read.
-            if (!_presenter.ReconnectNeeded)
-                WaitForToken();
+            // Turned away, which the presenter says from here on.
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -338,50 +330,18 @@ internal sealed class MainWindowController : NSWindowController
 
     private void OnSyncFailed(Exception ex)
     {
-        // A token Todoist turned away is said by the banner; one out of reach is waited out. Neither
-        // is a failure worth a line in the log every time the loop comes round.
-        if (ex is TodoistAuthException)
-        {
-            BeginInvokeOnMainThread(() =>
-            {
-                if (!_presenter.ReconnectNeeded)
-                    WaitForToken();
-            });
-            return;
-        }
+        // A token Todoist turned away is said by the banner, and isn't a failure worth a line in
+        // the log every time the loop comes round. One out of reach never gets here: the presenter
+        // waits it out, and says so in the status.
+        if (ex is TodoistAuthException && _presenter.ReconnectNeeded) return;
 
         _log.Error("A sync failed.", ex);
         BeginInvokeOnMainThread(() => Say(string.Format(CultureInfo.CurrentCulture, Strings.SyncFailed, ex.Message)));
     }
 
-    /// <summary>
-    /// Told after every sync that got through, from whichever thread ran it — which means the token
-    /// was there to send, so anything said about waiting for it is over.
-    /// </summary>
-    public void Synced() => BeginInvokeOnMainThread(() =>
-    {
-        if (!_waitingForToken)
-            return;
-
-        _waitingForToken = false;
-        _log.Info("The token can be read again, and syncing has carried on.");
-        RenderStatus();
-    });
-
-    /// <summary>The token is stored but can't be read yet: say so, quietly, and wait for it.</summary>
-    private void WaitForToken()
-    {
-        if (!_waitingForToken)
-            _log.Info("The token is stored but can't be read yet, so syncing waits for it.");
-
-        _waitingForToken = true;
-        RenderStatus();
-    }
-
     private void RetryForToken()
     {
-        if (_waitingForToken)
-            _scheduler.RequestNow();
+        if (_presenter.SyncStatus.State == SyncState.WaitingForToken) _scheduler.RequestNow();
     }
 
     /// <summary>
@@ -413,7 +373,7 @@ internal sealed class MainWindowController : NSWindowController
     {
         var crumbs = _presenter.Breadcrumbs;
         Window.Title = crumbs.Count > 0 ? crumbs[^1].Label : "Termyn";
-        Window.Subtitle = _notice ?? (_waitingForToken && !_presenter.ReconnectNeeded ? Strings.TokenOutOfReach : _presenter.Status);
+        Window.Subtitle = _notice ?? _presenter.Status;
         RenderBanner();
     }
 
