@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Termyn.Presentation;
 
 /// <summary>
@@ -118,4 +120,31 @@ public static class StartupLayout
     /// <returns>The task column's width in pixels</returns>
     public static int TaskColumnWidth(int room, int others, int dpi)
         => Math.Max(room - others, Scaled(TaskColumnLeast, dpi));
+
+    /// <summary>
+    /// The widest dates a column could show in a region, for making sure it starts wide enough.
+    /// </summary>
+    /// <remarks>
+    /// A two-digit day in every month, since month names differ in length, written with its year
+    /// the way a date that isn't this year's is. The due column's dates can have a time as well,
+    /// though not with a year too: a timed date in another year is rare, and wide enough in most
+    /// regions that a column fitted to it would be wider than nearly every row needs.
+    /// </remarks>
+    /// <param name="column">The column</param>
+    /// <param name="culture">The region the dates are written in</param>
+    /// <returns>The dates, written out, or none for a column that shows no dates</returns>
+    public static IReadOnlyList<string> WidestDates(TaskColumn column, CultureInfo culture)
+    {
+        if (column is not (TaskColumn.Due or TaskColumn.Deadline))
+            return [];
+
+        var days = Enumerable.Range(1, 12).Select(month => new DateOnly(DateTime.Today.Year, month, 28)).ToList();
+        var dated = days.Select(day => DisplayDates.DayMonthYear(day, culture));
+
+        if (column is TaskColumn.Deadline)
+            return dated.ToList();
+
+        var timed = days.Select(day => DisplayDates.DayMonthAndTime(day.ToDateTime(new TimeOnly(22, 30)), culture));
+        return dated.Concat(timed).ToList();
+    }
 }

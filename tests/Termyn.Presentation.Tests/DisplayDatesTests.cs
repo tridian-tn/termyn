@@ -34,6 +34,20 @@ public class DisplayDatesTests
         => Assert.Equal(expected, DisplayDates.DayMonth(Day, CultureInfo.GetCultureInfo(culture)));
 
     [Theory]
+    [InlineData("en-GB", "5 Oct 2026")]
+    [InlineData("en-US", "Oct 5, 2026")]
+    [InlineData("ja-JP", "2026年10月5日")]
+    public void A_day_month_and_year_follow_the_regions_order(string culture, string expected)
+        => Assert.Equal(expected, DisplayDates.DayMonthYear(Day, CultureInfo.GetCultureInfo(culture)));
+
+    [Theory]
+    [InlineData("en-GB", "5 Oct 09:30")]
+    [InlineData("en-US", "Oct 5 9:30 AM")]
+    [InlineData("ja-JP", "10月5日 9:30")]
+    public void A_day_and_month_with_a_time_follow_the_regions_order(string culture, string expected)
+        => Assert.Equal(expected, Regions.Spaced(DisplayDates.DayMonthAndTime(Moment, CultureInfo.GetCultureInfo(culture))));
+
+    [Theory]
     [InlineData("en-GB", "5 Oct 2026 09:30")]
     [InlineData("en-US", "Oct 5, 2026 9:30 AM")]
     [InlineData("ja-JP", "2026年10月5日 9:30")]
@@ -73,6 +87,8 @@ public class DisplayDatesTests
         var german = CultureInfo.GetCultureInfo("de-DE");
 
         Assert.Equal(Day.ToString("d. MMM", german), DisplayDates.DayMonth(Day, german));
+        Assert.Equal(Day.ToString("d. MMM yyyy", german), DisplayDates.DayMonthYear(Day, german));
+        Assert.Equal(Moment.ToString("d. MMM HH:mm", german), DisplayDates.DayMonthAndTime(Moment, german));
         Assert.Equal(Moment.ToString("d. MMM yyyy HH:mm", german), DisplayDates.DateAndTime(Moment, german));
         Assert.Equal(Moment.ToString("ddd, d. MMM HH:mm", german), DisplayDates.WeekdayAndTime(Moment, german));
     }

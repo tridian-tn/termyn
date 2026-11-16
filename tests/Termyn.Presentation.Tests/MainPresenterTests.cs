@@ -109,6 +109,7 @@ public class MainPresenterTests
     {
         // Read by the local grammar — the same one the box's preview uses — so the task created is
         // the one the preview showed, and the account's settings are honoured the one way everywhere.
+        using var british = new CultureScope(Regions.British);
         var presenter = NewPresenter(new FakeApi(), new InMemorySnapshotStore());
 
         await presenter.CaptureAsync("Email report tomorrow p1", TestContext.Current.CancellationToken);
@@ -350,6 +351,7 @@ public class MainPresenterTests
     [Fact]
     public void Renaming_priority_and_due_date_show_up_immediately()
     {
+        using var british = new CultureScope(Regions.British);
         var presenter = NewPresenter(new FakeApi(), SeededStore());
 
         presenter.Rename("i1", "Renamed");

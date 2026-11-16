@@ -34,6 +34,13 @@ public static class DisplayDates
     public static string DayMonth(DateOnly day, CultureInfo culture)
         => Write(culture, f => Brief(f.MonthDayPattern), (pattern, c) => day.ToString(pattern, c));
 
+    /// <summary>A day, month and year, such as "5 Oct 2027".</summary>
+    /// <param name="day">The day</param>
+    /// <param name="culture">The culture to write it in, normally the machine's</param>
+    /// <returns>The date, briefly</returns>
+    public static string DayMonthYear(DateOnly day, CultureInfo culture)
+        => Write(culture, BriefDate, (pattern, c) => day.ToString(pattern, c));
+
     /// <summary>A weekday, abbreviated, such as "Mon".</summary>
     /// <param name="day">The day</param>
     /// <param name="culture">The culture to write it in, normally the machine's</param>
@@ -53,7 +60,14 @@ public static class DisplayDates
     /// <param name="culture">The culture to write it in, normally the machine's</param>
     /// <returns>The date, briefly, then the time</returns>
     public static string DateAndTime(DateTime moment, CultureInfo culture)
-        => Write(culture, f => Brief(WithoutWeekday(f.LongDatePattern)) + " " + f.ShortTimePattern, (pattern, c) => moment.ToString(pattern, c));
+        => Write(culture, f => BriefDate(f) + " " + f.ShortTimePattern, (pattern, c) => moment.ToString(pattern, c));
+
+    /// <summary>A day and month with a time, such as "5 Oct 09:30".</summary>
+    /// <param name="moment">The moment, already in the timezone it's to be read in</param>
+    /// <param name="culture">The culture to write it in, normally the machine's</param>
+    /// <returns>The day and month, briefly, then the time</returns>
+    public static string DayMonthAndTime(DateTime moment, CultureInfo culture)
+        => Write(culture, f => Brief(f.MonthDayPattern) + " " + f.ShortTimePattern, (pattern, c) => moment.ToString(pattern, c));
 
     /// <summary>A moment in the coming days, such as "Mon, 5 Oct 09:30".</summary>
     /// <param name="moment">The moment, already in the timezone it's to be read in</param>
@@ -87,6 +101,12 @@ public static class DisplayDates
             return format(pattern(CultureInfo.InvariantCulture.DateTimeFormat), CultureInfo.InvariantCulture);
         }
     }
+
+    /// <summary>The region's long date without its weekday, briefly.</summary>
+    /// <param name="format">The region's date formats</param>
+    /// <returns>A pattern for the day, month and year</returns>
+    private static string BriefDate(DateTimeFormatInfo format)
+        => Brief(WithoutWeekday(format.LongDatePattern));
 
     /// <summary>A pattern with its month names abbreviated and its day unpadded.</summary>
     /// <param name="pattern">A date pattern</param>
