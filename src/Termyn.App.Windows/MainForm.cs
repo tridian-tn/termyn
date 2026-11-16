@@ -4373,8 +4373,12 @@ internal sealed class MainForm : Form
             _outline.LayColumns(_savedColumns.ToDictionary(c => c.Key, c => AtScale(c.Value)));
         });
 
-        await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
-        Guarded(_scheduler.Start);
+        // The loop's told what the first sync asked for. Otherwise it starts on its ordinary
+        // interval, and a token that couldn't be read yet waited 45 seconds, or for ever in manual
+        // mode, rather than being tried again in ten.
+        SyncOutcome? first = null;
+        await GuardedAsync(async () => first = await _presenter.LoadAsync(_cts.Token));
+        Guarded(() => _scheduler.Start(first));
     }
 
     private void Guarded(Action action)

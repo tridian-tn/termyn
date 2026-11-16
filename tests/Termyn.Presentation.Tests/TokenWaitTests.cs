@@ -48,6 +48,20 @@ public class TokenWaitTests
     }
 
     [Fact]
+    public async Task A_token_out_of_reach_at_startup_has_the_loop_try_again_soon()
+    {
+        // The windows start the loop from what loading says. When it said nothing, the loop started
+        // on its ordinary interval, and in manual mode never came back at all.
+        var (presenter, _, secrets, _) = SignedIn();
+        secrets.Unreachable = true;
+
+        var outcome = await presenter.LoadAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(SyncState.WaitingForToken, presenter.SyncStatus.State);
+        Assert.Equal(MainPresenter.TokenRetry, outcome.RetryIn);
+    }
+
+    [Fact]
     public async Task A_token_rejected_once_it_can_be_read_asks_to_reconnect_and_leaves_the_wait_behind()
     {
         var (presenter, api, secrets, _) = SignedIn();

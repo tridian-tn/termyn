@@ -130,11 +130,12 @@ internal sealed class MainWindowController : NSWindowController
         _activated = NSNotificationCenter.DefaultCenter.AddObserver(NSApplication.DidBecomeActiveNotification, _ => RetryForToken());
         _woke = NSWorkspace.SharedWorkspace.NotificationCenter.AddObserver(NSWorkspace.DidWakeNotification, _ => RetryForToken());
 
+        SyncOutcome? first = null;
         try
         {
-            // A token out of reach doesn't throw: the presenter says it's waiting, and the loop
-            // tries again.
-            await _presenter.LoadAsync(_cts.Token);
+            // A token out of reach doesn't throw: the presenter says it's waiting, and what it
+            // returns has the loop try again soon.
+            first = await _presenter.LoadAsync(_cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -149,7 +150,7 @@ internal sealed class MainWindowController : NSWindowController
             OnSyncFailed(ex);
         }
 
-        _scheduler.Start();
+        _scheduler.Start(first);
     }
 
     /// <summary>Stops listening, so nothing arrives for a window on its way out.</summary>

@@ -170,6 +170,57 @@ public class SyncSchedulerTests
         Assert.Equal(2, Volatile.Read(ref calls));
     }
 
+    [Fact]
+    public async Task A_retry_asked_for_before_the_loop_started_is_kept()
+    {
+        // The sync a window makes as it loads runs before the loop does. Its retry was dropped, so
+        // a token that couldn't be read at startup waited for the ordinary interval, or for ever in
+        // manual mode, as here.
+        var ran = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            ran.TrySetResult();
+            return Task.CompletedTask;
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start(new SyncOutcome(RetryIn: TimeSpan.FromMilliseconds(50)));
+
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_pause_asked_for_before_the_loop_started_is_waited_out()
+    {
+        // Rate-limited at startup, the loop went on to try again on its ordinary interval.
+        var calls = 0;
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.CompletedTask;
+        }, Fast);
+
+        scheduler.Start(new SyncOutcome(PauseFor: TimeSpan.FromSeconds(30)));
+        scheduler.RequestNow();
+
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.Equal(0, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task More_writes_queued_before_the_loop_started_are_gone_straight_back_for()
+    {
+        var ran = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            ran.TrySetResult();
+            return Task.CompletedTask;
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start(new SyncOutcome(MoreQueued: true));
+
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+    }
+
     /// <summary>Waits until something's true, failing the test if it isn't within the patience allowed.</summary>
     /// <param name="condition">What to wait for</param>
     private static async Task WaitFor(Func<bool> condition)

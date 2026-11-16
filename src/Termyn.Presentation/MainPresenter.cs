@@ -394,7 +394,8 @@ public sealed class MainPresenter
     /// Publishes the cached model immediately, then reconciles with the server and publishes again.
     /// Losing the network leaves the cached rows on screen; only a rejected token propagates.
     /// </summary>
-    public async Task LoadAsync(CancellationToken ct = default)
+    /// <returns>What the sync loop should do next, for <see cref="SyncScheduler.Start"/> to begin from</returns>
+    public async Task<SyncOutcome> LoadAsync(CancellationToken ct = default)
     {
         // Set rather than noted (see NoteReachable): nothing has been tried yet, so this is where
         // the session starts from and not something learnt about the network.
@@ -402,7 +403,7 @@ public sealed class MainPresenter
             IsOffline = false;
 
         Publish();
-        await SyncAsync(ct);
+        return await SyncAsync(ct);
     }
 
     /// <summary>Reconciles with the server and republishes, keeping the current view if offline.</summary>

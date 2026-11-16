@@ -71,13 +71,19 @@ public sealed class SyncScheduler : IAsyncDisposable
     /// <summary>Raised on the worker thread when a background sync throws.</summary>
     public event Action<Exception>? SyncFailed;
 
-    public void Start()
+    /// <summary>Starts the loop, unless it's running already or the scheduler's been disposed.</summary>
+    /// <param name="first">
+    /// What a sync made before the loop started said to do next, such as the one a window makes as
+    /// it loads, so a pause, a retry or a backlog it reported isn't lost
+    /// </param>
+    public void Start(SyncOutcome? first = null)
     {
         lock (_state)
         {
-            if (_disposed)
-                return;
-            _loop ??= Task.Run(() => RunAsync(_stopping.Token));
+            if (_disposed || _loop is not null) return;
+
+            if (first is not null) Follow(first);
+            _loop = Task.Run(() => RunAsync(_stopping.Token));
         }
     }
 
@@ -131,6 +137,21 @@ public sealed class SyncScheduler : IAsyncDisposable
 
         _stopping.Dispose();
         _wake.Dispose();
+    }
+
+    /// <summary>
+    /// Holds off, comes back by a given time, or comes straight back, as a sync's outcome asked.
+    /// Called holding <see cref="_state"/>.
+    /// </summary>
+    /// <param name="outcome">What the sync said to do next</param>
+    private void Follow(SyncOutcome outcome)
+    {
+        var now = Environment.TickCount64;
+        _pausedUntil = outcome.PauseFor is { Ticks: > 0 } pause ? now + (long)pause.TotalMilliseconds : 0;
+        _retryAt = outcome.RetryIn is { Ticks: > 0 } retry ? now + (long)retry.TotalMilliseconds : 0;
+
+        // More queued than one round could flush, so come straight back.
+        if (outcome.MoreQueued) Wake();
     }
 
     private void Wake()
@@ -206,18 +227,7 @@ public sealed class SyncScheduler : IAsyncDisposable
                 var outcome = await _sync(ct).ConfigureAwait(false);
 
                 lock (_state)
-                {
-                    var now = Environment.TickCount64;
-                    _pausedUntil = outcome.PauseFor is { Ticks: > 0 } pause
-                        ? now + (long)pause.TotalMilliseconds
-                        : 0;
-                    _retryAt = outcome.RetryIn is { Ticks: > 0 } retry
-                        ? now + (long)retry.TotalMilliseconds
-                        : 0;
-                }
-
-                if (outcome.MoreQueued)
-                    Wake(); // more queued than one round could flush; come straight back
+                    Follow(outcome);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
