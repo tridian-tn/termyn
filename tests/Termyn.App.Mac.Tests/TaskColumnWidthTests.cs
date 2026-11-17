@@ -44,12 +44,14 @@ public class TaskColumnWidthTests
     }
 
     [AppKitFact]
-    public void A_region_whose_dates_fit_keeps_the_usual_widths()
+    public void A_region_whose_deadlines_fit_keeps_the_usual_deadline_width()
     {
+        // The deadline column only. A due date has the reminder's mark in front, and with the room
+        // AppKit leaves between columns, even "⏰ 28/12 22:30" needs more than the due column's
+        // usual width here.
         using var figures = new CultureScope(Regions.Figures);
         var grid = Grid();
 
-        Assert.Equal((double)StartupLayout.ColumnWidth(TaskColumn.Due), (double)Column(grid, TaskColumn.Due).Width);
         Assert.Equal((double)StartupLayout.ColumnWidth(TaskColumn.Deadline), (double)Column(grid, TaskColumn.Deadline).Width);
     }
 
