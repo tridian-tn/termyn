@@ -59,7 +59,7 @@ public class TaskColumnWidthTests
     private static NSTableView Grid()
     {
         var defaults = NSUserDefaults.StandardUserDefaults;
-        foreach (var key in defaults.ToDictionary().Keys.Select(k => k.ToString()))
+        foreach (var key in defaults.ToDictionary().Keys.Select(k => k.ToString() ?? string.Empty))
         {
             if (key.StartsWith("NSTableView", StringComparison.Ordinal) && key.EndsWith("TaskColumns", StringComparison.Ordinal))
             {
