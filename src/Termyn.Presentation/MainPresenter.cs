@@ -407,7 +407,7 @@ public sealed class MainPresenter
     }
 
     /// <summary>Reconciles with the server and republishes, keeping the current view if offline.</summary>
-    /// <returns>What the sync loop should do next — come straight back, or hold off.</returns>
+    /// <returns>What the sync loop should do next: come straight back, hold off, or try again soon</returns>
     public async Task<SyncOutcome> SyncAsync(CancellationToken ct = default)
     {
         lock (_publishing)

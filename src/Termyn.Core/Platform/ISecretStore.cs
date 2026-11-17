@@ -14,6 +14,18 @@ public interface ISecretStore
     string? GetToken();
 
     /// <summary>
+    /// Forgets the token at once, and removes it from where it's kept if that can be done without
+    /// waiting.
+    /// </summary>
+    /// <remarks>
+    /// For a token Todoist has turned away, which only has to stop being sent. One left behind is
+    /// replaced by the next token saved, or turned away again at the next launch.
+    /// <see cref="ClearToken"/> is for signing out, where one left behind would sign the next
+    /// launch back in, so it's worth waiting a moment for. By default the two are the same.
+    /// </remarks>
+    void ForgetToken() => ClearToken();
+
+    /// <summary>
     /// Returns the stored token, saying whether a token that can't be had is missing or only out of
     /// reach for now.
     /// </summary>

@@ -24,7 +24,7 @@ public sealed class DpapiSecretStore : ISecretStore
     /// <summary>ERROR_LOCK_VIOLATION as an HRESULT: another program has locked part of the file.</summary>
     private const int LockViolation = unchecked((int)0x80070021);
 
-    /// <summary>How many times a save or a delete is tried while another program has the file.</summary>
+    /// <summary>How many times a save or a sign-out's delete is tried while another program has the file.</summary>
     private const int Attempts = 10;
 
     /// <summary>The wait between those tries, which brings them to about half a second.</summary>
@@ -132,7 +132,7 @@ public sealed class DpapiSecretStore : ISecretStore
 
                 // Moving over a file another program has open is refused as access denied rather
                 // than as a sharing violation, so that's tried again too.
-                WhileHeldOpen(() => File.Move(temporary, _tokenPath, overwrite: true), deniedToo: true);
+                WhileHeldOpen(() => File.Move(temporary, _tokenPath, overwrite: true), "saving the token", Attempts, deniedToo: true);
             }
             catch
             {
@@ -158,7 +158,14 @@ public sealed class DpapiSecretStore : ISecretStore
         }
     }
 
-    public void ClearToken()
+    public void ClearToken() => Clear(Attempts);
+
+    /// <summary>Forgets the token, and deletes its file only if no other program has it open.</summary>
+    public void ForgetToken() => Clear(1);
+
+    /// <summary>Forgets the token, then deletes its file.</summary>
+    /// <param name="attempts">How many times the delete's tried while another program has the file open</param>
+    private void Clear(int attempts)
     {
         lock (_gate)
         {
@@ -167,7 +174,7 @@ public sealed class DpapiSecretStore : ISecretStore
             _held = null;
             _known = true;
 
-            WhileHeldOpen(() => { if (File.Exists(_tokenPath)) File.Delete(_tokenPath); }, deniedToo: false);
+            WhileHeldOpen(() => { if (File.Exists(_tokenPath)) File.Delete(_tokenPath); }, "clearing the token", attempts, deniedToo: false);
         }
     }
 
@@ -179,8 +186,10 @@ public sealed class DpapiSecretStore : ISecretStore
     /// failed a sign-out that had already emptied the cache, which left the account signed in.
     /// </remarks>
     /// <param name="io">What to do to the file</param>
+    /// <param name="what">What's being done, for the log</param>
+    /// <param name="attempts">How many times it's tried at most</param>
     /// <param name="deniedToo">Whether access denied is tried again as well, as it is for a move</param>
-    private static void WhileHeldOpen(Action io, bool deniedToo)
+    private void WhileHeldOpen(Action io, string what, int attempts, bool deniedToo)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -189,8 +198,12 @@ public sealed class DpapiSecretStore : ISecretStore
                 io();
                 return;
             }
-            catch (Exception ex) when (attempt < Attempts && (ex is IOException held && IsHeldOpen(held) || deniedToo && ex is UnauthorizedAccessException))
+            catch (Exception ex) when (attempt < attempts && (ex is IOException held && IsHeldOpen(held) || deniedToo && ex is UnauthorizedAccessException))
             {
+                // Once, at the first refusal: a save that went through after a wait is worth
+                // knowing about, but not one line for every try.
+                if (attempt == 1) _log?.Info($"Another program has the token file open, so {what} is being tried again.");
+
                 Thread.Sleep(BetweenAttempts);
             }
         }

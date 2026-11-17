@@ -1313,14 +1313,20 @@ public class SyncEngineTests
         Assert.Null(secrets.Stored);
     }
 
-    [Fact]
-    public async Task A_rejected_token_whose_file_cant_be_deleted_still_puts_the_account_on_hold()
+    [Theory]
+    [InlineData("file")]
+    [InlineData("keychain")]
+    public async Task A_rejected_token_that_cant_be_deleted_still_puts_the_account_on_hold(string where)
     {
         // The delete threw, and the account carried on as if nothing had been rejected, with the
-        // error from the file said in place of the rejection.
+        // store's error said in place of the rejection. The Keychain's isn't an I/O error, so only
+        // catching the file's left the Mac saying it.
         var api = new FakeApi { Throw = new TodoistAuthException("rejected") };
         var log = new RecordingLog();
-        var secrets = new FakeSecrets { Stored = "tok", ClearThrows = new IOException("held") };
+        Exception refusal = where == "file"
+            ? new IOException("held")
+            : new InvalidOperationException("The Keychain didn't remove the token (InteractionNotAllowed).");
+        var secrets = new FakeSecrets { Stored = "tok", ClearThrows = refusal };
         var held = new InMemorySnapshotStore();
         held.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
         var engine = new SyncEngine(api, held, secrets, log: log);

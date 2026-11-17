@@ -1,4 +1,6 @@
+using Termyn.Core.Api;
 using Termyn.Core.Platform;
+using Termyn.Core.Sync;
 using Termyn.Platform.Windows;
 using Termyn.TestSupport;
 
@@ -131,21 +133,82 @@ public sealed class SecretStoreTests : IDisposable
     {
         Store().SetToken("old");
 
-        var held = Hold();
-        var saving = Task.Run(() => Store().SetToken("new"), TestContext.Current.CancellationToken);
-        await Task.Delay(100, TestContext.Current.CancellationToken);
-        await held.DisposeAsync();
+        var saving = LetGoOnceTriedAgain(() => Store().SetToken("new"), "saving the token");
         await saving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.Equal("new", Store().GetToken());
 
-        held = Hold();
-        var clearing = Task.Run(() => Store().ClearToken(), TestContext.Current.CancellationToken);
-        await Task.Delay(100, TestContext.Current.CancellationToken);
-        await held.DisposeAsync();
+        var clearing = LetGoOnceTriedAgain(() => Store().ClearToken(), "clearing the token");
         await clearing.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         Assert.False(File.Exists(TokenFile));
+    }
+
+    [Fact]
+    public void A_token_forgotten_while_the_file_is_held_isnt_waited_for()
+    {
+        // For a token Todoist turned away, forgotten holding the lock the window reads through. Waiting
+        // out the file there froze the window for half a second.
+        Store().SetToken("rejected");
+        var store = Store();
+        Assert.Equal("rejected", store.GetToken());
+
+        using (Hold(FileShare.Read))
+        {
+            Assert.ThrowsAny<IOException>(store.ForgetToken);
+        }
+
+        Assert.DoesNotContain("being tried again", _log.All);
+        Assert.Equal(new TokenRead(null), store.ReadToken());
+    }
+
+    [Fact]
+    public async Task A_rejected_token_whose_file_is_held_still_puts_the_account_on_hold_straight_away()
+    {
+        // The engine and the real store together: the delete that can't happen is written down
+        // rather than waited for, and isn't reported in place of the rejection.
+        Store().SetToken("tok");
+        var store = Store();
+        var cache = new InMemorySnapshotStore();
+        cache.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var engine = new SyncEngine(new FakeApi { Throw = new TodoistAuthException("rejected") }, cache, store, log: _log);
+        engine.Load();
+
+        using (Hold(FileShare.Read))
+        {
+            await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+        }
+
+        Assert.True(engine.AwaitingToken);
+        Assert.Contains("WARN The rejected token couldn't be deleted", _log.All);
+        Assert.DoesNotContain("being tried again", _log.All);
+        Assert.Equal(new TokenRead(null), store.ReadToken());
+    }
+
+    /// <summary>
+    /// Holds the file, starts something on it, and lets go as soon as the store says it's trying
+    /// again, which shows it met the file held rather than starting after it was let go.
+    /// </summary>
+    /// <remarks>
+    /// Waits on this thread rather than after an await, so a busy thread pool can't hold up the
+    /// letting go past the half-second the store keeps trying for.
+    /// </remarks>
+    /// <param name="io">What to do to the file meanwhile</param>
+    /// <param name="what">What the store calls it in the log</param>
+    /// <returns>The thing being done, to wait for</returns>
+    private Task LetGoOnceTriedAgain(Action io, string what)
+    {
+        using var held = Hold();
+        var doing = Task.Run(io, TestContext.Current.CancellationToken);
+
+        var giveUp = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!_log.All.Contains($"so {what} is being tried again", StringComparison.Ordinal))
+        {
+            Assert.True(DateTime.UtcNow < giveUp, $"The store never met the file held while {what}.");
+            Thread.Sleep(5);
+        }
+
+        return doing;
     }
 
     [Fact]

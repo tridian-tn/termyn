@@ -22,7 +22,7 @@ public class WaitingForTokenTests
         var log = new RecordingLog();
         using var window = TestWindow.WithSecrets("waiting-for-token.json", Held(), secrets, log, out var presenter);
         _ = window.Handle;
-        var status = Status(window);
+        var status = TestWindow.StatusLine(window);
         await presenter.SyncAsync(TestContext.Current.CancellationToken);
         var muted = status.ForeColor;
 
@@ -51,25 +51,25 @@ public class WaitingForTokenTests
         secrets.Unreachable = true;
 
         window.Run(AppCommand.ToggleCompleted);
-        await WaitFor(() => !Status(window).Text.StartsWith("Fetching", StringComparison.Ordinal));
 
-        Assert.Equal("Something went wrong: The saved Todoist token can't be read just now. Try again in a moment.", Status(window).Text);
+        await WaitForStatus(window, "Something went wrong: The saved Todoist token can't be read just now. Try again in a moment.");
     }
 
-    /// <summary>Lets the window's own awaits finish, for a command that's started and not awaited.</summary>
-    /// <param name="condition">What to wait for</param>
-    private static async Task WaitFor(Func<bool> condition)
+    /// <summary>
+    /// Lets the window's own awaits finish, for a command that's started and not awaited, until the
+    /// status line says what's expected.
+    /// </summary>
+    /// <param name="window">The window</param>
+    /// <param name="expected">What the status line should come to say</param>
+    private static async Task WaitForStatus(Form window, string expected)
     {
         var giveUp = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (!condition() && DateTime.UtcNow < giveUp)
+        while (TestWindow.StatusLine(window).Text != expected)
         {
+            Assert.True(DateTime.UtcNow < giveUp, $"The status line still says \"{TestWindow.StatusLine(window).Text}\".");
             await Task.Delay(10, TestContext.Current.CancellationToken);
         }
     }
-
-    /// <summary>The status line along the bottom of the window.</summary>
-    private static System.Windows.Forms.Label Status(Form window)
-        => TestWindow.Descendants(window).OfType<System.Windows.Forms.Label>().Single(l => l.Parent == window && l.Dock == DockStyle.Bottom);
 
     /// <summary>Account u1, holding one project with a task in it.</summary>
     private static InMemorySnapshotStore Held()

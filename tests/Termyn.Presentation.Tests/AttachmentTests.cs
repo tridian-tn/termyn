@@ -18,6 +18,8 @@ public sealed class AttachmentTests : IDisposable
 
     private readonly FakeApi _api = new() { FileBytes = [1, 2, 3, 4] };
 
+    private readonly FakeSecrets _secrets = new() { Stored = "tok" };
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))
@@ -170,6 +172,21 @@ public sealed class AttachmentTests : IDisposable
         Assert.Null(Assert.Single(presenter.CommentsOn("i1")).Attachment);
     }
 
+    [Fact]
+    public async Task Taking_a_file_off_while_the_token_is_out_of_reach_leaves_it_on_to_try_again()
+    {
+        // Taken off first, the comment had let go of the upload by the time its delete found the
+        // token out of reach, and the file was left on Todoist with nothing to try again from.
+        var presenter = Seeded(WithFile);
+        _secrets.Unreachable = true;
+
+        var thrown = await Assert.ThrowsAsync<TodoistAuthException>(() => presenter.DetachFileAsync("n1", TestContext.Current.CancellationToken));
+
+        Assert.True(thrown.Unreachable);
+        Assert.NotNull(Assert.Single(presenter.CommentsOn("i1")).Attachment);
+        Assert.Empty(_api.DeletedUploads);
+    }
+
     // ---- Emptying the cache -----------------------------------------------------------------------
 
     [Fact]
@@ -217,12 +234,11 @@ public sealed class AttachmentTests : IDisposable
         foreach (var (type, id, json) in resources)
             store.PutResource(type, id, json);
 
-        var secrets = new FakeSecrets { Stored = "tok" };
-        var engine = new SyncEngine(_api, store, secrets, new FixedClock(Today));
+        var engine = new SyncEngine(_api, store, _secrets, new FixedClock(Today));
         engine.Load();
 
         var fetcher = withFetcher
-            ? new AttachmentFetcher(_api, secrets, new AttachmentCache(_directory))
+            ? new AttachmentFetcher(_api, _secrets, new AttachmentCache(_directory))
             : null;
 
         var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), fetcher: fetcher);

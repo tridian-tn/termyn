@@ -248,6 +248,12 @@ internal static class TestWindow
     /// <returns>The control, of which there must be exactly one</returns>
     internal static T Find<T>(Control parent) where T : Control => Descendants(parent).OfType<T>().Single();
 
+    /// <summary>The status line along the bottom of a window.</summary>
+    /// <param name="window">The window to look in</param>
+    /// <returns>The label, of which there must be exactly one</returns>
+    internal static System.Windows.Forms.Label StatusLine(Form window)
+        => window.Controls.OfType<System.Windows.Forms.Label>().Single(l => l.Dock == DockStyle.Bottom);
+
     /// <summary>Picks a row in the sidebar, the way a click does.</summary>
     /// <param name="window">The window whose sidebar to click in</param>
     /// <param name="key">The sidebar key of the row to pick</param>
