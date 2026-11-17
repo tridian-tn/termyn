@@ -34,6 +34,20 @@ public class DisplayDatesTests
         => Assert.Equal(expected, DisplayDates.DayMonth(Day, CultureInfo.GetCultureInfo(culture)));
 
     [Theory]
+    [InlineData("en-GB", "5 Oct 2026")]
+    [InlineData("en-US", "Oct 5, 2026")]
+    [InlineData("ja-JP", "2026年10月5日")]
+    public void A_day_month_and_year_follow_the_regions_order(string culture, string expected)
+        => Assert.Equal(expected, DisplayDates.DayMonthYear(Day, CultureInfo.GetCultureInfo(culture)));
+
+    [Theory]
+    [InlineData("en-GB", "5 Oct 09:30")]
+    [InlineData("en-US", "Oct 5 9:30 AM")]
+    [InlineData("ja-JP", "10月5日 9:30")]
+    public void A_day_and_month_with_a_time_follow_the_regions_order(string culture, string expected)
+        => Assert.Equal(expected, Regions.Spaced(DisplayDates.DayMonthAndTime(Moment, CultureInfo.GetCultureInfo(culture))));
+
+    [Theory]
     [InlineData("en-GB", "5 Oct 2026 09:30")]
     [InlineData("en-US", "Oct 5, 2026 9:30 AM")]
     [InlineData("ja-JP", "2026年10月5日 9:30")]
@@ -73,6 +87,8 @@ public class DisplayDatesTests
         var german = CultureInfo.GetCultureInfo("de-DE");
 
         Assert.Equal(Day.ToString("d. MMM", german), DisplayDates.DayMonth(Day, german));
+        Assert.Equal(Day.ToString("d. MMM yyyy", german), DisplayDates.DayMonthYear(Day, german));
+        Assert.Equal(Moment.ToString("d. MMM HH:mm", german), DisplayDates.DayMonthAndTime(Moment, german));
         Assert.Equal(Moment.ToString("d. MMM yyyy HH:mm", german), DisplayDates.DateAndTime(Moment, german));
         Assert.Equal(Moment.ToString("ddd, d. MMM HH:mm", german), DisplayDates.WeekdayAndTime(Moment, german));
     }
@@ -185,5 +201,59 @@ public class DisplayDatesTests
         Assert.Equal("1 May 1600 09:30", DisplayDates.DateAndTime(old, saudi));
         Assert.Equal("Mon, May 1 09:30", DisplayDates.WeekdayAndTime(old, saudi));
         Assert.Equal("Monday, 01 May 1600", DisplayDates.LongDay(DateOnly.FromDateTime(old), saudi));
+    }
+
+    // ---- Years ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_gregorian_year_runs_from_january()
+    {
+        var british = CultureInfo.GetCultureInfo("en-GB");
+
+        Assert.True(DisplayDates.SameYear(new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), british));
+        Assert.False(DisplayDates.SameYear(new DateOnly(2026, 12, 31), new DateOnly(2027, 1, 1), british));
+    }
+
+    [Fact]
+    public void A_hijri_year_runs_from_where_its_calendar_starts_it()
+    {
+        // 1448 began on the sixteenth of June 2026.
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
+        Assert.False(DisplayDates.SameYear(new DateOnly(2026, 6, 10), new DateOnly(2026, 7, 31), saudi));
+        Assert.True(DisplayDates.SameYear(new DateOnly(2027, 1, 5), new DateOnly(2026, 7, 31), saudi));
+    }
+
+    [Fact]
+    public void Days_the_regions_calendar_cant_hold_are_compared_by_their_gregorian_years()
+    {
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
+        Assert.True(DisplayDates.SameYear(new DateOnly(1600, 5, 1), new DateOnly(1600, 11, 1), saudi));
+        Assert.False(DisplayDates.SameYear(new DateOnly(1600, 5, 1), new DateOnly(1601, 5, 1), saudi));
+    }
+
+    [Fact]
+    public void The_first_year_of_two_japanese_eras_is_not_the_same_year()
+    {
+        // Heisei 1 is 1989 and Reiwa 1 is 2019, so the year alone says they're the same.
+        var japanese = (CultureInfo)CultureInfo.GetCultureInfo("ja-JP").Clone();
+        if (japanese.OptionalCalendars.OfType<JapaneseCalendar>().FirstOrDefault() is not { } calendar)
+        {
+            Assert.Skip("this machine's ICU offers no Japanese calendar for ja-JP");
+            return;
+        }
+
+        japanese.DateTimeFormat.Calendar = calendar;
+
+        Assert.False(DisplayDates.SameYear(new DateOnly(1989, 6, 1), new DateOnly(2019, 6, 1), japanese));
     }
 }

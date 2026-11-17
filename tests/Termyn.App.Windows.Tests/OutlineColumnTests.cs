@@ -1,5 +1,7 @@
+using System.Globalization;
 using Termyn.Core.Model;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.App.Windows.Tests;
 
@@ -83,5 +85,70 @@ public class OutlineColumnTests
         var runs = outline.LabelRuns(Row() with { Labels = ["followup", "waiting"] }, selected: false, muted);
 
         Assert.Equal([("@followup", teal), ("@waiting", muted)], runs);
+    }
+
+    // ---- Widths ----------------------------------------------------------------------------------
+
+    [WinFormsFact]
+    public void The_deadline_column_starts_wide_enough_for_a_long_date_in_another_year()
+    {
+        // Spanish writes one as "28 de sept de 2027", which needs far more room than an English
+        // date. September's is the longest of its months.
+        using var spanish = new CultureScope("es-ES");
+        using var outline = new OutlineView();
+
+        outline.LayColumns(new Dictionary<TaskColumn, int>());
+
+        Fits(outline, TaskColumn.Deadline, DisplayDates.DayMonthYear(new DateOnly(2027, 9, 28), CultureInfo.CurrentCulture));
+    }
+
+    [WinFormsFact]
+    public void The_due_column_starts_wide_enough_for_a_time_with_a_reminder()
+    {
+        // Korean puts a word for the half of the day before the time, and the reminder's mark goes
+        // in front of the lot: "⏰ 12월 28일 오후 10:30".
+        using var korean = new CultureScope("ko-KR");
+        using var outline = new OutlineView();
+
+        outline.LayColumns(new Dictionary<TaskColumn, int>());
+
+        var due = DisplayDates.DayMonthAndTime(new DateTime(2026, 12, 28, 22, 30, 0), CultureInfo.CurrentCulture);
+        var row = new TaskRow("a", "Call", Priority.P4, string.Empty, due, [], ReminderCount: 1);
+        Fits(outline, TaskColumn.Due, OutlineCells.CellOf(row, TaskColumn.Due));
+    }
+
+    [WinFormsFact]
+    public void A_region_whose_dates_fit_keeps_the_usual_widths()
+    {
+        // Figures alone, which are short in any font the outline could be given.
+        using var figures = new CultureScope(Regions.Figures);
+        using var outline = new OutlineView();
+
+        outline.LayColumns(new Dictionary<TaskColumn, int>());
+
+        Assert.Equal(StartupLayout.Scaled(StartupLayout.ColumnWidth(TaskColumn.Due), outline.DeviceDpi), outline.ColumnWidths[TaskColumn.Due]);
+        Assert.Equal(StartupLayout.Scaled(StartupLayout.ColumnWidth(TaskColumn.Deadline), outline.DeviceDpi), outline.ColumnWidths[TaskColumn.Deadline]);
+    }
+
+    [WinFormsFact]
+    public void A_width_the_user_saved_is_kept_however_long_the_regions_dates_are()
+    {
+        using var spanish = new CultureScope("es-ES");
+        using var outline = new OutlineView();
+
+        outline.LayColumns(new Dictionary<TaskColumn, int> { [TaskColumn.Deadline] = 60 });
+
+        Assert.Equal(60, outline.ColumnWidths[TaskColumn.Deadline]);
+    }
+
+    /// <summary>The space a cell leaves either side of its text, six pixels a side.</summary>
+    private const int CellInsets = 12;
+
+    private static void Fits(OutlineView outline, TaskColumn column, string date)
+    {
+        var room = outline.ColumnWidths[column] - CellInsets;
+        var needs = TextRenderer.MeasureText(date, outline.Font).Width;
+
+        Assert.True(needs <= room, $"“{date}” needs {needs}px and the {column} column has {room}px");
     }
 }

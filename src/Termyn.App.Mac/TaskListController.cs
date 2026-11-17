@@ -201,15 +201,24 @@ internal sealed class TaskListController : NSViewController
     /// The Task column stays first and takes up whatever the window's width leaves of the others,
     /// as Finder's Name column does; the rest can be resized, dragged into another order, or hidden,
     /// and AppKit keeps all of that by the table's autosave name. The widths it starts at are the
-    /// Windows outline's.
+    /// Windows outline's, with the date columns made wider for a region whose dates need it.
     /// </remarks>
     private void LoadGrid()
     {
+        // Before the columns, so the room their widths allow between them is the style's own. A
+        // cell has its column's width less that room.
+        _grid.Style = NSTableViewStyle.Inset;
+        double spacing = _grid.IntercellSpacing.Width;
+
         foreach (var each in Columns)
         {
             var column = new NSTableColumn(each.ToString())
             {
-                Width = StartupLayout.ColumnWidth(each),
+                Width = (nfloat)StartupLayout.StartWidth(
+                    each,
+                    StartupLayout.ColumnWidth(each),
+                    CultureInfo.CurrentCulture,
+                    words => GridCell.WidthFor(words) + spacing),
                 MinWidth = each switch
                 {
                     TaskColumn.Content => TaskColumnLeast,
@@ -239,7 +248,6 @@ internal sealed class TaskListController : NSViewController
             _grid.AddColumn(column);
         }
 
-        _grid.Style = NSTableViewStyle.Inset;
         _grid.UsesAlternatingRowBackgroundColors = true;
         _grid.UsesAutomaticRowHeights = false;
         _grid.FloatsGroupRows = true;

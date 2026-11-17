@@ -21,6 +21,7 @@ public class DeadlineTests
     [Fact]
     public void A_deadline_is_written_the_way_the_due_date_is()
     {
+        using var british = new CultureScope(Regions.British);
         var row = Single(Task("i1", "Ship it", deadline: "2026-08-04"));
 
         Assert.Equal("4 Aug", row.Deadline);
@@ -32,7 +33,39 @@ public class DeadlineTests
     {
         // The year is only worth the width when it isn't this one — the same rule the due column
         // follows, so the two read alike down the row.
+        using var british = new CultureScope(Regions.British);
+
         Assert.Equal("4 Aug 2027", Single(Task("i1", "Ship it", deadline: "2027-08-04")).Deadline);
+    }
+
+    [Fact]
+    public void A_deadline_is_written_in_the_regions_order()
+    {
+        // A deadline never has the server's words on it, so it's always one of Termyn's own dates,
+        // and it reads the way the day headings above it do.
+        using var american = new CultureScope(Regions.American);
+
+        Assert.Equal("Aug 4", Single(Task("i1", "Ship it", deadline: "2026-08-04")).Deadline);
+        Assert.Equal("Aug 4, 2027", Single(Task("i1", "Ship it", deadline: "2027-08-04")).Deadline);
+    }
+
+    [Fact]
+    public void A_deadline_says_which_year_by_the_regions_own_calendar()
+    {
+        // Saudi Arabia's year began in the middle of June, so the tenth of June is last year by its
+        // calendar and the fifth of January is still this one. Gregorian years would get both wrong.
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
+        using var region = new CultureScope(saudi);
+        var june = new DateOnly(2026, 6, 10);
+        var january = new DateOnly(2027, 1, 5);
+
+        Assert.Equal(DisplayDates.DayMonthYear(june, saudi), Single(Task("i1", "Ship it", deadline: "2026-06-10")).Deadline);
+        Assert.Equal(DisplayDates.DayMonth(january, saudi), Single(Task("i1", "Ship it", deadline: "2027-01-05")).Deadline);
     }
 
     [Fact]
@@ -49,6 +82,7 @@ public class DeadlineTests
     {
         // The two answer different questions — when to pick the work up, and when it stops being
         // any use — and a task can carry either without the other.
+        using var british = new CultureScope(Regions.British);
         var row = Single(Task("i1", "Ship it", due: "2026-08-01", deadline: "2026-08-04"));
 
         Assert.Equal("1 Aug", row.Due);
@@ -116,6 +150,7 @@ public class DeadlineTests
     [Fact]
     public void A_day_picked_is_set_as_the_deadline()
     {
+        using var british = new CultureScope(Regions.British);
         var presenter = Presenter(Task("i1", "Ship it"));
 
         presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
@@ -187,6 +222,7 @@ public class DeadlineTests
     [Fact]
     public void Setting_a_deadline_leaves_the_due_date_alone()
     {
+        using var british = new CultureScope(Regions.British);
         var presenter = Presenter(Task("i1", "Ship it", due: "2026-08-01"));
 
         presenter.SetDeadline("i1", new DateOnly(2026, 8, 4));
@@ -199,6 +235,7 @@ public class DeadlineTests
     [Fact]
     public void A_deadline_is_set_on_the_task_it_was_asked_for_and_no_other()
     {
+        using var british = new CultureScope(Regions.British);
         var presenter = Presenter(Task("i1", "Ship it"), Task("i2", "Something else"));
 
         presenter.SetDeadline("i2", new DateOnly(2026, 8, 4));

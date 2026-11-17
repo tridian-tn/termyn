@@ -3279,13 +3279,15 @@ public sealed class MainPresenter
     /// </summary>
     /// <remarks>
     /// Todoist supplies the wording for a due date — "1 Aug", "every Monday" — and one set here has
-    /// none until it has been round-tripped, so the stored ISO date shows through and the row reads
-    /// as a different kind of thing from the ones either side of it. Writing it out the same way
-    /// closes that gap. A deadline is never worded at all, so it comes through here every time. The
-    /// year is only worth the width when it isn't this one.
+    /// none until it has been round-tripped, so without this the stored ISO date would show through
+    /// and the row would read as a different kind of thing from the ones either side of it. A
+    /// deadline is never worded at all, so it comes through here every time. The year is only worth
+    /// the width when it isn't this one, by the calendar the date is written in.
     ///
-    /// Written in the invariant culture rather than the machine's, since what's being reproduced
-    /// here is the server's wording and not a date of Termyn's own.
+    /// Written in the machine's region, like the rest of Termyn's own dates, the day headings above
+    /// these rows among them. It isn't trying to copy the server's wording: that's in the language
+    /// the account reads and follows the account's own date format, so no one culture would match it
+    /// for every account, and a deadline has no wording of the server's to match anyway.
     /// </remarks>
     /// <param name="stored">The ISO date, floating datetime, or UTC instant Todoist stores, or null</param>
     /// <param name="zone">The account's timezone, which a UTC instant is shown in</param>
@@ -3312,8 +3314,16 @@ public sealed class MainPresenter
 
         string Written(DateTime moment, bool withTime)
         {
-            var date = moment.Year == today.Year ? "d MMM" : "d MMM yyyy";
-            return moment.ToString(withTime ? date + ", HH:mm" : date, CultureInfo.InvariantCulture);
+            var culture = CultureInfo.CurrentCulture;
+            var day = DateOnly.FromDateTime(moment);
+
+            return (DisplayDates.SameYear(day, today, culture), withTime) switch
+            {
+                (true, true) => DisplayDates.DayMonthAndTime(moment, culture),
+                (true, false) => DisplayDates.DayMonth(day, culture),
+                (false, true) => DisplayDates.DateAndTime(moment, culture),
+                (false, false) => DisplayDates.DayMonthYear(day, culture),
+            };
         }
     }
 
@@ -3527,9 +3537,9 @@ public sealed class MainPresenter
     /// The row that heads a day's tasks.
     /// </summary>
     /// <remarks>
-    /// Written in the machine's own culture rather than the invariant one the due column uses:
-    /// that column reproduces the server's wording, and this is Termyn's own words about a day.
-    /// Tomorrow is named rather than given its weekday, since that is how anybody would say it.
+    /// Written in the machine's own culture, as the dates Termyn writes in the due and deadline
+    /// columns are. Tomorrow is named rather than given its weekday, since that's how anybody would
+    /// say it.
     /// </remarks>
     /// <param name="day">The day being headed</param>
     /// <param name="today">Today in the account's timezone, for naming tomorrow</param>

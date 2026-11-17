@@ -157,11 +157,17 @@ public static class OutlineCells
     /// the server says where it lands next. The date it's leaving would say the press did nothing.
     /// </remarks>
     private static string DueOf(TaskRow row)
+        => Marked(row.Advancing ? Strings.DueAdvancing : row.Due, row.IsRecurring, row.ReminderCount > 0);
+
+    /// <summary>The due column's words with the marks for a repeat and a reminder in front.</summary>
+    /// <param name="due">What the column says about when the task is due, or empty</param>
+    /// <param name="recurring">Whether the task repeats</param>
+    /// <param name="reminded">Whether the task has a reminder</param>
+    /// <returns>The marks, a space and the words, or whichever of them there is</returns>
+    public static string Marked(string due, bool recurring, bool reminded)
     {
-        var due = row.Advancing ? Strings.DueAdvancing : row.Due;
-        var marks = (row.IsRecurring ? "↻" : string.Empty) + (row.ReminderCount > 0 ? "⏰" : string.Empty);
-        if (marks.Length == 0)
-            return due;
+        var marks = (recurring ? "↻" : string.Empty) + (reminded ? "⏰" : string.Empty);
+        if (marks.Length == 0) return due;
 
         return due.Length == 0 ? marks : $"{marks} {due}";
     }

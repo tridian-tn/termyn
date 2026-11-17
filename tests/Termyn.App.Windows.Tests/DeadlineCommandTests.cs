@@ -36,7 +36,7 @@ public class DeadlineCommandTests
         window.AskForDeadline = _ => (true, new DateOnly(2026, 8, 11));
 
         Assert.True(window.RunOnTask(AppCommand.Deadline, "a"));
-        Assert.Equal("11 Aug", presenter.Rows.Single(r => r.Id == "a").Deadline);
+        Assert.Equal(new DateOnly(2026, 8, 11), presenter.Rows.Single(r => r.Id == "a").DeadlineOn);
     }
 
     [WinFormsFact]
@@ -69,7 +69,7 @@ public class DeadlineCommandTests
         window.AskForDeadline = _ => (false, null);
 
         Assert.False(window.RunOnTask(AppCommand.Deadline, "b"));
-        Assert.Equal("4 Aug", presenter.Rows.Single(r => r.Id == "b").Deadline);
+        Assert.Equal(new DateOnly(2026, 8, 4), presenter.Rows.Single(r => r.Id == "b").DeadlineOn);
     }
 
     [WinFormsFact]

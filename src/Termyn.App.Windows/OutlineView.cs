@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
 using Termyn.Presentation;
@@ -129,7 +130,8 @@ internal sealed class OutlineView : ListView
     /// Once the list is on its screen and laid out. Before that it only knows the scale of the screen
     /// the app started on, and on a second screen scaled differently that's the wrong one.
     ///
-    /// A column with no saved width takes its default. When none of them had one, the task column
+    /// A column with no saved width takes its default, widened for a date column when the region
+    /// writes its dates longer than that has room for. When none of them had one, the task column
     /// then takes whatever the others leave of the outline, so every column shows without scrolling
     /// sideways. A scroll bar is allowed for, showing or not: this runs before the rows are in, and a
     /// real account soon has more than fit.
@@ -142,9 +144,7 @@ internal sealed class OutlineView : ListView
         foreach (var header in headers)
         {
             var column = (TaskColumn)header.Tag!;
-            header.Width = saved.TryGetValue(column, out var width)
-                ? width
-                : StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi);
+            header.Width = saved.TryGetValue(column, out var width) ? width : DefaultWidth(column);
         }
 
         // Asked of the outline's own columns, so a width saved for one it no longer has doesn't
@@ -158,6 +158,22 @@ internal sealed class OutlineView : ListView
         foreach (var header in headers.Where(h => h.Tag is TaskColumn.Content))
             header.Width = StartupLayout.TaskColumnWidth(room, others, DeviceDpi);
     }
+
+    /// <summary>
+    /// How wide a column starts when no width has been saved for it.
+    /// </summary>
+    /// <remarks>
+    /// The layout's default at this screen's scale, widened for a date column whose region needs
+    /// it, measured the way a cell is drawn.
+    /// </remarks>
+    /// <param name="column">The column</param>
+    /// <returns>Its width in pixels</returns>
+    private int DefaultWidth(TaskColumn column)
+        => (int)StartupLayout.StartWidth(
+            column,
+            StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi),
+            CultureInfo.CurrentCulture,
+            words => TextRenderer.MeasureText(words, Font).Width + (TextInset * 2));
 
     /// <summary>Raised when a header is clicked, with the column it stands for.</summary>
     public event Action<TaskColumn>? SortRequested;

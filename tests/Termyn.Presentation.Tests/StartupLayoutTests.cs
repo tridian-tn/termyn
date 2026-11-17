@@ -1,3 +1,5 @@
+using Termyn.TestSupport;
+
 namespace Termyn.Presentation.Tests;
 
 /// <summary>
@@ -68,4 +70,27 @@ public class StartupLayoutTests
             columns.Where(c => c != TaskColumn.Content),
             c => Assert.True(StartupLayout.ColumnWidth(c) < StartupLayout.ColumnWidth(TaskColumn.Content)));
     }
+
+    // ---- Date columns --------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(TaskColumn.Content)]
+    [InlineData(TaskColumn.Priority)]
+    [InlineData(TaskColumn.Project)]
+    [InlineData(TaskColumn.Labels)]
+    public void A_column_with_no_dates_keeps_its_usual_width(TaskColumn column)
+        => Assert.Equal(50, StartupLayout.StartWidth(column, 50, Regions.Figures, _ => 1000));
+
+    [Fact]
+    public void A_date_column_takes_the_room_its_widest_date_needs()
+    {
+        // Measured by length. The due column's longest is a December time with the reminder's mark
+        // in front, "⏰ 28/12 22:30"; a deadline has no time and no mark, so its own is "28/12/26".
+        Assert.Equal(13, StartupLayout.StartWidth(TaskColumn.Due, 1, Regions.Figures, words => words.Length));
+        Assert.Equal(8, StartupLayout.StartWidth(TaskColumn.Deadline, 1, Regions.Figures, words => words.Length));
+    }
+
+    [Fact]
+    public void A_date_column_is_never_made_narrower_than_usual()
+        => Assert.Equal(200, StartupLayout.StartWidth(TaskColumn.Deadline, 200, Regions.Figures, _ => 1));
 }
