@@ -3207,7 +3207,7 @@ public sealed class MainPresenter
             .GroupBy(r => r.ItemId!)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
-        var selected = scoped ? InSelection(snapshot) : _ => true;
+        var (selected, selectedCompleted) = scoped ? InSelection(snapshot) : (_ => true, _ => true);
         var visible = VisibleItems(snapshot, withKept: true)
             .Where(i => i.Id.Length > 0 && selected(i))
             .ToList();
@@ -3228,7 +3228,7 @@ public sealed class MainPresenter
 
         // Less what's already up there, kept where it was for a moment after being ticked off.
         if (ShowingCompleted)
-            rows.AddRange(CompletedRows(snapshot, i => selected(i) && !present.Contains(i.Id), Row));
+            rows.AddRange(CompletedRows(snapshot, i => selectedCompleted(i) && !present.Contains(i.Id), Row));
 
         return rows;
 
@@ -3359,26 +3359,36 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// The test for "is this task in the current view", resolved once per publish. A filter has to
+    /// The tests for "is this task in the current view", resolved once per publish. A filter has to
     /// be parsed and its projects indexed, which is far too much work to repeat per task.
     /// </summary>
-    private Func<TaskItem, bool> InSelection(ModelSnapshot snapshot)
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>
+    /// The test for an active task and the one for a completed task. They're the same test except
+    /// in a smart view, where Today takes in less once a task is done
+    /// </returns>
+    private (Func<TaskItem, bool> Active, Func<TaskItem, bool> Completed) InSelection(ModelSnapshot snapshot)
     {
         if (Selection.SectionId is { } sectionId)
-            return item => item.SectionId == sectionId;
+            return Both(item => item.SectionId == sectionId);
 
         if (Selection.ProjectId is { } projectId)
-            return item => item.ProjectId == projectId;
+            return Both(item => item.ProjectId == projectId);
 
         if (Selection.LabelName is { } label)
-            return item => item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase);
+            return Both(item => item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase));
 
         if (Selection.FilterId is { } filterId)
-            return FilterPredicate(snapshot, filterId);
+            return Both(FilterPredicate(snapshot, filterId));
 
-        return Selection.View is not { } view
-            ? _ => true
-            : item => SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId);
+        if (Selection.View is not { } view)
+            return Both(_ => true);
+
+        return (
+            item => SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId),
+            item => SmartViews.MatchesCompleted(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId));
+
+        static (Func<TaskItem, bool>, Func<TaskItem, bool>) Both(Func<TaskItem, bool> test) => (test, test);
     }
 
     private Func<TaskItem, bool> FilterPredicate(ModelSnapshot snapshot, string filterId)

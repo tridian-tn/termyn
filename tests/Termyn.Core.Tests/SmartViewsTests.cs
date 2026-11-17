@@ -71,6 +71,52 @@ public class SmartViewsTests
     public void All_matches_everything()
         => Assert.True(SmartViews.Matches(Item(null, projectId: "work"), SmartView.All, Today, Utc, "inbox"));
 
+    [Theory]
+    [InlineData("2026-07-31", "2026-07-31T09:00:00Z", true)]   // due today
+    [InlineData("2026-07-31", "2026-07-29T09:00:00Z", true)]   // due today, done early
+    [InlineData("2026-07-28", "2026-07-31T09:00:00Z", true)]   // overdue and done today: it was on the list this morning
+    [InlineData("2026-07-28", null, true)]                     // ticked off here a moment ago, not acked yet
+    [InlineData("2026-05-02", "2026-05-09T09:00:00Z", false)]  // overdue when it was done, months ago
+    [InlineData("2026-07-30", "2026-07-30T09:00:00Z", false)]  // done yesterday, on the day it was due
+    [InlineData("2026-08-01", "2026-07-31T09:00:00Z", false)]  // due tomorrow, done early
+    [InlineData(null, "2026-07-31T09:00:00Z", false)]          // no due date
+    public void Today_takes_completed_tasks_due_today_and_overdue_ones_done_today(string? due, string? completedAt, bool expected)
+        => Assert.Equal(expected, SmartViews.MatchesCompleted(Completed(due, completedAt), SmartView.Today, Today, Utc, null));
+
+    [Fact]
+    public void A_completed_tasks_day_is_read_in_the_accounts_zone()
+    {
+        // 23:00 UTC on the 30th is already the 31st in Auckland, so an overdue task finished then
+        // was finished today there and yesterday in UTC.
+        var item = Completed("2026-07-28", "2026-07-30T23:00:00Z");
+        var auckland = TimeZoneInfo.FindSystemTimeZoneById("Pacific/Auckland");
+
+        Assert.True(SmartViews.MatchesCompleted(item, SmartView.Today, Today, auckland, null));
+        Assert.False(SmartViews.MatchesCompleted(item, SmartView.Today, Today, Utc, null));
+    }
+
+    [Fact]
+    public void Completed_tasks_match_the_other_views_as_active_ones_do()
+    {
+        var item = Completed("2026-08-01", "2026-07-20T09:00:00Z");
+
+        Assert.True(SmartViews.MatchesCompleted(item, SmartView.Upcoming, Today, Utc, null));
+        Assert.True(SmartViews.MatchesCompleted(item, SmartView.All, Today, Utc, null));
+        Assert.False(SmartViews.MatchesCompleted(Completed("2026-07-31", null, projectId: "work"), SmartView.Inbox, Today, Utc, "inbox"));
+    }
+
+    private static TaskItem Completed(string? due, string? completedAt, string? projectId = null)
+    {
+        var fields = new List<string> { "\"id\":\"i\"", "\"content\":\"T\"", "\"checked\":true" };
+        if (due is not null)
+            fields.Add($"\"due\":{{\"date\":\"{due}\"}}");
+        if (completedAt is not null)
+            fields.Add($"\"completed_at\":\"{completedAt}\"");
+        if (projectId is not null)
+            fields.Add($"\"project_id\":\"{projectId}\"");
+        return Projections.ToTaskItem(Json.Object("{" + string.Join(",", fields) + "}"));
+    }
+
     private static TaskItem Item(string? due, string? projectId = null)
         => Projections.ToTaskItem(Json.Object(due is null
             ? $$"""{"id":"i","content":"T"{{(projectId is null ? "" : $",\"project_id\":\"{projectId}\"")}}}"""
