@@ -5,13 +5,17 @@ using Termyn.Presentation;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// The box a task's renamed in, and whether it opens over the name it's renaming.
+/// The box a task is renamed in, and whether it opens over the name it's renaming.
 /// </summary>
 /// <remarks>
 /// The list opens it where it would have written the name itself, at the left of the cell, but the
 /// rows write their words past the indent, the expander and the box that ticks a task off. These
 /// read where the box's letters actually land, by printing it, rather than trusting the arithmetic
 /// that put it there.
+///
+/// The test host doesn't follow a screen's scale, so other scales are tried the way the other
+/// tests here try them: with the font made as big as that scale would make it. That's the part
+/// the box is lined up by measuring, rather than by the gutters the row and the box share.
 /// </remarks>
 public class OutlineRenameTests
 {
@@ -29,9 +33,13 @@ public class OutlineRenameTests
     private static Form Window(int width = 700)
         => new() { StartPosition = FormStartPosition.Manual, Location = new Point(-2200, -2200), Size = new Size(width, 400) };
 
-    private static OutlineView Outline(Form form)
+    /// <summary>The list's font as a display of another scale would make it.</summary>
+    private static Font FontAt(int dpi)
+        => new(Control.DefaultFont.FontFamily, Control.DefaultFont.SizeInPoints * dpi / 96f);
+
+    private static OutlineView Outline(Form form, Font font)
     {
-        var outline = new OutlineView { Dock = DockStyle.Fill };
+        var outline = new OutlineView { Dock = DockStyle.Fill, Font = font };
         form.Controls.Add(outline);
         form.Show();
 
@@ -150,36 +158,44 @@ public class OutlineRenameTests
     }
 
     [WinFormsTheory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(2)]
-    public void The_name_opens_where_the_row_writes_it(int index)
+    [InlineData(0, 96)]
+    [InlineData(1, 96)]
+    [InlineData(2, 96)]
+    [InlineData(1, 120)]
+    [InlineData(1, 144)]
+    [InlineData(1, 192)]
+    public void The_name_opens_where_the_row_writes_it(int index, int dpi)
     {
         // It opened at the cell's left edge on every row, over the box and the expander, with the
         // name well to the left of where it had been written and further out the deeper the task.
+        using var font = FontAt(dpi);
         using var form = Window();
-        using var outline = Outline(form);
+        using var outline = Outline(form, font);
 
         var box = Rename(outline, index);
 
         Assert.True(BoundsOf(outline, box).Left > RightOfCheckbox(outline, index), "The box covers the one that ticks the task off.");
-        Assert.InRange(FirstLetterIn(outline, box) - FirstLetterOnRow(outline, index), -1, 1);
+        Assert.Equal(FirstLetterOnRow(outline, index), FirstLetterIn(outline, box));
     }
 
-    [WinFormsFact]
-    public void The_name_stays_where_it_was_as_it_gets_longer()
+    [WinFormsTheory]
+    [InlineData(96)]
+    [InlineData(144)]
+    [InlineData(192)]
+    public void The_name_stays_where_it_was_as_it_gets_longer(int dpi)
     {
         // The list moves the box back to the cell's edge each time the name changes length, so a box
         // moved once, as it opened, would jump left at the first key.
+        using var font = FontAt(dpi);
         using var form = Window(width: 300);
-        using var outline = Outline(form);
+        using var outline = Outline(form, font);
 
         // Starting with the row's own words, so the first letter's the same one the row writes.
         var box = Rename(outline, 1);
         SendMessage(box, WmSetText, 0, "Under it, and then long enough to run past the right-hand edge of the list");
         Application.DoEvents();
 
-        Assert.InRange(FirstLetterIn(outline, box) - FirstLetterOnRow(outline, 1), -1, 1);
+        Assert.Equal(FirstLetterOnRow(outline, 1), FirstLetterIn(outline, box));
         Assert.True(BoundsOf(outline, box).Right <= outline.ClientSize.Width, "The box runs off the edge of the list.");
     }
 
