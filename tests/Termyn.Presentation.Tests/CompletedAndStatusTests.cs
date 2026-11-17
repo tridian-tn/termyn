@@ -141,6 +141,28 @@ public class CompletedViewTests
     }
 
     [Fact]
+    public async Task Today_shows_the_completed_tasks_due_today_and_not_old_overdue_ones()
+    {
+        // Today takes in overdue tasks, and its completed list used to take them in the same way,
+        // so everything finished late in the last three months turned up under today's tasks.
+        var api = WithCompleted(
+            Done("due", "Due today", "2026-07-30T12:00:00Z", due: "2026-07-31"),
+            Done("late", "Overdue, done today", "2026-07-31T12:00:00Z", due: "2026-07-28"),
+            Done("old", "Overdue, done in May", "2026-05-09T12:00:00Z", due: "2026-05-02"));
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = [Json.Change("user", "user", """{"id":"u","tz_info":{"timezone":"UTC"}}""")],
+        };
+        var presenter = await Loaded(api);
+        presenter.Select(ViewSelection.Of(SmartView.Today));
+
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["late", "due"], presenter.Rows.Select(r => r.Id).ToArray());
+    }
+
+    [Fact]
     public async Task A_completed_task_reaches_a_label_view_too()
     {
         var api = WithCompleted(Json.Change("items", "c1", """{"id":"c1","content":"Done","checked":true,"labels":["urgent"]}"""));
@@ -320,13 +342,15 @@ public class CompletedViewTests
         Completed = _ => new CompletedPage(items, null),
     };
 
-    private static ResourceChange Done(string id, string content, string? at = null, string? project = null)
+    private static ResourceChange Done(string id, string content, string? at = null, string? project = null, string? due = null)
     {
         var fields = new List<string> { $"\"id\":\"{id}\"", $"\"content\":\"{content}\"", "\"checked\":true" };
         if (at is not null)
             fields.Add($"\"completed_at\":\"{at}\"");
         if (project is not null)
             fields.Add($"\"project_id\":\"{project}\"");
+        if (due is not null)
+            fields.Add($"\"due\":{{\"date\":\"{due}\"}}");
         return Json.Change("items", id, "{" + string.Join(",", fields) + "}");
     }
 }

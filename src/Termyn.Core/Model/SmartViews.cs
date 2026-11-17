@@ -40,6 +40,34 @@ public static class SmartViews
     };
 
     /// <summary>
+    /// Whether a completed task belongs in a view. The same as <see cref="Matches"/> except in
+    /// Today, where "or earlier" stops meaning overdue once a task is done.
+    /// </summary>
+    /// <remarks>
+    /// Today keeps the completed tasks due today, and the overdue ones finished today. Those were on
+    /// the list this morning, so ticking one off doesn't make it vanish. Anything else due earlier
+    /// was finished on another day, and the completed list reaches back three months.
+    /// </remarks>
+    /// <param name="item">The completed task</param>
+    /// <param name="view">The view being shown</param>
+    /// <param name="today">Today in the account's timezone</param>
+    /// <param name="zone">The account's timezone</param>
+    /// <param name="inboxProjectId">The inbox's project id, or null when it isn't known</param>
+    /// <returns>True when the task is shown in the view's completed list</returns>
+    public static bool MatchesCompleted(TaskItem item, SmartView view, DateOnly today, TimeZoneInfo zone, string? inboxProjectId) => view switch
+    {
+        SmartView.Today => DueOn(item, zone) is { } due && (due == today || (due < today && CompletedToday(item, today, zone))),
+        _ => Matches(item, view, today, zone, inboxProjectId),
+    };
+
+    /// <summary>
+    /// Whether a completed task was ticked off today, in the account's timezone. One ticked off here
+    /// has no timestamp until the server acks it, and it was finished a moment ago.
+    /// </summary>
+    private static bool CompletedToday(TaskItem item, DateOnly today, TimeZoneInfo zone)
+        => item.CompletedAt is null || DayOf(item.CompletedAt, zone) == today;
+
+    /// <summary>
     /// The day a task falls due in the account's timezone. Todoist sends a floating date or local
     /// datetime as-is, but a task with a fixed timezone arrives as a UTC instant — taking the date
     /// off the front of that would be a day out either side of midnight.
