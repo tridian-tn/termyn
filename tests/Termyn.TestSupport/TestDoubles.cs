@@ -32,16 +32,32 @@ public sealed class FixedClock : IClock
 /// <summary>A log that keeps its lines, so a test can read what would have been written.</summary>
 public sealed class RecordingLog : ILog
 {
+    private readonly Lock _gate = new();
+
     public List<string> Lines { get; } = [];
 
     /// <summary>Everything written, as one string, for asserting that something isn't in it.</summary>
-    public string All => string.Join(Environment.NewLine, Lines);
+    /// <remarks>Safe to read while another thread's writing, which a test waiting on a line does.</remarks>
+    public string All
+    {
+        get
+        {
+            lock (_gate)
+                return string.Join(Environment.NewLine, Lines);
+        }
+    }
 
-    public void Info(string message) => Lines.Add($"INFO {message}");
+    public void Info(string message) => Add($"INFO {message}");
 
-    public void Warn(string message, Exception? error = null) => Lines.Add($"WARN {message} {error}".TrimEnd());
+    public void Warn(string message, Exception? error = null) => Add($"WARN {message} {error}".TrimEnd());
 
-    public void Error(string message, Exception? error = null) => Lines.Add($"ERROR {message} {error}".TrimEnd());
+    public void Error(string message, Exception? error = null) => Add($"ERROR {message} {error}".TrimEnd());
+
+    private void Add(string line)
+    {
+        lock (_gate)
+            Lines.Add(line);
+    }
 }
 
 public sealed class FakeSecrets : ISecretStore
@@ -53,9 +69,18 @@ public sealed class FakeSecrets : ISecretStore
 
     public string? GetToken() => Unreachable ? null : Stored;
 
+    /// <summary>What clearing the token throws instead, as a file another program won't let go of does.</summary>
+    public Exception? ClearThrows;
+
     public TokenRead ReadToken() => Unreachable ? new(null, Unreachable: Stored is not null) : new(Stored);
     public void SetToken(string token) => Stored = token;
-    public void ClearToken() => Stored = null;
+
+    public void ClearToken()
+    {
+        if (ClearThrows is { } refusal) throw refusal;
+
+        Stored = null;
+    }
 }
 
 public sealed class FakeApi : ITodoistApi

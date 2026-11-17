@@ -85,4 +85,12 @@
   <data name="NotSignedIn" xml:space="preserve">
     <value>Termyn isn't signed in to Todoist.</value>
   </data>
+  <data name="TokenOutOfReach" xml:space="preserve">
+    <value>The saved Todoist token can't be read just now. Try again in a moment.</value>
+    <comment>Shown when something the user asked for needs the token, and the token is saved but can't be read yet: another program has its file open, or the Mac's Keychain is locked.</comment>
+  </data>
+  <data name="AttachmentTokenOutOfReach" xml:space="preserve">
+    <value>{0} hasn't been downloaded, and the saved Todoist token can't be read just now. Try again in a moment.</value>
+    <comment>Shown when opening or saving an attachment needs the token to download it, and the token is saved but can't be read yet. {0} is the file's name.</comment>
+  </data>
 </root>

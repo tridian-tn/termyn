@@ -1265,8 +1265,10 @@ public class SyncEngineTests
         Assert.False(engine.AwaitingToken);
 
         // Out of reach, a sync has nothing to send with — and stops there, without putting the
-        // account on hold either.
-        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+        // account on hold either, and says why so the window can wait rather than report it.
+        var thrown = await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+        Assert.True(thrown.Unreachable);
+        Assert.Equal("The saved Todoist token can't be read just now. Try again in a moment.", thrown.Message);
         Assert.False(engine.AwaitingToken);
 
         secrets.Unreachable = false;
@@ -1274,6 +1276,66 @@ public class SyncEngineTests
 
         Assert.False(engine.AwaitingToken);
         Assert.Equal("tok", secrets.Stored);
+    }
+
+    [Fact]
+    public async Task A_token_gone_mid_session_isnt_taken_for_one_out_of_reach()
+    {
+        // Deleted rather than held: nothing will hand it back, so it isn't one to wait for.
+        var held = new InMemorySnapshotStore();
+        held.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var engine = new SyncEngine(new FakeApi(), held, secrets);
+        engine.Load();
+
+        secrets.Stored = null;
+
+        var thrown = await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+        Assert.False(thrown.Unreachable);
+    }
+
+    [Fact]
+    public async Task A_token_rejected_while_its_file_cant_be_read_is_still_forgotten()
+    {
+        // Compared with the stored one first, so a rejection that lands after a new token's been
+        // saved leaves it alone. One that can't be read just then is the one that was sent.
+        var api = new FakeApi();
+        var (engine, _, secrets) = HeldAccount(api);
+        api.Next = _ =>
+        {
+            secrets.Unreachable = true;
+            throw new TodoistAuthException("rejected");
+        };
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(engine.AwaitingToken);
+        Assert.Null(secrets.Stored);
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("keychain")]
+    public async Task A_rejected_token_that_cant_be_deleted_still_puts_the_account_on_hold(string where)
+    {
+        // The delete threw, and the account carried on as if nothing had been rejected, with the
+        // store's error said in place of the rejection. The Keychain's isn't an I/O error, so only
+        // catching the file's left the Mac saying it.
+        var api = new FakeApi { Throw = new TodoistAuthException("rejected") };
+        var log = new RecordingLog();
+        Exception refusal = where == "file"
+            ? new IOException("held")
+            : new InvalidOperationException("The Keychain didn't remove the token (InteractionNotAllowed).");
+        var secrets = new FakeSecrets { Stored = "tok", ClearThrows = refusal };
+        var held = new InMemorySnapshotStore();
+        held.PutResource("items", "i1", """{"id":"i1","content":"Private"}""");
+        var engine = new SyncEngine(api, held, secrets, log: log);
+        engine.Load();
+
+        await Assert.ThrowsAsync<TodoistAuthException>(() => engine.SyncAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(engine.AwaitingToken);
+        Assert.Contains("WARN The rejected token couldn't be deleted", log.All);
     }
 
     [Fact]

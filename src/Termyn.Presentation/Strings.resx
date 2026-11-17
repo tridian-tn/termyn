@@ -407,6 +407,10 @@
     <value>Reconnect needed</value>
     <comment>In the status bar once Todoist has turned the token away. Nothing syncs until a new one is given.</comment>
   </data>
+  <data name="SyncStatusWaitingForToken" xml:space="preserve">
+    <value>Waiting to read the saved Todoist token…</value>
+    <comment>In the status bar while the token is saved but can't be read yet: another program has its file open on Windows, or the Keychain is locked or waiting on its prompt on a Mac. Termyn keeps trying, and syncing carries on by itself once it can.</comment>
+  </data>
   <data name="SyncStatusSynced" xml:space="preserve">
     <value>Synced</value>
     <comment>In the status bar after a sync, when how long ago it was isn't known.</comment>

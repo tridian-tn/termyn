@@ -127,17 +127,7 @@ public sealed class AppDelegate : NSApplicationDelegate
         _presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()), log: _log, shortcutText: MacShortcuts.Text);
         _presenter.RestoreCollapsed(_settings.View.CollapsedTasks);
 
-        // Every sync that gets through had a token to send, which the window wants to hear when
-        // it's been waiting for the Keychain to hand one over.
-        var presenter = _presenter;
-        _scheduler = new SyncScheduler(
-            async ct =>
-            {
-                var outcome = await presenter.SyncAsync(ct);
-                _mainWindow?.Synced();
-                return outcome;
-            },
-            _settings.Cadence);
+        _scheduler = new SyncScheduler(_presenter.SyncAsync, _settings.Cadence);
 
         // Every change queued is a reason to sync soon, as on Windows.
         engine.Queued += _scheduler.NotifyWrite;

@@ -106,8 +106,8 @@ public sealed class AttachmentFetcher
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return new FetchResult(FetchOutcome.Ready, held);
 
-        if (_secrets.GetToken() is not { } token)
-            return SignedOut(attachment);
+        var read = _secrets.ReadToken();
+        if (read.Token is not { } token) return NoToken(attachment, read);
 
         // Worked out before anything's opened, so whatever goes wrong from here on — the folder
         // refusing the file included — has a part-file to tidy up and comes back as an answer.
@@ -173,8 +173,8 @@ public sealed class AttachmentFetcher
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return await CopyOutAsync(attachment, held, folder, ct);
 
-        if (_secrets.GetToken() is not { } token)
-            return SignedOut(attachment);
+        var read = _secrets.ReadToken();
+        if (read.Token is not { } token) return NoToken(attachment, read);
 
         return await WriteOutAsync(attachment, folder, target => _api.DownloadAsync(token, attachment.FileUrl, target, progress, ct), ct);
     }
@@ -264,8 +264,14 @@ public sealed class AttachmentFetcher
         return null;
     }
 
-    private static FetchResult SignedOut(FileAttachment attachment)
-        => new(FetchOutcome.Offline, Message: $"{attachment.FileName} hasn't been downloaded, and Termyn isn't signed in.");
+    /// <summary>What a file that has to be downloaded comes to when there's no token to fetch it with.</summary>
+    /// <param name="attachment">The file asked for</param>
+    /// <param name="read">What reading the token found</param>
+    /// <returns>Offline either way, saying whether the token's gone or only out of reach for now</returns>
+    private static FetchResult NoToken(FileAttachment attachment, TokenRead read)
+        => read.Unreachable
+            ? new(FetchOutcome.Offline, Message: string.Format(CultureInfo.CurrentCulture, Strings.AttachmentTokenOutOfReach, attachment.FileName))
+            : new(FetchOutcome.Offline, Message: $"{attachment.FileName} hasn't been downloaded, and Termyn isn't signed in.");
 
     /// <summary>
     /// What a transfer that threw comes to.

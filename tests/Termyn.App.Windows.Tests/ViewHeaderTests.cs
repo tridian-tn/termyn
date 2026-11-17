@@ -422,7 +422,7 @@ public class ViewHeaderTests : IDisposable
         using var window = Shown(out _);
         var header = TestWindow.Find<ViewHeader>(window);
         var panel = TestWindow.Find<DetailHeader>(window);
-        var status = window.Controls.OfType<System.Windows.Forms.Label>().Single(l => l.Dock == DockStyle.Bottom);
+        var status = TestWindow.StatusLine(window);
 
         window.SizeStrips(144);
 

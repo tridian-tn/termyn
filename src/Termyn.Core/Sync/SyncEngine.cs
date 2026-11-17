@@ -2398,7 +2398,7 @@ public sealed class SyncEngine
     /// <param name="fileName">What to call it on the account</param>
     /// <returns>The new comment's temporary id</returns>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected (401).</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected (401), there's none, or it can't be read just now.</exception>
     public async Task<string?> AddCommentWithFileAsync(string ownerId, string content, Stream file, string fileName, CancellationToken ct = default)
     {
         string token;
@@ -2460,6 +2460,10 @@ public sealed class SyncEngine
     /// delete is not reversible, which is why the caller confirms first.
     /// </remarks>
     /// <returns>The url of the upload to delete, or null when there was no file to take off</returns>
+    /// <exception cref="TodoistAuthException">
+    /// The token's stored but can't be read just now, so the upload couldn't be deleted. Nothing's
+    /// been changed.
+    /// </exception>
     public string? DetachFile(string commentId)
     {
         lock (_gate)
@@ -2472,6 +2476,10 @@ public sealed class SyncEngine
                 return null;
 
             var url = JsonRead.String(file, "file_url");
+
+            // Before the comment's touched. Once it's let go of the file there's nothing to try the
+            // upload's delete again from, and a token out of reach is worth waiting a moment for.
+            if (url is not null && _secrets.ReadToken().Unreachable) throw OutOfReach();
 
             // Null rather than removed: the field has to reach the server as cleared, and a command
             // that simply omits it is a command that changes nothing.
@@ -2490,7 +2498,7 @@ public sealed class SyncEngine
     /// rather than waiting for one — and it is not reversible even when it succeeds.
     /// </remarks>
     /// <exception cref="TodoistNetworkException">Todoist was unreachable, timed out, or returned an error status.</exception>
-    /// <exception cref="TodoistAuthException">The token was rejected, or there is none.</exception>
+    /// <exception cref="TodoistAuthException">The token was rejected, there's none, or it can't be read just now.</exception>
     public async Task DeleteUploadAsync(string fileUrl, CancellationToken ct = default)
     {
         string token;
@@ -4179,24 +4187,49 @@ public sealed class SyncEngine
     /// <param name="rejected">The token the request went out with</param>
     private void ForgetRejectedToken(string rejected)
     {
-        if (_secrets.GetToken() != rejected)
-            return;
+        // One that can't be read just now can't be compared, and is taken to be the one that went:
+        // it's the stored token, so it's what the request was sent with unless a new one has since
+        // been saved, and a store that's just saved one can read it.
+        var stored = _secrets.ReadToken();
+        if (stored.Token is { } token ? token != rejected : !stored.Unreachable) return;
 
         _log?.Warn("Todoist rejected the token. It has been cleared; the account's cache and queued changes are kept for the next one.");
 
-        _secrets.ClearToken();
+        // On hold before the token's forgotten, so a store that can't delete it can't leave the
+        // account carrying on as if nothing had been rejected. Forgotten rather than cleared, since
+        // this holds the lock the window reads through, and clearing waits out a file that another
+        // program has open.
         _awaitingToken = true;
+        try
+        {
+            _secrets.ForgetToken();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // A file another program has open, or a Keychain that won't remove the item. Either
+            // way it's the rejection that's worth reporting, not this.
+            _log?.Warn("The rejected token couldn't be deleted, so it's left for the next token to replace.", ex);
+        }
     }
 
     /// <summary>The stored token, for a request about to go out. Called with the lock held.</summary>
     /// <remarks>
-    /// No token here doesn't put the account on hold the way a rejection does. The secret store
-    /// answers null for a token file it can't read just now, a scanner holding it say, as well as for
-    /// one that isn't there, and only Todoist turning a token away is reason to ask for another.
+    /// No token here doesn't put the account on hold the way a rejection does: only Todoist turning
+    /// a token away is reason to ask for another. A token that's stored but can't be read just now,
+    /// a scanner holding its file say, is marked as such and says so, so a sync can wait for it and
+    /// anything the user asked for can say why it didn't happen.
     /// </remarks>
-    /// <exception cref="TodoistAuthException">There's no token, so there's nothing to send it with.</exception>
+    /// <exception cref="TodoistAuthException">There's no token to hand, so there's nothing to send it with.</exception>
     private string TokenOrThrow()
-        => _secrets.GetToken() ?? throw new TodoistAuthException(Strings.NotSignedIn);
+    {
+        var read = _secrets.ReadToken();
+        if (read.Token is { } token) return token;
+
+        throw read.Unreachable ? OutOfReach() : new TodoistAuthException(Strings.NotSignedIn);
+    }
+
+    /// <summary>What's thrown for a token that's stored but can't be read just now.</summary>
+    private static TodoistAuthException OutOfReach() => new(Strings.TokenOutOfReach) { Unreachable = true };
 
     /// <summary>Whether anything at all is held: a resource, or a change waiting to be sent.</summary>
     private bool HoldsAnything => !Model.IsEmpty || _outbox.Count > 0;

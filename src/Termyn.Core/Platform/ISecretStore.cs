@@ -7,8 +7,23 @@ namespace Termyn.Core.Platform;
 /// </remarks>
 public interface ISecretStore
 {
-    /// <summary>Returns the stored token, or <c>null</c> if none is stored.</summary>
+    /// <summary>
+    /// Returns the stored token, or <c>null</c> if none is stored or it can't be read just now.
+    /// </summary>
+    /// <remarks>Use <see cref="ReadToken"/> where those two need telling apart.</remarks>
     string? GetToken();
+
+    /// <summary>
+    /// Forgets the token at once, and removes it from where it's kept if that can be done without
+    /// waiting.
+    /// </summary>
+    /// <remarks>
+    /// For a token Todoist has turned away, which only has to stop being sent. One left behind is
+    /// replaced by the next token saved, or turned away again at the next launch.
+    /// <see cref="ClearToken"/> is for signing out, where one left behind would sign the next
+    /// launch back in, so it's worth waiting a moment for. By default the two are the same.
+    /// </remarks>
+    void ForgetToken() => ClearToken();
 
     /// <summary>
     /// Returns the stored token, saying whether a token that can't be had is missing or only out of
@@ -17,7 +32,8 @@ public interface ISecretStore
     /// <remarks>
     /// The two are opposite answers to whether the account is still signed in. A Keychain whose
     /// access prompt hasn't been answered, or a locked one, holds the token as surely as an open
-    /// one does, and treating that as no token would put the account on hold over nothing. By
+    /// one does, and so does a token file another program has open. Treating either as no token
+    /// would put the account on hold over nothing. By
     /// default a store can't tell the two apart and reports every miss as missing, which is what
     /// <see cref="GetToken"/> has always meant.
     /// </remarks>
@@ -33,8 +49,9 @@ public interface ISecretStore
 /// <summary>What reading the stored token found.</summary>
 /// <param name="Token">The token, or null when it couldn't be had</param>
 /// <param name="Unreachable">
-/// True when there is a token but it can't be read just now — a locked Keychain, or an access
-/// prompt not yet answered — so it's worth asking again rather than asking the user for another
+/// True when there is a token but it can't be read just now — a locked Keychain, an access prompt
+/// not yet answered, or a token file another program has open — so it's worth asking again rather
+/// than asking the user for another
 /// </param>
 public readonly record struct TokenRead(string? Token, bool Unreachable = false)
 {

@@ -304,10 +304,6 @@
     <value>Done</value>
     <comment>Button that closes the sheet listing refused changes.</comment>
   </data>
-  <data name="TokenOutOfReach" xml:space="preserve">
-    <value>Waiting to read the Todoist token from your Keychain…</value>
-    <comment>Window subtitle while the token is stored but can't be read yet: the Keychain is locked or its access prompt hasn't been answered. Syncing carries on by itself once it can.</comment>
-  </data>
   <data name="ReconnectButton" xml:space="preserve">
     <value>Reconnect…</value>
     <comment>Button in the banner shown when Todoist has turned the saved token away; asks for a new one.</comment>

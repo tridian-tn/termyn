@@ -136,7 +136,7 @@ internal static class Program
         // bounds its own calls instead (TodoistHttp says more).
         using var http = TodoistHttp.CreateClient();
         ITodoistApi api = new TodoistApiClient(http);
-        ISecretStore secrets = new DpapiSecretStore(paths);
+        ISecretStore secrets = new DpapiSecretStore(paths, log);
 
         // The same HttpClient as the API: one connection pool, one place to configure.
         // The Todoist token rides on each request rather than on the client, so nothing of the
