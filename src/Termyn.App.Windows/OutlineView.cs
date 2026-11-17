@@ -163,21 +163,17 @@ internal sealed class OutlineView : ListView
     /// How wide a column starts when no width has been saved for it.
     /// </summary>
     /// <remarks>
-    /// The layout's default at this screen's scale, or for a date column, wide enough for the
-    /// region's longest dates if they need more. A Spanish deadline in another year, "28 de sept de
-    /// 2027", doesn't fit the room an English one does.
+    /// The layout's default at this screen's scale, widened for a date column whose region needs
+    /// it, measured the way a cell is drawn.
     /// </remarks>
     /// <param name="column">The column</param>
     /// <returns>Its width in pixels</returns>
     private int DefaultWidth(TaskColumn column)
-    {
-        var width = StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi);
-        var dates = StartupLayout.WidestDates(column, CultureInfo.CurrentCulture);
-        if (dates.Count == 0)
-            return width;
-
-        return Math.Max(width, dates.Max(d => TextRenderer.MeasureText(d, Font).Width) + (TextInset * 2));
-    }
+        => (int)StartupLayout.StartWidth(
+            column,
+            StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi),
+            CultureInfo.CurrentCulture,
+            words => TextRenderer.MeasureText(words, Font).Width + (TextInset * 2));
 
     /// <summary>Raised when a header is clicked, with the column it stands for.</summary>
     public event Action<TaskColumn>? SortRequested;

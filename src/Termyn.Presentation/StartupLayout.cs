@@ -122,6 +122,26 @@ public static class StartupLayout
         => Math.Max(room - others, Scaled(TaskColumnLeast, dpi));
 
     /// <summary>
+    /// How wide a column starts when no width has been saved for it.
+    /// </summary>
+    /// <remarks>
+    /// Its usual width, or for a date column, wide enough for the region's widest dates if they
+    /// need more. A Spanish deadline in another year, "28 de sept de 2027", doesn't fit the room an
+    /// English one does. How much room some words take is the platform's to say, since it's the one
+    /// drawing them.
+    /// </remarks>
+    /// <param name="column">The column</param>
+    /// <param name="usual">Its usual width, at the screen's scale</param>
+    /// <param name="culture">The region its dates are written in</param>
+    /// <param name="needs">How wide a cell has to be to show some words in full, padding and all</param>
+    /// <returns>The width it starts at</returns>
+    public static double StartWidth(TaskColumn column, double usual, CultureInfo culture, Func<string, double> needs)
+    {
+        var dates = WidestDates(column, culture);
+        return dates.Count == 0 ? usual : Math.Max(usual, dates.Max(needs));
+    }
+
+    /// <summary>
     /// The widest dates a column could show in a region, for making sure it starts wide enough.
     /// </summary>
     /// <remarks>
@@ -129,22 +149,23 @@ public static class StartupLayout
     /// the way a date that isn't this year's is. The due column's dates can have a time as well,
     /// though not with a year too: a timed date in another year is rare, and wide enough in most
     /// regions that a column fitted to it would be wider than nearly every row needs.
+    ///
+    /// A due date can have a reminder's mark in front of it, so each one's measured with it. A
+    /// repeat's mark isn't counted: a repeating task's column shows its words, never a date written
+    /// here.
     /// </remarks>
     /// <param name="column">The column</param>
     /// <param name="culture">The region the dates are written in</param>
-    /// <returns>The dates, written out, or none for a column that shows no dates</returns>
+    /// <returns>The dates as the column would show them, or none for a column that shows no dates</returns>
     public static IReadOnlyList<string> WidestDates(TaskColumn column, CultureInfo culture)
     {
-        if (column is not (TaskColumn.Due or TaskColumn.Deadline))
-            return [];
+        if (column is not (TaskColumn.Due or TaskColumn.Deadline)) return [];
 
         var days = Enumerable.Range(1, 12).Select(month => new DateOnly(DateTime.Today.Year, month, 28)).ToList();
-        var dated = days.Select(day => DisplayDates.DayMonthYear(day, culture));
-
-        if (column is TaskColumn.Deadline)
-            return dated.ToList();
+        var dated = days.Select(day => DisplayDates.DayMonthYear(day, culture)).ToList();
+        if (column is TaskColumn.Deadline) return dated;
 
         var timed = days.Select(day => DisplayDates.DayMonthAndTime(day.ToDateTime(new TimeOnly(22, 30)), culture));
-        return dated.Concat(timed).ToList();
+        return dated.Concat(timed).Select(date => OutlineCells.Marked(date, recurring: false, reminded: true)).ToList();
     }
 }

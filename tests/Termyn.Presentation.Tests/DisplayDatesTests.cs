@@ -202,4 +202,58 @@ public class DisplayDatesTests
         Assert.Equal("Mon, May 1 09:30", DisplayDates.WeekdayAndTime(old, saudi));
         Assert.Equal("Monday, 01 May 1600", DisplayDates.LongDay(DateOnly.FromDateTime(old), saudi));
     }
+
+    // ---- Years ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_gregorian_year_runs_from_january()
+    {
+        var british = CultureInfo.GetCultureInfo("en-GB");
+
+        Assert.True(DisplayDates.SameYear(new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), british));
+        Assert.False(DisplayDates.SameYear(new DateOnly(2026, 12, 31), new DateOnly(2027, 1, 1), british));
+    }
+
+    [Fact]
+    public void A_hijri_year_runs_from_where_its_calendar_starts_it()
+    {
+        // 1448 began on the sixteenth of June 2026.
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
+        Assert.False(DisplayDates.SameYear(new DateOnly(2026, 6, 10), new DateOnly(2026, 7, 31), saudi));
+        Assert.True(DisplayDates.SameYear(new DateOnly(2027, 1, 5), new DateOnly(2026, 7, 31), saudi));
+    }
+
+    [Fact]
+    public void Days_the_regions_calendar_cant_hold_are_compared_by_their_gregorian_years()
+    {
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
+        Assert.True(DisplayDates.SameYear(new DateOnly(1600, 5, 1), new DateOnly(1600, 11, 1), saudi));
+        Assert.False(DisplayDates.SameYear(new DateOnly(1600, 5, 1), new DateOnly(1601, 5, 1), saudi));
+    }
+
+    [Fact]
+    public void The_first_year_of_two_japanese_eras_is_not_the_same_year()
+    {
+        // Heisei 1 is 1989 and Reiwa 1 is 2019, so the year alone says they're the same.
+        var japanese = (CultureInfo)CultureInfo.GetCultureInfo("ja-JP").Clone();
+        if (japanese.OptionalCalendars.OfType<JapaneseCalendar>().FirstOrDefault() is not { } calendar)
+        {
+            Assert.Skip("this machine's ICU offers no Japanese calendar for ja-JP");
+            return;
+        }
+
+        japanese.DateTimeFormat.Calendar = calendar;
+
+        Assert.False(DisplayDates.SameYear(new DateOnly(1989, 6, 1), new DateOnly(2019, 6, 1), japanese));
+    }
 }

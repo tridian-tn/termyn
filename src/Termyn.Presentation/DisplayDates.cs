@@ -84,6 +84,35 @@ public static class DisplayDates
         => Write(culture, f => f.LongDatePattern, (pattern, c) => day.ToString(pattern, c));
 
     /// <summary>
+    /// Whether two days fall in the same year of the calendar a region writes its dates in.
+    /// </summary>
+    /// <remarks>
+    /// Not always the Gregorian year. Saudi Arabia's Umm al-Qura year and Iran's Persian one start
+    /// partway through it, so a day can be in this Gregorian year and last year's Hijri one, and a
+    /// Japanese era starts its years again from one. A day the calendar can't hold is written the
+    /// invariant way, so it's compared that way too.
+    /// </remarks>
+    /// <param name="day">One day</param>
+    /// <param name="other">The other day</param>
+    /// <param name="culture">The culture whose calendar decides, normally the machine's</param>
+    /// <returns>True when both are in the same year and era of that calendar</returns>
+    public static bool SameYear(DateOnly day, DateOnly other, CultureInfo culture)
+    {
+        var calendar = culture.DateTimeFormat.Calendar;
+        var one = day.ToDateTime(TimeOnly.MinValue);
+        var two = other.ToDateTime(TimeOnly.MinValue);
+
+        try
+        {
+            return calendar.GetEra(one) == calendar.GetEra(two) && calendar.GetYear(one) == calendar.GetYear(two);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return day.Year == other.Year;
+        }
+    }
+
+    /// <summary>
     /// Formats with a culture's pattern, or the invariant one's for a day its calendar can't hold.
     /// </summary>
     /// <param name="culture">The culture to write in</param>

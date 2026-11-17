@@ -29,6 +29,12 @@ public static class Regions
     public static CultureInfo American { get; } = Pinned("en-US", "dddd, MMMM d, yyyy", "MMMM d", "h:mm tt");
 
     /// <summary>
+    /// A region that writes its dates in figures alone, "28/9/27", so they're short in any font and
+    /// none of them needs more than a column's usual width.
+    /// </summary>
+    public static CultureInfo Figures { get; } = Pinned("en-GB", "d/M/yy", "d/M", "H:mm");
+
+    /// <summary>
     /// Saudi Arabian Arabic on the Umm al-Qura calendar, which runs only from 1900 to 2077, or null
     /// where this machine's ICU doesn't offer that calendar for the region.
     /// </summary>

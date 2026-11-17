@@ -3282,7 +3282,7 @@ public sealed class MainPresenter
     /// none until it has been round-tripped, so without this the stored ISO date would show through
     /// and the row would read as a different kind of thing from the ones either side of it. A
     /// deadline is never worded at all, so it comes through here every time. The year is only worth
-    /// the width when it isn't this one.
+    /// the width when it isn't this one, by the calendar the date is written in.
     ///
     /// Written in the machine's region, like the rest of Termyn's own dates, the day headings above
     /// these rows among them. It isn't trying to copy the server's wording: that's in the language
@@ -3317,10 +3317,13 @@ public sealed class MainPresenter
             var culture = CultureInfo.CurrentCulture;
             var day = DateOnly.FromDateTime(moment);
 
-            if (moment.Year == today.Year)
-                return withTime ? DisplayDates.DayMonthAndTime(moment, culture) : DisplayDates.DayMonth(day, culture);
-
-            return withTime ? DisplayDates.DateAndTime(moment, culture) : DisplayDates.DayMonthYear(day, culture);
+            return (DisplayDates.SameYear(day, today, culture), withTime) switch
+            {
+                (true, true) => DisplayDates.DayMonthAndTime(moment, culture),
+                (true, false) => DisplayDates.DayMonth(day, culture),
+                (false, true) => DisplayDates.DateAndTime(moment, culture),
+                (false, false) => DisplayDates.DayMonthYear(day, culture),
+            };
         }
     }
 
@@ -3535,7 +3538,7 @@ public sealed class MainPresenter
     /// </summary>
     /// <remarks>
     /// Written in the machine's own culture, as the dates Termyn writes in the due and deadline
-    /// columns are. Tomorrow is named rather than given its weekday, since that is how anybody would
+    /// columns are. Tomorrow is named rather than given its weekday, since that's how anybody would
     /// say it.
     /// </remarks>
     /// <param name="day">The day being headed</param>

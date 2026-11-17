@@ -1,57 +1,96 @@
 using System.Globalization;
+using CoreGraphics;
+using Termyn.Core.Model;
+using Termyn.Core.Settings;
 using Termyn.Presentation;
+using Termyn.TestSupport;
 
 namespace Termyn.App.Mac.Tests;
 
 /// <summary>
-/// How wide the table's date columns start in a region whose dates are longer than the Windows
-/// outline's widths allow.
+/// How wide the table's date columns start in a region whose dates are longer than the usual
+/// widths allow. In the real table, with a real cell at the width it'd be given.
 /// </summary>
+/// <remarks>
+/// AppKit keeps the table's widths in the defaults under its autosave name, and puts them back over
+/// the ones it starts with, so they're cleared first. Left from an earlier run, they'd be what's
+/// measured.
+/// </remarks>
 public class TaskColumnWidthTests
 {
-    /// <summary>The room the table leaves between columns, made up rather than the table's own.</summary>
-    private const double Spacing = 17;
-
-    /// <summary>The space a cell leaves either side of its words, four points a side.</summary>
-    private const double CellInsets = 8;
-
     [AppKitFact]
     public void The_deadline_column_starts_wide_enough_for_a_long_date_in_another_year()
     {
-        var spanish = CultureInfo.GetCultureInfo("es-ES");
+        // Spanish writes one as "28 de sept de 2027". September's is the longest of its months.
+        using var spanish = new CultureScope("es-ES");
+        var grid = Grid();
 
-        Fits(TaskColumn.Deadline, spanish, DisplayDates.DayMonthYear(new DateOnly(2027, 9, 28), spanish));
+        var deadline = DisplayDates.DayMonthYear(new DateOnly(2027, 9, 28), CultureInfo.CurrentCulture);
+
+        Fits(grid, TaskColumn.Deadline, Row() with { Deadline = deadline });
     }
 
     [AppKitFact]
-    public void The_due_column_starts_wide_enough_for_a_time_written_with_words()
+    public void The_due_column_starts_wide_enough_for_a_time_with_a_reminder()
     {
-        var korean = CultureInfo.GetCultureInfo("ko-KR");
+        // Korean puts a word for the half of the day before the time, and the reminder's mark goes
+        // in front of the lot: "⏰ 12월 28일 오후 10:30".
+        using var korean = new CultureScope("ko-KR");
+        var grid = Grid();
 
-        Fits(TaskColumn.Due, korean, DisplayDates.DayMonthAndTime(new DateTime(2026, 12, 28, 22, 30, 0), korean));
+        var due = DisplayDates.DayMonthAndTime(new DateTime(2026, 12, 28, 22, 30, 0), CultureInfo.CurrentCulture);
+
+        Fits(grid, TaskColumn.Due, Row() with { Due = due, ReminderCount = 1 });
     }
 
     [AppKitFact]
     public void A_region_whose_dates_fit_keeps_the_usual_widths()
     {
-        // Numbers only, so nothing it writes comes near either column's width.
-        var numeric = (CultureInfo)CultureInfo.InvariantCulture.Clone();
-        numeric.DateTimeFormat.LongDatePattern = "d/M/yy";
-        numeric.DateTimeFormat.MonthDayPattern = "d/M";
-        numeric.DateTimeFormat.ShortTimePattern = "H:mm";
+        using var figures = new CultureScope(Regions.Figures);
+        var grid = Grid();
 
-        Assert.Equal((double)StartupLayout.ColumnWidth(TaskColumn.Due), (double)TaskListController.StartWidth(TaskColumn.Due, numeric, Spacing));
-        Assert.Equal((double)StartupLayout.ColumnWidth(TaskColumn.Deadline), (double)TaskListController.StartWidth(TaskColumn.Deadline, numeric, Spacing));
+        Assert.Equal((double)StartupLayout.ColumnWidth(TaskColumn.Due), (double)Column(grid, TaskColumn.Due).Width);
+        Assert.Equal((double)StartupLayout.ColumnWidth(TaskColumn.Deadline), (double)Column(grid, TaskColumn.Deadline).Width);
     }
 
-    private static void Fits(TaskColumn column, CultureInfo culture, string date)
+    /// <summary>The table of a task list loaded in the current culture, with no widths kept from before.</summary>
+    private static NSTableView Grid()
     {
-        var room = (double)TaskListController.StartWidth(column, culture, Spacing) - Spacing - CellInsets;
+        var defaults = NSUserDefaults.StandardUserDefaults;
+        foreach (var key in defaults.ToDictionary().Keys.Select(k => k.ToString()))
+        {
+            if (key.StartsWith("NSTableView", StringComparison.Ordinal) && key.EndsWith("TaskColumns", StringComparison.Ordinal))
+            {
+                defaults.RemoveObject(key);
+            }
+        }
 
-        using var label = NSTextField.CreateLabel(date);
-        label.Font = NSFont.GetPreferredFont(NSFontTextStyle.Body.GetConstant()!, new NSDictionary());
-        double needs = label.FittingSize.Width;
-
-        Assert.True(needs <= room, $"“{date}” needs {needs}pt and the {column} column has {room}pt");
+        var controller = new TaskListController(FakeAccount.Commands(FakeAccount.Presenter()));
+        return Descendants(controller.View).OfType<NSTableView>().Single(t => t.FindColumn(new NSString(nameof(TaskColumn.Deadline))) >= 0);
     }
+
+    private static NSTableColumn Column(NSTableView grid, TaskColumn column)
+        => grid.TableColumns().Single(c => c.Identifier == column.ToString());
+
+    private static TaskRow Row() => new("a", "Ship it", Priority.P4, string.Empty, string.Empty, []);
+
+    /// <summary>
+    /// Lays a cell out at the width the table gives it in a column, and checks its words aren't
+    /// squeezed narrower than they need.
+    /// </summary>
+    private static void Fits(NSTableView grid, TaskColumn column, TaskRow row)
+    {
+        var width = Column(grid, column).Width - grid.IntercellSpacing.Width;
+        using var cell = new GridCell("GridCell") { Frame = new CGRect(0, 0, width, 24) };
+
+        cell.Show(row, column, new Dictionary<string, Rgb>(), new DateOnly(2026, 7, 31));
+        cell.LayoutSubtreeIfNeeded();
+
+        var text = cell.TextField!;
+        var needs = text.IntrinsicContentSize.Width;
+        Assert.True(text.Frame.Width >= needs, $"“{text.StringValue}” needs {needs}pt and the {column} column's cell gives it {text.Frame.Width}pt");
+    }
+
+    private static IEnumerable<NSView> Descendants(NSView view)
+        => view.Subviews.SelectMany(child => Descendants(child).Prepend(child));
 }

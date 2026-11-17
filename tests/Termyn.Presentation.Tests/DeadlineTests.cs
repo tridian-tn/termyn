@@ -50,6 +50,25 @@ public class DeadlineTests
     }
 
     [Fact]
+    public void A_deadline_says_which_year_by_the_regions_own_calendar()
+    {
+        // Saudi Arabia's year began in the middle of June, so the tenth of June is last year by its
+        // calendar and the fifth of January is still this one. Gregorian years would get both wrong.
+        if (Regions.UmmAlQura is not { } saudi)
+        {
+            Assert.Skip("this machine's ICU offers no Umm al-Qura calendar for ar-SA");
+            return;
+        }
+
+        using var region = new CultureScope(saudi);
+        var june = new DateOnly(2026, 6, 10);
+        var january = new DateOnly(2027, 1, 5);
+
+        Assert.Equal(DisplayDates.DayMonthYear(june, saudi), Single(Task("i1", "Ship it", deadline: "2026-06-10")).Deadline);
+        Assert.Equal(DisplayDates.DayMonth(january, saudi), Single(Task("i1", "Ship it", deadline: "2027-01-05")).Deadline);
+    }
+
+    [Fact]
     public void A_task_with_no_deadline_leaves_the_column_empty()
     {
         var row = Single(Task("i1", "Ship it"));

@@ -103,21 +103,25 @@ public class OutlineColumnTests
     }
 
     [WinFormsFact]
-    public void The_due_column_starts_wide_enough_for_a_time_written_with_words()
+    public void The_due_column_starts_wide_enough_for_a_time_with_a_reminder()
     {
-        // Korean puts a word for the half of the day before the time: "12월 28일 오후 10:30".
+        // Korean puts a word for the half of the day before the time, and the reminder's mark goes
+        // in front of the lot: "⏰ 12월 28일 오후 10:30".
         using var korean = new CultureScope("ko-KR");
         using var outline = new OutlineView();
 
         outline.LayColumns(new Dictionary<TaskColumn, int>());
 
-        Fits(outline, TaskColumn.Due, DisplayDates.DayMonthAndTime(new DateTime(2026, 12, 28, 22, 30, 0), CultureInfo.CurrentCulture));
+        var due = DisplayDates.DayMonthAndTime(new DateTime(2026, 12, 28, 22, 30, 0), CultureInfo.CurrentCulture);
+        var row = new TaskRow("a", "Call", Priority.P4, string.Empty, due, [], ReminderCount: 1);
+        Fits(outline, TaskColumn.Due, OutlineCells.CellOf(row, TaskColumn.Due));
     }
 
     [WinFormsFact]
     public void A_region_whose_dates_fit_keeps_the_usual_widths()
     {
-        using var british = new CultureScope(Regions.British);
+        // Figures alone, which are short in any font the outline could be given.
+        using var figures = new CultureScope(Regions.Figures);
         using var outline = new OutlineView();
 
         outline.LayColumns(new Dictionary<TaskColumn, int>());
