@@ -23,6 +23,7 @@ which seed the reference account described in §14 into a real SQLite cache.
 | Idle private working set | < 100 MB | **17.6 MB** (82 MB total working set) | ✓ |
 | Write → visible | < 16 ms | 8–13 ms at 5,000 tasks | ✓ |
 | Snapshot load + first projection, 5,000 tasks | (part of cold start) | 134–142 ms | — |
+| Allocated by that load + first projection | (regression gate: < 33 MB) | 30.3 MB | ✓ |
 | Switching view, 5,000 tasks | one frame | 4–8 ms | ✓ |
 | Search keystroke, 5,000 tasks | interactive | 0.4 ms | ✓ |
 | Quick-add after hotkey | < 100 ms | not measured numerically | ? |

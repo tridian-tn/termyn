@@ -40,6 +40,39 @@ public class PerformanceBudgetTests : IDisposable
     /// </summary>
     private static readonly TimeSpan InteractiveCeiling = TimeSpan.FromMilliseconds(200);
 
+    /// <summary>
+    /// The part of the spec's 500 ms from launch to interactive that Termyn's own code owns: loading
+    /// the cache and the first projection. Measured at 111–141 ms in Release on the development
+    /// laptop.
+    /// </summary>
+    /// <remarks>
+    /// Not raised to suit a slow build agent, unlike <see cref="InteractiveCeiling"/>. A limit loose
+    /// enough to ride out a busy agent would let start-up get slower a little at a time, which is
+    /// what this is here to stop. More rounds steady it instead (<see cref="StartupRounds"/>), and
+    /// <see cref="StartupAllocationCeiling"/> catches the creep that no time limit on a shared agent
+    /// can.
+    /// </remarks>
+    private static readonly TimeSpan StartupBudget = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>
+    /// Rounds the start-up measurement takes, keeping the best. More than the others take, since
+    /// its budget isn't loosened: a busy patch on an agent passes, and a real slowdown shows in
+    /// every round.
+    /// </summary>
+    private const int StartupRounds = 20;
+
+    /// <summary>
+    /// What loading the cache and the first projection may allocate, in bytes. Unlike a time, the
+    /// count comes out the same on a busy agent as on an idle laptop, so it can sit close to the
+    /// measured cost and catch the slow creep that a time limit can't tell from a slow machine.
+    /// </summary>
+    /// <remarks>
+    /// Measured at 30.3 MB on 18 Nov 2026, the same in Debug and Release, so this is about 10%
+    /// above it. When a change has good reason to cost more, raise it in the same change and say
+    /// why. When one makes start-up cheaper, lower it, so the room doesn't quietly fill up.
+    /// </remarks>
+    private const long StartupAllocationCeiling = 33_000_000;
+
     private readonly string _dir = Directory.CreateTempSubdirectory("termyn-perf").FullName;
 
     public void Dispose()
@@ -59,29 +92,40 @@ public class PerformanceBudgetTests : IDisposable
     {
         var path = Seeded();
         var best = TimeSpan.MaxValue;
+        var leastAllocated = long.MaxValue;
 
-        for (var round = 0; round < Rounds; round++)
+        for (var round = 0; round < StartupRounds; round++)
         {
             // A fresh store each round, so this is a cold read of the file rather than a warm one of
             // the connection's own caches — which is what a cold start actually does.
             using var store = new SqliteSnapshotStore(path);
             var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
 
+            // Loading and projecting stay on this thread, so its own count is all of their
+            // allocations and none of the tests running alongside.
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var watch = Stopwatch.StartNew();
             engine.Load();
             var presenter = new MainPresenter(engine, Parser(), new FixedClock(ReferenceAccount.Today));
             watch.Stop();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
             Assert.Equal(ReferenceAccount.Tasks, engine.Snapshot().Items.Count);
             Assert.NotEmpty(presenter.Rows);
 
             if (watch.Elapsed < best)
                 best = watch.Elapsed;
+
+            // The least of the rounds, as the first pays for setting up statics that another test
+            // may already have done, depending on the order they ran in.
+            leastAllocated = Math.Min(leastAllocated, allocated);
         }
 
-        // The spec allows 500 ms from launch to interactive, of which process start, the runtime and
-        // WinForms take the bulk. This is the part Termyn's own code owns.
-        Assert.True(best < TimeSpan.FromMilliseconds(400), $"load and first projection took {best.TotalMilliseconds:N0} ms");
+        Assert.True(
+            leastAllocated < StartupAllocationCeiling,
+            $"load and first projection allocated {leastAllocated / 1_000_000.0:N1} MB");
+
+        Assert.True(best < StartupBudget, $"load and first projection took {best.TotalMilliseconds:N0} ms");
     }
 
     [Fact]
