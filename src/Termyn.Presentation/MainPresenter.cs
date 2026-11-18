@@ -3365,7 +3365,7 @@ public sealed class MainPresenter
     /// <param name="snapshot">The account as it stands</param>
     /// <returns>
     /// The test for an active task and the one for a completed task. They're the same test except
-    /// in a smart view, where Today takes in less once a task is done
+    /// in a smart view or a filter, where being done changes what a date means
     /// </returns>
     private (Func<TaskItem, bool> Active, Func<TaskItem, bool> Completed) InSelection(ModelSnapshot snapshot)
     {
@@ -3379,7 +3379,7 @@ public sealed class MainPresenter
             return Both(item => item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase));
 
         if (Selection.FilterId is { } filterId)
-            return Both(FilterPredicate(snapshot, filterId));
+            return FilterPredicates(snapshot, filterId);
 
         if (Selection.View is not { } view)
             return Both(_ => true);
@@ -3387,15 +3387,16 @@ public sealed class MainPresenter
         return (
             item => SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId),
             item => SmartViews.MatchesCompleted(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId));
-
-        static (Func<TaskItem, bool>, Func<TaskItem, bool>) Both(Func<TaskItem, bool> test) => (test, test);
     }
 
-    private Func<TaskItem, bool> FilterPredicate(ModelSnapshot snapshot, string filterId)
+    /// <summary>One test that serves active and completed tasks alike.</summary>
+    private static (Func<TaskItem, bool>, Func<TaskItem, bool>) Both(Func<TaskItem, bool> test) => (test, test);
+
+    private (Func<TaskItem, bool> Active, Func<TaskItem, bool> Completed) FilterPredicates(ModelSnapshot snapshot, string filterId)
     {
         var filter = snapshot.Filters.FirstOrDefault(f => f.Id == filterId);
         if (filter is null)
-            return _ => false;
+            return Both(_ => false);
 
         var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels, snapshot.Sections);
         var parsed = FilterParser.Parse(filter.Query, vocabulary);
@@ -3416,7 +3417,7 @@ public sealed class MainPresenter
             _unsupportedFilter = new UnreadableFilter(
                 ForDisplay(filter.Query),
                 Links.TodoistFilter(filter.Id, filter.Name));
-            return _ => false;
+            return Both(_ => false);
         }
 
         var context = new FilterContext(
@@ -3426,7 +3427,9 @@ public sealed class MainPresenter
             snapshot.Sections,
             snapshot.UserId,
             snapshot.NextWeek);
-        return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
+        return (
+            item => FilterEvaluator.Matches(parsed.Expression!, item, context),
+            item => FilterEvaluator.MatchesCompleted(parsed.Expression!, item, context));
     }
 
     /// <summary>

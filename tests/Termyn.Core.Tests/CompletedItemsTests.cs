@@ -32,9 +32,92 @@ public class CompletedItemsTests
 
         await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
-        var query = Assert.Single(api.CompletedQueries);
+        var query = Assert.Single(api.CompletedQueries, q => !q.ByDueDate);
         Assert.Equal(CompletedQuery.MaxWindow, query.Until - query.Since);
         Assert.Null(query.Cursor);
+    }
+
+    [Fact]
+    public async Task The_days_today_and_upcoming_show_are_also_asked_for_by_due_date()
+    {
+        // Due tomorrow and finished long before the three months the first request reaches back,
+        // so only a request by due date can find it.
+        var api = new FakeApi
+        {
+            Completed = q => q.ByDueDate
+                ? new CompletedPage([Done("early", "Done months ahead")], null)
+                : new CompletedPage([Done("recent", "Done this week")], null),
+        };
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, fetch.Count);
+        Assert.Equal(["early", "recent"], engine.Snapshot().CompletedItems.Select(i => i.Id).Order().ToArray());
+
+        // Wide enough to take in today and the week Upcoming shows in any timezone, and no wider
+        // than the six weeks the endpoint allows.
+        var due = Assert.Single(api.CompletedQueries, q => q.ByDueDate);
+        var now = new FixedClock(Today).UtcNow;
+        Assert.True(due.Since <= now.AddDays(-1));
+        Assert.True(due.Until >= now.AddDays(SmartViews.UpcomingDays + 1));
+        Assert.True(due.Until - due.Since <= TimeSpan.FromDays(42));
+    }
+
+    [Fact]
+    public async Task A_failed_request_by_due_date_still_shows_what_the_first_one_found()
+    {
+        var api = new FakeApi
+        {
+            Completed = q => q.ByDueDate
+                ? throw new TodoistNetworkException("refused")
+                : new CompletedPage([Done("recent", "Done this week")], null),
+        };
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fetch.Count);
+        Assert.Equal("recent", Assert.Single(engine.Snapshot().CompletedItems).Id);
+    }
+
+    [Fact]
+    public async Task A_refused_request_by_due_date_keeps_the_token_and_what_the_first_one_found()
+    {
+        // The first request has just been answered with the token, so a 401 or 403 from the second
+        // is that endpoint saying no. Taken as the token being rejected, it signed the account out.
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var api = new FakeApi
+        {
+            Completed = q => q.ByDueDate
+                ? throw new TodoistAuthException("refused")
+                : new CompletedPage([Done("recent", "Done this week")], null),
+        };
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets, new FixedClock(Today));
+        engine.Load();
+
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fetch.Count);
+        Assert.Equal("tok", secrets.Stored);
+        Assert.False(engine.AwaitingToken);
+    }
+
+    [Fact]
+    public async Task A_request_by_due_date_that_reaches_the_page_ceiling_says_so()
+    {
+        var page = 0;
+        var api = new FakeApi
+        {
+            Completed = q => q.ByDueDate
+                ? new CompletedPage([Done("d" + page++, "Due soon")], "more")
+                : new CompletedPage([Done("recent", "Done this week")], null),
+        };
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(fetch.Truncated);
     }
 
     [Fact]
@@ -55,7 +138,7 @@ public class CompletedItemsTests
 
         Assert.Equal(3, fetch.Count);
         Assert.False(fetch.Truncated);
-        Assert.Equal(["", "page2", "page3"], api.CompletedQueries.Select(q => q.Cursor ?? string.Empty).ToArray());
+        Assert.Equal(["", "page2", "page3"], api.CompletedQueries.Where(q => !q.ByDueDate).Select(q => q.Cursor ?? string.Empty).ToArray());
     }
 
     [Fact]
@@ -69,7 +152,7 @@ public class CompletedItemsTests
         var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
 
         Assert.True(fetch.Truncated);
-        Assert.Equal(10, api.CompletedQueries.Count);
+        Assert.Equal(10, api.CompletedQueries.Count(q => !q.ByDueDate));
     }
 
     [Fact]
