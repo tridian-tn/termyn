@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
 using Termyn.Presentation;
@@ -741,6 +742,151 @@ internal sealed class OutlineView : ListView
         return false;
     }
 
+    // ---- Renaming ------------------------------------------------------------------------------
+
+    /// <summary>LVM_GETEDITCONTROL, which hands back the box a rename is being typed in.</summary>
+    private const int LvmGetEditControl = 0x1000 + 24;
+
+    /// <summary>EM_GETRECT, which says where in an edit box its text is laid out.</summary>
+    private const int EmGetRect = 0x00B2;
+
+    /// <summary>
+    /// The box the current rename is being typed in, or the last one's once it's closed.
+    /// </summary>
+    /// <remarks>
+    /// Held so it isn't collected while it's still listening to the box. It lets go of the window
+    /// by itself when the window goes.
+    /// </remarks>
+    private RenameBox? _renameBox;
+
+    /// <summary>
+    /// Holds the box a rename is typed in over the words it's renaming.
+    /// </summary>
+    /// <remarks>
+    /// The list puts the box where it would have written the name itself, at the left of the cell,
+    /// and here the words start past the indent, the expander and the box that ticks the task off.
+    /// It also moves the box back every time the name changes length, so moving it once as it
+    /// opens doesn't last past the first key.
+    /// </remarks>
+    protected override void OnBeforeLabelEdit(LabelEditEventArgs e)
+    {
+        base.OnBeforeLabelEdit(e);
+
+        if (e.CancelEdit || e.Item < 0 || e.Item >= _rows.Count) return;
+
+        var box = SendMessage(Handle, LvmGetEditControl, 0, 0);
+        if (box != 0) _renameBox = new RenameBox(this, e.Item, box);
+    }
+
+    /// <summary>
+    /// Moves a rename's box so the name in it starts where the row's words do.
+    /// </summary>
+    /// <remarks>
+    /// The box is left where the list put it when the Task column's too narrow to show any words,
+    /// since there's nothing on the row for it to line up with.
+    /// </remarks>
+    /// <param name="index">The row being renamed</param>
+    /// <param name="box">The box's window</param>
+    /// <param name="pos">Where the list is about to put the box, changed in place</param>
+    /// <returns>True when it was changed</returns>
+    private bool PlaceRenameBox(int index, nint box, ref WindowPos pos)
+    {
+        const uint NoSize = 0x0001;
+        const uint NoMove = 0x0002;
+
+        if ((pos.Flags & NoMove) != 0 || index >= _rows.Count) return false;
+
+        var words = WordsOf(index);
+        if (words.Width <= 0 || words.X >= ClientSize.Width) return false;
+
+        var layout = default(NativeRect);
+        SendMessage(box, EmGetRect, 0, ref layout);
+        pos.X = words.X + LetterPadding - layout.Left;
+
+        // The list sizes the box to fit the name from where it opened it, and the name's no wider
+        // for being moved, but the box's right edge now runs that much further. It stops at the
+        // list's edge, where the box starts scrolling the name instead.
+        var room = ClientSize.Width - pos.X;
+        if ((pos.Flags & NoSize) == 0 && room > 0) pos.Cx = Math.Min(pos.Cx, room);
+
+        return true;
+    }
+
+    /// <summary>
+    /// How far in from the left of its rectangle TextRenderer writes the first letter.
+    /// </summary>
+    /// <remarks>
+    /// A sixth of the line's height, rounded up: the room it leaves for a letter that overhangs,
+    /// unless it's told NoPadding. The height's measured rather than read from Font.Height, which
+    /// is a pixel out at some sizes and takes the answer with it.
+    /// </remarks>
+    private int LetterPadding
+        => (int)Math.Ceiling(TextRenderer.MeasureText("x", Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Height / 6f);
+
+    /// <summary>
+    /// The box a rename is typed in, listened to so the list can't put it back at the cell's edge.
+    /// </summary>
+    private sealed class RenameBox : NativeWindow
+    {
+        private const int WmWindowPosChanging = 0x0046;
+
+        private readonly OutlineView _outline;
+        private readonly int _index;
+
+        /// <summary>Starts listening to a rename's box.</summary>
+        /// <param name="outline">The list the rename is in</param>
+        /// <param name="index">The row being renamed</param>
+        /// <param name="box">The box's window</param>
+        public RenameBox(OutlineView outline, int index, nint box)
+        {
+            _outline = outline;
+            _index = index;
+            AssignHandle(box);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WmWindowPosChanging)
+            {
+                var pos = Marshal.PtrToStructure<WindowPos>(m.LParam);
+                if (_outline.PlaceRenameBox(_index, Handle, ref pos))
+                {
+                    Marshal.StructureToPtr(pos, m.LParam, false);
+                }
+            }
+
+            base.WndProc(ref m);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPos
+    {
+        public nint Window;
+        public nint InsertAfter;
+        public int X;
+        public int Y;
+        public int Cx;
+        public int Cy;
+        public uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    // DllImport rather than LibraryImport, matching the rest of the app.
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, nint wParam, ref NativeRect lParam);
+
     // ---- Dragging ------------------------------------------------------------------------------
 
     /// <summary>What a drag out of the outline carries, under a name of its own.</summary>
@@ -1394,9 +1540,7 @@ internal sealed class OutlineView : ListView
 
                 DrawCheck(e.Graphics, Checkbox(bounds, DeviceDpi), done, selected ? Theme.OnAccent : Theme.Muted);
 
-                bounds.X += CheckWidth;
-                bounds.Width -= CheckWidth;
-                TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Inset(bounds), text, Flags);
+                TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Words(e.Bounds, row.Depth), text, Flags);
                 break;
 
             // The same face the task's own column uses, so a finished task's dates are struck
@@ -1451,6 +1595,28 @@ internal sealed class OutlineView : ListView
     /// <summary>Where the expander sits, given the row's first column already moved in by its depth.</summary>
     private Rectangle Expander(Rectangle indented)
         => new(indented.X, indented.Y, ExpanderWidth, indented.Height);
+
+    /// <summary>
+    /// Where a task's words are written in its Task cell: past its indent, the expander's room and
+    /// the box's.
+    /// </summary>
+    /// <param name="cell">The row's Task cell</param>
+    /// <param name="depth">How many levels down the task sits</param>
+    /// <returns>The rectangle the words are handed to TextRenderer in</returns>
+    private Rectangle Words(Rectangle cell, int depth)
+    {
+        var taken = (depth * IndentWidth) + ExpanderWidth + CheckWidth;
+        return Inset(new Rectangle(cell.X + taken, cell.Y, cell.Width - taken, cell.Height));
+    }
+
+    /// <summary>Where a row's words are written, in the list's own coordinates.</summary>
+    /// <param name="index">The row</param>
+    /// <returns>The rectangle the words are handed to TextRenderer in</returns>
+    internal Rectangle WordsOf(int index)
+    {
+        var row = GetItemRect(index, ItemBoundsPortion.Entire);
+        return Words(new Rectangle(row.X, row.Y, Columns[0].Width, row.Height), _rows[index].Depth);
+    }
 
     /// <summary>
     /// Where the box that ticks a task off sits, given the row already moved past its expander.
