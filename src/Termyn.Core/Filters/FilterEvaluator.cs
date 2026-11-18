@@ -140,7 +140,26 @@ public sealed class FilterContext
 /// <summary>Applies a parsed filter to a task.</summary>
 public static class FilterEvaluator
 {
-    public static bool Matches(FilterExpression expression, TaskItem item, FilterContext context) => expression switch
+    public static bool Matches(FilterExpression expression, TaskItem item, FilterContext context)
+        => Evaluate(expression, item, context, completed: false);
+
+    /// <summary>
+    /// Applies a parsed filter to a completed task. The same as <see cref="Matches"/> except that
+    /// nothing finished is overdue.
+    /// </summary>
+    /// <remarks>
+    /// Todoist's own filters never show completed tasks, so it has no answer to copy. Overdue means
+    /// late and still to do, which a finished task isn't, and without this "today | overdue" lists
+    /// everything finished late in the last three months.
+    /// </remarks>
+    /// <param name="expression">The parsed filter</param>
+    /// <param name="item">The completed task</param>
+    /// <param name="context">The account the filter runs against</param>
+    /// <returns>True when the filter's completed list takes the task</returns>
+    public static bool MatchesCompleted(FilterExpression expression, TaskItem item, FilterContext context)
+        => Evaluate(expression, item, context, completed: true);
+
+    private static bool Evaluate(FilterExpression expression, TaskItem item, FilterContext context, bool completed) => expression switch
     {
         FilterExpression.Everything => true,
 
@@ -166,7 +185,7 @@ public static class FilterEvaluator
         // are separate — "today | overdue" is how you ask for both.
         FilterExpression.DueToday => SmartViews.DueOn(item, context.Zone) == context.Today,
 
-        FilterExpression.Overdue => SmartViews.DueOn(item, context.Zone) is { } due && due < context.Today,
+        FilterExpression.Overdue => !completed && SmartViews.DueOn(item, context.Zone) is { } due && due < context.Today,
 
         // Read off the raw field, not the parsed date: a due date Termyn can't read is still a date.
         FilterExpression.NoDate => item.DueDate is null,
@@ -214,11 +233,11 @@ public static class FilterEvaluator
 
         FilterExpression.Shared => item.ProjectId is { } project && context.IsShared(project),
 
-        FilterExpression.Not e => !Matches(e.Operand, item, context),
+        FilterExpression.Not e => !Evaluate(e.Operand, item, context, completed),
 
-        FilterExpression.And e => Matches(e.Left, item, context) && Matches(e.Right, item, context),
+        FilterExpression.And e => Evaluate(e.Left, item, context, completed) && Evaluate(e.Right, item, context, completed),
 
-        FilterExpression.Or e => Matches(e.Left, item, context) || Matches(e.Right, item, context),
+        FilterExpression.Or e => Evaluate(e.Left, item, context, completed) || Evaluate(e.Right, item, context, completed),
 
         // Unreachable while every case is handled, and false rather than true so that it stays
         // harmless if one ever isn't: a term nobody evaluates should match nothing, not everything.

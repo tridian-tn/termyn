@@ -31,7 +31,7 @@ public class CompletedViewTests
         Assert.True(presenter.ShowingCompleted);
         var row = Assert.Single(presenter.Rows, r => r.Id == "c1");
         Assert.True(row.Completed);
-        Assert.Single(api.CompletedQueries);
+        Assert.Single(api.CompletedQueries, q => !q.ByDueDate);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class CompletedViewTests
 
         Assert.False(presenter.ShowingCompleted);
         Assert.DoesNotContain(presenter.Rows, r => r.Id == "c1");
-        Assert.Single(api.CompletedQueries);
+        Assert.Single(api.CompletedQueries, q => !q.ByDueDate);
     }
 
     [Fact]
@@ -137,14 +137,15 @@ public class CompletedViewTests
 
         // One account-wide fetch serves every view; which of them shows is decided locally.
         Assert.Equal(["cw"], presenter.Rows.Select(r => r.Id).ToArray());
-        Assert.Single(api.CompletedQueries);
+        Assert.Single(api.CompletedQueries, q => !q.ByDueDate);
     }
 
     [Fact]
-    public async Task Today_shows_the_completed_tasks_due_today_and_not_old_overdue_ones()
+    public async Task Today_shows_only_the_completed_tasks_due_today()
     {
         // Today takes in overdue tasks, and its completed list used to take them in the same way,
         // so everything finished late in the last three months turned up under today's tasks.
+        // Todoist's own Today drops an overdue task once it's done, even one done today.
         var api = WithCompleted(
             Done("due", "Due today", "2026-07-30T12:00:00Z", due: "2026-07-31"),
             Done("late", "Overdue, done today", "2026-07-31T12:00:00Z", due: "2026-07-28"),
@@ -159,7 +160,54 @@ public class CompletedViewTests
 
         await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(["late", "due"], presenter.Rows.Select(r => r.Id).ToArray());
+        Assert.Equal(["due"], presenter.Rows.Select(r => r.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task Upcoming_shows_the_completed_tasks_due_in_the_week_ahead()
+    {
+        var api = WithCompleted(
+            Done("soon", "Due tomorrow, done early", "2026-07-30T12:00:00Z", due: "2026-08-01"),
+            Done("today", "Due today", "2026-07-30T12:00:00Z", due: "2026-07-31"),
+            Done("later", "Due in a fortnight, done early", "2026-07-30T12:00:00Z", due: "2026-08-14"),
+            Done("deadline", "No due date, deadline tomorrow", "2026-07-30T12:00:00Z", deadline: "2026-08-01"));
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = [Json.Change("user", "user", """{"id":"u","tz_info":{"timezone":"UTC"}}""")],
+        };
+        var presenter = await Loaded(api);
+        presenter.Select(ViewSelection.Of(SmartView.Upcoming));
+
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["soon"], presenter.Rows.Select(r => r.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task A_filter_asking_for_overdue_tasks_leaves_out_the_completed_ones()
+    {
+        // "today | overdue" is how Todoist suggests rebuilding the Today view as a filter, and it
+        // listed every task finished late in the last three months.
+        var api = WithCompleted(
+            Done("due", "Due today", "2026-07-30T12:00:00Z", due: "2026-07-31"),
+            Done("old", "Overdue, done in May", "2026-05-09T12:00:00Z", due: "2026-05-02"));
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes =
+            [
+                Json.Change("user", "user", """{"id":"u","tz_info":{"timezone":"UTC"}}"""),
+                Json.Change("filters", "f1", """{"id":"f1","name":"Today and late","query":"today | overdue"}"""),
+                Json.Change("items", "a", """{"id":"a","content":"Still late","due":{"date":"2026-07-28"}}"""),
+            ],
+        };
+        var presenter = await Loaded(api);
+        presenter.Select(ViewSelection.OfFilter("f1"));
+
+        await presenter.ToggleCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(["a", "due"], presenter.Rows.Select(r => r.Id).ToArray());
     }
 
     [Fact]
@@ -342,7 +390,7 @@ public class CompletedViewTests
         Completed = _ => new CompletedPage(items, null),
     };
 
-    private static ResourceChange Done(string id, string content, string? at = null, string? project = null, string? due = null)
+    private static ResourceChange Done(string id, string content, string? at = null, string? project = null, string? due = null, string? deadline = null)
     {
         var fields = new List<string> { $"\"id\":\"{id}\"", $"\"content\":\"{content}\"", "\"checked\":true" };
         if (at is not null)
@@ -351,6 +399,8 @@ public class CompletedViewTests
             fields.Add($"\"project_id\":\"{project}\"");
         if (due is not null)
             fields.Add($"\"due\":{{\"date\":\"{due}\"}}");
+        if (deadline is not null)
+            fields.Add($"\"deadline\":{{\"date\":\"{deadline}\"}}");
         return Json.Change("items", id, "{" + string.Join(",", fields) + "}");
     }
 }

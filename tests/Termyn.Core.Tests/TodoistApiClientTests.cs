@@ -556,6 +556,20 @@ public class TodoistApiClientTests
     }
 
     [Fact]
+    public async Task A_query_by_due_date_goes_to_the_by_due_date_endpoint()
+    {
+        var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"items":[],"next_cursor":null}"""));
+        var client = new TodoistApiClient(new HttpClient(handler));
+        var since = new DateTimeOffset(2026, 7, 29, 0, 0, 0, TimeSpan.Zero);
+
+        await client.GetCompletedAsync("tok", new CompletedQuery(since, since.AddDays(11), ByDueDate: true), TestContext.Current.CancellationToken);
+
+        var uri = handler.LastRequest!.RequestUri!;
+        Assert.Equal("/api/v1/tasks/completed/by_due_date", uri.AbsolutePath);
+        Assert.Contains("since=2026-07-29T00:00:00Z", Uri.UnescapeDataString(uri.Query));
+    }
+
+    [Fact]
     public async Task A_first_page_asks_for_no_cursor_and_a_local_time_is_sent_as_utc()
     {
         var handler = new StubHandler(_ => Resp(HttpStatusCode.OK, """{"items":[]}"""));

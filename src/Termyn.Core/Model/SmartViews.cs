@@ -41,12 +41,19 @@ public static class SmartViews
 
     /// <summary>
     /// Whether a completed task belongs in a view. The same as <see cref="Matches"/> except in
-    /// Today, where "or earlier" stops meaning overdue once a task is done.
+    /// Today, which has no overdue once a task is done.
     /// </summary>
     /// <remarks>
-    /// Today keeps the completed tasks due today, and the overdue ones finished today. Those were on
-    /// the list this morning, so ticking one off doesn't make it vanish. Anything else due earlier
-    /// was finished on another day, and the completed list reaches back three months.
+    /// <para>
+    /// Todoist's own apps work this way. A completed task is shown on the day it was due, whenever
+    /// it was finished, so Today's are the ones due today. An overdue task drops out of Today once
+    /// it's done, even if it was done today, and one with no due date never shows there.
+    /// </para>
+    /// <para>
+    /// Todoist also places a completed task with no due date by its deadline. That's left out on
+    /// purpose: Termyn's lists don't place open tasks by deadline, and doing it only for finished
+    /// ones would put a task in Today for the first time once it was done.
+    /// </para>
     /// </remarks>
     /// <param name="item">The completed task</param>
     /// <param name="view">The view being shown</param>
@@ -56,16 +63,9 @@ public static class SmartViews
     /// <returns>True when the task is shown in the view's completed list</returns>
     public static bool MatchesCompleted(TaskItem item, SmartView view, DateOnly today, TimeZoneInfo zone, string? inboxProjectId) => view switch
     {
-        SmartView.Today => DueOn(item, zone) is { } due && (due == today || (due < today && CompletedToday(item, today, zone))),
+        SmartView.Today => DueOn(item, zone) == today,
         _ => Matches(item, view, today, zone, inboxProjectId),
     };
-
-    /// <summary>
-    /// Whether a completed task was ticked off today, in the account's timezone. One ticked off here
-    /// has no timestamp until the server acks it, and it was finished a moment ago.
-    /// </summary>
-    private static bool CompletedToday(TaskItem item, DateOnly today, TimeZoneInfo zone)
-        => item.CompletedAt is null || DayOf(item.CompletedAt, zone) == today;
 
     /// <summary>
     /// The day a task falls due in the account's timezone. Todoist sends a floating date or local

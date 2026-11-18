@@ -644,36 +644,26 @@ public sealed class SyncEngine
             generation = _generation;
         }
 
-        var until = _clock.UtcNow;
-        var since = until - CompletedQuery.MaxWindow;
+        var now = _clock.UtcNow;
+        var (fetched, truncated) = await PagesAsync(new CompletedQuery(now - CompletedQuery.MaxWindow, now), token, ct);
 
-        var fetched = new List<ResourceChange>();
-        string? cursor = null;
-        var truncated = false;
-
-        for (var page = 0; page < MaxCompletedPages; page++)
+        // Today and Upcoming list completed tasks by the day they were due, which a window of
+        // completion dates can miss: one due tomorrow but finished months ago, or one behind the
+        // page cap. A second request covers the days those views show, with a couple either side,
+        // as the endpoint reads its bounds as instants and most due dates have no time of day.
+        try
         {
-            CompletedPage result;
-            try
-            {
-                result = await _api.GetCompletedAsync(token, new CompletedQuery(since, until, cursor), ct);
-            }
-            catch (TodoistAuthException)
-            {
-                lock (_gate)
-                    ForgetRejectedToken(token);
-                throw;
-            }
-
-            fetched.AddRange(result.Items);
-            cursor = result.NextCursor;
-
-            if (cursor is null)
-                break;
-
-            // The last page allowed still reported more behind it.
-            if (page == MaxCompletedPages - 1)
-                truncated = true;
+            var (due, _) = await PagesAsync(
+                new CompletedQuery(now.AddDays(-2), now.AddDays(SmartViews.UpcomingDays + 2), ByDueDate: true),
+                token,
+                ct);
+            fetched.AddRange(due);
+        }
+        catch (TodoistNetworkException ex)
+        {
+            // What the first request found is still worth showing: these are only the rare ones
+            // it couldn't reach.
+            _log?.Warn($"Couldn't fetch completed tasks by due date: {ex.Message}");
         }
 
         lock (_gate)
@@ -688,6 +678,43 @@ public sealed class SyncEngine
 
             return new CompletedFetch(CompletedItems(Model.Items().ToList()).Count, truncated);
         }
+    }
+
+    /// <summary>
+    /// Fetches every page of one completed-items query, up to <see cref="MaxCompletedPages"/>.
+    /// </summary>
+    /// <param name="first">The query for the first page</param>
+    /// <param name="token">The token to send</param>
+    /// <param name="ct">Cancels the fetch</param>
+    /// <returns>What came back, and whether the last page allowed still reported more behind it</returns>
+    private async Task<(List<ResourceChange> Items, bool Truncated)> PagesAsync(CompletedQuery first, string token, CancellationToken ct)
+    {
+        var items = new List<ResourceChange>();
+        var query = first;
+
+        for (var page = 0; page < MaxCompletedPages; page++)
+        {
+            CompletedPage result;
+            try
+            {
+                result = await _api.GetCompletedAsync(token, query, ct);
+            }
+            catch (TodoistAuthException)
+            {
+                lock (_gate)
+                    ForgetRejectedToken(token);
+                throw;
+            }
+
+            items.AddRange(result.Items);
+
+            if (result.NextCursor is null)
+                return (items, false);
+
+            query = query with { Cursor = result.NextCursor };
+        }
+
+        return (items, true);
     }
 
     /// <summary>Drops the fetched completed tasks, leaving only what the model itself holds.</summary>
