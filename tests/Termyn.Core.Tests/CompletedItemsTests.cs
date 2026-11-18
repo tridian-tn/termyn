@@ -82,6 +82,45 @@ public class CompletedItemsTests
     }
 
     [Fact]
+    public async Task A_refused_request_by_due_date_keeps_the_token_and_what_the_first_one_found()
+    {
+        // The first request has just been answered with the token, so a 401 or 403 from the second
+        // is that endpoint saying no. Taken as the token being rejected, it signed the account out.
+        var secrets = new FakeSecrets { Stored = "tok" };
+        var api = new FakeApi
+        {
+            Completed = q => q.ByDueDate
+                ? throw new TodoistAuthException("refused")
+                : new CompletedPage([Done("recent", "Done this week")], null),
+        };
+        var engine = new SyncEngine(api, new InMemorySnapshotStore(), secrets, new FixedClock(Today));
+        engine.Load();
+
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, fetch.Count);
+        Assert.Equal("tok", secrets.Stored);
+        Assert.False(engine.AwaitingToken);
+    }
+
+    [Fact]
+    public async Task A_request_by_due_date_that_reaches_the_page_ceiling_says_so()
+    {
+        var page = 0;
+        var api = new FakeApi
+        {
+            Completed = q => q.ByDueDate
+                ? new CompletedPage([Done("d" + page++, "Due soon")], "more")
+                : new CompletedPage([Done("recent", "Done this week")], null),
+        };
+        var engine = NewEngine(api, new InMemorySnapshotStore());
+
+        var fetch = await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(fetch.Truncated);
+    }
+
+    [Fact]
     public async Task Paging_follows_the_cursor_until_the_server_stops_offering_one()
     {
         var api = new FakeApi

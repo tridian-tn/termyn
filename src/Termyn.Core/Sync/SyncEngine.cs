@@ -645,7 +645,19 @@ public sealed class SyncEngine
         }
 
         var now = _clock.UtcNow;
-        var (fetched, truncated) = await PagesAsync(new CompletedQuery(now - CompletedQuery.MaxWindow, now), token, ct);
+
+        List<ResourceChange> fetched;
+        bool truncated;
+        try
+        {
+            (fetched, truncated) = await PagesAsync(new CompletedQuery(now - CompletedQuery.MaxWindow, now), token, ct);
+        }
+        catch (TodoistAuthException)
+        {
+            lock (_gate)
+                ForgetRejectedToken(token);
+            throw;
+        }
 
         // Today and Upcoming list completed tasks by the day they were due, which a window of
         // completion dates can miss: one due tomorrow but finished months ago, or one behind the
@@ -653,16 +665,19 @@ public sealed class SyncEngine
         // as the endpoint reads its bounds as instants and most due dates have no time of day.
         try
         {
-            var (due, _) = await PagesAsync(
+            var (due, dueTruncated) = await PagesAsync(
                 new CompletedQuery(now.AddDays(-2), now.AddDays(SmartViews.UpcomingDays + 2), ByDueDate: true),
                 token,
                 ct);
             fetched.AddRange(due);
+            truncated |= dueTruncated;
         }
-        catch (TodoistNetworkException ex)
+        catch (Exception ex) when (ex is TodoistNetworkException or TodoistAuthException)
         {
             // What the first request found is still worth showing: these are only the rare ones
-            // it couldn't reach.
+            // it couldn't reach. A refusal here doesn't mean the token's gone, either. The first
+            // request has just been answered with it, so it's this endpoint saying no, and
+            // forgetting the token over it would sign the account out.
             _log?.Warn($"Couldn't fetch completed tasks by due date: {ex.Message}");
         }
 
@@ -694,18 +709,7 @@ public sealed class SyncEngine
 
         for (var page = 0; page < MaxCompletedPages; page++)
         {
-            CompletedPage result;
-            try
-            {
-                result = await _api.GetCompletedAsync(token, query, ct);
-            }
-            catch (TodoistAuthException)
-            {
-                lock (_gate)
-                    ForgetRejectedToken(token);
-                throw;
-            }
-
+            var result = await _api.GetCompletedAsync(token, query, ct);
             items.AddRange(result.Items);
 
             if (result.NextCursor is null)
