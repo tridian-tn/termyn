@@ -717,6 +717,10 @@
     <value>Project: {0}</value>
     <comment>The heading over the panel under the list while it's showing a project's description and comments. {0} is the project's name.</comment>
   </data>
+  <data name="PanelTasksSelected_Other" xml:space="preserve">
+    <value>{0} tasks selected</value>
+    <comment>The heading over the panel under the list while several tasks are selected in it, when the panel shows nothing. {0} is how many, always more than one.</comment>
+  </data>
   <data name="CommentNotSentYet" xml:space="preserve">
     <value>Not sent yet</value>
     <comment>Above a comment in the panel, in place of when it was posted, while it's waiting on this computer to be sent to Todoist.</comment>

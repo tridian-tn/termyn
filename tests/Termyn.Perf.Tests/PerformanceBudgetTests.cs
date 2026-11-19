@@ -215,6 +215,65 @@ public class PerformanceBudgetTests : IDisposable
     }
 
     [Fact]
+    public void Deleting_every_task_in_the_account_together_stays_interactive()
+    {
+        // One Ctrl+Z for the lot means the undo stack counts batches rather than writes. Counted by
+        // a walk of the stack for every write, a batch of thousands was quadratic, and made with
+        // the sync's lock held.
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < 3; round++)
+        {
+            var store = new InMemorySnapshotStore();
+            ReferenceAccount.Seed(store);
+            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+            engine.Load();
+            var ids = engine.Snapshot().Items.Select(i => i.Id).ToList();
+
+            var watch = Stopwatch.StartNew();
+            engine.DeleteItems(ids);
+            watch.Stop();
+
+            Assert.Empty(engine.Snapshot().Items);
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < InteractiveCeiling, $"deleting {ReferenceAccount.Tasks:N0} tasks together took {best.TotalMilliseconds:N0} ms");
+    }
+
+    [Fact]
+    public void A_batch_of_thousands_going_off_the_bottom_of_the_undo_stack_stays_interactive()
+    {
+        // Past fifty presses the oldest goes, all of it. Taken a write at a time from the front,
+        // each one shifted the rest of the stack along and then walked it again to count it.
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < 3; round++)
+        {
+            var store = new InMemorySnapshotStore();
+            ReferenceAccount.Seed(store);
+            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+            engine.Load();
+            var ids = engine.Snapshot().Items.Select(i => i.Id).ToList();
+
+            // The batch, and then fifty presses of their own on top of it: the last of those is the
+            // one that pushes the batch off.
+            engine.DeleteItems(ids.Take(ids.Count - 50).ToList());
+            foreach (var id in ids.Skip(ids.Count - 50).SkipLast(1))
+                engine.DeleteItem(id);
+
+            var watch = Stopwatch.StartNew();
+            engine.DeleteItem(ids[^1]);
+            watch.Stop();
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < InteractiveCeiling, $"letting go of a batch of {ReferenceAccount.Tasks - 50:N0} took {best.TotalMilliseconds:N1} ms");
+    }
+
+    [Fact]
     public void Switching_view_reprojects_within_a_frame()
     {
         using var store = new SqliteSnapshotStore(Seeded());
