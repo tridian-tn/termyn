@@ -273,6 +273,111 @@ public class PerformanceBudgetTests : IDisposable
         Assert.True(best < InteractiveCeiling, $"letting go of a batch of {ReferenceAccount.Tasks - 50:N0} took {best.TotalMilliseconds:N1} ms");
     }
 
+    /// <summary>How many tasks the batches on disk below are made of.</summary>
+    /// <remarks>
+    /// Twice the five hundred they were first timed at, so a commit made for each task is several
+    /// times the ceiling rather than a little over it: 0.7 seconds to delete them that way, and 1.4
+    /// to undo it, against 42 ms and 74 ms in one commit, in Debug on the development laptop.
+    /// </remarks>
+    private const int DiskBatch = 1_000;
+
+    [Fact]
+    public void Deleting_a_thousand_tasks_together_on_disk_stays_interactive()
+    {
+        // Each commit waits on the disk. Made one for each task, five hundred deleted together took
+        // 0.4 seconds, so they're made in one. The same thousand each round, put back untimed in
+        // between, so there are rounds enough for a busy agent's slow one to be outvoted.
+        using var store = new SqliteSnapshotStore(Seeded());
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+        engine.Load();
+        var batch = engine.Snapshot().Items.Select(i => i.Id).Take(DiskBatch).ToList();
+
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < Rounds; round++)
+        {
+            var watch = Stopwatch.StartNew();
+            engine.DeleteItems(batch);
+            watch.Stop();
+
+            Assert.Equal(ReferenceAccount.Tasks - DiskBatch, engine.Snapshot().Items.Count);
+            Assert.True(engine.Undo());
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < InteractiveCeiling, $"deleting {DiskBatch:N0} tasks together on disk took {best.TotalMilliseconds:N0} ms");
+    }
+
+    [Fact]
+    public void Undoing_a_thousand_tasks_deleted_together_on_disk_stays_interactive()
+    {
+        // The undo is one transaction too. Made one for each task, putting back five hundred took
+        // 0.7 seconds.
+        using var store = new SqliteSnapshotStore(Seeded());
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+        engine.Load();
+        var batch = engine.Snapshot().Items.Select(i => i.Id).Take(DiskBatch).ToList();
+
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < Rounds; round++)
+        {
+            engine.DeleteItems(batch);
+
+            var watch = Stopwatch.StartNew();
+            Assert.True(engine.Undo());
+            watch.Stop();
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.Equal(ReferenceAccount.Tasks, engine.Snapshot().Items.Count);
+        Assert.True(best < InteractiveCeiling, $"undoing {DiskBatch:N0} tasks deleted together on disk took {best.TotalMilliseconds:N0} ms");
+    }
+
+    /// <summary>
+    /// How many tasks the whole-account undo below puts back: twice the reference account, where
+    /// work that walks the queue once for each task takes seconds.
+    /// </summary>
+    private const int WholeAccount = 2 * ReferenceAccount.Tasks;
+
+    /// <summary>
+    /// A loose ceiling for undoing a delete of <see cref="WholeAccount"/> tasks at once, as a
+    /// regression gate rather than a measurement. Measured at 0.27–0.30 s in Debug on the
+    /// development laptop, against the 4 s or so it takes when each task undone walks the queue.
+    /// It's not an interactive figure: nobody deletes ten thousand tasks to see it happen quickly.
+    /// </summary>
+    private static readonly TimeSpan WholeAccountCeiling = TimeSpan.FromSeconds(1);
+
+    [Fact]
+    public void Undoing_every_task_in_a_large_account_deleted_together_takes_one_pass()
+    {
+        // Each write undone was looked for from the oldest end of the queue, though a batch's
+        // writes are the newest, and was forgotten twice, the second time by walking the whole
+        // undo stack for a write already taken off it.
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < 3; round++)
+        {
+            var store = new InMemorySnapshotStore();
+            ReferenceAccount.Seed(store, WholeAccount);
+            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+            engine.Load();
+            engine.DeleteItems(engine.Snapshot().Items.Select(i => i.Id).ToList());
+
+            var watch = Stopwatch.StartNew();
+            Assert.True(engine.Undo());
+            watch.Stop();
+
+            Assert.Equal(WholeAccount, engine.Snapshot().Items.Count);
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < WholeAccountCeiling, $"undoing {WholeAccount:N0} tasks deleted together took {best.TotalMilliseconds:N0} ms");
+    }
+
     [Fact]
     public void Switching_view_reprojects_within_a_frame()
     {

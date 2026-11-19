@@ -263,6 +263,80 @@ public class SqliteSnapshotStoreTests
     }
 
     [Fact]
+    public void Every_kind_of_write_goes_in_a_batch_and_is_kept_once_it_is_committed()
+    {
+        // A connection with a transaction open hands it to each new command, and refuses one told
+        // to run outside it or to begin one of its own. A write that left the batch would throw
+        // rather than quietly committing by itself.
+        var path = TempDbPath();
+        try
+        {
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                store.PutResource("items", "old", """{"id":"old"}""");
+                store.ApplyLocalWrite(Cmd("drop", "item_delete"), [], []);
+                var updated = Cmd("update", "item_update");
+                store.ApplyLocalWrite(updated, [], []);
+
+                using var batch = store.BeginBatch();
+                store.ApplyLocalWrite(Cmd("u1", "item_close"), [new StoredResource("items", "i1", """{"id":"i1"}""")], []);
+                store.PutResource("items", "i2", """{"id":"i2"}""");
+                store.RenameResource("items", "i2", "i3");
+                store.DeleteResource("items", "old");
+                store.DeleteCommands(["drop"]);
+                updated.Attempts = 3;
+                store.UpdateCommand(updated);
+                store.SaveSync([], [], "token-2");
+                batch.Commit();
+            }
+
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                var snapshot = store.Load();
+                Assert.Equal(["i1", "i3"], snapshot.Resources.Select(r => r.Id).Order());
+                Assert.Equal(["u1", "update"], snapshot.Outbox.Select(c => c.Uuid).Order());
+                Assert.Equal(3, snapshot.Outbox.Single(c => c.Uuid == "update").Attempts);
+                Assert.Equal("token-2", snapshot.SyncToken);
+            }
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public void A_batch_never_committed_leaves_nothing_behind()
+    {
+        var path = TempDbPath();
+        try
+        {
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                using (store.BeginBatch())
+                {
+                    store.ApplyLocalWrite(Cmd("u1", "item_close"), [new StoredResource("items", "i1", """{"id":"i1"}""")], []);
+                    store.PutResource("items", "i2", """{"id":"i2"}""");
+                }
+
+                // And the store carries on taking writes of its own afterwards.
+                store.ApplyLocalWrite(Cmd("u2", "item_close"), [], []);
+            }
+
+            using (var store = new SqliteSnapshotStore(path))
+            {
+                var snapshot = store.Load();
+                Assert.Empty(snapshot.Resources);
+                Assert.Equal("u2", Assert.Single(snapshot.Outbox).Uuid);
+            }
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
     public void Purge_erases_everything_and_leaves_no_write_ahead_log_behind()
     {
         var path = TempDbPath();

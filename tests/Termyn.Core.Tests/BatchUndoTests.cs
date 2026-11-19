@@ -3,6 +3,7 @@ using Termyn.Core.Api;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
+using static Termyn.TestSupport.Flushing;
 
 namespace Termyn.Core.Tests;
 
@@ -254,19 +255,6 @@ public class BatchUndoTests
 
     private static Dictionary<string, TaskItem> Items(SyncEngine engine)
         => engine.Snapshot().Items.ToDictionary(i => i.Id);
-
-    /// <summary>Sends what is queued and has the server accept all of it.</summary>
-    private static async Task Flush(SyncEngine engine, FakeApi api)
-    {
-        api.Next = cmds => new SyncResponse
-        {
-            SyncToken = "s2",
-            SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
-        };
-
-        await engine.SyncAsync();
-        Assert.Equal(0, engine.PendingCount);
-    }
 
     private static SyncEngine NewEngine(InMemorySnapshotStore store) => WithApi(store).Engine;
 

@@ -4,6 +4,7 @@ using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
+using static Termyn.TestSupport.Flushing;
 
 namespace Termyn.Core.Tests;
 
@@ -180,19 +181,6 @@ public class SyncEngineUndoScopeTests
     }
 
     // ---- Helpers -------------------------------------------------------------------------------
-
-    /// <summary>Sends what is queued and has the server accept all of it.</summary>
-    private static async Task Flush(SyncEngine engine, FakeApi api)
-    {
-        api.Next = cmds => new SyncResponse
-        {
-            SyncToken = "s2",
-            SyncStatus = cmds.ToDictionary(c => c.Uuid, _ => new CommandResult(true, null, null)),
-        };
-
-        await engine.SyncAsync();
-        Assert.Equal(0, engine.PendingCount);
-    }
 
     private static TaskItem Item(SyncEngine engine, string id)
         => engine.Snapshot().Items.Single(i => i.Id == id);

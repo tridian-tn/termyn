@@ -138,6 +138,53 @@ public class TodoistModelTests
         Assert.Equal("Work", model.Projects().Single().Name);
     }
 
+    // ---- A journal -----------------------------------------------------------------------------
+
+    [Fact]
+    public void A_rollback_puts_back_what_was_changed_removed_and_added()
+    {
+        var model = WithTask("i1", "A");
+        model.Upsert(ResourceType.Items, "i2", Parse("""{"id":"i2","content":"Gone soon"}"""));
+        _ = model.Items().ToList(); // cache them
+
+        model.BeginJournal();
+        model.Upsert(ResourceType.Items, "i1", Parse("""{"id":"i1","content":"B"}"""));
+        model.Upsert(ResourceType.Items, "i1", Parse("""{"id":"i1","content":"C"}"""));
+        model.Remove(ResourceType.Items, "i2");
+        model.Upsert(ResourceType.Items, "i3", Parse("""{"id":"i3","content":"New"}"""));
+        model.RollBack();
+
+        Assert.Equal([("i1", "A"), ("i2", "Gone soon")], model.Items().Select(i => (i.Id, i.Content)).OrderBy(i => i.Id));
+    }
+
+    [Fact]
+    public void A_rollback_puts_a_renamed_resource_back_under_its_old_id_and_with_it()
+    {
+        // A rename edits the id inside the object it moves, so the journal can't keep that object.
+        var model = WithTask("t-1", "A");
+
+        model.BeginJournal();
+        model.Rename(ResourceType.Items, "t-1", "real");
+        model.RollBack();
+
+        var item = Assert.Single(model.Items());
+        Assert.Equal("t-1", item.Id);
+        Assert.Equal("t-1", model.Get(ResourceType.Items, "t-1")?["id"]?.ToString());
+    }
+
+    [Fact]
+    public void Changes_kept_once_the_journal_ends_stay_put_through_a_later_rollback()
+    {
+        var model = WithTask("i1", "A");
+
+        model.BeginJournal();
+        model.Upsert(ResourceType.Items, "i1", Parse("""{"id":"i1","content":"B"}"""));
+        model.EndJournal();
+        model.RollBack();
+
+        Assert.Equal("B", model.Items().Single().Content);
+    }
+
     private static TodoistModel WithTask(string id, string content)
     {
         var model = new TodoistModel();

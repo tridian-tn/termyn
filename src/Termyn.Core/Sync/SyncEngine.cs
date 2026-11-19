@@ -1158,16 +1158,13 @@ public sealed class SyncEngine
     {
         var ticked = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
-        lock (_gate)
+        Together(() =>
         {
-            AsOneUndo(() =>
+            foreach (var id in ids)
             {
-                foreach (var id in ids)
-                {
-                    if (CompleteItem(id) is { } under) ticked[id] = under;
-                }
-            });
-        }
+                if (CompleteItem(id) is { } under) ticked[id] = under;
+            }
+        });
 
         return ticked;
     }
@@ -1177,16 +1174,29 @@ public sealed class SyncEngine
     /// </summary>
     /// <param name="ids">The tasks, in the order to delete them</param>
     public void DeleteItems(IReadOnlyList<string> ids)
+        => Together(() =>
+        {
+            foreach (var id in ids)
+            {
+                DeleteItem(id);
+            }
+        });
+
+    /// <summary>
+    /// Makes several writes as one thing done: one transaction in the store, all of them or none,
+    /// and one <see cref="Undo"/> for whatever of them can be taken back.
+    /// </summary>
+    /// <remarks>
+    /// For an action over several tasks that's made of writes the engine already has, such as a
+    /// priority given to each. The gate is held throughout, so nothing in
+    /// <paramref name="writes"/> may wait on anything that waits on the engine.
+    /// </remarks>
+    /// <param name="writes">The writes to make</param>
+    public void Together(Action writes)
     {
         lock (_gate)
         {
-            AsOneUndo(() =>
-            {
-                foreach (var id in ids)
-                {
-                    DeleteItem(id);
-                }
-            });
+            AllOrNothing(() => AsOneUndo(writes));
         }
     }
 
@@ -1207,15 +1217,18 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            foreach (var id in ids.OrderBy(i => DepthOf(Promoted(i))))
+            AllOrNothing(() =>
             {
-                if (Model.Get(ResourceType.Items, Promoted(id)) is { } held && !Projections.ToTaskItem(held).Completed)
+                foreach (var id in ids.OrderBy(i => DepthOf(Promoted(i))))
                 {
-                    continue;
-                }
+                    if (Model.Get(ResourceType.Items, Promoted(id)) is { } held && !Projections.ToTaskItem(held).Completed)
+                    {
+                        continue;
+                    }
 
-                ReopenItem(id);
-            }
+                    ReopenItem(id);
+                }
+            });
         }
     }
 
@@ -2950,42 +2963,59 @@ public sealed class SyncEngine
             if (_awaitingToken)
                 return false;
 
-            // Keep going past entries that can no longer be reversed — the task was deleted on
-            // another device, say — rather than reporting "nothing to undo" with history left.
-            while (_undoStack.Count > 0)
+            // All of it or none, in one transaction, the way the batch it takes back was made.
+            var undone = false;
+            AllOrNothing(() => undone = UndoNewest());
+            return undone;
+        }
+    }
+
+    /// <summary>
+    /// Takes back the newest batch on the undo stack, or the newest that can still be taken back.
+    /// </summary>
+    /// <remarks>Call it holding the gate.</remarks>
+    /// <returns>False when there was nothing left to undo, or the task it applied to is gone</returns>
+    private bool UndoNewest()
+    {
+        // Keep going past entries that can no longer be reversed — the task was deleted on
+        // another device, say — rather than reporting "nothing to undo" with history left.
+        while (_undoStack.Count > 0)
+        {
+            var batch = BatchOf(_undoStack[^1]);
+            var undone = false;
+            var barred = false;
+
+            // Newest first, the order the same writes made one at a time would be undone in.
+            while (_undoStack.Count > 0 && BatchOf(_undoStack[^1]) == batch)
             {
-                var batch = BatchOf(_undoStack[^1]);
-                var undone = false;
-                var barred = false;
+                // Taken off here rather than by forgetting it, which only looks on the stack for
+                // a write it still remembers. Should the two ever fall out of step, a write left
+                // on top would be found again on every pass, with the gate held.
+                var uuid = _undoStack[^1];
+                _undoStack.RemoveAt(_undoStack.Count - 1);
+                _undoable.Remove(uuid, out var record);
+                _undoBatch.Remove(uuid);
 
-                // Newest first, the order the same writes made one at a time would be undone in.
-                while (_undoStack.Count > 0 && BatchOf(_undoStack[^1]) == batch)
+                switch (UndoOne(uuid, record))
                 {
-                    var uuid = _undoStack[^1];
-                    var record = _undoable.GetValueOrDefault(uuid);
-                    ForgetUndoable(uuid);
+                    case Reversal.Undone:
+                        undone = true;
+                        break;
 
-                    switch (UndoOne(uuid, record))
-                    {
-                        case Reversal.Undone:
-                            undone = true;
-                            break;
-
-                        case Reversal.Barred:
-                            barred = true;
-                            break;
-                    }
+                    case Reversal.Barred:
+                        barred = true;
+                        break;
                 }
-
-                if (undone) return true;
-
-                // A destructive write we can't reverse. Consume it and stop, rather than reaching
-                // past it and silently undoing something the user wasn't thinking about.
-                if (barred) return false;
             }
 
-            return false;
+            if (undone) return true;
+
+            // A destructive write we can't reverse. Consume it and stop, rather than reaching
+            // past it and silently undoing something the user wasn't thinking about.
+            if (barred) return false;
         }
+
+        return false;
     }
 
     /// <summary>What came of trying to reverse one write.</summary>
@@ -3013,7 +3043,7 @@ public sealed class SyncEngine
         // left to deal with.
         if (record?.Type == "item_close") return TakeBack(uuid, record) ? Reversal.Undone : Reversal.Gone;
 
-        if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } queued)
+        if (QueuedCommand(uuid) is { InFlight: false } queued)
         {
             RevertLocked(queued);
             return Reversal.Undone;
@@ -3057,7 +3087,7 @@ public sealed class SyncEngine
     {
         var id = Promoted(close.Id);
 
-        if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } queued)
+        if (QueuedCommand(uuid) is { InFlight: false } queued)
         {
             RemoveCommand(queued);
             Uncheck(id);
@@ -3085,7 +3115,7 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } cmd)
+            if (QueuedCommand(uuid) is { InFlight: false } cmd)
                 RevertLocked(cmd);
         }
     }
@@ -3127,7 +3157,7 @@ public sealed class SyncEngine
         if (cmd.State != OutboxState.Failed)
             RestorePriors(cmd);
 
-        _outbox.Remove(cmd);
+        Unqueue(cmd);
         _store.DeleteCommands([cmd.Uuid]);
         ForgetUndoable(cmd.Uuid);
     }
@@ -4476,9 +4506,26 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>A command still in the outbox, or null.</summary>
+    /// <remarks>
+    /// Looked for from the newest end. Undo looks for the writes it's taking back, which are the
+    /// newest, newest first, and looked for from the oldest end, taking back a batch of thousands
+    /// walked the whole queue for each one.
+    /// </remarks>
+    /// <param name="uuid">The command's uuid</param>
+    /// <returns>The command, or null when it's been sent and settled or was never queued</returns>
+    private OutboxCommand? QueuedCommand(string uuid) => _outbox.FindLast(c => c.Uuid == uuid);
+
+    /// <summary>Takes a command out of the outbox here, looked for from the newest end as <see cref="QueuedCommand"/> is.</summary>
+    /// <param name="cmd">The command</param>
+    private void Unqueue(OutboxCommand cmd)
+    {
+        if (_outbox.LastIndexOf(cmd) is var at and >= 0) _outbox.RemoveAt(at);
+    }
+
     private void RemoveCommand(OutboxCommand cmd)
     {
-        _outbox.Remove(cmd);
+        Unqueue(cmd);
         _store.DeleteCommands([cmd.Uuid]);
     }
 
@@ -4575,13 +4622,19 @@ public sealed class SyncEngine
     /// <remarks>
     /// Looked for from the top, where an undo takes writes from and a reopen finds its close. Looked
     /// for from the bottom, undoing a batch of thousands walked most of the stack for each one.
+    ///
+    /// Not looked for at all when it isn't remembered, since the stack and what it remembers are
+    /// kept in step. Most calls are for writes that never went on the stack, or have already come
+    /// off: an undo takes each write off before reversing it, and the reversal forgets it again.
+    /// Each of those walked the whole stack and found nothing.
     /// </remarks>
     /// <param name="uuid">The write's command</param>
     private void ForgetUndoable(string uuid)
     {
+        if (!_undoable.Remove(uuid)) return;
+
         if (_undoStack.LastIndexOf(uuid) is var at and >= 0) _undoStack.RemoveAt(at);
 
-        _undoable.Remove(uuid);
         _undoBatch.Remove(uuid);
     }
 
@@ -4614,11 +4667,155 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>Whether writes are being made all or nothing, so one inside doesn't start another.</summary>
+    private bool _allOrNothing;
+
+    /// <summary>
+    /// Makes several writes in one transaction in the store, and in memory all of them or none.
+    /// </summary>
+    /// <remarks>
+    /// One transaction rather than one per write, since each commit waits on the disk: five hundred
+    /// tasks deleted together took 0.4 seconds, and the undo that brought them back 0.7.
+    ///
+    /// A store that gives out partway takes back everything from the first of them, here as well
+    /// as on disk: the model, the queue, the undo stack and the completed tasks out of the archive.
+    /// That's what a single write the store refuses leaves, since it's refused before anything
+    /// changes. Left ahead of the store instead, the window would show a batch as done that a
+    /// restart would lose.
+    ///
+    /// The queue goes back as the same commands, each with what it held, since a write can edit
+    /// one already queued: letting a create go takes what it made out of other commands' priors,
+    /// and reverting an edit passes what it found on to the next. They're put back into the same
+    /// objects rather than swapped for copies, which a sync with them on the wire still holds.
+    ///
+    /// Copying all of it costs in proportion to what's queued and remembered, not to what the
+    /// batch writes: about 0.9 ms and 480 KB with four thousand writes queued and a batch of four
+    /// thousand on the undo stack, and a few microseconds with neither. Noting each change where
+    /// it's made would cost only what's changed, but would put back only what every one of those
+    /// places remembered to note.
+    ///
+    /// <see cref="Queued"/> is said once, after the batch is committed, rather than for each write:
+    /// a thousand tasks deleted together would otherwise wake the loop a thousand times for a sync
+    /// that can't start until the gate is let go, and tell it of writes a rollback then undoes.
+    ///
+    /// Call it holding the gate, which it keeps throughout. Nested, the outer one decides.
+    /// </remarks>
+    /// <param name="writes">The writes to make</param>
+    private void AllOrNothing(Action writes)
+    {
+        if (_allOrNothing)
+        {
+            writes();
+            return;
+        }
+
+        var outbox = _outbox.Select(c => (Command: c, Held: CommandFields.Of(c))).ToList();
+        var undoStack = _undoStack.ToList();
+        var undoable = _undoable.ToList();
+        var undoBatch = _undoBatch.ToList();
+        var completed = _completed.ToList();
+
+        bool queued;
+        _allOrNothing = true;
+        _queuedInBatch = false;
+        Model.BeginJournal();
+        try
+        {
+            using (var batch = _store.BeginBatch())
+            {
+                writes();
+                batch.Commit();
+            }
+
+            Model.EndJournal();
+        }
+        catch
+        {
+            Model.RollBack();
+
+            _outbox.Clear();
+            foreach (var (command, held) in outbox)
+            {
+                held.Into(command);
+                _outbox.Add(command);
+            }
+
+            Restore(_undoStack, undoStack);
+            Restore(_undoable, undoable);
+            Restore(_undoBatch, undoBatch);
+            Restore(_completed, completed);
+            throw;
+        }
+        finally
+        {
+            _allOrNothing = false;
+            queued = _queuedInBatch;
+            _queuedInBatch = false;
+        }
+
+        if (queued) SayQueued();
+    }
+
+    /// <summary>Whether a write was queued in the batch being made, to say so once it's committed.</summary>
+    private bool _queuedInBatch;
+
+    /// <summary>What a queued command holds that can change while it waits.</summary>
+    private readonly record struct CommandFields(
+        long Seq,
+        string ArgsJson,
+        string? PriorJson,
+        bool InFlight,
+        int Attempts,
+        int NoVerdictRounds,
+        DateTimeOffset? RetryAt,
+        OutboxState State,
+        string? LastError)
+    {
+        public static CommandFields Of(OutboxCommand c)
+            => new(c.Seq, c.ArgsJson, c.PriorJson, c.InFlight, c.Attempts, c.NoVerdictRounds, c.RetryAt, c.State, c.LastError);
+
+        /// <summary>Writes these back into the command they were read from.</summary>
+        public void Into(OutboxCommand c)
+        {
+            c.Seq = Seq;
+            c.ArgsJson = ArgsJson;
+            c.PriorJson = PriorJson;
+            c.InFlight = InFlight;
+            c.Attempts = Attempts;
+            c.NoVerdictRounds = NoVerdictRounds;
+            c.RetryAt = RetryAt;
+            c.State = State;
+            c.LastError = LastError;
+        }
+    }
+
+    /// <summary>Puts a list back to what it held.</summary>
+    private static void Restore<T>(List<T> list, List<T> held)
+    {
+        list.Clear();
+        list.AddRange(held);
+    }
+
+    /// <summary>Puts a dictionary back to what it held.</summary>
+    private static void Restore<TKey, TValue>(Dictionary<TKey, TValue> map, List<KeyValuePair<TKey, TValue>> held)
+        where TKey : notnull
+    {
+        map.Clear();
+        foreach (var (key, value) in held)
+        {
+            map[key] = value;
+        }
+    }
+
     /// <summary>
     /// Commits an optimistic write to the durable store and queues its command. Callers mutate the
     /// in-memory model only after this returns, so a store failure can't leave a change on screen
     /// that was never persisted or queued.
     /// </summary>
+    /// <remarks>
+    /// In a batch, the store holds the write until the batch commits, and <see cref="AllOrNothing"/>
+    /// takes back what's on screen if it doesn't.
+    /// </remarks>
     private OutboxCommand Persist(string type, JsonObject args, string? tempId, string? prior, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
     {
         var cmd = new OutboxCommand
@@ -4641,14 +4838,24 @@ public sealed class SyncEngine
 
         // Every write the engine takes passes through here, which is what makes this the one place
         // that has to say so. Not the outbox being loaded from the store on the way up — that is
-        // the same writes being remembered, not new ones being made.
-        //
-        // Guarded the way the scheduler guards its own event, and for a sharper reason: by this
-        // point the write is in the store and in the outbox, so a subscriber that threw would
-        // unwind through the caller and have the window report a failure for a write that had
-        // already happened — and skip the refresh that would have shown it. The worst a swallowed
-        // one costs is the loop coming round on its own clock, which is where it was before any of
-        // this.
+        // the same writes being remembered, not new ones being made. A write in a batch is said
+        // once the batch is committed, since until then it can still be taken back.
+        if (_allOrNothing) _queuedInBatch = true;
+        else SayQueued();
+
+        return cmd;
+    }
+
+    /// <summary>Tells whoever's listening that a write has been queued.</summary>
+    /// <remarks>
+    /// Guarded the way the scheduler guards its own event, and for a sharper reason: by this point
+    /// the write is in the store and in the outbox, so a subscriber that threw would unwind through
+    /// the caller and have the window report a failure for a write that had already happened — and
+    /// skip the refresh that would have shown it. The worst a swallowed one costs is the loop coming
+    /// round on its own clock, which is where it was before any of this.
+    /// </remarks>
+    private void SayQueued()
+    {
         try
         {
             Queued?.Invoke();
@@ -4657,8 +4864,6 @@ public sealed class SyncEngine
         {
             // A subscriber's failure must not turn a write that landed into one that looks lost.
         }
-
-        return cmd;
     }
 
     private static bool ReferencesAny(OutboxCommand cmd, HashSet<string> ids)

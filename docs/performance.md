@@ -99,6 +99,14 @@ the screen from **16 ms to 8 ms** — from the edge of the frame budget to comfo
 account rather than the current view, which needs a second full projection. Most publishes happen
 with the search box empty, and that projection is now built only when something is typed.
 
+Later, with several tasks selected at once:
+
+**Writes made together are one transaction.** Deleting, ticking off or moving several tasks, and
+the Ctrl+Z that takes such a batch back, each committed once per task, and every commit waits on
+the disk. A thousand tasks deleted together took **718 ms**, and undoing it **1,411 ms**; in one
+transaction they take **42 ms** and **74 ms** (Debug, the SQLite cache, the five-thousand-task
+reference account).
+
 ## Metrics not measured numerically
 
 - **Quick-add after hotkey (< 100 ms).** The window is created once and hidden between uses, so a
