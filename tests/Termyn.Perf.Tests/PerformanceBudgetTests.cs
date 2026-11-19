@@ -277,7 +277,9 @@ public class PerformanceBudgetTests : IDisposable
     /// <remarks>
     /// Twice the five hundred they were first timed at, so a commit made for each task is several
     /// times the ceiling rather than a little over it: 0.7 seconds to delete them that way, and 1.4
-    /// to undo it, against 42 ms and 74 ms in one commit, in Debug on the development laptop.
+    /// to undo it, against about 30 ms each in one commit, in Debug on the development laptop.
+    /// The undo was 53–74 ms until the queue was indexed by uuid, and over the ceiling with the
+    /// whole suite running alongside it.
     /// </remarks>
     private const int DiskBatch = 1_000;
 

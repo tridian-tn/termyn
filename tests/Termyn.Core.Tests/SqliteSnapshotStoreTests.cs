@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Microsoft.Data.Sqlite;
 using Termyn.Core.Sync;
 
 namespace Termyn.Core.Tests;
@@ -334,6 +335,58 @@ public class SqliteSnapshotStoreTests
         {
             Cleanup(path);
         }
+    }
+
+    [Fact]
+    public void A_file_made_before_the_queue_was_indexed_finds_a_command_by_its_uuid_through_one()
+    {
+        // Each command taken off the queue by uuid read the whole queue without it, so undoing a
+        // thousand tasks deleted together read it a thousand times: 74 ms on disk, and 29 with it.
+        var path = TempDbPath();
+        try
+        {
+            using (new SqliteSnapshotStore(path))
+            {
+            }
+
+            Sql(path, "DROP INDEX outbox_by_uuid;");
+
+            using (new SqliteSnapshotStore(path))
+            {
+            }
+
+            using var conn = Connect(path);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "EXPLAIN QUERY PLAN DELETE FROM outbox WHERE uuid = 'u1'";
+            using var plan = cmd.ExecuteReader();
+
+            var steps = new List<string>();
+            while (plan.Read())
+            {
+                steps.Add(plan.GetString(3));
+            }
+
+            Assert.Contains(steps, step => step.Contains("USING INDEX outbox_by_uuid", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    private static SqliteConnection Connect(string path)
+    {
+        var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        conn.Open();
+        return conn;
+    }
+
+    private static void Sql(string path, string sql)
+    {
+        using var conn = Connect(path);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
     }
 
     [Fact]
