@@ -135,8 +135,8 @@ public class HeadingRowTests
     /// With nothing else held. The list asks whether Alt is down, and doesn't move on an arrow
     /// that comes with it — and this thread's key state follows the machine's real keyboard, so an
     /// Alt+Tab or an AltGr character typed in another window while these ran was enough to fail
-    /// them. Ctrl and Shift don't matter here: they only change what an arrow does in a list that
-    /// can select more than one row, and this one can't.
+    /// them. Ctrl and Shift are cleared with it, since the list can select several rows and either
+    /// one held turns an arrow into a step that keeps or adds to the selection.
     ///
     /// Alt is asked about before the state is cleared. A key pressed or let go anywhere reaches
     /// the thread the next time it asks about one, over the top of anything set in between, so
