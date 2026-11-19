@@ -104,6 +104,24 @@ public sealed class SyncEngine
     /// <summary>What each undoable write did, so it can still be reversed after the server acks it.</summary>
     private readonly Dictionary<string, UndoableWrite> _undoable = [];
 
+    /// <summary>
+    /// Which batch each write on the undo stack was made in, by the write's uuid. A write made on
+    /// its own is a batch of one and has no entry here.
+    /// </summary>
+    /// <remarks>
+    /// Tasks ticked off or deleted together come back together: one Ctrl+Z for the lot, the way they
+    /// went. The stack itself still holds one entry per write, since everything that finds a write
+    /// on it — a reopen looking for its close, a temporary id being promoted — asks per write.
+    ///
+    /// Held in memory only. The stack is rebuilt from the outbox after a restart, and the outbox
+    /// doesn't say which writes went together, so a batch still queued then comes back one task per
+    /// Ctrl+Z.
+    /// </remarks>
+    private readonly Dictionary<string, string> _undoBatch = new(StringComparer.Ordinal);
+
+    /// <summary>The batch the writes being made now belong to, or null outside one.</summary>
+    private string? _batch;
+
     /// <summary>Bumped whenever the cache is wiped, so an in-flight response can't repopulate it.</summary>
     private int _generation;
 
@@ -403,6 +421,7 @@ public sealed class SyncEngine
             _deferredDeletes.AddRange(snapshot.DeferredDeletes);
             _undoStack.Clear();
             _undoable.Clear();
+            _undoBatch.Clear();
             _completed.Clear();
 
             var unreadable = 0;
@@ -1102,27 +1121,250 @@ public sealed class SyncEngine
     /// command still goes, so it has to leave the fetch too — otherwise the row stays on screen after
     /// the server has removed it, and pressing delete again queues a second command for an id that no
     /// longer exists, which retries to the ceiling and sits in the outbox as a permanent failure.
+    ///
+    /// Its sub-tasks go with it, as the server takes them. Left until a sync said so, they sat on
+    /// the list as top-level tasks with nothing above them, and the fetched completed ones stayed
+    /// on show. Those the model holds go in the command's priors, the way a project's contents go
+    /// in its delete's, so putting it back puts them back too.
     /// </remarks>
     public void DeleteItem(string id)
     {
         lock (_gate)
         {
-            id = Promoted(id);
+            Delete(id, ChildrenByParent());
+        }
+    }
 
-            var existing = Model.Get(ResourceType.Items, id);
-            var prior = existing?.ToJsonString();
-            ResourceKey[] deletes = existing is not null ? [new ResourceKey(ResourceType.Items, id)] : [];
+    /// <summary>Deletes a task and its sub-tasks, given who's under whom.</summary>
+    /// <remarks>Call it holding the gate.</remarks>
+    /// <param name="id">The task</param>
+    /// <param name="children">Each task's sub-tasks, from <see cref="ChildrenByParent"/></param>
+    /// <returns>The ids it took off, sub-tasks included</returns>
+    private List<string> Delete(string id, Dictionary<string, List<string>> children)
+    {
+        id = Promoted(id);
 
-            var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, [], deletes);
-            Forget(ResourceType.Items, id);
+        var existing = Model.Get(ResourceType.Items, id);
+        var under = DescendantsOf(id, children);
+        var held = under.Where(u => Model.Get(ResourceType.Items, u) is not null).ToList();
 
-            if (existing is not null)
+        string? prior;
+        if (existing is null || held.Count == 0)
+        {
+            prior = existing?.ToJsonString();
+        }
+        else
+        {
+            var entries = new JsonArray();
+            foreach (var taken in held.Prepend(id))
             {
-                Model.Remove(ResourceType.Items, id);
-                RecordUndoable(cmd, id, prior);
+                entries.Add(new JsonObject { ["type"] = ResourceType.Items, ["resource"] = Model.Get(ResourceType.Items, taken)!.DeepClone() });
+            }
+
+            prior = entries.ToJsonString();
+        }
+
+        var removed = existing is not null ? held.Prepend(id).ToList() : [];
+        var deletes = removed.Select(r => new ResourceKey(ResourceType.Items, r)).ToList();
+
+        var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, [], deletes);
+
+        foreach (var gone in under.Prepend(id))
+        {
+            Forget(ResourceType.Items, gone);
+        }
+
+        if (existing is not null)
+        {
+            foreach (var key in deletes)
+            {
+                Model.Remove(key.Type, key.Id);
+            }
+
+            RecordUndoable(cmd, id, prior);
+        }
+
+        return under.Prepend(id).ToList();
+    }
+
+    /// <summary>
+    /// Each task's sub-tasks, among those the model holds and the completed ones fetched, by the
+    /// parent's id.
+    /// </summary>
+    /// <remarks>
+    /// Built once for a batch of deletes rather than for each of them: built for each, deleting
+    /// the whole account read it once per task.
+    /// </remarks>
+    private Dictionary<string, List<string>> ChildrenByParent()
+    {
+        var children = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        void Add(string? parent, string child)
+        {
+            if (parent is null) return;
+
+            if (!children.TryGetValue(parent, out var list)) children[parent] = list = [];
+            list.Add(child);
+        }
+
+        foreach (var item in Model.Items())
+        {
+            Add(item.ParentId, item.Id);
+        }
+
+        foreach (var (id, json) in _completed)
+        {
+            Add(JsonRead.String(json, "parent_id"), id);
+        }
+
+        return children;
+    }
+
+    /// <summary>
+    /// Completes several tasks as one thing done, so a single <see cref="Undo"/> puts them all back.
+    /// </summary>
+    /// <remarks>
+    /// Each one exactly as <see cref="CompleteItem"/> would, sub-tasks and recurring ones included.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order to close them</param>
+    /// <returns>
+    /// The sub-tasks ticked off along with each task that was ticked off here, by the id it was
+    /// asked for under. A recurring task isn't among them, since it isn't ticked off here
+    /// </returns>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> CompleteItems(IReadOnlyList<string> ids)
+    {
+        var ticked = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+
+        Together(() =>
+        {
+            foreach (var id in ids)
+            {
+                if (CompleteItem(id) is { } under) ticked[id] = under;
+            }
+        });
+
+        return ticked;
+    }
+
+    /// <summary>
+    /// Deletes several tasks as one thing done, so a single <see cref="Undo"/> brings them all back.
+    /// </summary>
+    /// <remarks>
+    /// One that went with a task deleted before it isn't deleted again. A second delete would only
+    /// be refused, since the server takes it with its parent, and sit in the outbox as a failure.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order to delete them</param>
+    public void DeleteItems(IReadOnlyList<string> ids)
+        => Together(() =>
+        {
+            var children = ChildrenByParent();
+            var gone = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var id in ids)
+            {
+                if (!gone.Contains(Promoted(id))) gone.UnionWith(Delete(id, children));
+            }
+        });
+
+    /// <summary>
+    /// Makes several writes as one thing done: one transaction in the store, all of them or none,
+    /// and one <see cref="Undo"/> for whatever of them can be taken back.
+    /// </summary>
+    /// <remarks>
+    /// For an action over several tasks that's made of writes the engine already has, such as a
+    /// priority given to each. The gate is held throughout, so nothing in
+    /// <paramref name="writes"/> may wait on anything that waits on the engine.
+    /// </remarks>
+    /// <param name="writes">The writes to make</param>
+    public void Together(Action writes)
+    {
+        lock (_gate)
+        {
+            AllOrNothing(() => AsOneUndo(writes));
+        }
+    }
+
+    /// <summary>
+    /// Reopens several tasks, passing over any that are already open by the time they're reached.
+    /// </summary>
+    /// <remarks>
+    /// Putting a task back puts back what its close ticked off with it, so a sub-task picked out
+    /// alongside its parent can be open again before its own turn comes. Reopening it a second time
+    /// would queue an uncomplete for a task that isn't complete.
+    ///
+    /// Parents go first, whatever order they were picked in. A sub-task reopened ahead of its
+    /// parent opens the parent too, the way the server does, so the parent was passed over when its
+    /// turn came: its close was never used up, and the rest of what that close took stayed finished.
+    /// </remarks>
+    /// <param name="ids">The tasks</param>
+    public void ReopenItems(IReadOnlyList<string> ids)
+    {
+        lock (_gate)
+        {
+            AllOrNothing(() =>
+            {
+                foreach (var id in ids.OrderBy(i => DepthOf(Promoted(i))))
+                {
+                    if (Model.Get(ResourceType.Items, Promoted(id)) is { } held && !Projections.ToTaskItem(held).Completed)
+                    {
+                        continue;
+                    }
+
+                    ReopenItem(id);
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// The tasks among several that aren't under another one of them.
+    /// </summary>
+    /// <remarks>
+    /// Anything done to a task is done to what's under it, so a sub-task picked out alongside its
+    /// parent is already taken care of. Doing it again queued a second command for a task the first
+    /// had already finished, or a delete for one the server had already deleted with its parent.
+    ///
+    /// Asked here rather than of a snapshot. Only here are the completed tasks fetched from the
+    /// archive known along with their parents, and only here does an id the outline still holds
+    /// from before a sync answer to the name the server has given it since.
+    /// </remarks>
+    /// <param name="ids">The tasks, by whatever names the caller holds them under</param>
+    /// <param name="covers">
+    /// Whether a picked parent takes what's under it along, or null when every one does
+    /// </param>
+    /// <returns>Those with no picked ancestor that covers them, by the names they came under, in the order they came</returns>
+    public IReadOnlyList<string> OutermostOf(IReadOnlyList<string> ids, Func<TaskItem, bool>? covers = null)
+    {
+        lock (_gate)
+        {
+            var picked = ids.Select(Promoted).ToHashSet(StringComparer.Ordinal);
+
+            return ids.Distinct(StringComparer.Ordinal).Where(id => !UnderAnother(Promoted(id))).ToList();
+
+            bool UnderAnother(string id)
+            {
+                // Bounded by what's been seen, since a parent loop in the data would go round for ever.
+                var seen = new HashSet<string>(StringComparer.Ordinal) { id };
+                var parent = HeldTask(id)?.ParentId;
+
+                while (parent is not null && seen.Add(parent))
+                {
+                    var above = HeldTask(parent);
+                    if (picked.Contains(parent) && (covers is null || above is null || covers(above))) return true;
+
+                    parent = above?.ParentId;
+                }
+
+                return false;
             }
         }
     }
+
+    /// <summary>A task the model holds, or failing that one fetched from the archive.</summary>
+    /// <param name="id">The task, already promoted</param>
+    /// <returns>The task, or null when neither has it</returns>
+    private TaskItem? HeldTask(string id)
+        => (Model.Get(ResourceType.Items, id) ?? _completed.GetValueOrDefault(id)) is { } json ? Projections.ToTaskItem(json) : null;
 
     /// <summary>
     /// How one kind of thing is reordered: what the command is called, and what it calls the array
@@ -2125,6 +2367,15 @@ public sealed class SyncEngine
             .GroupBy(i => i.ParentId!)
             .ToDictionary(g => g.Key, g => g.Select(i => i.Id).ToList(), StringComparer.Ordinal);
 
+        return DescendantsOf(id, byParent);
+    }
+
+    /// <summary>Every task filed under this one, however deep, given who's under whom.</summary>
+    /// <param name="id">The task to start from, which isn't itself included</param>
+    /// <param name="byParent">Each task's sub-tasks, by the parent's id</param>
+    /// <returns>The ids under it, nearest first</returns>
+    private static List<string> DescendantsOf(string id, Dictionary<string, List<string>> byParent)
+    {
         var seen = new HashSet<string>(StringComparer.Ordinal) { id };
         var found = new List<string>();
         var level = new List<string> { id };
@@ -2793,7 +3044,11 @@ public sealed class SyncEngine
     /// Reverses the most recent completion or deletion. If its command hasn't been sent it is simply
     /// dropped and the resource restored; if it has, the opposite command is issued.
     /// </summary>
-    /// <returns><c>false</c> when there is nothing left to undo, or the task it applied to is gone.</returns>
+    /// <remarks>
+    /// Writes made together, such as several tasks ticked off at once, are taken back together.
+    /// Within a batch, whatever can be reversed is, and the rest is consumed with it.
+    /// </remarks>
+    /// <returns><c>false</c> when there is nothing left to undo, or the task it applied to is gone</returns>
     public bool Undo()
     {
         lock (_gate)
@@ -2801,53 +3056,139 @@ public sealed class SyncEngine
             if (_awaitingToken)
                 return false;
 
-            // Keep going past entries that can no longer be reversed — the task was deleted on
-            // another device, say — rather than reporting "nothing to undo" with history left.
-            while (_undoStack.Count > 0)
+            // All of it or none, in one transaction, the way the batch it takes back was made.
+            var undone = false;
+            AllOrNothing(() => undone = UndoNewest());
+            return undone;
+        }
+    }
+
+    /// <summary>
+    /// Takes back the newest batch on the undo stack, or the newest that can still be taken back.
+    /// </summary>
+    /// <remarks>Call it holding the gate.</remarks>
+    /// <returns>False when there was nothing left to undo, or the task it applied to is gone</returns>
+    private bool UndoNewest()
+    {
+        // Keep going past entries that can no longer be reversed — the task was deleted on
+        // another device, say — rather than reporting "nothing to undo" with history left.
+        while (_undoStack.Count > 0)
+        {
+            var batch = BatchOf(_undoStack[^1]);
+            var undone = false;
+            var barred = false;
+
+            // Newest first, the order the same writes made one at a time would be undone in.
+            while (_undoStack.Count > 0 && BatchOf(_undoStack[^1]) == batch)
             {
+                // Taken off here rather than by forgetting it, which only looks on the stack for
+                // a write it still remembers. Should the two ever fall out of step, a write left
+                // on top would be found again on every pass, with the gate held.
                 var uuid = _undoStack[^1];
                 _undoStack.RemoveAt(_undoStack.Count - 1);
-                var record = _undoable.GetValueOrDefault(uuid);
-                _undoable.Remove(uuid);
+                _undoable.Remove(uuid, out var record);
+                _undoBatch.Remove(uuid);
 
-                // Its undo entry has already been taken off the stack above, so the close itself is
-                // all that's left to deal with.
-                if (record?.Type == "item_close")
+                switch (UndoOne(uuid, record))
                 {
-                    if (TakeBack(uuid, record))
-                        return true;
+                    case Reversal.Undone:
+                        undone = true;
+                        break;
 
-                    continue;
-                }
-
-                var queued = _outbox.FirstOrDefault(c => c.Uuid == uuid);
-
-                if (queued is { InFlight: false })
-                {
-                    RevertLocked(queued);
-                    return true;
-                }
-
-                if (record is null)
-                    continue;
-
-                // A destructive write we can't reverse. Consume it and stop, rather than reaching
-                // past it and silently undoing something the user wasn't thinking about.
-                if (record.Type == UndoBarrier)
-                    return false;
-
-                // Todoist cannot undelete, so the task is recreated from the state we last held.
-                if (record.PriorJson is { } json && TryParse(json) is { } prior)
-                {
-                    var fields = ItemFields.ForRecreate(prior);
-                    if (fields["content"] is null)
-                        continue;
-                    AddItem(fields);
-                    return true;
+                    case Reversal.Barred:
+                        barred = true;
+                        break;
                 }
             }
 
-            return false;
+            if (undone) return true;
+
+            // A destructive write we can't reverse. Consume it and stop, rather than reaching
+            // past it and silently undoing something the user wasn't thinking about.
+            if (barred) return false;
+        }
+
+        return false;
+    }
+
+    /// <summary>What came of trying to reverse one write.</summary>
+    private enum Reversal
+    {
+        /// <summary>Taken back.</summary>
+        Undone,
+
+        /// <summary>Nothing left to take back — the task was deleted on another device, say.</summary>
+        Gone,
+
+        /// <summary>A write the server has that can't be reversed, which undo mustn't reach past.</summary>
+        Barred,
+    }
+
+    /// <summary>
+    /// Reverses one write that's just come off the undo stack.
+    /// </summary>
+    /// <param name="uuid">The write's command</param>
+    /// <param name="record">What the write recorded, or null when nothing was remembered of it</param>
+    /// <returns>What came of it</returns>
+    private Reversal UndoOne(string uuid, UndoableWrite? record)
+    {
+        // Its undo entry has already been taken off the stack, so the close itself is all that's
+        // left to deal with.
+        if (record?.Type == "item_close") return TakeBack(uuid, record) ? Reversal.Undone : Reversal.Gone;
+
+        if (QueuedCommand(uuid) is { InFlight: false } queued)
+        {
+            RevertLocked(queued);
+            return Reversal.Undone;
+        }
+
+        if (record is null) return Reversal.Gone;
+
+        if (record.Type == UndoBarrier) return Reversal.Barred;
+
+        // Todoist cannot undelete, so the task is recreated from the state we last held.
+        if (record.PriorJson is { } json && TryParseNode(json) is { } node && PriorEntries(node).ToList() is [var first, ..] entries)
+        {
+            var prior = first["resource"] as JsonObject ?? first;
+            var fields = ItemFields.ForRecreate(prior);
+            if (fields["content"] is null) return Reversal.Gone;
+
+            var made = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [JsonRead.String(prior, "id") ?? record.Id] = AddItem(fields),
+            };
+
+            Remake(entries.Skip(1).Select(e => e["resource"] as JsonObject).OfType<JsonObject>(), made);
+            return Reversal.Undone;
+        }
+
+        return Reversal.Gone;
+    }
+
+    /// <summary>
+    /// Makes again the sub-tasks a delete the server has took with their parent, each under the
+    /// copy of the task it was under.
+    /// </summary>
+    /// <remarks>
+    /// Nearest first, as the delete recorded them, so each one's parent has been made before it.
+    /// A completed one isn't made again, nor anything under it: it would come back to do, the way
+    /// the parent itself comes back however it stood, and it was done.
+    /// </remarks>
+    /// <param name="taken">What each sub-task held when it was deleted</param>
+    /// <param name="made">The new id of each task made again so far, by its old one</param>
+    private void Remake(IEnumerable<JsonObject> taken, Dictionary<string, string> made)
+    {
+        foreach (var sub in taken)
+        {
+            if (JsonRead.Bool(sub, "checked")) continue;
+            if (JsonRead.String(sub, "id") is not { } id) continue;
+            if (JsonRead.String(sub, "parent_id") is not { } parent || !made.TryGetValue(parent, out var copy)) continue;
+
+            var fields = ItemFields.ForRecreate(sub);
+            if (fields["content"] is null) continue;
+
+            fields["parent_id"] = copy;
+            made[id] = AddItem(fields);
         }
     }
 
@@ -2872,7 +3213,7 @@ public sealed class SyncEngine
     {
         var id = Promoted(close.Id);
 
-        if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } queued)
+        if (QueuedCommand(uuid) is { InFlight: false } queued)
         {
             RemoveCommand(queued);
             Uncheck(id);
@@ -2900,7 +3241,7 @@ public sealed class SyncEngine
     {
         lock (_gate)
         {
-            if (_outbox.FirstOrDefault(c => c.Uuid == uuid) is { InFlight: false } cmd)
+            if (QueuedCommand(uuid) is { InFlight: false } cmd)
                 RevertLocked(cmd);
         }
     }
@@ -2942,7 +3283,7 @@ public sealed class SyncEngine
         if (cmd.State != OutboxState.Failed)
             RestorePriors(cmd);
 
-        _outbox.Remove(cmd);
+        Unqueue(cmd);
         _store.DeleteCommands([cmd.Uuid]);
         ForgetUndoable(cmd.Uuid);
     }
@@ -4274,6 +4615,7 @@ public sealed class SyncEngine
         _deferredDeletes.Clear();
         _undoStack.Clear();
         _undoable.Clear();
+        _undoBatch.Clear();
         _completed.Clear();
         _store.Purge();
 
@@ -4290,9 +4632,26 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>A command still in the outbox, or null.</summary>
+    /// <remarks>
+    /// Looked for from the newest end. Undo looks for the writes it's taking back, which are the
+    /// newest, newest first, and looked for from the oldest end, taking back a batch of thousands
+    /// walked the whole queue for each one.
+    /// </remarks>
+    /// <param name="uuid">The command's uuid</param>
+    /// <returns>The command, or null when it's been sent and settled or was never queued</returns>
+    private OutboxCommand? QueuedCommand(string uuid) => _outbox.FindLast(c => c.Uuid == uuid);
+
+    /// <summary>Takes a command out of the outbox here, looked for from the newest end as <see cref="QueuedCommand"/> is.</summary>
+    /// <param name="cmd">The command</param>
+    private void Unqueue(OutboxCommand cmd)
+    {
+        if (_outbox.LastIndexOf(cmd) is var at and >= 0) _outbox.RemoveAt(at);
+    }
+
     private void RemoveCommand(OutboxCommand cmd)
     {
-        _outbox.Remove(cmd);
+        Unqueue(cmd);
         _store.DeleteCommands([cmd.Uuid]);
     }
 
@@ -4321,22 +4680,257 @@ public sealed class SyncEngine
     /// reach. Barriers go on the same stack as everything else — closing recurring tasks makes one
     /// per keypress, so a stack that only ever grew would be a leak in a long session.
     /// </summary>
+    /// <remarks>
+    /// The depth counts batches rather than writes. Counting writes would trim a batch of sixty
+    /// tasks to its last fifty, and Ctrl+Z would bring back most of what went rather than all of it.
+    ///
+    /// It's only measured when a write starts a batch, since one that carries on the batch before
+    /// it adds no press to the stack. Measured for every write, a batch of thousands of tasks walked
+    /// the whole stack once for each of them, with the gate held.
+    /// </remarks>
     private void Remember(string uuid, UndoableWrite write)
     {
+        var starts = _batch is null || _undoStack.Count == 0 || BatchOf(_undoStack[^1]) != _batch;
+
         _undoStack.Add(uuid);
         _undoable[uuid] = write;
 
-        while (_undoStack.Count > MaxUndoDepth)
+        if (_batch is not null) _undoBatch[uuid] = _batch;
+
+        while (starts && UndoDepth() > MaxUndoDepth)
         {
-            _undoable.Remove(_undoStack[0]);
-            _undoStack.RemoveAt(0);
+            ForgetOldestUndo();
         }
     }
 
+    /// <summary>
+    /// Drops the oldest press from the undo stack, every write of it.
+    /// </summary>
+    /// <remarks>
+    /// Whole, rather than leaving a piece of a batch for Ctrl+Z to bring back by itself, and in one
+    /// go: taken a write at a time from the front, each one shifted everything behind it.
+    /// </remarks>
+    private void ForgetOldestUndo()
+    {
+        var oldest = BatchOf(_undoStack[0]);
+        var count = 1;
+        while (count < _undoStack.Count && BatchOf(_undoStack[count]) == oldest)
+        {
+            count++;
+        }
+
+        foreach (var uuid in _undoStack.Take(count))
+        {
+            _undoable.Remove(uuid);
+            _undoBatch.Remove(uuid);
+        }
+
+        _undoStack.RemoveRange(0, count);
+    }
+
+    /// <summary>How many separate Ctrl+Z presses the stack holds.</summary>
+    private int UndoDepth()
+    {
+        // A batch's writes sit together on the stack, since the gate is held while it's made.
+        var depth = 0;
+        for (var i = 0; i < _undoStack.Count; i++)
+        {
+            if (i == 0 || BatchOf(_undoStack[i]) != BatchOf(_undoStack[i - 1])) depth++;
+        }
+
+        return depth;
+    }
+
+    /// <summary>The batch a write on the undo stack was made in, which is its own uuid for a write made alone.</summary>
+    private string BatchOf(string uuid) => _undoBatch.GetValueOrDefault(uuid) ?? uuid;
+
+    /// <summary>Takes one write off the undo stack.</summary>
+    /// <remarks>
+    /// Looked for from the top, where an undo takes writes from and a reopen finds its close. Looked
+    /// for from the bottom, undoing a batch of thousands walked most of the stack for each one.
+    ///
+    /// Not looked for at all when it isn't remembered, since the stack and what it remembers are
+    /// kept in step. Most calls are for writes that never went on the stack, or have already come
+    /// off: an undo takes each write off before reversing it, and the reversal forgets it again.
+    /// Each of those walked the whole stack and found nothing.
+    /// </remarks>
+    /// <param name="uuid">The write's command</param>
     private void ForgetUndoable(string uuid)
     {
-        _undoStack.Remove(uuid);
-        _undoable.Remove(uuid);
+        if (!_undoable.Remove(uuid)) return;
+
+        if (_undoStack.LastIndexOf(uuid) is var at and >= 0) _undoStack.RemoveAt(at);
+
+        _undoBatch.Remove(uuid);
+    }
+
+    /// <summary>
+    /// Makes everything <paramref name="write"/> puts on the undo stack one batch, so a single
+    /// <see cref="Undo"/> takes the lot back.
+    /// </summary>
+    /// <remarks>
+    /// Call it holding the gate, which it keeps for the whole batch: a write from anywhere else
+    /// landing halfway through would otherwise be taken back with it.
+    /// </remarks>
+    /// <param name="write">The writes to make</param>
+    private void AsOneUndo(Action write)
+    {
+        // Nested, the outer batch is the one that counts: it's still one thing the user did.
+        if (_batch is not null)
+        {
+            write();
+            return;
+        }
+
+        _batch = Guid.NewGuid().ToString("N");
+        try
+        {
+            write();
+        }
+        finally
+        {
+            _batch = null;
+        }
+    }
+
+    /// <summary>Whether writes are being made all or nothing, so one inside doesn't start another.</summary>
+    private bool _allOrNothing;
+
+    /// <summary>
+    /// Makes several writes in one transaction in the store, and in memory all of them or none.
+    /// </summary>
+    /// <remarks>
+    /// One transaction rather than one per write, since each commit waits on the disk: five hundred
+    /// tasks deleted together took 0.4 seconds, and the undo that brought them back 0.7.
+    ///
+    /// A store that gives out partway takes back everything from the first of them, here as well
+    /// as on disk: the model, the queue, the undo stack and the completed tasks out of the archive.
+    /// That's what a single write the store refuses leaves, since it's refused before anything
+    /// changes. Left ahead of the store instead, the window would show a batch as done that a
+    /// restart would lose.
+    ///
+    /// The queue goes back as the same commands, each with what it held, since a write can edit
+    /// one already queued: letting a create go takes what it made out of other commands' priors,
+    /// and reverting an edit passes what it found on to the next. They're put back into the same
+    /// objects rather than swapped for copies, which a sync with them on the wire still holds.
+    ///
+    /// Copying all of it costs in proportion to what's queued and remembered, not to what the
+    /// batch writes: about 0.9 ms and 480 KB with four thousand writes queued and a batch of four
+    /// thousand on the undo stack, and a few microseconds with neither. Noting each change where
+    /// it's made would cost only what's changed, but would put back only what every one of those
+    /// places remembered to note.
+    ///
+    /// <see cref="Queued"/> is said once, after the batch is committed, rather than for each write:
+    /// a thousand tasks deleted together would otherwise wake the loop a thousand times for a sync
+    /// that can't start until the gate is let go, and tell it of writes a rollback then undoes.
+    ///
+    /// Call it holding the gate, which it keeps throughout. Nested, the outer one decides.
+    /// </remarks>
+    /// <param name="writes">The writes to make</param>
+    private void AllOrNothing(Action writes)
+    {
+        if (_allOrNothing)
+        {
+            writes();
+            return;
+        }
+
+        var outbox = _outbox.Select(c => (Command: c, Held: CommandFields.Of(c))).ToList();
+        var undoStack = _undoStack.ToList();
+        var undoable = _undoable.ToList();
+        var undoBatch = _undoBatch.ToList();
+        var completed = _completed.ToList();
+
+        bool queued;
+        _allOrNothing = true;
+        _queuedInBatch = false;
+        Model.BeginJournal();
+        try
+        {
+            using (var batch = _store.BeginBatch())
+            {
+                writes();
+                batch.Commit();
+            }
+
+            Model.EndJournal();
+        }
+        catch
+        {
+            Model.RollBack();
+
+            _outbox.Clear();
+            foreach (var (command, held) in outbox)
+            {
+                held.Into(command);
+                _outbox.Add(command);
+            }
+
+            Restore(_undoStack, undoStack);
+            Restore(_undoable, undoable);
+            Restore(_undoBatch, undoBatch);
+            Restore(_completed, completed);
+            throw;
+        }
+        finally
+        {
+            _allOrNothing = false;
+            queued = _queuedInBatch;
+            _queuedInBatch = false;
+        }
+
+        if (queued) SayQueued();
+    }
+
+    /// <summary>Whether a write was queued in the batch being made, to say so once it's committed.</summary>
+    private bool _queuedInBatch;
+
+    /// <summary>What a queued command holds that can change while it waits.</summary>
+    private readonly record struct CommandFields(
+        long Seq,
+        string ArgsJson,
+        string? PriorJson,
+        bool InFlight,
+        int Attempts,
+        int NoVerdictRounds,
+        DateTimeOffset? RetryAt,
+        OutboxState State,
+        string? LastError)
+    {
+        public static CommandFields Of(OutboxCommand c)
+            => new(c.Seq, c.ArgsJson, c.PriorJson, c.InFlight, c.Attempts, c.NoVerdictRounds, c.RetryAt, c.State, c.LastError);
+
+        /// <summary>Writes these back into the command they were read from.</summary>
+        public void Into(OutboxCommand c)
+        {
+            c.Seq = Seq;
+            c.ArgsJson = ArgsJson;
+            c.PriorJson = PriorJson;
+            c.InFlight = InFlight;
+            c.Attempts = Attempts;
+            c.NoVerdictRounds = NoVerdictRounds;
+            c.RetryAt = RetryAt;
+            c.State = State;
+            c.LastError = LastError;
+        }
+    }
+
+    /// <summary>Puts a list back to what it held.</summary>
+    private static void Restore<T>(List<T> list, List<T> held)
+    {
+        list.Clear();
+        list.AddRange(held);
+    }
+
+    /// <summary>Puts a dictionary back to what it held.</summary>
+    private static void Restore<TKey, TValue>(Dictionary<TKey, TValue> map, List<KeyValuePair<TKey, TValue>> held)
+        where TKey : notnull
+    {
+        map.Clear();
+        foreach (var (key, value) in held)
+        {
+            map[key] = value;
+        }
     }
 
     /// <summary>
@@ -4344,6 +4938,10 @@ public sealed class SyncEngine
     /// in-memory model only after this returns, so a store failure can't leave a change on screen
     /// that was never persisted or queued.
     /// </summary>
+    /// <remarks>
+    /// In a batch, the store holds the write until the batch commits, and <see cref="AllOrNothing"/>
+    /// takes back what's on screen if it doesn't.
+    /// </remarks>
     private OutboxCommand Persist(string type, JsonObject args, string? tempId, string? prior, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
     {
         var cmd = new OutboxCommand
@@ -4366,14 +4964,24 @@ public sealed class SyncEngine
 
         // Every write the engine takes passes through here, which is what makes this the one place
         // that has to say so. Not the outbox being loaded from the store on the way up — that is
-        // the same writes being remembered, not new ones being made.
-        //
-        // Guarded the way the scheduler guards its own event, and for a sharper reason: by this
-        // point the write is in the store and in the outbox, so a subscriber that threw would
-        // unwind through the caller and have the window report a failure for a write that had
-        // already happened — and skip the refresh that would have shown it. The worst a swallowed
-        // one costs is the loop coming round on its own clock, which is where it was before any of
-        // this.
+        // the same writes being remembered, not new ones being made. A write in a batch is said
+        // once the batch is committed, since until then it can still be taken back.
+        if (_allOrNothing) _queuedInBatch = true;
+        else SayQueued();
+
+        return cmd;
+    }
+
+    /// <summary>Tells whoever's listening that a write has been queued.</summary>
+    /// <remarks>
+    /// Guarded the way the scheduler guards its own event, and for a sharper reason: by this point
+    /// the write is in the store and in the outbox, so a subscriber that threw would unwind through
+    /// the caller and have the window report a failure for a write that had already happened — and
+    /// skip the refresh that would have shown it. The worst a swallowed one costs is the loop coming
+    /// round on its own clock, which is where it was before any of this.
+    /// </remarks>
+    private void SayQueued()
+    {
         try
         {
             Queued?.Invoke();
@@ -4382,8 +4990,6 @@ public sealed class SyncEngine
         {
             // A subscriber's failure must not turn a write that landed into one that looks lost.
         }
-
-        return cmd;
     }
 
     private static bool ReferencesAny(OutboxCommand cmd, HashSet<string> ids)

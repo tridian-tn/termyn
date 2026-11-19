@@ -230,11 +230,65 @@ public sealed class FailingWriteStore : ISnapshotStore
     public void RenameResource(string type, string oldId, string newId) => _inner.RenameResource(type, oldId, newId);
     public void UpdateCommand(OutboxCommand command) => _inner.UpdateCommand(command);
     public void DeleteCommands(IReadOnlyList<string> uuids) => _inner.DeleteCommands(uuids);
+    public IStoreBatch BeginBatch() => _inner.BeginBatch();
     public void Purge() => _inner.Purge();
     public void Dispose() => _inner.Dispose();
 
     public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
         => throw new IOException("disk full");
+}
+
+/// <summary>
+/// An in-memory store that runs out of room partway, standing in for a disk that fills up in the
+/// middle of a batch.
+/// </summary>
+public sealed class FillingStore(InMemorySnapshotStore inner) : ISnapshotStore
+{
+    /// <summary>How many more writes it takes before it fails, counting command deletes as writes.</summary>
+    public int WritesLeft { get; set; } = int.MaxValue;
+
+    /// <summary>How many batches have been committed.</summary>
+    public int Commits { get; private set; }
+
+    public StoredSnapshot Load() => inner.Load();
+    public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null) => inner.SaveSync(upserts, deletes, syncToken, deferredDeletes);
+    public void PutResource(string type, string id, string json) => inner.PutResource(type, id, json);
+    public void DeleteResource(string type, string id) => inner.DeleteResource(type, id);
+    public void RenameResource(string type, string oldId, string newId) => inner.RenameResource(type, oldId, newId);
+    public void UpdateCommand(OutboxCommand command) => inner.UpdateCommand(command);
+    public void Purge() => inner.Purge();
+    public void Dispose() => inner.Dispose();
+
+    public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
+    {
+        Spend();
+        return inner.ApplyLocalWrite(command, upserts, deletes);
+    }
+
+    public void DeleteCommands(IReadOnlyList<string> uuids)
+    {
+        Spend();
+        inner.DeleteCommands(uuids);
+    }
+
+    public IStoreBatch BeginBatch() => new Counted(this, inner.BeginBatch());
+
+    private void Spend()
+    {
+        if (WritesLeft-- <= 0) throw new IOException("disk full");
+    }
+
+    /// <summary>The inner store's batch, counting the commits it gets.</summary>
+    private sealed class Counted(FillingStore store, IStoreBatch batch) : IStoreBatch
+    {
+        public void Commit()
+        {
+            batch.Commit();
+            store.Commits++;
+        }
+
+        public void Dispose() => batch.Dispose();
+    }
 }
 
 /// <summary>An in-memory store that can't be emptied, standing in for a cache file that's locked.</summary>
@@ -250,6 +304,7 @@ public sealed class UnpurgeableStore : ISnapshotStore
     public void UpdateCommand(OutboxCommand command) => _inner.UpdateCommand(command);
     public void DeleteCommands(IReadOnlyList<string> uuids) => _inner.DeleteCommands(uuids);
     public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes) => _inner.ApplyLocalWrite(command, upserts, deletes);
+    public IStoreBatch BeginBatch() => _inner.BeginBatch();
     public void Dispose() => _inner.Dispose();
 
     public void Purge() => throw new IOException("locked");

@@ -38,8 +38,56 @@ public sealed class TodoistModel
         return null;
     }
 
+    /// <summary>
+    /// What each resource changed since <see cref="BeginJournal"/> was before its first change, or
+    /// null for one that wasn't there; null itself when nothing is being kept.
+    /// </summary>
+    /// <remarks>
+    /// The object held before, not a copy of it, since a change here replaces a resource's object
+    /// rather than editing it. <see cref="Rename"/> edits the id inside it, so it keeps a copy.
+    /// <see cref="RewriteReferences"/> edits objects in place too, and a journal doesn't see it:
+    /// it's the sync's, which doesn't run while one is kept.
+    /// </remarks>
+    private Dictionary<(string Type, string Id), JsonObject?>? _journal;
+
+    /// <summary>
+    /// Starts keeping what each resource was before its next change, so a run of changes can be
+    /// taken back together.
+    /// </summary>
+    public void BeginJournal() => _journal = [];
+
+    /// <summary>Keeps every change since <see cref="BeginJournal"/>, and stops noting them.</summary>
+    public void EndJournal() => _journal = null;
+
+    /// <summary>Puts back every resource changed since <see cref="BeginJournal"/>, and stops noting them.</summary>
+    public void RollBack()
+    {
+        if (_journal is not { } journal) return;
+
+        _journal = null;
+        foreach (var ((type, id), was) in journal)
+        {
+            if (was is null) Remove(type, id);
+            else Upsert(type, id, was);
+        }
+    }
+
+    /// <summary>Notes what a resource is before it changes, the first time it does while a journal's kept.</summary>
+    /// <param name="type">The resource's type</param>
+    /// <param name="id">The resource's id</param>
+    /// <param name="copy">Whether to keep a copy, for a change that edits the object itself</param>
+    private void Note(string type, string id, bool copy = false)
+    {
+        if (_journal is null || _journal.ContainsKey((type, id))) return;
+
+        var held = Get(type, id);
+        _journal[(type, id)] = copy ? held?.DeepClone().AsObject() : held;
+    }
+
     public void Upsert(string type, string id, JsonObject json)
     {
+        Note(type, id);
+
         if (!_byType.TryGetValue(type, out var m))
         {
             m = new Dictionary<string, JsonObject>();
@@ -51,12 +99,16 @@ public sealed class TodoistModel
 
     public bool Remove(string type, string id)
     {
+        Note(type, id);
         Invalidate(type, id);
         return _byType.TryGetValue(type, out var m) && m.Remove(id);
     }
 
     public void Rename(string type, string oldId, string newId)
     {
+        Note(type, oldId, copy: true);
+        Note(type, newId);
+
         if (_byType.TryGetValue(type, out var m) && m.Remove(oldId, out var o))
         {
             o["id"] = newId;

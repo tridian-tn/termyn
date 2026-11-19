@@ -1818,27 +1818,49 @@ public sealed class MainPresenter
     /// Asked before the change rather than after: a delete takes the name with it, and a rename
     /// makes the old one the interesting half. A task the model has never heard of is quoted as
     /// nothing at all, which reads better in a sentence than an id nobody recognises.
+    ///
+    /// A completed task fetched from the archive is named from there, since that's where the row
+    /// being acted on came from.
     /// </remarks>
     /// <param name="id">The task to name</param>
     /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
     private string Named(string id)
-        => _engine.Snapshot().Items.FirstOrDefault(i => i.Id == id) is { Content.Length: > 0 } item
+    {
+        var snapshot = _engine.Snapshot();
+        return NameOf(snapshot.Items.FirstOrDefault(i => i.Id == id) ?? snapshot.CompletedItems.FirstOrDefault(i => i.Id == id));
+    }
+
+    /// <summary>What a task is called in a line of history, once it's been found.</summary>
+    /// <param name="item">The task, or null when there's none to name</param>
+    /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
+    private static string NameOf(TaskItem? item)
+        => item is { Content.Length: > 0 }
             ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryTaskNamed, item.Content)
             : Strings.HistoryTaskUnnamed;
 
     public void SetPriority(string id, Priority priority)
     {
         var named = Named(id);
-        _engine.UpdateItem(id, new JsonObject { ["priority"] = PriorityMap.ToApi(priority) });
+        _engine.UpdateItem(id, PriorityChange(priority));
+        NotePriority(id, named, priority);
+        Publish();
+    }
 
-        History.Note(
+    /// <summary>The change to a task that gives it a priority.</summary>
+    /// <param name="priority">The priority to give it</param>
+    /// <returns>The field to write</returns>
+    private static JsonObject PriorityChange(Priority priority) => new() { ["priority"] = PriorityMap.ToApi(priority) };
+
+    /// <summary>Puts a priority given to a task in the history.</summary>
+    /// <param name="id">The task</param>
+    /// <param name="named">What it's called, from before the change</param>
+    /// <param name="priority">The priority it was given</param>
+    private void NotePriority(string id, string named, Priority priority)
+        => History.Note(
             priority == Priority.P4
                 ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryPriorityCleared, named)
                 : string.Format(CultureInfo.CurrentCulture, Strings.HistoryPrioritySet, named, (int)priority),
             $"priority:{id}");
-
-        Publish();
-    }
 
     /// <summary>Sets or, with a null date, clears the due date.</summary>
     public void SetDue(string id, DateOnly? date, TimeOnly? time = null)
@@ -2158,6 +2180,243 @@ public sealed class MainPresenter
         Publish();
     }
 
+    // ---- Several tasks at once -----------------------------------------------------------------
+
+    /// <summary>
+    /// Ticks off several tasks, as one thing for Ctrl+Z to take back.
+    /// </summary>
+    /// <remarks>
+    /// A task picked out alongside its parent is left to the parent, which ticks it off with
+    /// everything else under it. Closing it as well would queue a second close for a task the first
+    /// has already finished.
+    ///
+    /// Not under a repeating parent, which moves on to its next date rather than being finished,
+    /// and takes nothing under it along. A sub-task picked out with one is closed in its own right.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    public void Complete(IReadOnlyList<string> ids)
+    {
+        var outermost = _engine.OutermostOf(ids, covers: parent => !parent.IsRecurring);
+        var named = Names(_engine.Snapshot(), outermost);
+
+        // Under the lock for the reason the single close is: a publish from the sync mustn't catch
+        // them finished and not yet kept.
+        lock (_publishing)
+        {
+            var now = _clock.UtcNow;
+            foreach (var (id, under) in _engine.CompleteItems(outermost))
+            {
+                _ticked[id] = new Ticked(now, under);
+            }
+        }
+
+        foreach (var id in outermost)
+        {
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryCompleted, named[id]), $"complete:{id}");
+        }
+
+        Publish();
+    }
+
+    /// <summary>Puts several completed tasks back among the active ones.</summary>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    public void Reopen(IReadOnlyList<string> ids)
+    {
+        var named = Names(_engine.Snapshot(), ids);
+        _engine.ReopenItems(ids);
+
+        lock (_publishing)
+        {
+            foreach (var id in ids)
+            {
+                _ticked.Remove(id);
+            }
+        }
+
+        foreach (var id in ids)
+        {
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryReopened, named[id]), $"reopen:{id}");
+        }
+
+        Publish();
+    }
+
+    /// <summary>
+    /// Deletes several tasks, as one thing for Ctrl+Z to bring back.
+    /// </summary>
+    /// <remarks>
+    /// A task picked out alongside its parent goes with the parent, the way Todoist deletes a
+    /// task's sub-tasks along with it, rather than being deleted a second time.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    public void Delete(IReadOnlyList<string> ids)
+    {
+        var outermost = _engine.OutermostOf(ids);
+
+        // Named first: the delete is what takes the names away.
+        var named = Names(_engine.Snapshot(), outermost);
+        _engine.DeleteItems(outermost);
+
+        foreach (var id in outermost)
+        {
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeleted, named[id]), $"delete:{id}");
+        }
+
+        Publish();
+    }
+
+    /// <summary>
+    /// Gives several tasks one priority, passing over any that already have it.
+    /// </summary>
+    /// <remarks>
+    /// Only the tasks the model holds. The rest are completed tasks out of the archive, which an
+    /// edit is declined for, and counting them had the history say they'd been changed.
+    /// </remarks>
+    /// <param name="ids">The tasks</param>
+    /// <param name="priority">The priority to give them</param>
+    /// <returns>False when none of them was changed, so nothing was written</returns>
+    public bool SetPriority(IReadOnlyList<string> ids, Priority priority)
+    {
+        var snapshot = _engine.Snapshot();
+        var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+        var changing = ids.Distinct(StringComparer.Ordinal)
+            .Where(id => held.GetValueOrDefault(_engine.Resolve(id)) is { } item && item.Priority != priority)
+            .ToList();
+
+        var named = Names(snapshot, changing);
+        var written = new List<string>();
+
+        // Together, so the store commits them once. Only the writes go inside: the gate is held
+        // there, and the history is noted outside it.
+        _engine.Together(() =>
+        {
+            foreach (var id in changing)
+            {
+                // Declined for one a sync has taken away since the snapshot.
+                if (_engine.UpdateItem(id, PriorityChange(priority))) written.Add(id);
+            }
+        });
+
+        foreach (var id in written)
+        {
+            NotePriority(id, named[id], priority);
+        }
+
+        if (written.Count == 0) return false;
+
+        Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Everywhere several tasks could be moved to, with the place they sit marked when they all sit
+    /// in the same one.
+    /// </summary>
+    /// <param name="ids">The tasks about to move</param>
+    /// <returns>Every project and section the sidebar shows</returns>
+    public IReadOnlyList<MoveDestination> DestinationsFor(IReadOnlyList<string> ids)
+    {
+        var snapshot = _engine.Snapshot();
+        var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+
+        // The ones that will move: a sub-task picked out with its parent goes with it, so where it
+        // sits doesn't count. Counted, it stopped the parent's own place being marked, and choosing
+        // it moved nothing.
+        var tasks = _engine.OutermostOf(ids).Select(id => held.GetValueOrDefault(_engine.Resolve(id))).ToList();
+
+        // Marked only when it's true of all of them. Marking where the first one sits would have the
+        // picker refuse a place the rest could perfectly well go to.
+        var first = tasks.FirstOrDefault();
+        var together = first is not null
+                       && tasks.All(t => t is { ParentId: null }
+                                         && t.SectionId == first.SectionId
+                                         && (t.ProjectId ?? snapshot.InboxProjectId) == (first.ProjectId ?? snapshot.InboxProjectId));
+
+        return MoveDestinations.From(Sidebar, together ? first : null, snapshot.InboxProjectId);
+    }
+
+    /// <summary>
+    /// Moves several tasks to the top level of a project or a section, each taking its sub-tasks
+    /// with it.
+    /// </summary>
+    /// <remarks>
+    /// A task picked out alongside its parent stays with the parent. Moving it on its own would
+    /// take it out from under the task it was filed beneath, which nobody picking out a branch to
+    /// move has asked for.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    /// <param name="destination">Where to, from <see cref="DestinationsFor(IReadOnlyList{string})"/></param>
+    /// <returns>How many were moved, which leaves out any already there, or gone</returns>
+    public int MoveTo(IReadOnlyList<string> ids, MoveDestination destination)
+    {
+        var outermost = _engine.OutermostOf(ids);
+        var named = Names(_engine.Snapshot(), outermost);
+        var moved = new List<string>();
+
+        // Together, for the reason a priority given to several is.
+        _engine.Together(() =>
+        {
+            foreach (var id in outermost)
+            {
+                if (Send(id, destination)) moved.Add(id);
+            }
+        });
+
+        foreach (var id in moved)
+        {
+            NoteMoved(id, named[id], destination);
+        }
+
+        if (moved.Count > 0) Publish();
+
+        return moved.Count;
+    }
+
+    /// <summary>
+    /// What can be done to several tasks at once, so a menu can grey out the rest.
+    /// </summary>
+    /// <remarks>
+    /// Only a move to somewhere else is asked about: the rest of what <see cref="TaskAbilities"/>
+    /// holds is about one task's place among its neighbours, and a batch doesn't have one. A move is
+    /// offered when every one of them can go, since one that can't is a completed task out of the
+    /// archive and would be left behind without a word.
+    /// </remarks>
+    /// <param name="ids">The tasks</param>
+    /// <returns>What they can be made to do together</returns>
+    public TaskAbilities AbilitiesForAll(IReadOnlyList<string> ids) => ids.Count switch
+    {
+        0 => TaskAbilities.None,
+        1 => AbilitiesFor(ids[0]),
+        _ => new TaskAbilities(CanMoveTo: ids.All(_engine.Holds)),
+    };
+
+    /// <summary>What to call each of several tasks in the history.</summary>
+    /// <remarks>
+    /// Read from a snapshot the caller already has. Each one projects every task in the account,
+    /// and taking one per question made a batch pay for three or four.
+    /// </remarks>
+    /// <param name="snapshot">The model as it stands</param>
+    /// <param name="ids">The tasks, by whatever names the outline holds them under</param>
+    /// <returns>Each one's name, the way <see cref="Named"/> gives it</returns>
+    private Dictionary<string, string> Names(ModelSnapshot snapshot, IReadOnlyList<string> ids)
+    {
+        // The model's own copy first, then what's been fetched from the archive.
+        var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+        foreach (var done in snapshot.CompletedItems)
+        {
+            held.TryAdd(done.Id, done);
+        }
+
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var id in ids)
+        {
+            names[id] = NameOf(held.GetValueOrDefault(_engine.Resolve(id)));
+        }
+
+        return names;
+    }
+
     public bool Undo()
     {
         var undone = _engine.Undo();
@@ -2310,22 +2569,37 @@ public sealed class MainPresenter
     public bool MoveTo(string id, MoveDestination destination)
     {
         var named = Named(id);
-        var moved = destination.Kind switch
-        {
-            SidebarKind.Project => _engine.MoveItemToProject(id, destination.Id),
-            SidebarKind.Section => _engine.MoveItemToSection(id, destination.Id),
-            _ => false,
-        };
 
-        if (!moved)
-            return false;
+        if (!Send(id, destination)) return false;
 
-        // Its own run rather than the nudges' one. Moving a row up and then sending it to another
-        // project are two things done, and folding them would leave only the second.
-        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedTo, named, destination.Path), $"move:to:{id}");
+        NoteMoved(id, named, destination);
         Publish();
         return true;
     }
+
+    /// <summary>Sends one task to the top level of a project or a section.</summary>
+    /// <param name="id">The task</param>
+    /// <param name="destination">Where to</param>
+    /// <returns>False when it was already there, or the task or the destination has gone</returns>
+    private bool Send(string id, MoveDestination destination) => destination.Kind switch
+    {
+        SidebarKind.Project => _engine.MoveItemToProject(id, destination.Id),
+        SidebarKind.Section => _engine.MoveItemToSection(id, destination.Id),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Puts a task sent somewhere else in the history.
+    /// </summary>
+    /// <remarks>
+    /// Its own run rather than the nudges' one. Moving a row up and then sending it to another
+    /// project are two things done, and folding them would leave only the second.
+    /// </remarks>
+    /// <param name="id">The task</param>
+    /// <param name="named">What it's called, from before the move</param>
+    /// <param name="destination">Where it went</param>
+    private void NoteMoved(string id, string named, MoveDestination destination)
+        => History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedTo, named, destination.Path), $"move:to:{id}");
 
     /// <summary>
     /// Whether tasks can be dragged about the outline as it's shown now.

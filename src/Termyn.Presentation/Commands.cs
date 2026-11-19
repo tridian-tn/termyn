@@ -169,6 +169,10 @@ public sealed record ScheduleDays(DateOnly Today, DateOnly? Weekend, DateOnly? N
 /// Whether Todoist has turned the token away, which greys everything that would change the account
 /// </param>
 /// <param name="Schedule">The days the Schedule menu's entries land on, or null when they aren't known</param>
+/// <param name="Tasks">
+/// Every task the outline has selected, when there's more than one. <paramref name="Task"/> is null
+/// then, since nothing that acts on a single task has one to act on
+/// </param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -185,13 +189,29 @@ public sealed record CommandContext(
     TaskAbilities? SelectionAbilities = null,
     string? NewTaskText = null,
     bool ReconnectNeeded = false,
-    ScheduleDays? Schedule = null)
+    ScheduleDays? Schedule = null,
+    IReadOnlyList<TaskRow>? Tasks = null)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
 
-    /// <summary>What the task can do, or nothing at all when there is no task.</summary>
-    public TaskAbilities Can => Task is null ? TaskAbilities.None : Abilities ?? TaskAbilities.None;
+    /// <summary>
+    /// Every task the outline has selected: several, the one, or none.
+    /// </summary>
+    public IReadOnlyList<TaskRow> Selected
+        => Tasks is { Count: > 0 } several ? several : Task is { } task ? [task] : [];
+
+    /// <summary>What the selected tasks can do, or nothing at all when there are none.</summary>
+    /// <remarks>
+    /// For several, only a move to somewhere else, whatever <see cref="Abilities"/> says. The rest
+    /// is about one task's place among its neighbours, which a batch hasn't got.
+    /// </remarks>
+    public TaskAbilities Can => Selected.Count switch
+    {
+        0 => TaskAbilities.None,
+        1 => Abilities ?? TaskAbilities.None,
+        _ => new TaskAbilities(CanMoveTo: Abilities?.CanMoveTo == true),
+    };
 
     /// <summary>
     /// What the sidebar row can do, or nothing at all when there is no row.
@@ -245,6 +265,33 @@ public static class Commands
     public static bool IsSelectionCommand(AppCommand command)
         => command is >= AppCommand.RenameSelection and <= AppCommand.MoveSelectionDown;
 
+    /// <summary>
+    /// The task commands that can act on several tasks at once. Every other one needs a single task
+    /// and is greyed while the outline has more than one selected.
+    /// </summary>
+    /// <remarks>
+    /// Ticking off, deleting, a priority and a move: things that mean the same done to each task in
+    /// turn. Indenting or nudging a batch would turn on where each one sits among the others, and
+    /// renaming or dating one opens something that only has room for one task.
+    /// </remarks>
+    /// <param name="command">The command</param>
+    /// <returns>True when it can be run over several tasks</returns>
+    public static bool ActsOnSeveral(AppCommand command)
+        => command is AppCommand.ToggleComplete or AppCommand.Delete or AppCommand.MoveTo
+           || PriorityOf(command) is not null;
+
+    /// <summary>
+    /// Whether ticking off the tasks would put them back instead, which it does only when every one
+    /// of them is finished already.
+    /// </summary>
+    /// <remarks>
+    /// A selection with some of each has its open ones ticked off. It's the one rule for the label
+    /// and the action both, so the menu can't say Complete and then reopen.
+    /// </remarks>
+    /// <param name="tasks">The tasks selected</param>
+    /// <returns>True when the command would reopen them</returns>
+    public static bool Reopens(IReadOnlyList<TaskRow> tasks) => tasks.Count > 0 && tasks.All(t => t.Completed);
+
     /// <summary>The priority a command sets, or null when it sets none.</summary>
     public static Priority? PriorityOf(AppCommand command) => command switch
     {
@@ -279,13 +326,16 @@ public static class Commands
     private static CommandState Unguarded(AppCommand command, CommandContext context)
     {
         var task = context.Task;
+        var selected = context.Selected;
         var can = context.Can;
 
         return command switch
         {
             // Ticking off a task that is already done means putting it back, so the one action
             // wears the label the row has earned.
-            AppCommand.ToggleComplete => Task(task is { Completed: true } ? Strings.CommandReopen : Strings.CommandComplete),
+            AppCommand.ToggleComplete => new CommandState(
+                Reopens(selected) ? Strings.CommandReopen : Strings.CommandComplete,
+                selected.Count > 0),
 
             // No ellipsis: the editor opens on the row itself rather than in a dialog.
             AppCommand.Rename => Task(Strings.CommandRename),
@@ -308,9 +358,14 @@ public static class Commands
             // they'd be getting, and it refuses the save itself rather than being absent here.
             AppCommand.Reminders => Task(Strings.CommandReminders),
 
+            // Ticked over several only when they all have it, since that's the one a press would
+            // change nothing on.
             AppCommand.Priority1 or AppCommand.Priority2 or AppCommand.Priority3 or AppCommand.Priority4
                 when PriorityOf(command) is { } priority
-                => new CommandState(PriorityLabel(priority), task is not null, task?.Priority == priority),
+                => new CommandState(
+                    PriorityLabel(priority),
+                    selected.Count > 0,
+                    selected.Count > 0 && selected.All(t => t.Priority == priority)),
 
             AppCommand.Indent => new CommandState(Strings.CommandIndent, can.CanIndent),
             AppCommand.Outdent => new CommandState(Strings.CommandOutdent, can.CanOutdent),
@@ -321,7 +376,7 @@ public static class Commands
             // No ellipsis: nothing opens here to ask anything, the browser just goes to the task.
             AppCommand.ShowInTodoist => new CommandState(Strings.CommandShowInTodoist, can.CanShowInTodoist),
 
-            AppCommand.Delete => Task(Strings.CommandDelete),
+            AppCommand.Delete => new CommandState(Strings.CommandDelete, selected.Count > 0),
 
             // Not on a task that is finished with — a sub-task of one would be work filed under
             // something already ticked off, where nothing on screen would ever show it as due — and
