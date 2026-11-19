@@ -1818,10 +1818,17 @@ public sealed class MainPresenter
     /// Asked before the change rather than after: a delete takes the name with it, and a rename
     /// makes the old one the interesting half. A task the model has never heard of is quoted as
     /// nothing at all, which reads better in a sentence than an id nobody recognises.
+    ///
+    /// A completed task fetched from the archive is named from there, since that's where the row
+    /// being acted on came from.
     /// </remarks>
     /// <param name="id">The task to name</param>
     /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
-    private string Named(string id) => NameOf(_engine.Snapshot().Items.FirstOrDefault(i => i.Id == id));
+    private string Named(string id)
+    {
+        var snapshot = _engine.Snapshot();
+        return NameOf(snapshot.Items.FirstOrDefault(i => i.Id == id) ?? snapshot.CompletedItems.FirstOrDefault(i => i.Id == id));
+    }
 
     /// <summary>What a task is called in a line of history, once it's been found.</summary>
     /// <param name="item">The task, or null when there's none to name</param>
@@ -2393,7 +2400,13 @@ public sealed class MainPresenter
     /// <returns>Each one's name, the way <see cref="Named"/> gives it</returns>
     private Dictionary<string, string> Names(ModelSnapshot snapshot, IReadOnlyList<string> ids)
     {
+        // The model's own copy first, then what's been fetched from the archive.
         var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+        foreach (var done in snapshot.CompletedItems)
+        {
+            held.TryAdd(done.Id, done);
+        }
+
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var id in ids)

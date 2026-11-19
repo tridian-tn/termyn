@@ -222,6 +222,52 @@ public class SeveralTasksTests
         Assert.Equal(["child", "other", "parent"], engine.Snapshot().Items.Select(i => i.Id).Order());
     }
 
+    [Fact]
+    public void A_parent_deleted_with_another_task_takes_its_sub_task_off_the_list()
+    {
+        // Only the parent is sent, since the server takes the sub-task with it. Left until a sync
+        // said so, the sub-task sat on the list as a top-level task.
+        var presenter = NewPresenter(Family(), out var engine);
+
+        presenter.Delete(["parent", "other"]);
+
+        Assert.Empty(engine.Snapshot().Items);
+    }
+
+    [Fact]
+    public async Task A_completed_task_deleted_out_of_the_archive_is_named_in_the_history()
+    {
+        // Named from the model alone, it was "a task", though the row it came from said what it was.
+        var presenter = NewPresenter(Family(), out var engine, Archived());
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        presenter.Delete(["done", "other"]);
+
+        Assert.Contains("Deleted “Done”", presenter.History.Recent().Select(h => h.Said));
+    }
+
+    [Fact]
+    public async Task One_completed_task_deleted_out_of_the_archive_is_named_in_the_history_too()
+    {
+        var presenter = NewPresenter(Family(), out var engine, Archived());
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        presenter.Delete("done");
+
+        Assert.Equal("Deleted “Done”", presenter.History.Recent().Single().Said);
+    }
+
+    [Fact]
+    public async Task Completed_tasks_put_back_out_of_the_archive_are_named_in_the_history()
+    {
+        var presenter = NewPresenter(Family(), out var engine, Archived());
+        await engine.FetchCompletedAsync(TestContext.Current.CancellationToken);
+
+        presenter.Reopen(["done"]);
+
+        Assert.Equal("Reopened “Done”", presenter.History.Recent().Single().Said);
+    }
+
     // ---- A priority ----------------------------------------------------------------------------
 
     [Fact]
@@ -401,6 +447,14 @@ public class SeveralTasksTests
             .ToList();
 
     private static TaskItem Item(SyncEngine engine, string id) => engine.Snapshot().Items.Single(i => i.Id == id);
+
+    /// <summary>A server whose archive holds one completed task, called Done.</summary>
+    private static FakeApi Archived() => new()
+    {
+        Completed = _ => new CompletedPage(
+            [Json.Change("items", "done", """{"id":"done","content":"Done","project_id":"work","checked":true}""")],
+            null),
+    };
 
     /// <summary>
     /// Two projects, and in Work a parent with a sub-task under it and another task beside them.
