@@ -1121,26 +1121,103 @@ public sealed class SyncEngine
     /// command still goes, so it has to leave the fetch too — otherwise the row stays on screen after
     /// the server has removed it, and pressing delete again queues a second command for an id that no
     /// longer exists, which retries to the ceiling and sits in the outbox as a permanent failure.
+    ///
+    /// Its sub-tasks go with it, as the server takes them. Left until a sync said so, they sat on
+    /// the list as top-level tasks with nothing above them, and the fetched completed ones stayed
+    /// on show. Those the model holds go in the command's priors, the way a project's contents go
+    /// in its delete's, so putting it back puts them back too.
     /// </remarks>
     public void DeleteItem(string id)
     {
         lock (_gate)
         {
-            id = Promoted(id);
-
-            var existing = Model.Get(ResourceType.Items, id);
-            var prior = existing?.ToJsonString();
-            ResourceKey[] deletes = existing is not null ? [new ResourceKey(ResourceType.Items, id)] : [];
-
-            var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, [], deletes);
-            Forget(ResourceType.Items, id);
-
-            if (existing is not null)
-            {
-                Model.Remove(ResourceType.Items, id);
-                RecordUndoable(cmd, id, prior);
-            }
+            Delete(id, ChildrenByParent());
         }
+    }
+
+    /// <summary>Deletes a task and its sub-tasks, given who's under whom.</summary>
+    /// <remarks>Call it holding the gate.</remarks>
+    /// <param name="id">The task</param>
+    /// <param name="children">Each task's sub-tasks, from <see cref="ChildrenByParent"/></param>
+    /// <returns>The ids it took off, sub-tasks included</returns>
+    private List<string> Delete(string id, Dictionary<string, List<string>> children)
+    {
+        id = Promoted(id);
+
+        var existing = Model.Get(ResourceType.Items, id);
+        var under = DescendantsOf(id, children);
+        var held = under.Where(u => Model.Get(ResourceType.Items, u) is not null).ToList();
+
+        string? prior;
+        if (existing is null || held.Count == 0)
+        {
+            prior = existing?.ToJsonString();
+        }
+        else
+        {
+            var entries = new JsonArray();
+            foreach (var taken in held.Prepend(id))
+            {
+                entries.Add(new JsonObject { ["type"] = ResourceType.Items, ["resource"] = Model.Get(ResourceType.Items, taken)!.DeepClone() });
+            }
+
+            prior = entries.ToJsonString();
+        }
+
+        var removed = existing is not null ? held.Prepend(id).ToList() : [];
+        var deletes = removed.Select(r => new ResourceKey(ResourceType.Items, r)).ToList();
+
+        var cmd = Persist("item_delete", new JsonObject { ["id"] = id }, null, prior, [], deletes);
+
+        foreach (var gone in under.Prepend(id))
+        {
+            Forget(ResourceType.Items, gone);
+        }
+
+        if (existing is not null)
+        {
+            foreach (var key in deletes)
+            {
+                Model.Remove(key.Type, key.Id);
+            }
+
+            RecordUndoable(cmd, id, prior);
+        }
+
+        return under.Prepend(id).ToList();
+    }
+
+    /// <summary>
+    /// Each task's sub-tasks, among those the model holds and the completed ones fetched, by the
+    /// parent's id.
+    /// </summary>
+    /// <remarks>
+    /// Built once for a batch of deletes rather than for each of them: built for each, deleting
+    /// the whole account read it once per task.
+    /// </remarks>
+    private Dictionary<string, List<string>> ChildrenByParent()
+    {
+        var children = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        void Add(string? parent, string child)
+        {
+            if (parent is null) return;
+
+            if (!children.TryGetValue(parent, out var list)) children[parent] = list = [];
+            list.Add(child);
+        }
+
+        foreach (var item in Model.Items())
+        {
+            Add(item.ParentId, item.Id);
+        }
+
+        foreach (var (id, json) in _completed)
+        {
+            Add(JsonRead.String(json, "parent_id"), id);
+        }
+
+        return children;
     }
 
     /// <summary>
@@ -1172,13 +1249,20 @@ public sealed class SyncEngine
     /// <summary>
     /// Deletes several tasks as one thing done, so a single <see cref="Undo"/> brings them all back.
     /// </summary>
+    /// <remarks>
+    /// One that went with a task deleted before it isn't deleted again. A second delete would only
+    /// be refused, since the server takes it with its parent, and sit in the outbox as a failure.
+    /// </remarks>
     /// <param name="ids">The tasks, in the order to delete them</param>
     public void DeleteItems(IReadOnlyList<string> ids)
         => Together(() =>
         {
+            var children = ChildrenByParent();
+            var gone = new HashSet<string>(StringComparer.Ordinal);
+
             foreach (var id in ids)
             {
-                DeleteItem(id);
+                if (!gone.Contains(Promoted(id))) gone.UnionWith(Delete(id, children));
             }
         });
 
@@ -2283,6 +2367,15 @@ public sealed class SyncEngine
             .GroupBy(i => i.ParentId!)
             .ToDictionary(g => g.Key, g => g.Select(i => i.Id).ToList(), StringComparer.Ordinal);
 
+        return DescendantsOf(id, byParent);
+    }
+
+    /// <summary>Every task filed under this one, however deep, given who's under whom.</summary>
+    /// <param name="id">The task to start from, which isn't itself included</param>
+    /// <param name="byParent">Each task's sub-tasks, by the parent's id</param>
+    /// <returns>The ids under it, nearest first</returns>
+    private static List<string> DescendantsOf(string id, Dictionary<string, List<string>> byParent)
+    {
         var seen = new HashSet<string>(StringComparer.Ordinal) { id };
         var found = new List<string>();
         var level = new List<string> { id };
@@ -3054,16 +3147,49 @@ public sealed class SyncEngine
         if (record.Type == UndoBarrier) return Reversal.Barred;
 
         // Todoist cannot undelete, so the task is recreated from the state we last held.
-        if (record.PriorJson is { } json && TryParse(json) is { } prior)
+        if (record.PriorJson is { } json && TryParseNode(json) is { } node && PriorEntries(node).ToList() is [var first, ..] entries)
         {
+            var prior = first["resource"] as JsonObject ?? first;
             var fields = ItemFields.ForRecreate(prior);
             if (fields["content"] is null) return Reversal.Gone;
 
-            AddItem(fields);
+            var made = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [JsonRead.String(prior, "id") ?? record.Id] = AddItem(fields),
+            };
+
+            Remake(entries.Skip(1).Select(e => e["resource"] as JsonObject).OfType<JsonObject>(), made);
             return Reversal.Undone;
         }
 
         return Reversal.Gone;
+    }
+
+    /// <summary>
+    /// Makes again the sub-tasks a delete the server has took with their parent, each under the
+    /// copy of the task it was under.
+    /// </summary>
+    /// <remarks>
+    /// Nearest first, as the delete recorded them, so each one's parent has been made before it.
+    /// A completed one isn't made again, nor anything under it: it would come back to do, the way
+    /// the parent itself comes back however it stood, and it was done.
+    /// </remarks>
+    /// <param name="taken">What each sub-task held when it was deleted</param>
+    /// <param name="made">The new id of each task made again so far, by its old one</param>
+    private void Remake(IEnumerable<JsonObject> taken, Dictionary<string, string> made)
+    {
+        foreach (var sub in taken)
+        {
+            if (JsonRead.Bool(sub, "checked")) continue;
+            if (JsonRead.String(sub, "id") is not { } id) continue;
+            if (JsonRead.String(sub, "parent_id") is not { } parent || !made.TryGetValue(parent, out var copy)) continue;
+
+            var fields = ItemFields.ForRecreate(sub);
+            if (fields["content"] is null) continue;
+
+            fields["parent_id"] = copy;
+            made[id] = AddItem(fields);
+        }
     }
 
     /// <summary>
