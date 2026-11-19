@@ -1335,8 +1335,9 @@ internal sealed class OutlineView : ListView
     internal void ForgetDrawCounts() => (DrawnInPaint, AskedOutsidePaint) = (0, 0);
 
     /// <summary>
-    /// Notes which side of a paint the drawing is on, and swallows the background erase and the
-    /// request for a menu where there is no task to put one on.
+    /// Notes which side of a paint the drawing is on, keeps the list's size current through a
+    /// resize, and swallows the background erase and the request for a menu where there is no task
+    /// to put one on.
     /// </summary>
     /// <remarks>
     /// The control repaints a row as the pointer crosses it, and erasing first leaves it blank for a
@@ -1355,6 +1356,17 @@ internal sealed class OutlineView : ListView
         const int WmLeftDouble = 0x0203;
         const int WmRightDown = 0x0204;
         const int WmKeyDown = 0x0100;
+        const int WmWindowPosChanged = 0x0047;
+
+        // WinForms leaves any row outside the size it has stored for the list to the control's plain
+        // drawing — no box, no dots, the system's highlight — and only stores the new size after
+        // Windows has handled the resize. Windows can paint during that handling: a list that grows
+        // past its last row scrolls back up, and with smooth scrolling on that scroll paints as it
+        // goes, so the rows the resize uncovered came out plain and stayed that way. The window
+        // already has its new size by now, so this only learns it a step sooner, and WinForms' own
+        // update afterwards finds nothing changed.
+        if (m.Msg == WmWindowPosChanged)
+            UpdateBounds();
 
         if (m.Msg == WmPaint)
         {
