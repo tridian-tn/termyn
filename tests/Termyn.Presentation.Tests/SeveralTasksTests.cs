@@ -271,7 +271,58 @@ public class SeveralTasksTests
         Assert.Empty(presenter.History.Recent());
     }
 
+    [Fact]
+    public void A_priority_given_to_several_is_saved_in_one_commit()
+    {
+        // Each commit waits on the disk, so one for each task made a long run of them slow.
+        var store = new FillingStore(Family());
+        var presenter = NewPresenter(store, out _);
+
+        presenter.SetPriority(["parent", "child", "other"], Priority.P1);
+
+        Assert.Equal(1, store.Commits);
+    }
+
+    [Fact]
+    public void A_priority_the_store_gives_out_on_partway_changes_nothing_and_notes_nothing()
+    {
+        // Noted as each was written, the history said the first had been changed when the store
+        // had taken it back with the rest.
+        var store = new FillingStore(Family()) { WritesLeft = 1 };
+        var presenter = NewPresenter(store, out var engine);
+
+        Assert.Throws<IOException>(() => presenter.SetPriority(["parent", "other"], Priority.P1));
+
+        Assert.Equal(Priority.P4, Item(engine, "parent").Priority);
+        Assert.Empty(presenter.History.Recent());
+    }
+
     // ---- Moving --------------------------------------------------------------------------------
+
+    [Fact]
+    public void Several_moved_together_are_saved_in_one_commit()
+    {
+        var store = new FillingStore(Family());
+        var presenter = NewPresenter(store, out _);
+        var home = presenter.DestinationsFor(["parent", "other"]).Single(d => d.Path == "Home");
+
+        Assert.Equal(2, presenter.MoveTo(["parent", "other"], home));
+
+        Assert.Equal(1, store.Commits);
+    }
+
+    [Fact]
+    public void A_move_the_store_gives_out_on_partway_changes_nothing_and_notes_nothing()
+    {
+        var store = new FillingStore(Family()) { WritesLeft = 1 };
+        var presenter = NewPresenter(store, out var engine);
+        var home = presenter.DestinationsFor(["parent", "other"]).Single(d => d.Path == "Home");
+
+        Assert.Throws<IOException>(() => presenter.MoveTo(["parent", "other"], home));
+
+        Assert.Equal("work", Item(engine, "parent").ProjectId);
+        Assert.Empty(presenter.History.Recent());
+    }
 
     [Fact]
     public void Moving_several_sends_each_and_leaves_a_sub_task_under_its_parent()
@@ -388,7 +439,7 @@ public class SeveralTasksTests
         store.PutResource("items", id, item.ToJsonString());
     }
 
-    private static MainPresenter NewPresenter(InMemorySnapshotStore store, out SyncEngine engine, FakeApi? api = null)
+    private static MainPresenter NewPresenter(ISnapshotStore store, out SyncEngine engine, FakeApi? api = null)
     {
         engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();

@@ -91,6 +91,37 @@ public class SyncEngineQueuedTests
     }
 
     [Fact]
+    public void Tasks_deleted_together_say_so_once()
+    {
+        // Said for each write, a thousand tasks deleted together woke the loop a thousand times,
+        // for a sync that couldn't start until the batch was done.
+        var (engine, told) = Listening();
+        var ids = Enumerable.Range(0, 3).Select(i => engine.AddItem(new JsonObject { ["content"] = $"Task {i}" })).ToList();
+        var before = told();
+
+        engine.DeleteItems(ids);
+
+        Assert.Equal(before + 1, told());
+    }
+
+    [Fact]
+    public void A_batch_the_store_gives_out_on_says_nothing()
+    {
+        // Its writes are taken back, so there's nothing new for the loop to send.
+        var store = new FillingStore(new InMemorySnapshotStore());
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var ids = Enumerable.Range(0, 3).Select(i => engine.AddItem(new JsonObject { ["content"] = $"Task {i}" })).ToList();
+        var told = 0;
+        engine.Queued += () => told++;
+        store.WritesLeft = 2;
+
+        Assert.Throws<IOException>(() => engine.DeleteItems(ids));
+
+        Assert.Equal(0, told);
+    }
+
+    [Fact]
     public void Reading_says_nothing()
     {
         // It is a write that the loop has to be woken for. Waking it for a look at the model would

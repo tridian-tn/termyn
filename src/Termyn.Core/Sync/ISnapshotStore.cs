@@ -55,6 +55,24 @@ public interface ISnapshotStore : IDisposable
     void UpdateCommand(OutboxCommand command);
     void DeleteCommands(IReadOnlyList<string> uuids);
 
+    /// <summary>
+    /// Holds every write from here on for one transaction, so many of them cost one commit and
+    /// land together or not at all.
+    /// </summary>
+    /// <remarks>
+    /// Disposed without <see cref="IStoreBatch.Commit"/>, everything written since is thrown away.
+    /// One at a time: a batch isn't opened inside another, and nothing is read while one is open.
+    /// </remarks>
+    /// <returns>The batch, to commit and then dispose</returns>
+    IStoreBatch BeginBatch();
+
     /// <summary>Erases all cached data: resources, outbox, withheld deletions and the sync token.</summary>
     void Purge();
+}
+
+/// <summary>Writes held for one transaction, from <see cref="ISnapshotStore.BeginBatch"/>.</summary>
+public interface IStoreBatch : IDisposable
+{
+    /// <summary>Makes every write since the batch began durable, all together.</summary>
+    void Commit();
 }

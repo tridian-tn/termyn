@@ -2277,20 +2277,28 @@ public sealed class MainPresenter
             .ToList();
 
         var named = Names(snapshot, changing);
-        var wrote = false;
+        var written = new List<string>();
 
-        foreach (var id in changing)
+        // Together, so the store commits them once. Only the writes go inside: the gate is held
+        // there, and the history is noted outside it.
+        _engine.Together(() =>
         {
-            // Declined for one a sync has taken away since the snapshot.
-            if (!_engine.UpdateItem(id, PriorityChange(priority))) continue;
+            foreach (var id in changing)
+            {
+                // Declined for one a sync has taken away since the snapshot.
+                if (_engine.UpdateItem(id, PriorityChange(priority))) written.Add(id);
+            }
+        });
 
+        foreach (var id in written)
+        {
             NotePriority(id, named[id], priority);
-            wrote = true;
         }
 
-        if (wrote) Publish();
+        if (written.Count == 0) return false;
 
-        return wrote;
+        Publish();
+        return true;
     }
 
     /// <summary>
@@ -2336,19 +2344,25 @@ public sealed class MainPresenter
     {
         var outermost = _engine.OutermostOf(ids);
         var named = Names(_engine.Snapshot(), outermost);
-        var moved = 0;
+        var moved = new List<string>();
 
-        foreach (var id in outermost)
+        // Together, for the reason a priority given to several is.
+        _engine.Together(() =>
         {
-            if (!Send(id, destination)) continue;
+            foreach (var id in outermost)
+            {
+                if (Send(id, destination)) moved.Add(id);
+            }
+        });
 
-            moved++;
+        foreach (var id in moved)
+        {
             NoteMoved(id, named[id], destination);
         }
 
-        if (moved > 0) Publish();
+        if (moved.Count > 0) Publish();
 
-        return moved;
+        return moved.Count;
     }
 
     /// <summary>
