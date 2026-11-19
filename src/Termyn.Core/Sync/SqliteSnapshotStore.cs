@@ -172,7 +172,12 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, no_verdict INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL, last_error TEXT);
             CREATE TABLE IF NOT EXISTS deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
+            CREATE INDEX IF NOT EXISTS outbox_by_uuid ON outbox (uuid);
             """, tx);
+
+        // The index is made here rather than in a step, since it's made the same way for a file of
+        // any age and an older build reads past it. Without it, each command taken off the queue
+        // by uuid read the whole queue, and undoing a batch of a thousand read it a thousand times.
 
         // Unversioned files from before the outbox counted rounds without a verdict.
         if (version < 1 && !HasColumn(conn, tx, "outbox", "no_verdict"))

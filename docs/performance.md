@@ -104,8 +104,9 @@ Later, with several tasks selected at once:
 **Writes made together are one transaction.** Deleting, ticking off or moving several tasks, and
 the Ctrl+Z that takes such a batch back, each committed once per task, and every commit waits on
 the disk. A thousand tasks deleted together took **718 ms**, and undoing it **1,411 ms**; in one
-transaction they take **42 ms** and **74 ms** (Debug, the SQLite cache, the five-thousand-task
-reference account).
+transaction they take **28–31 ms** and **27–30 ms** (Debug, the SQLite cache, the five-thousand-task
+reference account). The undo was 53–74 ms until the queue was indexed by uuid: each command taken
+off it was found by reading the whole queue.
 
 ## Metrics not measured numerically
 
