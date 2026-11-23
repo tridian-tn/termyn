@@ -109,6 +109,24 @@ public class TaskCommandsTests
         => Assert.Equal("As it stands", TaskCommands.Label(AppCommand.QuickAdd, new CommandState("As it stands", true), null));
 
     [AppKitFact]
+    public void Group_by_section_is_lit_in_a_project_with_sections_and_ticked_for_the_setting()
+    {
+        var presenter = FakeAccount.Presenter(prepare: store =>
+            store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p1","section_order":1}"""));
+        var commands = FakeAccount.Commands(presenter);
+
+        // All isn't one project, so there's nothing there to group.
+        Assert.False(commands.State(AppCommand.GroupBySection, null).Enabled);
+
+        presenter.Select(ViewSelection.OfProject("p1"));
+        Assert.True(commands.State(AppCommand.GroupBySection, null).Enabled);
+        Assert.False(commands.State(AppCommand.GroupBySection, null).Checked);
+
+        presenter.SetGroupBySection(true);
+        Assert.True(commands.State(AppCommand.GroupBySection, null).Checked);
+    }
+
+    [AppKitFact]
     public void Every_command_on_offer_has_a_name()
         => Assert.All(TaskCommands.Offered, command => Assert.False(string.IsNullOrWhiteSpace(Label(command)), command.ToString()));
 

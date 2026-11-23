@@ -478,5 +478,7 @@ internal sealed class TaskCommands(MainPresenter presenter, ILog log, Action<str
         Sort: presenter.Sort,
         NewTaskText: presenter.NewTaskText(presenter.Selection),
         ReconnectNeeded: presenter.ReconnectNeeded,
-        Schedule: presenter.ScheduleDays);
+        Schedule: presenter.ScheduleDays,
+        GroupingBySection: presenter.GroupBySection,
+        CanGroupBySection: presenter.CanGroupBySection);
 }

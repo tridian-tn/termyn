@@ -85,6 +85,7 @@ internal static class MainMenu
             NSMenuItem.SeparatorItem,
             new NSMenuItem(Strings.MenuSortBy) { Submenu = ViewMenus.SortByMenu(Strings.MenuSortBy) },
             new NSMenuItem(Strings.MenuColumns) { Submenu = ViewMenus.ColumnsMenu(Strings.MenuColumns) },
+            Item(Strings.MenuGroupBySection, ViewMenus.GroupBySection),
             NSMenuItem.SeparatorItem,
             Item(Strings.MenuExpandAll, ViewMenus.ExpandAll),
             Item(Strings.MenuCollapseAll, ViewMenus.CollapseAll),

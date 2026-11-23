@@ -99,6 +99,7 @@ public sealed class AppDelegate : NSApplicationDelegate
                 {
                     SelectedKey = _presenter.SelectedKey,
                     CollapsedTasks = _presenter.CollapsedTasks,
+                    GroupBySection = _presenter.GroupBySection,
                 },
             });
         }
@@ -126,6 +127,7 @@ public sealed class AppDelegate : NSApplicationDelegate
         // The status line names the undo key, so it's told how a Mac writes one.
         _presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()), log: _log, shortcutText: MacShortcuts.Text);
         _presenter.RestoreCollapsed(_settings.View.CollapsedTasks);
+        _presenter.SetGroupBySection(_settings.View.GroupBySection);
 
         _scheduler = new SyncScheduler(_presenter.SyncAsync, _settings.Cadence);
 

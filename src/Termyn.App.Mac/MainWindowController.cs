@@ -236,6 +236,13 @@ internal sealed class MainWindowController : NSWindowController
     [Export(ViewMenus.ShowAllColumns)]
     private void ShowAllColumns(NSObject sender) => _tasks.ShowAllColumns();
 
+    /// <summary>Turns grouping by section on or off, where the open view is a project with sections.</summary>
+    [Export(ViewMenus.GroupBySection)]
+    private void ToggleGroupBySection(NSObject sender)
+    {
+        if (_presenter.CanGroupBySection) _presenter.SetGroupBySection(!_presenter.GroupBySection);
+    }
+
     [Export(ViewMenus.ExpandAll)]
     private void ExpandAll(NSObject sender) => _tasks.FoldAll(collapsed: false);
 
@@ -286,6 +293,13 @@ internal sealed class MainWindowController : NSWindowController
 
             case ViewMenus.ShowAllColumns:
                 return table && !_tasks.AllShown;
+
+            // Ticked for the setting, which holds for every project, and greyed where the open view
+            // isn't a project with sections, as on Windows.
+            case ViewMenus.GroupBySection:
+                var grouping = _commands.State(AppCommand.GroupBySection, null);
+                item.State = grouping.Checked ? NSCellStateValue.On : NSCellStateValue.Off;
+                return grouping.Enabled;
 
             case ViewMenus.ExpandAll:
                 return _commands.State(AppCommand.ExpandAll, null).Enabled;
