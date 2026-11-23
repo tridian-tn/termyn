@@ -130,6 +130,12 @@ internal sealed class MainForm : Form
     /// <summary>The same description, rendered.</summary>
     private readonly MarkdownView _rendered;
 
+    /// <summary>The ring round the two, lit while typing would change the description.</summary>
+    private readonly FocusFrame _descriptionFrame;
+
+    /// <summary>The strip above the two, saying which is showing and offering the other.</summary>
+    private readonly DescriptionBar _descriptionBar;
+
     /// <summary>The conversation on whatever the pane is pointed at.</summary>
     private readonly CommentsView _comments;
 
@@ -462,6 +468,13 @@ internal sealed class MainForm : Form
         _rendered.EditRequested += StartWriting;
         _rendered.ZoomWheeled += OnDescriptionWheeled;
 
+        _descriptionFrame = new FocusFrame();
+        _descriptionFrame.Controls.Add(_description);
+        _descriptionFrame.Controls.Add(_rendered);
+
+        _descriptionBar = new DescriptionBar();
+        _descriptionBar.Fill(AppCommand.EditDescription, Run);
+
         // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
         // worse, nowhere to type one.
@@ -499,9 +512,12 @@ internal sealed class MainForm : Form
         // The description keeps its own pair inside its tab — the markdown and the rendering, one
         // visible at a time — because that is a mode rather than a place, and reading and writing
         // the same text are not two tabs' worth of different.
+        //
+        // The frame first and the strip after, so the strip takes the top: a docked control added
+        // later sits nearer the edge.
         _descriptionTab = new TabPage(Strings.MainDescriptionTab);
-        _descriptionTab.Controls.Add(_description);
-        _descriptionTab.Controls.Add(_rendered);
+        _descriptionTab.Controls.Add(_descriptionFrame);
+        _descriptionTab.Controls.Add(_descriptionBar);
 
         _commentsTab = new TabPage(Strings.MainCommentsTab);
         _commentsTab.Controls.Add(_comments);
@@ -1253,6 +1269,8 @@ internal sealed class MainForm : Form
         _outline.Theme = _theme;
         _rendered.Theme = _theme;
         _description.Theme = _theme;
+        _descriptionFrame.Theme = _theme;
+        _descriptionBar.Theme = _theme;
         _comments.Theme = _theme;
         _panelHeader.Theme = _theme;
 
@@ -1378,6 +1396,8 @@ internal sealed class MainForm : Form
     {
         _viewHeader.ScaleTo(dpi);
         _panelHeader.Height = StartupLayout.Scaled(DetailHeader.LogicalHeight, dpi);
+        _descriptionBar.ScaleTo(dpi);
+        _descriptionFrame.ScaleTo(dpi);
         _status.Height = StartupLayout.Scaled(StatusHeight, dpi);
     }
 
@@ -2457,6 +2477,7 @@ internal sealed class MainForm : Form
     {
         _description.ReadOnly = access is not DescriptionAccess.Writable;
         _rendered.Inert = _description.ReadOnly;
+        RenderDescriptionMode();
 
         // A completed task's description is shown and can't be edited, and there is no room to say so
         // over the top of them — the recessed background carries that one on its own.
@@ -2483,6 +2504,7 @@ internal sealed class MainForm : Form
         // that tab was selected is how the comments pane itself came to be invisible.
         _description.Visible = writing;
         _rendered.Visible = !writing;
+        RenderDescriptionMode();
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
@@ -2496,6 +2518,31 @@ internal sealed class MainForm : Form
 
         if (focus && !_detail.Panel2Collapsed && !_showingComments)
             (writing ? (Control)_description : _rendered).Focus();
+    }
+
+    /// <summary>
+    /// Puts the pencil above the description and the ring round it in step with what the panel is
+    /// showing and whether the account would take typing.
+    /// </summary>
+    /// <remarks>
+    /// The ring only round the markdown. The rendering takes Enter and F2 to open it, but typing
+    /// at it changes nothing, so a ring there would promise something that doesn't happen.
+    /// </remarks>
+    private void RenderDescriptionMode()
+    {
+        var writable = !_description.ReadOnly;
+        _descriptionFrame.TakesTyping = _writingDescription && writable;
+
+        // Only what the entry's state is read from, rather than the whole of NewContext: this runs
+        // on every switch between reading and writing, and in the constructor before there's a
+        // selection to ask about.
+        var context = new CommandContext(
+            ShowingDescription: !_detail.Panel2Collapsed,
+            WritingDescription: _writingDescription,
+            ShowingComments: _showingComments,
+            CanWriteDescription: writable);
+
+        _descriptionBar.Render(Presentation.Commands.StateOf(AppCommand.EditDescription, context));
     }
 
     // ---- Comments ----------------------------------------------------------------------------------
@@ -2977,6 +3024,42 @@ internal sealed class MainForm : Form
         _description.ScrollToCaret();
     }
 
+    /// <summary>
+    /// Edit description, from the View menu, Ctrl+E or the pencil above the description.
+    /// </summary>
+    /// <remarks>
+    /// With the markdown in front, back to the rendering. From anywhere else — the rendering, the
+    /// outline, the comments tab or a shut panel — on to the description and into the markdown,
+    /// with the keyboard, since asking to edit is asking to type.
+    ///
+    /// Going back takes the keyboard to the rendering only if the description had it. An empty
+    /// description opens in the markdown without the focus, and looking at it formatted shouldn't
+    /// pull the keyboard off the outline.
+    /// </remarks>
+    private void ToggleWriting()
+    {
+        if (_writingDescription && !_detail.Panel2Collapsed && !_showingComments)
+        {
+            var hadFocus = _descriptionFrame.ContainsFocus;
+            StopWriting();
+
+            if (hadFocus)
+                _rendered.Focus();
+
+            return;
+        }
+
+        if (_description.ReadOnly)
+            return;
+
+        ShowPanelTab(comments: false);
+
+        if (_writingDescription)
+            _description.Focus();
+        else
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+    }
+
     /// <summary>Writes what was typed and goes back to reading.</summary>
     private void StopWriting()
     {
@@ -3280,7 +3363,8 @@ internal sealed class MainForm : Form
             _presenter.ScheduleDays,
             rows.Count > 1 ? rows : null,
             _presenter.GroupBySection,
-            _presenter.CanGroupBySection);
+            _presenter.CanGroupBySection,
+            !_description.ReadOnly);
     }
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
@@ -3650,6 +3734,10 @@ internal sealed class MainForm : Form
 
             case AppCommand.ViewComments:
                 Guarded(() => ShowPanelTab(comments: true));
+                return false;
+
+            case AppCommand.EditDescription:
+                Guarded(ToggleWriting);
                 return false;
 
             case AppCommand.ZoomIn:

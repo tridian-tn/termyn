@@ -207,6 +207,22 @@ public class CommandsTests
     }
 
     [Fact]
+    public void Editing_the_description_is_offered_where_typing_would_be_kept_and_ticked_while_it_is_happening()
+    {
+        // Lit from a shut panel or the comments as well, since from there it opens the description.
+        // Ticked only with the markdown actually in front: writing left behind the comments tab or
+        // a shut panel isn't anything the user can see.
+        Assert.False(State(AppCommand.EditDescription).Enabled);
+        Assert.True(State(AppCommand.EditDescription, new CommandContext(CanWriteDescription: true)).Enabled);
+
+        var writing = new CommandContext(ShowingDescription: true, WritingDescription: true, CanWriteDescription: true);
+        Assert.True(State(AppCommand.EditDescription, writing).Checked);
+        Assert.False(State(AppCommand.EditDescription, writing with { ShowingComments = true }).Checked);
+        Assert.False(State(AppCommand.EditDescription, writing with { ShowingDescription = false }).Checked);
+        Assert.False(State(AppCommand.EditDescription, writing with { WritingDescription = false }).Checked);
+    }
+
+    [Fact]
     public void No_command_in_the_catalogue_renames_itself_for_its_own_state()
     {
         // The rule this keeps: a label may change with what is selected — "Rename project" against

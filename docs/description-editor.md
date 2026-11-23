@@ -173,6 +173,15 @@ back and saves. A single click still selects and still follows a link. A task wi
 ready to write. `F4` opens and closes the panel; `F6` and `F7` pick which of its two tabs is in front.
 `showPreview` and `previewWidth` retire.
 
+Later additions: **Edit description** in the View menu, on `Ctrl+E`, switches between the two both
+ways, and from the outline or the comments opens the description for writing. A pencil at the left of
+a strip above the description runs the same command and stays pressed while the markdown is showing.
+The markdown has an accent ring round it while it has the keyboard, so it's clear a key pressed now
+would change the description.
+
+Typing at the rendering to open the markdown with the character already in was tried and taken out:
+where the caret lands in the markdown, between markers especially, wasn't reliable enough.
+
 The case turns on how much of the highlighting the control can be left to do. Configured, Lexilla
 does most of it — but not checklists, not bare URLs, and not a list or quotation opening a
 description, which between them cover a lot of what people actually write. Fixing those means

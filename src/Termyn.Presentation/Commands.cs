@@ -61,6 +61,7 @@ public enum AppCommand
     ToggleDescription,
     ViewDescription,
     ViewComments,
+    EditDescription,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -176,6 +177,7 @@ public sealed record ScheduleDays(DateOnly Today, DateOnly? Weekend, DateOnly? N
 /// </param>
 /// <param name="GroupingBySection">Whether a project with sections is shown under a heading for each one</param>
 /// <param name="CanGroupBySection">Whether the open view is a project with sections, which that setting changes</param>
+/// <param name="CanWriteDescription">Whether the panel's description is one the account would take typing into</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -195,7 +197,8 @@ public sealed record CommandContext(
     ScheduleDays? Schedule = null,
     IReadOnlyList<TaskRow>? Tasks = null,
     bool GroupingBySection = false,
-    bool CanGroupBySection = false)
+    bool CanGroupBySection = false,
+    bool CanWriteDescription = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -479,6 +482,14 @@ public static class Commands
             AppCommand.ViewComments => new CommandState(
                 Strings.CommandViewComments,
                 !context.ShowingDescription || !context.ShowingComments),
+
+            // Ticked while the markdown is in front, and run again it goes back to the rendering.
+            // From anywhere else — the outline, the comments, a shut panel — it opens the panel on
+            // the description and starts writing. Greyed where nothing typed would be kept.
+            AppCommand.EditDescription => new CommandState(
+                Strings.CommandEditDescription,
+                context.CanWriteDescription,
+                context.ShowingDescription && !context.ShowingComments && context.WritingDescription),
 
             // The description panel already zooms to the wheel; these are the same thing said out
             // loud, for anybody who doesn't know the wheel does it. Offered on the same terms as
