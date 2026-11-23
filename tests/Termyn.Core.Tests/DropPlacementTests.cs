@@ -146,6 +146,69 @@ public class DropPlacementTests
         Assert.Equal(["a", "x", "c"], Order(engine));
     }
 
+    // ---- Grouped by section ----------------------------------------------------------------------
+
+    [Fact]
+    public void In_a_flat_list_a_task_put_beside_one_from_another_section_keeps_its_own()
+    {
+        // The flat project list sets every task out in one order, sections or not, so the drop is
+        // a reorder and nothing more.
+        var engine = TwoSections();
+
+        Assert.True(Placed(engine, "a", "x", after: true));
+
+        Assert.Equal("s1", Task(engine, "a").SectionId);
+        Assert.Equal("item_reorder", engine.Outbox.Single().Type);
+        Assert.Equal(["b", "x", "a", "y"], Order(engine));
+    }
+
+    [Fact]
+    public void Grouped_by_section_a_task_put_beside_one_from_another_section_joins_it()
+    {
+        var engine = TwoSections();
+
+        Assert.True(Placed(engine, "a", "x", after: true, bySection: true));
+
+        Assert.Equal("s2", Task(engine, "a").SectionId);
+        Assert.Equal(["item_move", "item_reorder"], engine.Outbox.Select(c => c.Type));
+        Assert.Equal("s2", Args(engine.Outbox[0])["section_id"]!.ToString());
+        Assert.Equal(["b", "x", "a", "y"], Order(engine));
+    }
+
+    [Fact]
+    public void Grouped_by_section_a_task_put_beside_one_in_no_section_leaves_its_section()
+    {
+        var store = TwoSectionsStore();
+        store.PutResource("items", "n", """{"id":"n","content":"Loose","project_id":"p","child_order":0}""");
+        var engine = NewEngine(store);
+
+        Assert.True(Placed(engine, "x", "n", after: true, bySection: true));
+
+        Assert.Null(Task(engine, "x").SectionId);
+        Assert.Equal("p", Args(engine.Outbox[0])["project_id"]!.ToString());
+        Assert.Equal(["n", "x", "a", "b", "y"], Order(engine));
+    }
+
+    [Fact]
+    public void Grouped_by_section_a_task_moved_within_its_section_is_only_reordered()
+    {
+        var engine = TwoSections();
+
+        Assert.True(Placed(engine, "b", "a", after: false, bySection: true));
+
+        Assert.Equal("s1", Task(engine, "b").SectionId);
+        Assert.Equal("item_reorder", engine.Outbox.Single().Type);
+    }
+
+    [Fact]
+    public void Grouped_by_section_a_drop_where_a_task_already_is_sends_nothing()
+    {
+        var engine = TwoSections();
+
+        Assert.False(Placed(engine, "b", "a", after: true, bySection: true));
+        Assert.Equal(0, engine.PendingCount);
+    }
+
     [Fact]
     public void A_task_put_down_beside_one_in_another_project_moves_there_with_its_sub_tasks()
     {
@@ -336,10 +399,10 @@ public class DropPlacementTests
 
     /// <summary>Puts a task down beside another, having asked first whether it could be.</summary>
     /// <returns>Whether it was put down</returns>
-    private static bool Placed(SyncEngine engine, string id, string besideId, bool after)
+    private static bool Placed(SyncEngine engine, string id, string besideId, bool after, bool bySection = false)
     {
-        var offered = engine.CanPlaceItem(id, besideId, after);
-        var placed = engine.PlaceItem(id, besideId, after);
+        var offered = engine.CanPlaceItem(id, besideId, after, bySection);
+        var placed = engine.PlaceItem(id, besideId, after, bySection);
 
         Assert.Equal(offered, placed);
         return placed;
@@ -373,6 +436,21 @@ public class DropPlacementTests
         store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","child_order":2}""");
         store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","child_order":3}""");
         return NewEngine(store);
+    }
+
+    /// <summary>"a" and "b" in section "s1", then "x" and "y" in "s2", all in project "p".</summary>
+    private static SyncEngine TwoSections() => NewEngine(TwoSectionsStore());
+
+    private static InMemorySnapshotStore TwoSectionsStore()
+    {
+        var store = Projects();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p","section_order":1}""");
+        store.PutResource("sections", "s2", """{"id":"s2","name":"Errands","project_id":"p","section_order":2}""");
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","section_id":"s1","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","child_order":2}""");
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","section_id":"s2","child_order":3}""");
+        store.PutResource("items", "y", """{"id":"y","content":"Y","project_id":"p","section_id":"s2","child_order":4}""");
+        return store;
     }
 
     /// <summary>"a" with "c" under it, and "b" alongside "a".</summary>

@@ -281,6 +281,32 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Grouping_by_section_comes_back_after_a_restart()
+    {
+        var store = new SettingsStore(Config);
+        store.Save(new AppSettings { View = new ViewState { GroupBySection = true } });
+
+        Assert.Contains("\"groupBySection\": true", File.ReadAllText(Config), StringComparison.Ordinal);
+        Assert.True(new SettingsStore(Config).Load().View.GroupBySection);
+    }
+
+    [Fact]
+    public void Grouping_by_section_starts_off_and_counts_towards_a_changed_view()
+    {
+        // Off, so a project looks as it always has until somebody asks otherwise.
+        Assert.False(new ViewState().GroupBySection);
+        Assert.NotEqual(new ViewState(), new ViewState { GroupBySection = true });
+        Assert.NotEqual(new ViewState().GetHashCode(), new ViewState { GroupBySection = true }.GetHashCode());
+    }
+
+    [Fact]
+    public void Signing_out_keeps_grouping_by_section()
+    {
+        // How somebody likes a list laid out isn't the account's, so the next one gets it too.
+        Assert.True(new ViewState { GroupBySection = true }.WithoutAccount().GroupBySection);
+    }
+
+    [Fact]
     public void The_description_panel_starts_closed()
     {
         // One more thing on screen for someone who doesn't use descriptions, so it is asked for

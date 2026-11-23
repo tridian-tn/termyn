@@ -271,6 +271,10 @@
     <value>Completed tasks</value>
     <comment>Ticked in the menu while completed tasks are shown in the list. Names the thing, not the action: it never changes to say show or hide.</comment>
   </data>
+  <data name="CommandGroupBySection" xml:space="preserve">
+    <value>Group by section</value>
+    <comment>Ticked in the menu while a project's tasks are shown under a heading for each of its sections. Names the setting, not the action.</comment>
+  </data>
   <data name="CommandExpandAll" xml:space="preserve">
     <value>Expand all</value>
     <comment>Opens every task in the list to show its sub-tasks.</comment>

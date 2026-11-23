@@ -65,15 +65,21 @@ public sealed record TaskRow(
     DateOnly? DeadlineOn = null,
 
     /// <summary>
-    /// Whether this row is a day's heading rather than a task.
+    /// Whether this row is a heading rather than a task: a day's in Upcoming, or a section's in a
+    /// project grouped by section.
     /// </summary>
     /// <remarks>
-    /// Upcoming is grouped by day, and a virtualised list can't use the control's own grouping —
-    /// so a heading is a row like any other, and everything that acts on a task has to know the
-    /// difference. It carries the day's name in <c>Content</c> and nothing else.
+    /// A virtualised list can't use the control's own grouping, so a heading is a row like any
+    /// other, and everything that acts on a task has to know the difference. It carries the day's
+    /// or the section's name in <c>Content</c>, and a section's id in <c>SectionId</c>.
     /// </remarks>
     bool IsHeading = false,
-    bool Advancing = false);
+    bool Advancing = false,
+
+    /// <summary>
+    /// The section the task is in, or the one a section's heading heads, or null for neither.
+    /// </summary>
+    string? SectionId = null);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -2456,10 +2462,10 @@ public sealed class MainPresenter
         => id is null
             ? TaskAbilities.None
             : new TaskAbilities(
-                _engine.CanIndentItem(id),
+                _engine.CanIndentItem(id, OneSectionAtATime),
                 _engine.CanOutdentItem(id),
-                _engine.CanMoveItem(id, -1),
-                _engine.CanMoveItem(id, 1),
+                _engine.CanMoveItem(id, -1, OneSectionAtATime),
+                _engine.CanMoveItem(id, 1, OneSectionAtATime),
                 _engine.Holds(id),
                 TodoistLinkFor(id) is not null,
                 _engine.CanNestUnder(id));
@@ -2483,7 +2489,7 @@ public sealed class MainPresenter
     public bool Move(string id, int offset)
     {
         var named = Named(id);
-        var moved = _engine.MoveItem(id, offset);
+        var moved = _engine.MoveItem(id, offset, OneSectionAtATime);
 
         if (moved)
         {
@@ -2503,7 +2509,7 @@ public sealed class MainPresenter
     public bool Indent(string id)
     {
         var named = Named(id);
-        var indented = _engine.IndentItem(id);
+        var indented = _engine.IndentItem(id, OneSectionAtATime);
 
         if (indented)
         {
@@ -2527,7 +2533,19 @@ public sealed class MainPresenter
     /// </summary>
     /// <param name="id">The task that wouldn't indent</param>
     /// <returns>True when there was somewhere to go and it was too deep to go there</returns>
-    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id);
+    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id, OneSectionAtATime);
+
+    /// <summary>
+    /// Whether the outline shows a section at a time: grouped under its headings, or one section
+    /// open on its own.
+    /// </summary>
+    /// <remarks>
+    /// Moving and indenting a task go by the project's order, which runs through every section, so
+    /// the task above one in that order can be in another section. Shown a section at a time, that
+    /// task isn't beside it on screen, and a nudge past it would look like nothing happened, or an
+    /// indent under it would carry the task off into the other section.
+    /// </remarks>
+    private bool OneSectionAtATime => GroupingBySection || Selection.SectionId is not null;
 
     /// <summary>Promotes a sub-task alongside its parent.</summary>
     public bool Outdent(string id)
@@ -2631,9 +2649,13 @@ public sealed class MainPresenter
     {
         id = _engine.Resolve(id);
 
-        return CanDrag && OutlineDrop.Moves(Rows, id, target) && (target.Zone == DropZone.Onto
+        if (!CanDrag || !OutlineDrop.Moves(Rows, id, target)) return false;
+
+        if (SectionHeadedBy(target) is { } section) return IntoSection(id, section, act: false);
+
+        return target.Zone == DropZone.Onto
             ? _engine.CanNestItem(id, target.Id)
-            : _engine.CanPlaceItem(id, target.Id, after: target.Zone == DropZone.After));
+            : _engine.CanPlaceItem(id, target.Id, after: target.Zone == DropZone.After, bySection: GroupingBySection);
     }
 
     /// <summary>
@@ -2655,10 +2677,20 @@ public sealed class MainPresenter
             return false;
 
         var named = Named(id);
+
+        if (SectionHeadedBy(target) is { } section)
+        {
+            if (!IntoSection(id, section, act: true)) return false;
+
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMoved, named), $"drop:{Guid.NewGuid():N}");
+            Publish();
+            return true;
+        }
+
         var onto = target.Zone == DropZone.Onto;
         var dropped = onto
             ? _engine.NestItem(id, target.Id)
-            : _engine.PlaceItem(id, target.Id, after: target.Zone == DropZone.After);
+            : _engine.PlaceItem(id, target.Id, after: target.Zone == DropZone.After, bySection: GroupingBySection);
 
         if (!dropped)
             return false;
@@ -2674,6 +2706,44 @@ public sealed class MainPresenter
         History.Note(onto ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedUnder, named, Named(target.Id)) : string.Format(CultureInfo.CurrentCulture, Strings.HistoryMoved, named), $"drop:{Guid.NewGuid():N}");
         Publish();
         return true;
+    }
+
+    /// <summary>The section whose heading a drop is over, or null when it's over a task.</summary>
+    /// <param name="target">The drop, from <see cref="OutlineDrop"/></param>
+    /// <returns>The section's id</returns>
+    private string? SectionHeadedBy(DropTarget target)
+        => target.Row >= 0 && target.Row < Rows.Count && Rows[target.Row] is { IsHeading: true } heading && heading.Id == target.Id
+            ? heading.SectionId
+            : null;
+
+    /// <summary>
+    /// Puts a task first in a section, which is what a drop on the section's heading asks for.
+    /// </summary>
+    /// <remarks>
+    /// Before the first task shown under the heading, when there is one, so it lands right under
+    /// where it was let go. An empty section has nothing to go before, so the task is just moved in.
+    /// </remarks>
+    /// <param name="id">The task being put down</param>
+    /// <param name="section">The section whose heading it's on</param>
+    /// <param name="act">Whether to make the move, or only say whether it could be made</param>
+    /// <returns>False when it's already first there, or the engine won't take it</returns>
+    private bool IntoSection(string id, string section, bool act)
+    {
+        var at = Rows.ToList().FindIndex(r => r.IsHeading && r.SectionId == section);
+        var first = at < 0 || at + 1 >= Rows.Count || Rows[at + 1] is not { IsHeading: false, Completed: false, Depth: 0 } next
+            ? null
+            : next.Id;
+
+        if (first is null)
+        {
+            return act ? _engine.MoveItemToSection(id, section) : _engine.CanMoveItemToSection(id, section);
+        }
+
+        if (first == id) return false;
+
+        return act
+            ? _engine.PlaceItem(id, first, after: false, bySection: true)
+            : _engine.CanPlaceItem(id, first, after: false, bySection: true);
     }
 
     // ---- Reminder intents ----------------------------------------------------------------------
@@ -3544,7 +3614,8 @@ public sealed class MainPresenter
                 ProjectColour: project.Name is null ? null : project.Colour,
                 Deadline: DateShown(item.Deadline, snapshot.TimeZone, snapshot.Today),
                 DeadlineOn: SmartViews.DeadlineOn(item, snapshot.TimeZone),
-                Advancing: item.IsRecurring && snapshot.Closing.Contains(item.Id));
+                Advancing: item.IsRecurring && snapshot.Closing.Contains(item.Id),
+                SectionId: item.SectionId);
         }
     }
 
@@ -3750,8 +3821,10 @@ public sealed class MainPresenter
         var ordered = Ordered(rows);
 
         // One or the other, never both. Grouping lays the view out flat under its days, and a fold
-        // hides what sits under a task — which, under a day, is nothing at all.
-        Rows = Grouping ? ByDay(ordered) : Folded(ordered);
+        // hides what sits under a task — which, under a day, is nothing at all. Sections are another
+        // matter: a sub-task is always in its parent's section, so the tree survives being grouped
+        // and folds work under the headings as they do without them.
+        Rows = Grouping ? ByDay(ordered) : BySection(Folded(ordered));
         Status = ComposeStatus(pending, failed);
     }
 
@@ -3812,6 +3885,150 @@ public sealed class MainPresenter
         grouped.AddRange(loose);
         return grouped;
     }
+
+    /// <summary>
+    /// Whether a project with sections is shown under a heading for each one.
+    /// </summary>
+    /// <remarks>
+    /// A setting rather than anything about the view: it holds for every project, and it's saved
+    /// with the rest of the view state so a restart keeps it.
+    /// </remarks>
+    public bool GroupBySection { get; private set; }
+
+    /// <summary>
+    /// Turns grouping by section on or off.
+    /// </summary>
+    /// <remarks>
+    /// Republished only when there's already something on screen. On a start this is put back
+    /// before the first projection, and there's nothing yet for it to change.
+    /// </remarks>
+    /// <param name="on">True to group a project's tasks under its sections</param>
+    /// <returns>False when it was already that way, so the caller can leave the list alone</returns>
+    public bool SetGroupBySection(bool on)
+    {
+        lock (_publishing)
+        {
+            if (GroupBySection == on) return false;
+
+            GroupBySection = on;
+        }
+
+        if (_projectedFrom is not null) Republish();
+
+        return true;
+    }
+
+    /// <summary>Whether the open view is a project with sections, which is where grouping by them shows.</summary>
+    public bool CanGroupBySection
+    {
+        get
+        {
+            lock (_publishing)
+                return _projectedFrom is { } snapshot && SectionsToGroup(snapshot).Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// The sections the open view would be grouped under, in the sidebar's order.
+    /// </summary>
+    /// <remarks>
+    /// None outside a project, though the Inbox counts as one since it can have sections too. None
+    /// during a search either, which answers from the whole account with matches rather than with
+    /// the project's own outline.
+    /// </remarks>
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>The project's sections still in use, or none where the view isn't one project</returns>
+    private List<Section> SectionsToGroup(ModelSnapshot snapshot)
+    {
+        var project = Selection.ProjectId ?? (Selection.View == SmartView.Inbox ? snapshot.InboxProjectId : null);
+
+        if (project is null || Searching) return [];
+
+        return snapshot.Sections
+            .Where(s => s.ProjectId == project && !s.IsArchived && s.Id.Length > 0)
+            .DistinctBy(s => s.Id)
+            // The sidebar's own order, name and all, so two sections a sync has left with the same
+            // order come out the same way round under both.
+            .OrderBy(s => s.SectionOrder)
+            .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(s => s.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>Whether the outline is being laid out under a heading for each section.</summary>
+    private bool GroupingBySection => GroupBySection && _projectedFrom is { } snapshot && SectionsToGroup(snapshot).Count > 0;
+
+    /// <summary>
+    /// A project's tasks under a heading for each of its sections, when that's been asked for.
+    /// Every other view, and a project with no sections, is handed back untouched.
+    /// </summary>
+    /// <remarks>
+    /// Laid over whatever order and folding settled on, the way the day headings are: each top-level
+    /// task goes under its section's heading with everything nested beneath it, so a sort orders the
+    /// tasks within each section and the sections stay in their own order.
+    ///
+    /// Tasks in no section come first under no heading, which is where Todoist puts them too. Every
+    /// section gets its heading even with nothing in it, since that heading is the only place left to
+    /// drop a task into it. A finished task keeps to the bottom under no heading, as it does in
+    /// Upcoming; one only just ticked off stays where it was until it goes.
+    /// </remarks>
+    /// <param name="rows">The outline as ordering and folding left it</param>
+    /// <returns>The rows to show, headings and all</returns>
+    private IReadOnlyList<TaskRow> BySection(IReadOnlyList<TaskRow> rows)
+    {
+        if (!GroupBySection || _projectedFrom is not { } snapshot) return rows;
+
+        var sections = SectionsToGroup(snapshot);
+        if (sections.Count == 0) return rows;
+
+        var under = sections.ToDictionary(s => s.Id, _ => new List<TaskRow>(), StringComparer.Ordinal);
+        var loose = new List<TaskRow>();
+        var settled = new List<TaskRow>();
+        var kept = Kept();
+
+        // Where the rows are going, set by each top-level task for itself and everything after it
+        // until the next. A section the project no longer has, archived say, files its tasks with
+        // the ones in no section rather than dropping them.
+        var into = loose;
+
+        foreach (var row in rows)
+        {
+            if (row.Depth == 0)
+            {
+                into = Settled(row, kept) ? settled
+                    : row.SectionId is { } section && under.TryGetValue(section, out var heading) ? heading
+                    : loose;
+            }
+
+            into.Add(row);
+        }
+
+        var grouped = new List<TaskRow>(rows.Count + sections.Count);
+        grouped.AddRange(loose);
+
+        foreach (var section in sections)
+        {
+            grouped.Add(SectionRow(section));
+            grouped.AddRange(under[section.Id]);
+        }
+
+        grouped.AddRange(settled);
+        return grouped;
+    }
+
+    /// <summary>The row that heads a section's tasks.</summary>
+    /// <param name="section">The section being headed</param>
+    /// <returns>A row carrying the section's name and id, which is no task</returns>
+    private static TaskRow SectionRow(Section section)
+        => new(
+            $"section:{section.Id}",
+            section.Name,
+            Priority.P4,
+            string.Empty,
+            string.Empty,
+            [],
+            IsHeading: true,
+            SectionId: section.Id);
 
     /// <summary>Whether the outline is being laid out under a heading for each day.</summary>
     /// <remarks>
@@ -4378,6 +4595,7 @@ public sealed class MainPresenter
         AppCommand.NewSection,
         AppCommand.SyncNow,
         AppCommand.ToggleCompleted,
+        AppCommand.GroupBySection,
         AppCommand.Undo,
         AppCommand.Settings,
         AppCommand.CheckForUpdates,
@@ -4391,7 +4609,12 @@ public sealed class MainPresenter
         // Only what the presenter itself knows. The palette lists an action whether or not it can
         // be run right now — typing "undo" and finding nothing there reads as a missing feature,
         // where running it and being told there is nothing to undo does not.
-        var context = new CommandContext(ShowingCompleted: ShowingCompleted, CanUndo: CanUndo, ReconnectNeeded: ReconnectNeeded);
+        var context = new CommandContext(
+            ShowingCompleted: ShowingCompleted,
+            CanUndo: CanUndo,
+            ReconnectNeeded: ReconnectNeeded,
+            GroupingBySection: GroupBySection,
+            CanGroupBySection: CanGroupBySection);
 
         foreach (var command in PaletteActions)
         {

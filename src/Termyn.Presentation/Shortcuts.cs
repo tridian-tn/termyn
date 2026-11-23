@@ -105,6 +105,10 @@ public static class Shortcuts
         Bind(Ctrl, Key.N, AppCommand.NewTask, Window),
         Bind(None, Key.F5, AppCommand.SyncNow, Window),
         Bind(Ctrl, Key.H, AppCommand.ToggleCompleted, Window),
+
+        // G for group. Window-wide like Ctrl+H, the other switch for what the list shows, since a
+        // text box has no use of its own for it.
+        Bind(Ctrl, Key.G, AppCommand.GroupBySection, Window),
         // F4 shows and hides the panel; F6 and F7 pick which of its tabs is in front.
         Bind(None, Key.F4, AppCommand.ToggleDescription, Window),
         Bind(None, Key.F6, AppCommand.ViewDescription, Window),

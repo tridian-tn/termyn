@@ -119,6 +119,7 @@ public static class Menus
             MenuEntry.Of(AppCommand.PreviousView),
             MenuEntry.Of(AppCommand.NextView),
             MenuEntry.AfterRule(AppCommand.ToggleCompleted),
+            MenuEntry.Of(AppCommand.GroupBySection),
             MenuEntry.AfterRule(AppCommand.ToggleDescription),
             MenuEntry.Of(AppCommand.ViewDescription),
             MenuEntry.Of(AppCommand.ViewComments),

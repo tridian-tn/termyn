@@ -57,6 +57,27 @@ public class OutlineDragTests
     }
 
     [WinFormsFact]
+    public void Anywhere_on_a_sections_heading_is_a_drop_into_it_but_a_days_heading_takes_none()
+    {
+        using var form = Window();
+        using var outline = Outline(form, (_, _) => true);
+        outline.Rows =
+        [
+            Task("a"),
+            new TaskRow("section:s1", "Admin", Priority.P4, string.Empty, string.Empty, [], IsHeading: true, SectionId: "s1"),
+            new TaskRow("day:2026-08-01", "1 Aug · Tomorrow", Priority.P4, string.Empty, string.Empty, [], IsHeading: true),
+            Task("c"),
+        ];
+
+        var onto = new DropTarget("section:s1", DropZone.Onto, 1, 0);
+
+        Assert.Equal(onto, outline.DropAt("c", In(outline, 1, 0.1)));
+        Assert.Equal(onto, outline.DropAt("c", In(outline, 1, 0.5)));
+        Assert.Equal(onto, outline.DropAt("c", In(outline, 1, 0.9)));
+        Assert.Null(outline.DropAt("c", In(outline, 2, 0.5)));
+    }
+
+    [WinFormsFact]
     public void Past_the_last_column_the_row_is_still_found()
     {
         // The list's own hit test says there's no row out there, though the row is drawn right across.

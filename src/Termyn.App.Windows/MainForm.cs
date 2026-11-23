@@ -1341,6 +1341,7 @@ internal sealed class MainForm : Form
         // Straight to the presenter rather than held like the sidebar's: which rows exist is its
         // answer, so it needs these before it works the outline out rather than after.
         _presenter.RestoreCollapsed(state.CollapsedTasks);
+        _presenter.SetGroupBySection(state.GroupBySection);
     }
 
     /// <summary>A size in the window's display pixels as it would be at 100%, which is how sizes are saved.</summary>
@@ -1421,6 +1422,7 @@ internal sealed class MainForm : Form
             ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => AtHundred(c.Value)),
             SidebarWidth = AtHundred(_split.SplitterDistance),
             ShowDescription = !_detail.Panel2Collapsed,
+            GroupBySection = _presenter.GroupBySection,
             DescriptionHeight = _descriptionHeight,
             WindowX = bounds.X,
             WindowY = bounds.Y,
@@ -3262,7 +3264,9 @@ internal sealed class MainForm : Form
             NewTaskText(selection),
             _presenter.ReconnectNeeded,
             _presenter.ScheduleDays,
-            rows.Count > 1 ? rows : null);
+            rows.Count > 1 ? rows : null,
+            _presenter.GroupBySection,
+            _presenter.CanGroupBySection);
     }
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
@@ -3593,6 +3597,17 @@ internal sealed class MainForm : Form
 
             case AppCommand.ToggleCompleted:
                 _ = ToggleCompletedAsync();
+                return false;
+
+            // Only where the menu entry's lit. Ctrl+G reaches here from any view, and flipping the
+            // setting where it changes nothing on screen would leave the next project looking
+            // different with no idea why.
+            case AppCommand.GroupBySection:
+                if (_presenter.CanGroupBySection)
+                {
+                    Guarded(() => _presenter.SetGroupBySection(!_presenter.GroupBySection));
+                }
+
                 return false;
 
             case AppCommand.History:

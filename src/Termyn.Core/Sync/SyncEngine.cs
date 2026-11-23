@@ -1399,8 +1399,14 @@ public sealed class SyncEngine
     /// parent — and queues an <c>item_reorder</c>. Ordering is computed over the whole sibling set,
     /// never over a filtered view, so hidden tasks keep their positions.
     /// </summary>
+    /// <param name="id">The task to move</param>
+    /// <param name="offset">How far, and which way — negative is up the list</param>
+    /// <param name="bySection">
+    /// Whether the list it's moved in shows one section at a time, so tasks in other sections are
+    /// stepped over rather than swapped with out of sight, and a task stops at its section's edge
+    /// </param>
     /// <returns>False when the task is already at that end, or isn't held.</returns>
-    public bool MoveItem(string id, int offset)
+    public bool MoveItem(string id, int offset, bool bySection = false)
     {
         lock (_gate)
         {
@@ -1409,8 +1415,8 @@ public sealed class SyncEngine
             if (Placement(id) is not { } placement)
                 return false;
 
-            var (_, siblings, from) = placement;
-            if (MoveTarget(siblings, from, offset, i => i.Completed) is not { } to)
+            var (item, siblings, from) = placement;
+            if (MoveTarget(siblings, from, offset, Unseen(item, bySection)) is not { } to)
                 return false;
 
             ReorderLocked(Reorder.Items, Moved(siblings.Select(i => i.Id).ToList(), from, to));
@@ -1419,16 +1425,34 @@ public sealed class SyncEngine
     }
 
     /// <summary>Whether <see cref="MoveItem"/> would move it, so a menu can grey out what it can't do.</summary>
-    public bool CanMoveItem(string id, int offset)
+    public bool CanMoveItem(string id, int offset, bool bySection = false)
     {
         lock (_gate)
         {
             id = Promoted(id);
 
-            return Placement(id) is { } p && MoveTarget(p.Siblings, p.Index, offset, i => i.Completed) is not null;
+            return Placement(id) is { } p && MoveTarget(p.Siblings, p.Index, offset, Unseen(p.Item, bySection)) is not null;
         }
 
     }
+
+    /// <summary>
+    /// Which of a task's siblings don't sit beside it on screen, so moving or indenting it steps
+    /// over them.
+    /// </summary>
+    /// <remarks>
+    /// A completed task isn't drawn in its place anywhere. Where the list shows a section at a time,
+    /// nor is one in another section: the ordering runs through the whole project, so the task above
+    /// in that order can be under a different heading, or in no view of this section at all.
+    /// Sub-tasks always share their parent's section, so this only ever leaves out top-level tasks.
+    /// </remarks>
+    /// <param name="item">The task being moved or indented</param>
+    /// <param name="bySection">Whether the list shows one section at a time</param>
+    /// <returns>The test for a sibling that's out of sight</returns>
+    private static Func<TaskItem, bool> Unseen(TaskItem item, bool bySection)
+        => bySection
+            ? i => i.Completed || i.SectionId != item.SectionId
+            : i => i.Completed;
 
     /// <summary>
     /// Moves a project one place up or down among the projects sharing its parent, and queues a
@@ -1643,8 +1667,13 @@ public sealed class SyncEngine
     /// Makes a task a child of the sibling above it, and queues an <c>item_move</c>. Todoist has no
     /// notion of indent beyond parentage, so this is a re-parent.
     /// </summary>
+    /// <param name="id">The task to indent</param>
+    /// <param name="bySection">
+    /// Whether the list shows one section at a time, so the task goes under the one above it in its
+    /// own section rather than one under another heading
+    /// </param>
     /// <returns>False when there is no sibling above to adopt it.</returns>
-    public bool IndentItem(string id)
+    public bool IndentItem(string id, bool bySection = false)
     {
         lock (_gate)
         {
@@ -1653,7 +1682,7 @@ public sealed class SyncEngine
             if (Placement(id) is not { } placement)
                 return false;
 
-            return AdopterFor(placement.Siblings, placement.Index) is { } adopter
+            return AdopterFor(placement, bySection) is { } adopter
                    && Fits(id, adopter)
                    && MoveTo(id, parentId: adopter.Id);
         }
@@ -1715,15 +1744,16 @@ public sealed class SyncEngine
     /// sends them looking for a task above that is sitting right there.
     /// </remarks>
     /// <param name="id">The task that would be indented</param>
+    /// <param name="bySection">Whether the list shows one section at a time, as for <see cref="IndentItem"/></param>
     /// <returns>True when there is somewhere to go and it is too deep to go there</returns>
-    public bool IndentTooDeep(string id)
+    public bool IndentTooDeep(string id, bool bySection = false)
     {
         lock (_gate)
         {
             id = Promoted(id);
 
             return Placement(id) is { } p
-                   && AdopterFor(p.Siblings, p.Index) is { } adopter
+                   && AdopterFor(p, bySection) is { } adopter
                    && !Fits(id, adopter);
         }
     }
@@ -1789,14 +1819,14 @@ public sealed class SyncEngine
     }
 
     /// <summary>Whether <see cref="IndentItem"/> would find something above to indent under.</summary>
-    public bool CanIndentItem(string id)
+    public bool CanIndentItem(string id, bool bySection = false)
     {
         lock (_gate)
         {
             id = Promoted(id);
 
             return Placement(id) is { } p
-                   && AdopterFor(p.Siblings, p.Index) is { } adopter
+                   && AdopterFor(p, bySection) is { } adopter
                    && Fits(id, adopter);
         }
 
@@ -1806,8 +1836,14 @@ public sealed class SyncEngine
     /// The sibling that would take this one in, or null when there is none. Adopting a completed
     /// task would be invisible: it isn't in the outline, so the row wouldn't appear to move at all.
     /// </summary>
-    private static TaskItem? AdopterFor(List<TaskItem> siblings, int index)
-        => index <= 0 ? null : siblings.Take(index).LastOrDefault(i => !i.Completed);
+    /// <param name="placement">The task, its siblings and where it sits among them</param>
+    /// <param name="bySection">Whether the list shows one section at a time, which hides the rest</param>
+    /// <returns>The nearest sibling above it that's on screen, or null</returns>
+    private static TaskItem? AdopterFor((TaskItem Item, List<TaskItem> Siblings, int Index) placement, bool bySection)
+    {
+        var unseen = Unseen(placement.Item, bySection);
+        return placement.Index <= 0 ? null : placement.Siblings.Take(placement.Index).LastOrDefault(i => !unseen(i));
+    }
 
     /// <summary>Whether <see cref="OutdentItem"/> has a level to promote to.</summary>
     /// <remarks>
@@ -1982,7 +2018,7 @@ public sealed class SyncEngine
             // Straight after the parent, so the task comes out where it was rather than going to the
             // end of the list. Nowhere to put it beside a parent that's gone or finished, neither of
             // which has a place among its siblings, so those carry on to the move below.
-            if (parent is { Completed: false } && Place(id, parentId, after: true, act: true))
+            if (parent is { Completed: false } && Place(id, parentId, after: true, bySection: false, act: true))
                 return true;
 
             // Alongside the parent means the parent's own place: under its parent if it has one,
@@ -2071,11 +2107,17 @@ public sealed class SyncEngine
     /// <param name="id">The task being put down</param>
     /// <param name="besideId">The task it's put down next to</param>
     /// <param name="after">Whether it goes after that task rather than before it</param>
+    /// <param name="bySection">
+    /// Whether the list it's dropped in is grouped by section, so a top-level task put beside one in
+    /// another section joins that section rather than only changing places in the project's order
+    /// </param>
     /// <returns>False when it changes nothing, or it'd go under itself, too deep, or beside a completed task</returns>
-    public bool PlaceItem(string id, string besideId, bool after) => Place(id, besideId, after, act: true);
+    public bool PlaceItem(string id, string besideId, bool after, bool bySection = false)
+        => Place(id, besideId, after, bySection, act: true);
 
     /// <summary>Whether <see cref="PlaceItem"/> would put it there, so a drag can show where it can't drop.</summary>
-    public bool CanPlaceItem(string id, string besideId, bool after) => Place(id, besideId, after, act: false);
+    public bool CanPlaceItem(string id, string besideId, bool after, bool bySection = false)
+        => Place(id, besideId, after, bySection, act: false);
 
     /// <summary>
     /// The placement and the question of whether there's one to make, which are the same walk.
@@ -2083,9 +2125,10 @@ public sealed class SyncEngine
     /// <param name="id">The task being put down</param>
     /// <param name="besideId">The task it's put down next to</param>
     /// <param name="after">Whether it goes after that task rather than before it</param>
+    /// <param name="bySection">Whether a top-level task's section counts as part of where it sits</param>
     /// <param name="act">Whether to queue the change, or only report that it could be made</param>
     /// <returns>Whether the placement is one that can be made</returns>
-    private bool Place(string id, string besideId, bool after, bool act)
+    private bool Place(string id, string besideId, bool after, bool bySection, bool act)
     {
         lock (_gate)
         {
@@ -2101,8 +2144,12 @@ public sealed class SyncEngine
                 return false;
 
             // Siblings the way the ordering counts them, which doesn't look at sections. Neither
-            // does the project outline, which sets a project's tasks out in that one order.
-            var stays = moving.Item.ProjectId == beside.Item.ProjectId && moving.Item.ParentId == beside.Item.ParentId;
+            // does the flat project outline, which sets a project's tasks out in that one order. A
+            // list grouped by section does, though: there a task put beside one under another
+            // heading has to go into that section, or it'd land back under the heading it came from.
+            var stays = moving.Item.ProjectId == beside.Item.ProjectId
+                        && moving.Item.ParentId == beside.Item.ParentId
+                        && (!bySection || moving.Item.SectionId == beside.Item.SectionId);
             var level = stays ? default : LevelBeside(moving.Item, beside.Item);
 
             if (!stays && level is null)

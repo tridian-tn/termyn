@@ -138,6 +138,13 @@ public sealed record ViewState
     /// <summary>Whether the description panel under the outline is open.</summary>
     public bool ShowDescription { get; init; }
 
+    /// <summary>Whether a project with sections is shown under a heading for each one.</summary>
+    /// <remarks>
+    /// One setting for every project rather than one per project, and it stays when the account is
+    /// signed out: it's how the user likes a list laid out, not anything about the account.
+    /// </remarks>
+    public bool GroupBySection { get; init; }
+
     /// <summary>
     /// How tall the description panel is, in pixels at 100% scale off the bottom of the outline, or
     /// null until the window has saved it.
@@ -189,6 +196,7 @@ public sealed record ViewState
            && SelectedKey == other.SelectedKey
            && SidebarWidth == other.SidebarWidth
            && ShowDescription == other.ShowDescription
+           && GroupBySection == other.GroupBySection
            && DescriptionHeight == other.DescriptionHeight
            && WindowX == other.WindowX
            && WindowY == other.WindowY
@@ -207,6 +215,7 @@ public sealed record ViewState
         hash.Add(SelectedKey);
         hash.Add(SidebarWidth);
         hash.Add(ShowDescription);
+        hash.Add(GroupBySection);
         hash.Add(DescriptionHeight);
         hash.Add(WindowX);
         hash.Add(WindowY);

@@ -93,6 +93,7 @@ public class ShortcutTests
     [InlineData(Ctrl, Key.N, AppCommand.NewTask)]
     [InlineData(None, Key.F5, AppCommand.SyncNow)]
     [InlineData(Ctrl, Key.H, AppCommand.ToggleCompleted)]
+    [InlineData(Ctrl, Key.G, AppCommand.GroupBySection)]
     [InlineData(Ctrl, Key.F, AppCommand.Search)]
     [InlineData(Ctrl, Key.K, AppCommand.Palette)]
     [InlineData(Alt, Key.Up, AppCommand.PreviousView)]
