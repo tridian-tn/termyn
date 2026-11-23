@@ -2637,11 +2637,9 @@ public sealed class MainPresenter
     {
         id = _engine.Resolve(id);
 
-        if (!CanDrag || !OutlineDrop.Moves(Rows, id, target))
-            return false;
+        if (!CanDrag || !OutlineDrop.Moves(Rows, id, target)) return false;
 
-        if (SectionHeadedBy(target) is { } section)
-            return IntoSection(id, section, act: false);
+        if (SectionHeadedBy(target) is { } section) return IntoSection(id, section, act: false);
 
         return target.Zone == DropZone.Onto
             ? _engine.CanNestItem(id, target.Id)
@@ -2670,8 +2668,7 @@ public sealed class MainPresenter
 
         if (SectionHeadedBy(target) is { } section)
         {
-            if (!IntoSection(id, section, act: true))
-                return false;
+            if (!IntoSection(id, section, act: true)) return false;
 
             History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMoved, named), $"drop:{Guid.NewGuid():N}");
             Publish();
@@ -2726,10 +2723,11 @@ public sealed class MainPresenter
             : next.Id;
 
         if (first is null)
+        {
             return act ? _engine.MoveItemToSection(id, section) : _engine.CanMoveItemToSection(id, section);
+        }
 
-        if (first == id)
-            return false;
+        if (first == id) return false;
 
         return act
             ? _engine.PlaceItem(id, first, after: false, bySection: true)
@@ -3898,14 +3896,12 @@ public sealed class MainPresenter
     {
         lock (_publishing)
         {
-            if (GroupBySection == on)
-                return false;
+            if (GroupBySection == on) return false;
 
             GroupBySection = on;
         }
 
-        if (_projectedFrom is not null)
-            Republish();
+        if (_projectedFrom is not null) Republish();
 
         return true;
     }
@@ -3934,8 +3930,7 @@ public sealed class MainPresenter
     {
         var project = Selection.ProjectId ?? (Selection.View == SmartView.Inbox ? snapshot.InboxProjectId : null);
 
-        if (project is null || Searching)
-            return [];
+        if (project is null || Searching) return [];
 
         return snapshot.Sections
             .Where(s => s.ProjectId == project && !s.IsArchived && s.Id.Length > 0)
@@ -3966,12 +3961,10 @@ public sealed class MainPresenter
     /// <returns>The rows to show, headings and all</returns>
     private IReadOnlyList<TaskRow> BySection(IReadOnlyList<TaskRow> rows)
     {
-        if (!GroupBySection || _projectedFrom is not { } snapshot)
-            return rows;
+        if (!GroupBySection || _projectedFrom is not { } snapshot) return rows;
 
         var sections = SectionsToGroup(snapshot);
-        if (sections.Count == 0)
-            return rows;
+        if (sections.Count == 0) return rows;
 
         var under = sections.ToDictionary(s => s.Id, _ => new List<TaskRow>(), StringComparer.Ordinal);
         var loose = new List<TaskRow>();

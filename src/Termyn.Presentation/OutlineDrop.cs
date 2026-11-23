@@ -70,13 +70,11 @@ public static class OutlineDrop
     /// <returns>The drop, or null when the row isn't a task or a section to drop by</returns>
     public static DropTarget? Over(IReadOnlyList<TaskRow> rows, int index, DropZone zone)
     {
-        if (index < 0 || index >= rows.Count)
-            return null;
+        if (index < 0 || index >= rows.Count) return null;
 
         var row = rows[index];
 
-        if (row.IsHeading)
-            return row.SectionId is null ? null : new DropTarget(row.Id, DropZone.Onto, index, 0);
+        if (row.IsHeading) return row.SectionId is null ? null : new DropTarget(row.Id, DropZone.Onto, index, 0);
 
         if (zone == DropZone.After && index + 1 < rows.Count && rows[index + 1] is { IsHeading: false } next && next.Depth > row.Depth)
             return new DropTarget(next.Id, DropZone.Before, index + 1, next.Depth);
