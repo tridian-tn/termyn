@@ -2462,10 +2462,10 @@ public sealed class MainPresenter
         => id is null
             ? TaskAbilities.None
             : new TaskAbilities(
-                _engine.CanIndentItem(id),
+                _engine.CanIndentItem(id, OneSectionAtATime),
                 _engine.CanOutdentItem(id),
-                _engine.CanMoveItem(id, -1),
-                _engine.CanMoveItem(id, 1),
+                _engine.CanMoveItem(id, -1, OneSectionAtATime),
+                _engine.CanMoveItem(id, 1, OneSectionAtATime),
                 _engine.Holds(id),
                 TodoistLinkFor(id) is not null,
                 _engine.CanNestUnder(id));
@@ -2489,7 +2489,7 @@ public sealed class MainPresenter
     public bool Move(string id, int offset)
     {
         var named = Named(id);
-        var moved = _engine.MoveItem(id, offset);
+        var moved = _engine.MoveItem(id, offset, OneSectionAtATime);
 
         if (moved)
         {
@@ -2509,7 +2509,7 @@ public sealed class MainPresenter
     public bool Indent(string id)
     {
         var named = Named(id);
-        var indented = _engine.IndentItem(id);
+        var indented = _engine.IndentItem(id, OneSectionAtATime);
 
         if (indented)
         {
@@ -2533,7 +2533,19 @@ public sealed class MainPresenter
     /// </summary>
     /// <param name="id">The task that wouldn't indent</param>
     /// <returns>True when there was somewhere to go and it was too deep to go there</returns>
-    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id);
+    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id, OneSectionAtATime);
+
+    /// <summary>
+    /// Whether the outline shows a section at a time: grouped under its headings, or one section
+    /// open on its own.
+    /// </summary>
+    /// <remarks>
+    /// Moving and indenting a task go by the project's order, which runs through every section, so
+    /// the task above one in that order can be in another section. Shown a section at a time, that
+    /// task isn't beside it on screen, and a nudge past it would look like nothing happened, or an
+    /// indent under it would carry the task off into the other section.
+    /// </remarks>
+    private bool OneSectionAtATime => GroupingBySection || Selection.SectionId is not null;
 
     /// <summary>Promotes a sub-task alongside its parent.</summary>
     public bool Outdent(string id)

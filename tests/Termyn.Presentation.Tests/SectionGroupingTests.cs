@@ -253,7 +253,90 @@ public class SectionGroupingTests
         Assert.Equal(["Loose", "A", "Under A", "X", "B"], Shown(presenter));
     }
 
+    // ---- Moving and indenting with the keys ----------------------------------------------------
+
+    [Fact]
+    public void Grouped_a_task_moved_up_passes_over_tasks_in_other_sections()
+    {
+        // Held as A, X, B: B's neighbour above in that order is X, under another heading.
+        var presenter = InProject(Interleaved(), grouped: true);
+
+        Assert.True(presenter.AbilitiesFor("b").CanMoveUp);
+        Assert.True(presenter.Move("b", -1));
+
+        Assert.Equal(["Loose", "Admin", "B", "A", "Under A", "Errands", "X", "Empty"], Shown(presenter));
+    }
+
+    [Fact]
+    public void Grouped_a_task_stops_at_the_edges_of_its_section()
+    {
+        var presenter = InProject(Interleaved(), grouped: true);
+
+        // "Loose" is above A in the project's order and X below B, but neither is in Admin.
+        Assert.False(presenter.AbilitiesFor("a").CanMoveUp);
+        Assert.False(presenter.Move("a", -1));
+        Assert.False(presenter.AbilitiesFor("b").CanMoveDown);
+        Assert.False(presenter.Move("b", 1));
+        Assert.Empty(presenter.History.Recent());
+    }
+
+    [Fact]
+    public void Grouped_a_task_indents_under_the_one_above_it_in_its_own_section()
+    {
+        var presenter = InProject(Interleaved(), grouped: true);
+
+        Assert.True(presenter.Indent("b"));
+
+        Assert.Equal(["Loose", "Admin", "A", "Under A", "B", "Errands", "X", "Empty"], Shown(presenter));
+        Assert.Equal(1, presenter.Rows.Single(r => r.Id == "b").Depth);
+        Assert.Equal("s1", presenter.Rows.Single(r => r.Id == "b").SectionId);
+    }
+
+    [Fact]
+    public void Grouped_the_first_task_in_a_section_has_nothing_to_indent_under()
+    {
+        var presenter = InProject(Interleaved(), grouped: true);
+
+        // The task above it in the project's order is "Loose", in no section.
+        Assert.False(presenter.AbilitiesFor("a").CanIndent);
+        Assert.False(presenter.Indent("a"));
+        Assert.False(presenter.IndentTooDeep("a"));
+    }
+
+    [Fact]
+    public void In_a_sections_own_view_a_task_moved_up_passes_over_the_other_sections_tasks()
+    {
+        var presenter = NewPresenter(Interleaved());
+        presenter.Select(ViewSelection.OfSection("s1"));
+
+        Assert.True(presenter.Move("b", -1));
+
+        Assert.Equal(["B", "A", "Under A"], Shown(presenter));
+    }
+
+    [Fact]
+    public void Ungrouped_a_task_moved_up_goes_by_the_projects_order_as_before()
+    {
+        // Every task is in the one list here, so the one above in the project's order is the one
+        // above on screen.
+        var presenter = InProject(Interleaved());
+
+        Assert.True(presenter.Move("b", -1));
+
+        Assert.Equal(["Loose", "A", "Under A", "B", "X"], Shown(presenter));
+        Assert.Equal("s1", presenter.Rows.Single(r => r.Id == "b").SectionId);
+    }
+
     // ---- Helpers -------------------------------------------------------------------------------
+
+    /// <summary>The usual project, but held in the order A, X, B, so a section's tasks have another's between them.</summary>
+    private static InMemorySnapshotStore Interleaved()
+    {
+        var store = Store();
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","section_id":"s2","child_order":2}""");
+        store.PutResource("items", "b", """{"id":"b","content":"B","project_id":"p","section_id":"s1","child_order":3}""");
+        return store;
+    }
 
     /// <summary>Drops a task, having asked first whether it could be, the way a drag does.</summary>
     private static bool Dropped(MainPresenter presenter, string id, DropTarget target)
