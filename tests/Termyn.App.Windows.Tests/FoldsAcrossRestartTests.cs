@@ -170,6 +170,21 @@ public class FoldsAcrossRestartTests : IDisposable
     }
 
     [WinFormsFact]
+    public void Ctrl_G_where_there_is_nothing_to_group_leaves_the_setting_alone()
+    {
+        using var window = Window(out var presenter, Sectioned());
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.Equal(AppCommand.GroupBySection, MainForm.CommandFor(Keys.Control | Keys.G, Presentation.ShortcutScope.Window));
+        window.Run(AppCommand.GroupBySection);
+        Assert.False(presenter.GroupBySection);
+
+        presenter.Select(ViewSelection.OfProject("p"));
+        window.Run(AppCommand.GroupBySection);
+        Assert.True(presenter.GroupBySection);
+    }
+
+    [WinFormsFact]
     public void A_file_that_says_nothing_about_grouping_leaves_a_project_flat()
     {
         File.WriteAllText(_config, """{"view":{"sidebarWidth":240}}""");

@@ -3599,8 +3599,15 @@ internal sealed class MainForm : Form
                 _ = ToggleCompletedAsync();
                 return false;
 
+            // Only where the menu entry's lit. Ctrl+G reaches here from any view, and flipping the
+            // setting where it changes nothing on screen would leave the next project looking
+            // different with no idea why.
             case AppCommand.GroupBySection:
-                Guarded(() => _presenter.SetGroupBySection(!_presenter.GroupBySection));
+                if (_presenter.CanGroupBySection)
+                {
+                    Guarded(() => _presenter.SetGroupBySection(!_presenter.GroupBySection));
+                }
+
                 return false;
 
             case AppCommand.History:
