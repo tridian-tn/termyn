@@ -2022,6 +2022,8 @@ internal sealed class MainForm : Form
     /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
     /// display is scaled to — an image list would have had to be rebuilt at every DPI.
     ///
+    /// A collapsed heading gets an arrow after its name, which the tree won't draw for it.
+    ///
     /// Every other row is left to the tree, which keeps the headings' own font and both of the ways
     /// a selected row is marked.
     /// </remarks>
@@ -2054,14 +2056,34 @@ internal sealed class MainForm : Form
             taken = lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
         }
 
-        TextRenderer.DrawText(
-            e.Graphics,
-            drawn.Text,
-            drawn.NodeFont ?? _sidebar.Font,
-            bounds with { X = bounds.X + taken },
-            Writing(drawn, e.State),
-            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        const TextFormatFlags Flags = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis;
+
+        var font = drawn.NodeFont ?? _sidebar.Font;
+        var ink = Writing(drawn, e.State);
+        var text = bounds with { X = bounds.X + taken };
+
+        if (ShowsChevron(drawn))
+        {
+            var (name, arrow) = SidebarChevron.Layout(
+                text,
+                TextRenderer.MeasureText(e.Graphics, drawn.Text, font, text.Size, Flags).Width,
+                _sidebar.LogicalToDeviceUnits(SidebarChevron.Gap),
+                new Size(_sidebar.LogicalToDeviceUnits(SidebarChevron.Width), _sidebar.LogicalToDeviceUnits(SidebarChevron.Height)));
+
+            text = name;
+            SidebarChevron.Draw(e.Graphics, arrow, _sidebar.LogicalToDeviceUnits(1), ink);
+        }
+
+        TextRenderer.DrawText(e.Graphics, drawn.Text, font, text, ink, Flags);
     }
+
+    /// <summary>
+    /// Whether a sidebar row is a heading that's been collapsed, with rows hidden under it.
+    /// </summary>
+    /// <param name="drawn">The row being drawn</param>
+    /// <returns>True when it wants the arrow after its name</returns>
+    internal static bool ShowsChevron(TreeNode drawn)
+        => drawn is { Tag: SidebarNode { Kind: SidebarKind.Header }, IsExpanded: false, Nodes.Count: > 0 };
 
     /// <summary>
     /// What to write a sidebar row in.
