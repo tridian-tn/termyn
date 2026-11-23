@@ -10,8 +10,10 @@ namespace Termyn.App.Mac;
 /// <remarks>
 /// The words are <see cref="OutlineCells"/>' own, so a column says here what it says on Windows.
 /// Colour follows the same rule as the list's second line: Todoist's, only where it means
-/// something, and none at all on a selected row, where the accent behind it is what the row says.
-/// The rest of the text is the secondary label colour, as a Finder list writes its other columns.
+/// something, and none on a selected row, where the accent behind it is what the row says. The
+/// project's dot is the exception: it keeps its colour there, ringed in the selection's text
+/// colour so it still reads against the accent, rather than vanishing as the row's picked. The
+/// rest of the text is the secondary label colour, as a Finder list writes its other columns.
 /// </remarks>
 internal sealed class GridCell : NSTableCellView
 {

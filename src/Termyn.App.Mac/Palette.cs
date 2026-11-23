@@ -43,7 +43,8 @@ internal static class Palette
             attributes.StrokeWidth = -8f;
         }
 
-        var run = new NSMutableAttributedString("●", attributes);
+        var run = new NSMutableAttributedString();
+        run.Append(new NSAttributedString("●", attributes));
         run.Append(new NSAttributedString(" ", new NSStringAttributes { Font = font }));
         return run;
     }
