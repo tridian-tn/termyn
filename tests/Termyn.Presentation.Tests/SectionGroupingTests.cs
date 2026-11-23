@@ -51,6 +51,23 @@ public class SectionGroupingTests
     }
 
     [Fact]
+    public void Sections_sharing_an_order_come_out_as_the_sidebar_has_them()
+    {
+        // Tied on order, so the sidebar goes by name: "Errands" before "Zebra", though Zebra's id
+        // comes first.
+        var store = Store();
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Zebra","project_id":"p","section_order":1}""");
+        store.PutResource("sections", "s2", """{"id":"s2","name":"Errands","project_id":"p","section_order":1}""");
+        var presenter = InProject(store, grouped: true);
+
+        var headings = presenter.Rows.Where(r => r.IsHeading).Select(r => r.Content).ToArray();
+        var sidebar = presenter.Sidebar.Where(n => n.Kind == SidebarKind.Section && headings.Contains(n.Label)).Select(n => n.Label).ToArray();
+
+        Assert.Equal(["Errands", "Zebra", "Empty"], headings);
+        Assert.Equal(sidebar, headings);
+    }
+
+    [Fact]
     public void A_heading_is_not_a_task()
     {
         var presenter = InProject(grouped: true);

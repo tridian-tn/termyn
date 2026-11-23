@@ -3947,7 +3947,10 @@ public sealed class MainPresenter
         return snapshot.Sections
             .Where(s => s.ProjectId == project && !s.IsArchived && s.Id.Length > 0)
             .DistinctBy(s => s.Id)
+            // The sidebar's own order, name and all, so two sections a sync has left with the same
+            // order come out the same way round under both.
             .OrderBy(s => s.SectionOrder)
+            .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(s => s.Id, StringComparer.Ordinal)
             .ToList();
     }
