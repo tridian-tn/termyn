@@ -53,6 +53,7 @@ public enum AppCommand
     QuickAdd,
     SyncNow,
     ToggleCompleted,
+    GroupBySection,
     History,
     SortDefault,
     ExpandAll,
@@ -173,6 +174,8 @@ public sealed record ScheduleDays(DateOnly Today, DateOnly? Weekend, DateOnly? N
 /// Every task the outline has selected, when there's more than one. <paramref name="Task"/> is null
 /// then, since nothing that acts on a single task has one to act on
 /// </param>
+/// <param name="GroupingBySection">Whether a project with sections is shown under a heading for each one</param>
+/// <param name="CanGroupBySection">Whether the open view is a project with sections, which that setting changes</param>
 public sealed record CommandContext(
     TaskRow? Task = null,
     TaskAbilities? Abilities = null,
@@ -190,7 +193,9 @@ public sealed record CommandContext(
     string? NewTaskText = null,
     bool ReconnectNeeded = false,
     ScheduleDays? Schedule = null,
-    IReadOnlyList<TaskRow>? Tasks = null)
+    IReadOnlyList<TaskRow>? Tasks = null,
+    bool GroupingBySection = false,
+    bool CanGroupBySection = false)
 {
     /// <summary>Nothing selected anywhere — what a menu opened over an empty window would see.</summary>
     public static readonly CommandContext Empty = new();
@@ -431,6 +436,14 @@ public static class Commands
                 Strings.CommandCompletedTasks,
                 true,
                 context.ShowingCompleted),
+
+            // Ticked for the setting, which holds for every project, and greyed where the open view
+            // isn't a project with sections, since flipping it there would change nothing on screen.
+            AppCommand.GroupBySection => new CommandState(
+                Strings.CommandGroupBySection,
+                context.CanGroupBySection,
+                context.GroupingBySection),
+
             // Folding the whole view at once, which the expander on a row does one task at a time.
             // Each is greyed when there is nothing left for it to do, which is also how the pair
             // says which way the outline currently stands.

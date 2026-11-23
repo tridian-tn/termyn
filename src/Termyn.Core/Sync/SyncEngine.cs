@@ -1982,7 +1982,7 @@ public sealed class SyncEngine
             // Straight after the parent, so the task comes out where it was rather than going to the
             // end of the list. Nowhere to put it beside a parent that's gone or finished, neither of
             // which has a place among its siblings, so those carry on to the move below.
-            if (parent is { Completed: false } && Place(id, parentId, after: true, act: true))
+            if (parent is { Completed: false } && Place(id, parentId, after: true, bySection: false, act: true))
                 return true;
 
             // Alongside the parent means the parent's own place: under its parent if it has one,
@@ -2071,11 +2071,17 @@ public sealed class SyncEngine
     /// <param name="id">The task being put down</param>
     /// <param name="besideId">The task it's put down next to</param>
     /// <param name="after">Whether it goes after that task rather than before it</param>
+    /// <param name="bySection">
+    /// Whether the list it's dropped in is grouped by section, so a top-level task put beside one in
+    /// another section joins that section rather than only changing places in the project's order
+    /// </param>
     /// <returns>False when it changes nothing, or it'd go under itself, too deep, or beside a completed task</returns>
-    public bool PlaceItem(string id, string besideId, bool after) => Place(id, besideId, after, act: true);
+    public bool PlaceItem(string id, string besideId, bool after, bool bySection = false)
+        => Place(id, besideId, after, bySection, act: true);
 
     /// <summary>Whether <see cref="PlaceItem"/> would put it there, so a drag can show where it can't drop.</summary>
-    public bool CanPlaceItem(string id, string besideId, bool after) => Place(id, besideId, after, act: false);
+    public bool CanPlaceItem(string id, string besideId, bool after, bool bySection = false)
+        => Place(id, besideId, after, bySection, act: false);
 
     /// <summary>
     /// The placement and the question of whether there's one to make, which are the same walk.
@@ -2083,9 +2089,10 @@ public sealed class SyncEngine
     /// <param name="id">The task being put down</param>
     /// <param name="besideId">The task it's put down next to</param>
     /// <param name="after">Whether it goes after that task rather than before it</param>
+    /// <param name="bySection">Whether a top-level task's section counts as part of where it sits</param>
     /// <param name="act">Whether to queue the change, or only report that it could be made</param>
     /// <returns>Whether the placement is one that can be made</returns>
-    private bool Place(string id, string besideId, bool after, bool act)
+    private bool Place(string id, string besideId, bool after, bool bySection, bool act)
     {
         lock (_gate)
         {
@@ -2101,8 +2108,12 @@ public sealed class SyncEngine
                 return false;
 
             // Siblings the way the ordering counts them, which doesn't look at sections. Neither
-            // does the project outline, which sets a project's tasks out in that one order.
-            var stays = moving.Item.ProjectId == beside.Item.ProjectId && moving.Item.ParentId == beside.Item.ParentId;
+            // does the flat project outline, which sets a project's tasks out in that one order. A
+            // list grouped by section does, though: there a task put beside one under another
+            // heading has to go into that section, or it'd land back under the heading it came from.
+            var stays = moving.Item.ProjectId == beside.Item.ProjectId
+                        && moving.Item.ParentId == beside.Item.ParentId
+                        && (!bySection || moving.Item.SectionId == beside.Item.SectionId);
             var level = stays ? default : LevelBeside(moving.Item, beside.Item);
 
             if (!stays && level is null)
