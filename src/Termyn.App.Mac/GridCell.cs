@@ -131,7 +131,7 @@ internal sealed class GridCell : NSTableCellView
         {
             case TaskColumn.Project when row.Project.Length > 0:
                 if (OutlineCells.ProjectDot(row, Selected) is { } dot && !done)
-                    line.Append(Run("● ", Palette.Of(dot)));
+                    line.Append(Palette.Dot(dot, _text.Font));
                 line.Append(Run(row.Project, quiet));
                 break;
 

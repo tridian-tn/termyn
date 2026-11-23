@@ -284,7 +284,7 @@ internal sealed class TaskCell : NSTableCellView
             if (line.Length > 0)
                 line.Append(Run("   ", null));
             if (OutlineCells.ProjectDot(row, Selected) is { } dot)
-                line.Append(Run("● ", Palette.Of(dot)));
+                line.Append(Palette.Dot(dot, _detail.Font));
             line.Append(Run(row.Project, quiet));
         }
 
