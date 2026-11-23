@@ -51,6 +51,9 @@ internal sealed class OutlineView : ListView
     private const int DotAt96 = 8;
     private const int PriorityDotAt96 = 9;
 
+    /// <summary>How thick the ring round a project's dot is on a selected row.</summary>
+    private const int DotRingAt96 = 1;
+
     /// <summary>A size at 100% at the scale of the display the list is on.</summary>
     /// <param name="logical">The size at 100%</param>
     /// <returns>The size in the display's pixels</returns>
@@ -1758,7 +1761,7 @@ internal sealed class OutlineView : ListView
         var text = Inset(bounds);
 
         if (OutlineCells.ProjectDot(row, selected) is { } dot)
-            DrawDot(g, ref text, Theme.ToColor(dot));
+            DrawDot(g, ref text, Theme.ToColor(dot.Colour), dot.Ringed ? Theme.OnAccent : null);
 
         TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
     }
@@ -1796,14 +1799,32 @@ internal sealed class OutlineView : ListView
         }
     }
 
-    /// <summary>Draws a colour's dot at the left of <paramref name="bounds"/>, and takes its room.</summary>
-    private void DrawDot(Graphics g, ref Rectangle bounds, Color colour)
+    /// <summary>
+    /// Draws a colour's dot at the left of <paramref name="bounds"/>, and takes its room.
+    /// </summary>
+    /// <remarks>
+    /// A ring goes round the outside rather than eating into the dot, so the dot's the same size
+    /// either way and the text after it doesn't shift when the row's selected.
+    /// </remarks>
+    /// <param name="g">What to draw on</param>
+    /// <param name="bounds">The room left in the cell, moved past the dot once it's drawn</param>
+    /// <param name="colour">What the dot's filled with</param>
+    /// <param name="ring">What to ring it with, or null for no ring</param>
+    private void DrawDot(Graphics g, ref Rectangle bounds, Color colour, Color? ring)
     {
         var size = Math.Min(AtScale(DotAt96), bounds.Height - AtScale(8));
         if (size <= 0)
             return;
 
-        Dots.Fill(g, new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size), colour);
+        var dot = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size);
+
+        if (ring is { } around)
+        {
+            var width = AtScale(DotRingAt96);
+            Dots.Fill(g, Rectangle.Inflate(dot, width, width), around);
+        }
+
+        Dots.Fill(g, dot, colour);
 
         var taken = size + (TextInset / 2);
         bounds.X += taken;

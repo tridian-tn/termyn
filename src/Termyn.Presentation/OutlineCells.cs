@@ -14,6 +14,11 @@ public enum CellPaint
     Labels,
 }
 
+/// <summary>A coloured dot the outline marks a cell with.</summary>
+/// <param name="Colour">What the dot's filled with</param>
+/// <param name="Ringed">Whether it's drawn inside a ring of the colour written over the selection</param>
+public readonly record struct ColourDot(Rgb Colour, bool Ringed);
+
 /// <summary>
 /// What each cell of a task's row says, and how it's filled.
 /// </summary>
@@ -79,14 +84,16 @@ public static class OutlineCells
     /// The dot in front of a row's project, or null when there's none to draw.
     /// </summary>
     /// <remarks>
-    /// Nothing on a selected row: the accent is behind it, and a colour chosen to read against the
-    /// panel has made no promise about that. A task in no project has no colour either — the row
-    /// carries one only when it found the project — so that answers itself.
+    /// A selected row keeps its dot, ringed in the colour written over the accent. The project's
+    /// colour was chosen to read against the panel and has made no promise about the accent, so
+    /// the ring is what stops a colour close to the accent sinking into it. A task in no project
+    /// has no colour — the row carries one only when it found the project — so that answers itself.
     /// </remarks>
     /// <param name="row">The task the cell belongs to</param>
     /// <param name="selected">Whether the row is drawn selected</param>
-    /// <returns>The project's colour, or null for no dot</returns>
-    public static Rgb? ProjectDot(TaskRow row, bool selected) => selected ? null : row.ProjectColour;
+    /// <returns>The project's colour and whether to ring it, or null for no dot</returns>
+    public static ColourDot? ProjectDot(TaskRow row, bool selected)
+        => row.ProjectColour is { } colour ? new ColourDot(colour, Ringed: selected) : null;
 
     /// <summary>
     /// What a row's priority dot says when the pointer rests on it, or null when there's no dot.

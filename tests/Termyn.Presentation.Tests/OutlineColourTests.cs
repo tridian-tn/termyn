@@ -29,7 +29,7 @@ public class OutlineColourTests
 
     [Fact]
     public void A_project_is_marked_with_the_colour_todoist_gives_it()
-        => Assert.Equal(BerryRed, OutlineCells.ProjectDot(Row(colour: BerryRed), selected: false));
+        => Assert.Equal(new ColourDot(BerryRed, Ringed: false), OutlineCells.ProjectDot(Row(colour: BerryRed), selected: false));
 
     [Fact]
     public void A_task_in_no_project_has_no_dot()
@@ -40,12 +40,16 @@ public class OutlineColourTests
     }
 
     [Fact]
-    public void A_selected_row_keeps_the_accent_it_is_drawn_in()
+    public void A_selected_row_keeps_its_dot_inside_a_ring()
     {
-        // The accent is behind the row, and a colour picked to read against the panel has made no
-        // promise about reading against that.
-        Assert.Null(OutlineCells.ProjectDot(Row(colour: BerryRed), selected: true));
+        // The dot used to go when the row was selected, which read as the project losing its
+        // colour. The ring is what lets it read against the accent instead.
+        Assert.Equal(new ColourDot(BerryRed, Ringed: true), OutlineCells.ProjectDot(Row(colour: BerryRed), selected: true));
     }
+
+    [Fact]
+    public void A_selected_task_in_no_project_still_has_no_dot()
+        => Assert.Null(OutlineCells.ProjectDot(Row(project: string.Empty), selected: true));
 
     // ---- The labels ------------------------------------------------------------------------------
 

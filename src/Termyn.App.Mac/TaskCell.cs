@@ -11,9 +11,11 @@ namespace Termyn.App.Mac;
 /// </summary>
 /// <remarks>
 /// Colour on the second line is Todoist's, and only where it means something: an overdue date in
-/// red, the project's dot, each label in its own colour. On a selected row all of it gives way to
+/// red, the project's dot, each label in its own colour. On a selected row the words give way to
 /// the selection's text colour — the accent behind it is what the row is saying, and a second
 /// colour over it says less, which is the same rule <see cref="OutlineCells"/> keeps on Windows.
+/// The project's dot keeps its colour, ringed in the selection's text colour so it still reads
+/// against the accent; a dot that vanished as the row was picked looked like the project had gone.
 ///
 /// The circle is a button, so clicking it ticks the task off without taking the selection with it,
 /// the way the Windows box doesn't. The name is a label until it's renamed, when it becomes the
@@ -284,7 +286,7 @@ internal sealed class TaskCell : NSTableCellView
             if (line.Length > 0)
                 line.Append(Run("   ", null));
             if (OutlineCells.ProjectDot(row, Selected) is { } dot)
-                line.Append(Run("● ", Palette.Of(dot)));
+                line.Append(Palette.Dot(dot, _detail.Font));
             line.Append(Run(row.Project, quiet));
         }
 
