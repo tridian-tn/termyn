@@ -149,9 +149,18 @@ internal sealed class MainForm : Form
     /// <remarks>
     /// Read off the selection rather than held. Held, it went stale the moment the selection moved
     /// without passing through whatever set it — which it did.
+    ///
+    /// The outline's selection is read once. Each read asks the native list for every row in it,
+    /// and this is asked several times a render.
     /// </remarks>
     private PanelSubject Subject
-        => PanelSubject.Of(_outline.SelectedRow, _sidebar.SelectedNode?.Tag as SidebarNode);
+    {
+        get
+        {
+            var rows = _outline.SelectedRows;
+            return PanelSubject.Of(rows is [var only] ? only : null, _sidebar.SelectedNode?.Tag as SidebarNode, rows.Count);
+        }
+    }
 
     /// <summary>The task or project the comments hang off, or null when neither is picked out.</summary>
     private string? CommentsOwner => Subject.Id;
@@ -1482,17 +1491,18 @@ internal sealed class MainForm : Form
     ///
     /// The rows are republished from inside the fold and the list has taken them by the time it
     /// returns, so the selection read here is the one the fold left behind.
+    ///
+    /// Several selected are left alone while any of them is still on screen. Folded away together,
+    /// they go to the place the first of them was folded into.
     /// </remarks>
     /// <param name="fold">The fold to carry out, answering whether it changed anything</param>
     private void Folding(Func<bool> fold)
     {
-        var was = _outline.SelectedId;
+        var was = _outline.SelectedIds;
 
-        if (!fold() || was is null || _outline.SelectedId is not null)
-            return;
+        if (!fold() || was.Count == 0 || _outline.SelectedRows.Count > 0) return;
 
-        if (_presenter.NearestShown(was) is { } instead)
-            _outline.SelectId(instead);
+        if (_presenter.NearestShown(was[0]) is { } instead) _outline.SelectId(instead);
     }
 
     // ---- Rendering -----------------------------------------------------------------------------
@@ -3231,23 +3241,29 @@ internal sealed class MainForm : Form
     /// </summary>
     /// <param name="selection">The sidebar row to answer about, or null for none</param>
     /// <returns>What the menus would read from</returns>
-    internal CommandContext NewContext(SidebarNode? selection) => new(
-        _outline.SelectedRow,
-        _presenter.AbilitiesFor(_outline.SelectedId),
-        selection,
-        _presenter.ShowingCompleted,
-        _presenter.CanUndo,
-        _presenter.Sort,
-        !_detail.Panel2Collapsed,
-        _writingDescription,
-        _showingComments,
-        Zoomed,
-        _presenter.CanExpandAll,
-        _presenter.CanCollapseAll,
-        _presenter.SelectionAbilitiesFor(selection),
-        NewTaskText(selection),
-        _presenter.ReconnectNeeded,
-        _presenter.ScheduleDays);
+    internal CommandContext NewContext(SidebarNode? selection)
+    {
+        var rows = _outline.SelectedRows;
+
+        return new(
+            rows is [var only] ? only : null,
+            _presenter.AbilitiesForAll(rows.Select(r => r.Id).ToList()),
+            selection,
+            _presenter.ShowingCompleted,
+            _presenter.CanUndo,
+            _presenter.Sort,
+            !_detail.Panel2Collapsed,
+            _writingDescription,
+            _showingComments,
+            Zoomed,
+            _presenter.CanExpandAll,
+            _presenter.CanCollapseAll,
+            _presenter.SelectionAbilitiesFor(selection),
+            NewTaskText(selection),
+            _presenter.ReconnectNeeded,
+            _presenter.ScheduleDays,
+            rows.Count > 1 ? rows : null);
+    }
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
     /// <param name="selection">The row, or null for none</param>
@@ -3348,7 +3364,7 @@ internal sealed class MainForm : Form
     {
         // The outline turns away a right-click that missed every row, so what's left to catch here
         // is the keyboard asking for a menu with nothing selected — an empty list, most likely.
-        if (_outline.SelectedRow is null)
+        if (_outline.SelectedRows.Count == 0)
         {
             e.Cancel = true;
             return;
@@ -3533,7 +3549,14 @@ internal sealed class MainForm : Form
         }
 
         if (Presentation.Commands.IsTaskCommand(command))
-            return _outline.SelectedId is { } id && RunTaskCommand(command, id);
+        {
+            return _outline.SelectedRows switch
+            {
+                [var only] => RunTaskCommand(command, only.Id),
+                { Count: > 1 } several => RunOnSeveral(command, several),
+                _ => false,
+            };
+        }
 
         if (Presentation.Commands.IsSelectionCommand(command))
             return RunSelectionCommand(command);
@@ -3863,6 +3886,60 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// Runs an action on several tasks at once, or says why it can't be.
+    /// </summary>
+    /// <remarks>
+    /// The menus grey whatever needs a single task, but a keystroke reaches here without a menu
+    /// having opened, so the reason is still said.
+    /// </remarks>
+    /// <param name="command">The action to run</param>
+    /// <param name="rows">The tasks to run it on, top to bottom</param>
+    /// <returns>True when it changed something the server has yet to hear about</returns>
+    private bool RunOnSeveral(AppCommand command, IReadOnlyList<TaskRow> rows)
+    {
+        if (!Presentation.Commands.ActsOnSeveral(command))
+        {
+            _status.Text = Strings.OneTaskOnly;
+            return false;
+        }
+
+        var ids = rows.Select(r => r.Id).ToList();
+        var wrote = false;
+
+        switch (command)
+        {
+            // Put back only when every one of them is done already, which is when the menu says
+            // Reopen. Otherwise the open ones are ticked off and the done ones left as they are.
+            case AppCommand.ToggleComplete:
+                Guarded(() =>
+                {
+                    if (Presentation.Commands.Reopens(rows)) _presenter.Reopen(ids);
+                    else _presenter.Complete(rows.Where(r => !r.Completed).Select(r => r.Id).ToList());
+                });
+                return true;
+
+            case AppCommand.Priority1:
+            case AppCommand.Priority2:
+            case AppCommand.Priority3:
+            case AppCommand.Priority4:
+                Guarded(() => wrote = _presenter.SetPriority(ids, Presentation.Commands.PriorityOf(command) ?? Priority.P4));
+                return wrote;
+
+            case AppCommand.MoveTo:
+                Guarded(() => wrote = MoveElsewhere(ids));
+                return wrote;
+
+            // Unconfirmed for the reason a single delete is: Ctrl+Z brings the lot back.
+            case AppCommand.Delete:
+                Guarded(() => _presenter.Delete(ids));
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
     // ---- Outline keys --------------------------------------------------------------------------
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
@@ -3873,8 +3950,7 @@ internal sealed class MainForm : Form
 
         // A task command with no row under the cursor was never handled here: swallowing the key
         // would leave an empty list eating keystrokes that mean nothing in it.
-        if (Presentation.Commands.IsTaskCommand(command) && _outline.SelectedId is null)
-            return;
+        if (Presentation.Commands.IsTaskCommand(command) && _outline.SelectedRows.Count == 0) return;
 
         // Left unhandled deliberately: the editor is open by the time the control sees its own F2,
         // and suppressing the key would stop the two agreeing about what is being edited.
@@ -4066,8 +4142,15 @@ internal sealed class MainForm : Form
 
     private void BeginRename()
     {
-        if (_outline.SelectedIndices.Count > 0)
-            _outline.Items[_outline.SelectedIndices[0]].BeginEdit();
+        // The row of the task rather than the first index selected, which can be a day's heading
+        // that Shift took in along with it.
+        if (_outline.SelectedRow is { } row && _outline.RowOf(row.Id) is var index and >= 0)
+        {
+            _outline.Items[index].BeginEdit();
+            return;
+        }
+
+        if (_outline.SelectedRows.Count > 1) _status.Text = Strings.OneTaskOnly;
     }
 
     private void OnBeforeLabelEdit(object? sender, LabelEditEventArgs e)
@@ -4080,7 +4163,20 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var row = _outline.SelectedRow;
+        // The list starts an edit of its own on F2, on whichever row has the focus. With several
+        // selected there's no one task it's the name of.
+        if (_outline.SelectedRows.Count > 1)
+        {
+            e.CancelEdit = true;
+            _status.Text = Strings.OneTaskOnly;
+            return;
+        }
+
+        // The row the box is open over, which isn't always the one selected. The list's own F2
+        // opens it over whichever row has the focus, and Ctrl+click can leave the focus on a task
+        // it's just let go of. Taken from the selection, what was typed over one task renamed
+        // another.
+        var row = e.Item >= 0 && e.Item < _outline.Rows.Count ? _outline.Rows[e.Item] : null;
         _editingId = row?.Id;
         _editingText = row?.Content;
     }
@@ -4314,6 +4410,38 @@ internal sealed class MainForm : Form
             _outline.SelectId(id);
         else
             _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.MovedNotShown, destination.Path);
+
+        return true;
+    }
+
+    /// <summary>Sends several tasks to another project or section together.</summary>
+    /// <param name="ids">The tasks, top to bottom</param>
+    /// <returns>True when any of them moved</returns>
+    private bool MoveElsewhere(IReadOnlyList<string> ids)
+    {
+        // Refused whole rather than moving the rest: a completed task left behind where it was would
+        // look like the move hadn't worked for it.
+        if (!ids.All(_presenter.HasTask))
+        {
+            _status.Text = Strings.MoveCompletedRefused;
+            return false;
+        }
+
+        var heading = Plurals.Format(Strings.ResourceManager, nameof(Strings.MoveTasksCount_Other), ids.Count);
+        if (MoveTaskForm.Pick(this, heading, _presenter.DestinationsFor(ids), _theme) is not { } destination) return false;
+
+        if (_presenter.MoveTo(ids, destination) == 0)
+        {
+            _status.Text = Strings.MoveTargetGoneSeveral;
+            return false;
+        }
+
+        // The ones still in view stay selected by themselves. Only when none is left is there
+        // anything to say about where they went.
+        if (!_outline.Rows.Any(r => ids.Contains(r.Id)))
+        {
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.MovedNotShown, destination.Path);
+        }
 
         return true;
     }

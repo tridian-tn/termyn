@@ -977,4 +977,16 @@ The file is deleted from Todoist as well, and that can't be undone.</value>
     <value>Moved to {0}, which this view doesn't show.</value>
     <comment>Status bar after a move. {0} is where the task went, as a project and section path.</comment>
   </data>
+  <data name="MoveTasksCount_Other" xml:space="preserve">
+    <value>{0} tasks</value>
+    <comment>In the Move To dialog, the line above the box, in place of a task's name while several tasks are being moved together. {0} is how many, always more than one.</comment>
+  </data>
+  <data name="MoveTargetGoneSeveral" xml:space="preserve">
+    <value>Not moved — the tasks or where they were going are no longer there.</value>
+    <comment>Status bar when moving several tasks together moves none of them, because they or their destination were deleted while the dialog was open.</comment>
+  </data>
+  <data name="OneTaskOnly" xml:space="preserve">
+    <value>Select just one task for that.</value>
+    <comment>Status bar when a command that works on a single task, such as renaming or setting a due date, is asked for with several tasks selected in the list.</comment>
+  </data>
 </root>
