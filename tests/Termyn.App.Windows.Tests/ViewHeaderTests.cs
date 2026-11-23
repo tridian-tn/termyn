@@ -428,7 +428,7 @@ public class ViewHeaderTests : IDisposable
 
         Assert.Equal(ViewHeader.HeightAt(144), header.Height);
         Assert.All(header.Tools.Items.OfType<ToolStripButton>(), b => Assert.Equal(ViewHeader.ButtonSizeAt(144), b.Size));
-        Assert.Equal(36, panel.Height);
+        Assert.Equal(DetailHeader.LogicalHeight * 3 / 2, panel.Height);
         Assert.Equal(36, status.Height);
     }
 
