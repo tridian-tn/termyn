@@ -74,6 +74,8 @@ internal static class MainMenu
         //
         // As List and as Table are Finder's words for the same choice. Finder has ⌘1–4 for its view
         // styles, which here are the views themselves, so they take ⌃⌘ — the sidebar's modifiers.
+        // Group by Section takes ⌃⌘0 beside them, which is Finder's key for Use Groups. ⌘G would
+        // have matched Windows' Ctrl+G, but on a Mac it's Find Next.
         // Expand All and Collapse All have no keys: → and ← do a task at a time, as in Finder.
         Add(bar, Strings.MenuView,
             Item(Strings.MenuToday, ShowToday, "1"),
@@ -85,6 +87,7 @@ internal static class MainMenu
             NSMenuItem.SeparatorItem,
             new NSMenuItem(Strings.MenuSortBy) { Submenu = ViewMenus.SortByMenu(Strings.MenuSortBy) },
             new NSMenuItem(Strings.MenuColumns) { Submenu = ViewMenus.ColumnsMenu(Strings.MenuColumns) },
+            Item(Strings.MenuGroupBySection, ViewMenus.GroupBySection, "0", NSEventModifierMask.CommandKeyMask | NSEventModifierMask.ControlKeyMask),
             NSMenuItem.SeparatorItem,
             Item(Strings.MenuExpandAll, ViewMenus.ExpandAll),
             Item(Strings.MenuCollapseAll, ViewMenus.CollapseAll),

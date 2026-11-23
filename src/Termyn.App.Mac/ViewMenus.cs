@@ -27,6 +27,7 @@ internal static class ViewMenus
     public const string SortDescending = "sortDescending:";
     public const string ToggleColumn = "toggleTaskColumn:";
     public const string ShowAllColumns = "showAllTaskColumns:";
+    public const string GroupBySection = "toggleGroupBySection:";
     public const string ExpandAll = "expandAllTasks:";
     public const string CollapseAll = "collapseAllTasks:";
 

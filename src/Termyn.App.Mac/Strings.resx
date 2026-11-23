@@ -356,6 +356,10 @@
     <value>Columns</value>
     <comment>View menu submenu, and the menu on the table's header, that hides and shows the table's columns.</comment>
   </data>
+  <data name="MenuGroupBySection" xml:space="preserve">
+    <value>Group by Section</value>
+    <comment>View menu item, ticked while a project's tasks are shown under a heading for each of its sections.</comment>
+  </data>
   <data name="MenuExpandAll" xml:space="preserve">
     <value>Expand All</value>
     <comment>View menu item that shows every task's sub-tasks in the view.</comment>
