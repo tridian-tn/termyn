@@ -22,18 +22,11 @@ internal sealed class OutlineView : ListView
     private const int IndentAt96 = 18;
     private const int TextInset = 6;
 
-    /// <summary>
-    /// How much room the expander takes at the head of a row.
-    /// </summary>
-    /// <remarks>
-    /// Kept on every row and not only the ones that have an expander, so a task with sub-tasks and
-    /// one without still start their words in the same place. A gutter that appeared and vanished
-    /// would shuffle the whole column sideways as tasks gained and lost children.
-    /// </remarks>
-    private const int ExpanderAt96 = 14;
+    /// <summary>How much room the expander takes at the head of a row, the same as the sidebar's.</summary>
+    private const int ExpanderAt96 = ExpanderGlyph.RoomAt96;
 
     /// <summary>How big the arrow itself is drawn inside that room.</summary>
-    private const int ExpanderGlyphAt96 = 8;
+    private const int ExpanderGlyphAt96 = ExpanderGlyph.SizeAt96;
 
     /// <summary>
     /// How much room the box that ticks a task off takes, between the expander and the words.
@@ -1757,7 +1750,7 @@ internal sealed class OutlineView : ListView
 
                 // The words start after the expander whether or not there is one to draw.
                 if (row.HasChildren)
-                    DrawExpander(e.Graphics, Expander(bounds), row.Collapsed, AtScale(ExpanderGlyphAt96), selected ? Theme.OnAccent : Theme.Muted);
+                    ExpanderGlyph.Draw(e.Graphics, Expander(bounds), row.Collapsed, AtScale(ExpanderGlyphAt96), selected ? Theme.OnAccent : Theme.Muted);
 
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
@@ -1901,40 +1894,6 @@ internal sealed class OutlineView : ListView
         {
             g.SmoothingMode = was;
         }
-    }
-
-    /// <summary>
-    /// The arrow that hides and shows a task's sub-tasks — right when they are hidden, down when
-    /// they are not.
-    /// </summary>
-    /// <remarks>
-    /// Drawn rather than written. A glyph would mean a font that has it, which is a thing to check
-    /// for and fall back from, and three points are cheaper than either. Filled rather than outlined
-    /// so it reads at this size in both themes.
-    /// </remarks>
-    /// <param name="g">What to draw on</param>
-    /// <param name="bounds">The room the expander has</param>
-    /// <param name="collapsed">Whether the sub-tasks are currently hidden</param>
-    /// <param name="glyph">How big the arrow is at most, at the display's scale</param>
-    /// <param name="colour">What to draw it in</param>
-    private static void DrawExpander(Graphics g, Rectangle bounds, bool collapsed, int glyph, Color colour)
-    {
-        var size = Math.Min(glyph, Math.Min(bounds.Width, bounds.Height));
-        var left = bounds.X + ((bounds.Width - size) / 2);
-        var top = bounds.Y + ((bounds.Height - size) / 2);
-
-        var arrow = collapsed
-            ? new[] { new Point(left, top), new Point(left + size, top + (size / 2)), new Point(left, top + size) }
-            : new[] { new Point(left, top), new Point(left + size, top), new Point(left + (size / 2), top + size) };
-
-        // Smoothed, since the diagonals are the whole shape and unsmoothed they read as a staircase.
-        var was = g.SmoothingMode;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-        using (var brush = new SolidBrush(colour))
-            g.FillPolygon(brush, arrow);
-
-        g.SmoothingMode = was;
     }
 
     /// <summary>Faint vertical rules showing how deep a sub-task sits.</summary>
