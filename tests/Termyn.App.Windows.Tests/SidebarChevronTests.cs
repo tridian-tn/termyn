@@ -96,10 +96,23 @@ public class SidebarChevronTests
     }
 
     [WinFormsFact]
-    public void A_sidebar_too_narrow_for_the_arrow_leaves_the_name_no_room_rather_than_less_than_none()
+    public void A_row_too_narrow_for_the_gap_keeps_the_arrow_inside_it()
     {
-        var (text, _) = SidebarChevron.Layout(new Rectangle(10, 20, 6, 18), textWidth: 50, gap: 5, Arrow);
+        // Six pixels: room for the arrow but not the gap in front of it. The name gets nothing,
+        // never less than nothing, and the gap gives way so the arrow isn't drawn past the edge.
+        var bounds = new Rectangle(10, 20, 6, 18);
+        var (text, arrow) = SidebarChevron.Layout(bounds, textWidth: 50, gap: 5, Arrow);
 
         Assert.Equal(0, text.Width);
+        Assert.Equal(bounds.Right, arrow.Right);
+    }
+
+    [WinFormsFact]
+    public void A_row_too_narrow_for_the_arrow_starts_it_at_the_row_rather_than_before_it()
+    {
+        var bounds = new Rectangle(10, 20, 2, 18);
+        var (_, arrow) = SidebarChevron.Layout(bounds, textWidth: 50, gap: 5, Arrow);
+
+        Assert.Equal(bounds.X, arrow.X);
     }
 }

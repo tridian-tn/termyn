@@ -31,7 +31,8 @@ internal static class SidebarChevron
     /// <remarks>
     /// The arrow follows the name rather than sitting at the sidebar's right edge, so it reads as
     /// part of the heading. When the sidebar's too narrow for both, the name gives way and the
-    /// arrow stays: it's the one thing saying there's more under the heading.
+    /// arrow stays: it's the one thing saying there's more under the heading. Narrower still, the
+    /// gap goes too, and the arrow sits against the row's right edge rather than past it.
     /// </remarks>
     /// <param name="bounds">The room the heading has</param>
     /// <param name="textWidth">How wide the name is when written in full</param>
@@ -41,7 +42,7 @@ internal static class SidebarChevron
     internal static (Rectangle Text, Rectangle Arrow) Layout(Rectangle bounds, int textWidth, int gap, Size size)
     {
         var textRoom = Math.Max(0, Math.Min(textWidth, bounds.Width - gap - size.Width));
-        var left = bounds.X + textRoom + gap;
+        var left = Math.Max(bounds.X, Math.Min(bounds.X + textRoom + gap, bounds.Right - size.Width));
         var top = bounds.Y + ((bounds.Height - size.Height) / 2);
 
         return (bounds with { Width = textRoom }, new Rectangle(left, top, size.Width, size.Height));
