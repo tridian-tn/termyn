@@ -138,6 +138,10 @@ internal sealed class SidebarTree : BufferedTreeView
     /// <summary>
     /// Folds or unfolds the row whose arrow a press landed on, if it landed on one.
     /// </summary>
+    /// <remarks>
+    /// Takes the focus as the tree's own press would have, as the outline does for its arrows.
+    /// Without it, the arrow keys would go on moving through the outline after a click here.
+    /// </remarks>
     /// <param name="client">Where the press was, in the tree's own coordinates</param>
     /// <returns>True when the press was on an arrow, and so is taken from the tree</returns>
     internal bool TookPress(Point client)
@@ -145,6 +149,7 @@ internal sealed class SidebarTree : BufferedTreeView
         if (ExpanderAt(client) is not { } row)
             return false;
 
+        Focus();
         OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, client.X, client.Y, 0));
         row.Toggle();
         return true;

@@ -91,6 +91,23 @@ public class SidebarExpanderTests
     }
 
     [WinFormsFact]
+    public void A_click_on_the_arrow_brings_the_focus_to_the_sidebar()
+    {
+        // From wherever it was, as a click anywhere else on the tree would: left behind, the arrow
+        // keys go on moving through the outline after a row here has been folded.
+        using var form = Window();
+        var elsewhere = new TextBox { Dock = DockStyle.Top };
+        form.Controls.Add(elsewhere);
+        var tree = Tree(form);
+        elsewhere.Focus();
+        Assert.True(elsewhere.Focused);
+
+        Press(tree, WmLButtonDown, OnArrow(tree, Labels(tree)));
+
+        Assert.True(tree.Focused);
+    }
+
+    [WinFormsFact]
     public void A_second_quick_click_on_the_arrow_unfolds_it_again()
     {
         // The second press of two in quick succession arrives as a double-click, which the tree
