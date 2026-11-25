@@ -59,8 +59,8 @@ internal sealed class MainForm : Form
 
     /// <summary>
     /// The space around the search box at 100%, so it sits in from the window's edges rather than
-    /// running into them. The sides line its border up with where the sidebar's text starts below
-    /// it, which is <see cref="DotLead"/> scaled the same way.
+    /// running into them. The sides line its border up with the column of arrows in the sidebar
+    /// below it, each centred in the room <see cref="ExpanderGlyph.RoomAt96"/> gives it.
     /// </summary>
     internal static readonly Padding SearchPadding = new(4, 6, 4, 6);
 
@@ -342,6 +342,10 @@ internal sealed class MainForm : Form
             HideSelection = true,
             ShowLines = false,
             ShowRootLines = false,
+
+            // The arrows are drawn with the rows, the outline's own, and the tree's boxes would be a
+            // second kind beside them.
+            ShowPlusMinus = false,
             FullRowSelect = true,
             Indent = SidebarIndent,
             BorderStyle = BorderStyle.None,
@@ -2006,24 +2010,29 @@ internal sealed class MainForm : Form
     private const int DotSize = 8;
 
     /// <summary>
-    /// How far in from the text's own left edge the dot starts.
+    /// How far past the arrow's room the dot starts.
     /// </summary>
     /// <remarks>
-    /// The expander is drawn immediately to the left of that edge, with next to nothing between the
-    /// two, so a dot starting there sits against it while the same expander has clear space on its
-    /// other side. Scaled with the display, since the expander is.
+    /// The arrow is centred in its room, so it already has a little clear space on its right; this
+    /// takes the dot far enough on that it reads as the row's and not as part of the arrow. Scaled
+    /// with the display, since the arrow is.
     /// </remarks>
     private const int DotLead = 4;
 
     /// <summary>
-    /// Draws a row of the dot column: its name, and the dot in front of it where it has one.
+    /// Draws a sidebar row: its arrow where it folds, its dot where it has one, and its name.
     /// </summary>
     /// <remarks>
+    /// The arrow is the outline's, drawn here rather than left to the tree, whose own boxes didn't
+    /// match it and which draws nothing at all for the headings: they're its top rows, and the tree
+    /// only draws those an expander with lines running to them. Every row keeps the arrow's room
+    /// whether or not it has one, so the names line up down the sidebar.
+    ///
     /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
     /// display is scaled to — an image list would have had to be rebuilt at every DPI.
     ///
-    /// Every other row is left to the tree, which keeps the headings' own font and both of the ways
-    /// a selected row is marked.
+    /// The row's background is left to the tree, which keeps both of the ways a selected row is
+    /// marked.
     /// </remarks>
     private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
     {
@@ -2034,7 +2043,18 @@ internal sealed class MainForm : Form
         }
 
         var bounds = Widened(e.Bounds, _sidebar.ClientSize.Width);
-        var taken = 0;
+        var lit = Lit(drawn, e.State);
+        var taken = _sidebar.ExpanderRoom;
+
+        if (drawn.Nodes.Count > 0)
+        {
+            ExpanderGlyph.Draw(
+                e.Graphics,
+                bounds with { Width = taken },
+                collapsed: !drawn.IsExpanded,
+                _sidebar.LogicalToDeviceUnits(ExpanderGlyph.SizeAt96),
+                lit ? SystemColors.HighlightText : _theme.Muted);
+        }
 
         if (node.SitsInDotColumn)
         {
@@ -2045,26 +2065,27 @@ internal sealed class MainForm : Form
             {
                 Dots.Fill(
                     e.Graphics,
-                    new Rectangle(bounds.X + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
+                    new Rectangle(bounds.X + taken + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
                     Theme.ToColor(colour));
             }
 
-            // The text keeps its full width rather than losing the dot's room: the row's background
-            // is already drawn, and a name shortened by a dot would be the wrong thing to trim.
-            taken = lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
+            taken += lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
         }
 
+        // The text keeps its full width rather than losing the arrow's and the dot's room: the
+        // row's background is already drawn, and a name shortened by them would be the wrong thing
+        // to trim.
         TextRenderer.DrawText(
             e.Graphics,
             drawn.Text,
             drawn.NodeFont ?? _sidebar.Font,
             bounds with { X = bounds.X + taken },
-            Writing(drawn, e.State),
+            lit ? SystemColors.HighlightText : drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor,
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
     }
 
     /// <summary>
-    /// What to write a sidebar row in.
+    /// Whether a sidebar row is drawn on the focused selection's highlight, and so in its ink.
     /// </summary>
     /// <remarks>
     /// The selection is taken from the tree as well as from the row handed over, because the two
@@ -2075,16 +2096,9 @@ internal sealed class MainForm : Form
     /// </remarks>
     /// <param name="drawn">The row being drawn</param>
     /// <param name="state">What the tree says about it</param>
-    /// <returns>The colour to write its name in</returns>
-    private Color Writing(TreeNode drawn, TreeNodeStates state)
-    {
-        var selected = (state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn;
-
-        if (selected && _sidebar.Focused)
-            return SystemColors.HighlightText;
-
-        return drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor;
-    }
+    /// <returns>True when it's on the highlight</returns>
+    private bool Lit(TreeNode drawn, TreeNodeStates state)
+        => ((state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn) && _sidebar.Focused;
 
     /// <summary>
     /// A row's text given the rest of the sidebar's width to be written in.

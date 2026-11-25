@@ -25,6 +25,8 @@ internal sealed class SidebarTree : BufferedTreeView
     /// </summary>
     private const int ScrollEvery = 60;
 
+    private const int WmLButtonDown = 0x0201;
+
     public SidebarTree()
     {
         AllowDrop = true;
@@ -94,6 +96,75 @@ internal sealed class SidebarTree : BufferedTreeView
 
     /// <summary>When the tree last scrolled for a drag, so holding still near an edge doesn't race.</summary>
     private long _scrolled;
+
+    /// <summary>The room at the head of every row that a row's arrow takes, at the display's scale.</summary>
+    internal int ExpanderRoom => LogicalToDeviceUnits(ExpanderGlyph.RoomAt96);
+
+    /// <summary>
+    /// The row whose arrow is under a point, or null when there's no arrow there.
+    /// </summary>
+    /// <param name="client">The point, in the tree's own coordinates</param>
+    /// <returns>The row that folds, or null</returns>
+    internal TreeNode? ExpanderAt(Point client)
+        => GetNodeAt(client) is { Nodes.Count: > 0 } row && OnExpander(row.Bounds, ExpanderRoom, client) ? row : null;
+
+    /// <summary>
+    /// Whether a point is in the room at the head of a row that its arrow is drawn in.
+    /// </summary>
+    /// <param name="row">Where the tree puts the row's text, which the arrow's room starts</param>
+    /// <param name="room">How wide the arrow's room is</param>
+    /// <param name="client">The point, in the tree's own coordinates</param>
+    /// <returns>True when the point is on the arrow</returns>
+    internal static bool OnExpander(Rectangle row, int room, Point client)
+        => client.X >= row.Left && client.X < row.Left + room && client.Y >= row.Top && client.Y < row.Bottom;
+
+    /// <summary>
+    /// Folds or unfolds a row when its arrow is clicked, the way the outline's arrows work.
+    /// </summary>
+    /// <remarks>
+    /// Taken before the tree sees the press, which would otherwise select the row and open its
+    /// view, and a click on a project's arrow is asking to see under it, not to go to it. A second
+    /// press in quick succession comes as a double-click, which is left to the tree: it toggles the
+    /// row without selecting it, which is what a second click on the arrow should do anyway.
+    /// </remarks>
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmLButtonDown && TookPress(PointOf(m.LParam)))
+            return;
+
+        base.WndProc(ref m);
+    }
+
+    /// <summary>
+    /// Folds or unfolds the row whose arrow a press landed on, if it landed on one.
+    /// </summary>
+    /// <remarks>
+    /// Takes the focus as the tree's own press would have, as the outline does for its arrows.
+    /// Without it, the arrow keys would go on moving through the outline after a click here.
+    /// </remarks>
+    /// <param name="client">Where the press was, in the tree's own coordinates</param>
+    /// <returns>True when the press was on an arrow, and so is taken from the tree</returns>
+    internal bool TookPress(Point client)
+    {
+        if (ExpanderAt(client) is not { } row)
+            return false;
+
+        Focus();
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, client.X, client.Y, 0));
+        row.Toggle();
+        return true;
+    }
+
+    /// <summary>
+    /// Where a mouse message says the pointer was.
+    /// </summary>
+    /// <param name="lParam">The message's lParam, which holds the two as signed sixteen-bit halves</param>
+    /// <returns>The point, in the window's own coordinates</returns>
+    internal static Point PointOf(IntPtr lParam)
+    {
+        var packed = (int)(long)lParam;
+        return new Point((short)(packed & 0xFFFF), (short)((packed >> 16) & 0xFFFF));
+    }
 
     /// <summary>
     /// Starts a drag from a row, where the presenter allows one.
