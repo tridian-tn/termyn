@@ -120,4 +120,49 @@ public class SidebarSelectionTests : IDisposable
         Assert.Equal(WindowTheme.Background.ToArgb(), Background(bitmap));
         Assert.False(Shows(bitmap, WindowTheme.Accent), "A row that isn't selected has the accent on it.");
     }
+
+    [WinFormsFact]
+    public void A_press_lights_its_row_before_the_tree_has_selected_it()
+    {
+        // The tree selects on the button coming up, in case the press is a drag. Its own drawing
+        // lit the row in the meantime, and with that gone nothing showed the click had landed.
+        using var window = Window();
+        var tree = TestWindow.Find<SidebarTree>(window);
+        var row = Rows(tree.Nodes).First(n => n.Tag is SidebarNode { Label: "Errands" });
+
+        tree.Press(Middle(row));
+
+        Assert.Same(row, tree.Pressed);
+        Assert.NotSame(row, tree.SelectedNode);
+        Assert.True(window.Lit(row, default));
+    }
+
+    [WinFormsFact]
+    public void Letting_go_puts_the_row_back_to_how_the_selection_has_it()
+    {
+        using var window = Window();
+        var tree = TestWindow.Find<SidebarTree>(window);
+        var row = Rows(tree.Nodes).First(n => n.Tag is SidebarNode { Label: "Errands" });
+        tree.Press(Middle(row));
+
+        tree.Release();
+
+        Assert.Null(tree.Pressed);
+        Assert.False(window.Lit(row, default));
+    }
+
+    [WinFormsFact]
+    public void A_press_on_no_row_lights_nothing()
+    {
+        using var window = Window();
+        var tree = TestWindow.Find<SidebarTree>(window);
+        var last = Rows(tree.Nodes).Where(n => n.IsVisible).Last();
+
+        tree.Press(new Point(tree.ClientSize.Width / 2, last.Bounds.Bottom + (tree.ItemHeight * 3)));
+
+        Assert.Null(tree.Pressed);
+    }
+
+    /// <summary>The middle of a row's name, in the tree's own coordinates.</summary>
+    private static Point Middle(TreeNode row) => new(row.Bounds.X + (row.Bounds.Width / 2), row.Bounds.Y + (row.Bounds.Height / 2));
 }

@@ -2203,17 +2203,21 @@ internal sealed class MainForm : Form
     /// Whether a sidebar row is drawn as the focused selection, on the accent and in its ink.
     /// </summary>
     /// <remarks>
-    /// The selection is taken from the tree as well as from the row handed over, because the two
-    /// disagree for as long as a mouse button is held: the row is selected the moment the button
-    /// goes down, and the tree holds the item's own selected state back until it goes up in case
-    /// the press turns into a drag. Read from the state alone, a click would only light the row
-    /// once the button came back up.
+    /// A row the button is being held on is lit, and it's the only one: the tree doesn't select it
+    /// until the button comes up, in case the press turns into a drag, and lighting it straight
+    /// away is how Windows' own trees show the click has landed. Lit whether or not the tree has
+    /// the focus yet, since the press is about to give it the focus.
+    ///
+    /// Otherwise the selection is read from the tree as well as from the row handed over. The two
+    /// can disagree for a moment as the selection moves, and either is enough.
     /// </remarks>
     /// <param name="drawn">The row being drawn</param>
     /// <param name="state">What the tree says about it</param>
     /// <returns>True when it's on the highlight</returns>
-    private bool Lit(TreeNode drawn, TreeNodeStates state)
-        => ((state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn) && _sidebar.Focused;
+    internal bool Lit(TreeNode drawn, TreeNodeStates state)
+        => _sidebar.Pressed is { } pressed
+            ? pressed == drawn
+            : ((state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn) && _sidebar.Focused;
 
     /// <summary>
     /// A row's text given the rest of the sidebar's width to be written in.
