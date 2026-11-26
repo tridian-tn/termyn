@@ -58,22 +58,26 @@ public class DescriptionModeTests
     // ---- Ctrl+E ----------------------------------------------------------------------------------
 
     [WinFormsFact]
-    public void Ctrl_and_E_opens_the_markdown_and_closes_it_again()
+    public void Ctrl_and_E_opens_the_markdown_and_only_Escape_closes_it()
     {
-        // From the rendering as well as the markdown. A read-only rich edit control takes Ctrl+E for
-        // itself, to centre the paragraph, so this is also checking the window gets there first.
+        // From the rendering. A read-only rich edit control takes Ctrl+E for itself, to centre the
+        // paragraph, so this is also checking the window gets there first. Edit description is an
+        // action like Rename, not a switch, so a second Ctrl+E leaves the markdown where it is.
         using var window = Window("termyn-ctrl-e.json", out var view, out var editor);
 
         Press(view, Keys.Control | Keys.E);
         Assert.True(Writing(window), "Ctrl+E didn't open the markdown");
 
         Press(editor, Keys.Control | Keys.E);
-        Assert.False(Writing(window), "Ctrl+E didn't close the markdown");
+        Assert.True(Writing(window), "a second Ctrl+E closed the markdown");
+
+        Press(editor, Keys.Escape);
+        Assert.False(Writing(window), "Escape didn't close the markdown");
         Assert.Equal("Notes", editor.Text);
     }
 
     [WinFormsFact]
-    public void Ctrl_and_E_from_the_outline_switches_the_description_in_front()
+    public void Ctrl_and_E_from_the_outline_opens_the_markdown()
     {
         using var window = Window("termyn-ctrl-e-outline.json", out _, out _);
 
@@ -83,9 +87,9 @@ public class DescriptionModeTests
     }
 
     [WinFormsFact]
-    public void Ctrl_and_E_leaves_a_shut_panel_shut()
+    public void Ctrl_and_E_opens_a_shut_panel_on_the_markdown()
     {
-        // Bringing the description forward is F6's job. Ctrl+E only switches the one in front.
+        // Asked for by name, so it opens the panel, where Return on a task won't.
         using var window = Window("termyn-ctrl-e-shut.json", out _, out _);
         window.Run(AppCommand.ToggleDescription);
         Assert.False(window.NewContext(null).ShowingDescription, "the panel didn't shut, so this says nothing");
@@ -93,21 +97,36 @@ public class DescriptionModeTests
         Press(TestWindow.Find<OutlineView>(window), Keys.Control | Keys.E);
 
         var context = window.NewContext(null);
-        Assert.False(context.ShowingDescription, "the panel opened");
-        Assert.False(context.WritingDescription, "the markdown opened behind a shut panel");
+        Assert.True(context.ShowingDescription, "the panel stayed shut");
+        Assert.True(context.WritingDescription, "the panel opened on the rendering");
     }
 
     [WinFormsFact]
-    public void Ctrl_and_E_leaves_the_comments_in_front()
+    public void Edit_description_with_nothing_to_write_to_leaves_the_panel_alone()
     {
-        using var window = Window("termyn-ctrl-e-comments.json", out _, out _);
+        // The menu has it greyed, so the key does nothing either: nothing is selected, and taking
+        // the comments away to show a description that can't be typed into would be a move for
+        // nothing.
+        using var window = TestWindow.Build("termyn-edit-nothing.json");
+        _ = window.Handle;
+        window.ShowPanelTab(comments: true);
+
+        window.Run(AppCommand.EditDescription);
+
+        Assert.True(window.NewContext(null).ShowingComments, "the comments were taken away");
+    }
+
+    [WinFormsFact]
+    public void Edit_description_from_the_comments_goes_to_the_markdown()
+    {
+        using var window = Window("termyn-edit-from-comments.json", out _, out _);
         window.ShowPanelTab(comments: true);
 
         window.Run(AppCommand.EditDescription);
 
         var context = window.NewContext(null);
-        Assert.True(context.ShowingComments, "the description was brought forward");
-        Assert.False(context.WritingDescription, "the markdown opened behind the comments");
+        Assert.False(context.ShowingComments, "the comments stayed in front");
+        Assert.True(context.WritingDescription, "the markdown didn't open");
     }
 
     // ---- F6 and F7 -------------------------------------------------------------------------------
@@ -152,6 +171,23 @@ public class DescriptionModeTests
         Assert.True(TestWindow.Find<CommentsView>(window).ContainsFocus, "the keyboard stayed where it was");
     }
 
+    [WinFormsFact]
+    public void Return_in_the_rendering_after_F6_opens_the_markdown()
+    {
+        using var window = Window("termyn-f6-return.json", out var view, out var editor, shown: true);
+        var outline = TestWindow.Find<OutlineView>(window);
+        outline.Focus();
+        Application.DoEvents();
+
+        Press(outline, Keys.F6);
+        Assert.True(view.Focused, "F6 didn't take the keyboard to the rendering, so this says nothing");
+
+        Press(view, Keys.Return);
+
+        Assert.True(Writing(window), "Return in the rendering didn't open the markdown");
+        Assert.True(editor.Focused, "the keyboard didn't go to the markdown");
+    }
+
     // ---- Return on a task ------------------------------------------------------------------------
 
     [WinFormsTheory]
@@ -191,11 +227,15 @@ public class DescriptionModeTests
     }
 
     [WinFormsFact]
-    public void The_menu_entry_is_lit_over_a_description_that_can_be_written_to()
+    public void The_menu_entry_is_lit_over_a_description_that_can_be_written_to_until_it_is_being_written()
     {
         using var window = Window("termyn-edit-entry-lit.json", out _, out _);
 
         Assert.True(Commands.StateOf(AppCommand.EditDescription, window.NewContext(null)).Enabled);
+
+        window.Run(AppCommand.EditDescription);
+
+        Assert.False(Commands.StateOf(AppCommand.EditDescription, window.NewContext(null)).Enabled);
     }
 
     // ---- The pencil ------------------------------------------------------------------------------
@@ -219,14 +259,19 @@ public class DescriptionModeTests
     }
 
     [WinFormsFact]
-    public void The_pencil_is_named_for_the_menu_entry_with_its_key()
+    public void The_pencil_is_named_for_what_a_click_would_do_with_the_key_that_does_the_same()
     {
+        // The name's what a screen reader reads; the tooltip adds the key a picture can't show.
         using var window = Window("termyn-pencil-name.json", out _, out _);
         var pencil = Pencil(window);
 
-        // The name's what a screen reader reads; the tooltip adds the key a picture can't show.
         Assert.Equal("Edit description", pencil.Text);
         Assert.Equal("Edit description (Ctrl+E)", pencil.ToolTipText);
+
+        pencil.PerformClick();
+
+        Assert.Equal("Preview description", pencil.Text);
+        Assert.Equal("Preview description (Esc)", pencil.ToolTipText);
     }
 
     [WinFormsFact]
@@ -288,8 +333,7 @@ public class DescriptionModeTests
         }
     }
 
-    private static ToolStripButton Pencil(MainForm window)
-        => TestWindow.Find<DescriptionBar>(window).Pencil ?? throw new InvalidOperationException("The pencil was never put up.");
+    private static ToolStripButton Pencil(MainForm window) => TestWindow.Find<DescriptionBar>(window).Pencil;
 
     // ---- The ring --------------------------------------------------------------------------------
 

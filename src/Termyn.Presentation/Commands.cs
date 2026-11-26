@@ -483,13 +483,14 @@ public static class Commands
                 Strings.CommandViewComments,
                 !context.ShowingDescription || !context.ShowingComments),
 
-            // Switches the description in front between the rendering and the markdown, ticked
-            // while it's the markdown. Greyed with the description not in front, since getting it
-            // there is View description's job, and where nothing typed would be kept.
+            // An action, like Rename, and not a switch: it opens the description's markdown, from
+            // wherever the keyboard is, and Escape is the way out. So no tick, and greyed while the
+            // markdown is already in front, where running it would do nothing. Greyed too where
+            // nothing typed would be kept.
             AppCommand.EditDescription => new CommandState(
                 Strings.CommandEditDescription,
-                context.CanWriteDescription && context.ShowingDescription && !context.ShowingComments,
-                context.ShowingDescription && !context.ShowingComments && context.WritingDescription),
+                context.CanWriteDescription
+                    && !(context.ShowingDescription && !context.ShowingComments && context.WritingDescription)),
 
             // The description panel already zooms to the wheel; these are the same thing said out
             // loud, for anybody who doesn't know the wheel does it. Offered on the same terms as

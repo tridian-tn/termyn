@@ -11,9 +11,8 @@ namespace Termyn.App.Windows;
 /// </summary>
 /// <remarks>
 /// One button that stays pressed while the markdown is showing, like a Bold button stays pressed in
-/// bold text, rather than a pair. It's the Edit description entry in the View menu drawn another way:
-/// what it's called and whether it's lit come from <see cref="Presentation.Commands.StateOf"/>, so
-/// the two can't disagree.
+/// bold text, rather than a pair. A switch, where the Task menu's Edit description is an action that
+/// only goes one way, so it says what a click would do next rather than wearing that entry's name.
 ///
 /// On the left, where the eye starts along the strip and where formatting buttons would follow it.
 ///
@@ -71,15 +70,32 @@ internal sealed class DescriptionBar : Panel
             ShowItemToolTips = true,
         };
 
+        // Greyed until Render says there's something to write to.
+        Pencil = new ToolStripButton
+        {
+            DisplayStyle = ToolStripItemDisplayStyle.None,
+            AutoSize = false,
+            Size = ButtonSizeAt(_dpi),
+            AutoToolTip = false,
+            Enabled = false,
+        };
+
+        Pencil.Click += (_, _) => PencilClicked?.Invoke();
+        Tools.Items.Add(Pencil);
+
         Controls.Add(Tools);
+        Render(writing: false, writable: false);
         ApplyTheme();
     }
+
+    /// <summary>Raised when the pencil's clicked.</summary>
+    public event Action? PencilClicked;
 
     /// <summary>The buttons, for a test to click.</summary>
     internal ToolStrip Tools { get; }
 
-    /// <summary>The pencil, once <see cref="Fill"/> has put it up.</summary>
-    internal ToolStripButton? Pencil { get; private set; }
+    /// <summary>The pencil, for a test to click.</summary>
+    internal ToolStripButton Pencil { get; }
 
     /// <summary>The colours to draw with.</summary>
     [Browsable(false)]
@@ -95,46 +111,36 @@ internal sealed class DescriptionBar : Panel
     }
 
     /// <summary>
-    /// Puts up the pencil, greyed until <see cref="Render"/> says otherwise.
-    /// </summary>
-    /// <param name="command">The command the pencil runs</param>
-    /// <param name="run">Called with it when the pencil's clicked</param>
-    public void Fill(AppCommand command, Action<AppCommand> run)
-    {
-        Pencil = new ToolStripButton
-        {
-            Tag = command,
-            DisplayStyle = ToolStripItemDisplayStyle.None,
-            AutoSize = false,
-            Size = ButtonSizeAt(_dpi),
-            AutoToolTip = false,
-            Enabled = false,
-        };
-
-        Pencil.Click += (_, _) => run(command);
-        Tools.Items.Add(Pencil);
-    }
-
-    /// <summary>
-    /// Names, lights and presses the pencil for what the description is doing now.
+    /// Presses the pencil in or lets it out, says what clicking it would do, and greys it where
+    /// there's nothing to write to.
     /// </summary>
     /// <remarks>
-    /// The name goes on the button as well as in its tooltip, though it isn't drawn: it's what a
-    /// screen reader says the button is called. The tooltip adds the key, since a picture can't say
-    /// it and a menu entry can.
+    /// Named for the click to come, the way a play button reads Pause while something's playing:
+    /// pressed in over the markdown it offers the rendering, and let out over the rendering it
+    /// offers the markdown. The key that does the same goes in the tooltip, since a picture can't
+    /// show it. The name goes on the button as well, though it isn't drawn: it's what a screen
+    /// reader says the button is called.
     /// </remarks>
-    /// <param name="state">The command's state, as the View menu would show it</param>
-    public void Render(CommandState state)
+    /// <param name="writing">True while the markdown is showing</param>
+    /// <param name="writable">False where the account wouldn't keep anything typed</param>
+    public void Render(bool writing, bool writable)
     {
-        if (Pencil is null)
-            return;
+        Pencil.Checked = writing;
+        Pencil.Enabled = writable;
 
-        var key = Shortcuts.ShortcutFor((AppCommand)Pencil.Tag!);
-
-        Pencil.Text = state.Label;
-        Pencil.ToolTipText = key.Length == 0 ? state.Label : $"{state.Label} ({key})";
-        Pencil.Enabled = state.Enabled;
-        Pencil.Checked = state.Checked;
+        if (writing)
+        {
+            Pencil.Text = Strings.PencilPreview;
+            Pencil.ToolTipText = Strings.PencilPreviewTip;
+        }
+        else
+        {
+            Pencil.Text = Strings.PencilEdit;
+            Pencil.ToolTipText = string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                Strings.PencilEditTip,
+                Shortcuts.ShortcutFor(AppCommand.EditDescription));
+        }
     }
 
     /// <summary>Sizes the strip and the pencil for a display's scale.</summary>
@@ -143,9 +149,7 @@ internal sealed class DescriptionBar : Panel
     {
         _dpi = dpi;
         Height = StartupLayout.Scaled(LogicalHeight, dpi);
-
-        if (Pencil is not null)
-            Pencil.Size = ButtonSizeAt(dpi);
+        Pencil.Size = ButtonSizeAt(dpi);
     }
 
     /// <summary>Draws the rule between the strip and the description under it.</summary>

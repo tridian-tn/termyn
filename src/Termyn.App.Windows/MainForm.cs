@@ -473,7 +473,7 @@ internal sealed class MainForm : Form
         _descriptionFrame.Controls.Add(_rendered);
 
         _descriptionBar = new DescriptionBar();
-        _descriptionBar.Fill(AppCommand.EditDescription, Run);
+        _descriptionBar.PencilClicked += () => Guarded(TogglePencil);
 
         // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
@@ -2532,17 +2532,7 @@ internal sealed class MainForm : Form
     {
         var writable = !_description.ReadOnly;
         _descriptionFrame.TakesTyping = _writingDescription && writable;
-
-        // Only what the entry's state is read from, rather than the whole of NewContext: this runs
-        // on every switch between reading and writing, and in the constructor before there's a
-        // selection to ask about.
-        var context = new CommandContext(
-            ShowingDescription: !_detail.Panel2Collapsed,
-            WritingDescription: _writingDescription,
-            ShowingComments: _showingComments,
-            CanWriteDescription: writable);
-
-        _descriptionBar.Render(Presentation.Commands.StateOf(AppCommand.EditDescription, context));
+        _descriptionBar.Render(_writingDescription, writable);
     }
 
     // ---- Comments ----------------------------------------------------------------------------------
@@ -3025,18 +3015,40 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Edit description, from the View menu, Ctrl+E or the pencil above the description: switches
-    /// the description in front between the rendering and the markdown.
+    /// Edit description, from the Task menu or Ctrl+E: on to the description, in the markdown,
+    /// with the keyboard.
     /// </summary>
     /// <remarks>
-    /// Only ever the description that's already in front. Getting there is F6's job, and a key that
-    /// did both left two ways to reach the same tab that differed only in the mode they arrived in.
-    ///
-    /// Going back takes the keyboard to the rendering only if the description had it. An empty
-    /// description opens in the markdown without the focus, and looking at it formatted shouldn't
-    /// pull the keyboard off the outline.
+    /// One way only, like Rename: Escape is how you leave. So it does nothing with the markdown
+    /// already in front, where the menu has it greyed, and nothing where typing wouldn't be kept.
+    /// From a shut panel it opens the panel, since this is asked for by name.
     /// </remarks>
-    private void ToggleWriting()
+    private void EditDescription()
+    {
+        if (_description.ReadOnly)
+            return;
+
+        if (_writingDescription && !_detail.Panel2Collapsed && !_showingComments)
+            return;
+
+        ShowPanelTab(comments: false);
+
+        if (_writingDescription)
+            _description.Focus();
+        else
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+    }
+
+    /// <summary>
+    /// The pencil above the description: switches it between the rendering and the markdown.
+    /// </summary>
+    /// <remarks>
+    /// A real switch, unlike the menu entry, since a button can show which way it's set by being
+    /// pressed in. Going back takes the keyboard to the rendering only if the description had it:
+    /// an empty description opens in the markdown without the focus, and looking at it formatted
+    /// shouldn't pull the keyboard off the outline.
+    /// </remarks>
+    private void TogglePencil()
     {
         if (_detail.Panel2Collapsed || _showingComments)
             return;
@@ -3063,10 +3075,10 @@ internal sealed class MainForm : Form
     /// Return on a task in the outline, with the panel open: on to its description, in the markdown.
     /// </summary>
     /// <remarks>
-    /// F6 and then Ctrl+E in one key. Kept out of the menus and the shortcut table: it isn't a command
-    /// of its own, and a menu entry for it would only repeat those two. Only with the panel open, so
-    /// Return can't open a panel somebody shut. A description that can't be written to is shown rather than opened,
-    /// so the key still lands somewhere that says why.
+    /// A second key for Edit description, kept out of the menus and the shortcut table, which list
+    /// each command once. It differs in two ways. It's only answered with the panel open, so Return
+    /// can't open a panel somebody shut. And a description that can't be written to is shown rather
+    /// than left alone, so the key still lands somewhere that says why.
     /// </remarks>
     private void WriteSelectedDescription()
     {
@@ -3768,7 +3780,7 @@ internal sealed class MainForm : Form
                 return false;
 
             case AppCommand.EditDescription:
-                Guarded(ToggleWriting);
+                Guarded(EditDescription);
                 return false;
 
             case AppCommand.ZoomIn:

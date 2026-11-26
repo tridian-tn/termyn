@@ -207,22 +207,25 @@ public class CommandsTests
     }
 
     [Fact]
-    public void Editing_the_description_is_offered_on_the_one_in_front_and_ticked_while_it_is_happening()
+    public void Editing_the_description_is_offered_wherever_it_would_open_something_and_never_ticked()
     {
-        // Only with the description in front, since bringing it forward is View description's job,
-        // and only where typing would be kept. Ticked only with the markdown actually in front:
-        // writing left behind the comments tab or a shut panel isn't anything the user can see.
-        var inFront = new CommandContext(ShowingDescription: true, CanWriteDescription: true);
-        Assert.True(State(AppCommand.EditDescription, inFront).Enabled);
-        Assert.False(State(AppCommand.EditDescription, inFront with { CanWriteDescription = false }).Enabled);
-        Assert.False(State(AppCommand.EditDescription, inFront with { ShowingComments = true }).Enabled);
-        Assert.False(State(AppCommand.EditDescription, inFront with { ShowingDescription = false }).Enabled);
+        // An action like Rename, so no tick, and lit from anywhere it has somewhere to take you: the
+        // rendering, the comments, a shut panel. Greyed where typing wouldn't be kept, and with the
+        // markdown already in front, where it would do nothing.
+        var reading = new CommandContext(ShowingDescription: true, CanWriteDescription: true);
+        Assert.True(State(AppCommand.EditDescription, reading).Enabled);
+        Assert.True(State(AppCommand.EditDescription, reading with { ShowingComments = true }).Enabled);
+        Assert.True(State(AppCommand.EditDescription, reading with { ShowingDescription = false }).Enabled);
+        Assert.False(State(AppCommand.EditDescription, reading with { CanWriteDescription = false }).Enabled);
 
-        var writing = new CommandContext(ShowingDescription: true, WritingDescription: true, CanWriteDescription: true);
-        Assert.True(State(AppCommand.EditDescription, writing).Checked);
-        Assert.False(State(AppCommand.EditDescription, writing with { ShowingComments = true }).Checked);
-        Assert.False(State(AppCommand.EditDescription, writing with { ShowingDescription = false }).Checked);
-        Assert.False(State(AppCommand.EditDescription, writing with { WritingDescription = false }).Checked);
+        var writing = reading with { WritingDescription = true };
+        Assert.False(State(AppCommand.EditDescription, writing).Enabled);
+
+        // Writing left behind the comments tab or a shut panel can be brought back.
+        Assert.True(State(AppCommand.EditDescription, writing with { ShowingComments = true }).Enabled);
+        Assert.True(State(AppCommand.EditDescription, writing with { ShowingDescription = false }).Enabled);
+
+        Assert.All([reading, writing], c => Assert.False(State(AppCommand.EditDescription, c).Checked));
     }
 
     [Fact]
