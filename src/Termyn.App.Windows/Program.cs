@@ -129,7 +129,10 @@ internal static class Program
 
         // A restart, which mustn't reach for the lock while the copy it replaces still holds it.
         // Otherwise it would hand itself over to that one, which is closing, and nothing would be
-        // left running. Should the wait run out, this carries on as any second launch would.
+        // left running. That copy lets go of the lock before it starts this one, so the wait is
+        // for the cache it can still have open when a sync was slow to stop. Should the wait run
+        // out, the lock is free all the same, and only another launch in between would hold it,
+        // in which case handing over to that one is right.
         var waited = Restart.Replacing(args) is not { } replacing || Restart.WaitFor(replacing, Restart.Patience);
 
         using var instance = new WindowsSingleInstance();
