@@ -242,6 +242,12 @@ internal sealed class MainForm : Form
     private AppSettings _settings;
     private Theme _theme;
 
+    /// <summary>
+    /// The theme the window was built in. Only a restart changes what Windows draws, so it's what
+    /// the window stays in, whatever the settings have said since.
+    /// </summary>
+    private readonly ThemePreference _builtIn;
+
     private string? _editingId;
     private string? _editingText;
     private bool _syncingSidebar;
@@ -265,6 +271,17 @@ internal sealed class MainForm : Form
     /// way. Nothing has been wiped yet, for the same reason as there.
     /// </remarks>
     public TokenCheck? SwitchTo { get; private set; }
+
+    /// <summary>
+    /// True once the window has closed so that Termyn can start again, which is how a new theme
+    /// reaches the parts Windows draws.
+    /// </summary>
+    /// <remarks>
+    /// The window has closed the way Exit closes it, so what was being typed and the view state are
+    /// saved. Starting the next copy is left to whoever ran the window, once this one has let go of
+    /// everything it held.
+    /// </remarks>
+    public bool RestartRequested { get; private set; }
 
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
     private string _sidebarKey = ViewSelection.Default.Key;
@@ -312,6 +329,7 @@ internal sealed class MainForm : Form
         _shell = shell;
         _settings = shell.Settings;
         _theme = Theme.Resolve(_settings.Theme);
+        _builtIn = _settings.Theme;
 
         Text = "Termyn";
         Icon = AppIcon.Window;
@@ -663,9 +681,7 @@ internal sealed class MainForm : Form
 
         RestoreViewState(_settings.View);
 
-        // Only the colours here. Loading publishes and renders a moment later anyway, and rendering
-        // the whole outline twice before the window is even up is time the user waits for.
-        ApplyTheme(render: false);
+        ApplyTheme();
 
         _presenter.RowsChanged += OnRowsChanged;
         _presenter.StatusChanged += OnStatusChanged;
@@ -1194,6 +1210,11 @@ internal sealed class MainForm : Form
     internal void ApplySettings(AppSettings amended)
     {
         var themeChanged = amended.Theme != _settings.Theme;
+
+        // Against the theme the window was built in rather than the last one saved: going back to
+        // it is going back to what's on screen, and needs no restart.
+        var themePending = amended.Theme != _builtIn;
+
         var hotkeyChanged = amended.HotkeyEnabled != _settings.HotkeyEnabled
                             || amended.HotkeyBinding != _settings.HotkeyBinding;
         var cadenceChanged = amended.SyncMode != _settings.SyncMode
@@ -1233,15 +1254,12 @@ internal sealed class MainForm : Form
         _settings = amended;
         _outline.PriorityTips = _settings.ShowPriorityTips;
 
-        if (themeChanged)
-        {
-            _theme = Theme.Resolve(_settings.Theme);
-            ApplyTheme();
-            _quickAdd?.ApplyTheme(_theme);
-
-            // The framework's own chrome — scrollbars, menus, title bars — is set once at startup.
-            notices.Add(Strings.NoticeFrameTheme);
-        }
+        // A new theme isn't painted on here. What Windows draws — the tab headers, scrollbars,
+        // menus, the title bar and the sidebar tree's own look — takes the framework's colour mode,
+        // and that's only read as the first window is made, so repainting the rest left the window
+        // half in each. It's saved below and offered as a restart once it is.
+        if (themePending)
+            notices.Add(Strings.NoticeThemeAtNextStart);
 
         if (hotkeyNotice is not null)
             notices.Add(hotkeyNotice);
@@ -1255,15 +1273,77 @@ internal sealed class MainForm : Form
         if (cacheChanged)
             _presenter.SetDownloadLimits(amended.AttachmentCache);
 
-        // Saved last, so the theme and hotkey are applied even when the file can't be written.
-        if (!SaveViewState())
+        // Saved last, so the hotkey is applied even when the file can't be written.
+        var saved = SaveViewState();
+        if (!saved)
             notices.Add(Strings.NoticeSettingsNotSaved);
 
+        // With nothing to say after going back to the theme on screen, what was said about the
+        // other one is put right rather than left standing.
         if (notices.Count > 0)
             _status.Text = string.Join("  ·  ", notices);
+        else if (themeChanged)
+            RenderStatus();
+
+        // Only once it's on disk, since the next copy reads the theme from there. A file that
+        // couldn't be written would restart into the same theme. Asked only when the theme has just
+        // changed, so saving something else meanwhile doesn't ask again.
+        if (themeChanged && themePending && saved)
+            OfferRestart();
     }
 
-    private void ApplyTheme(bool render = true)
+    /// <summary>
+    /// Asks whether to restart now for the new theme, and closes the window to do it if so.
+    /// </summary>
+    /// <remarks>
+    /// Not offered while a file is on its way, which closing would cut off. The status bar already
+    /// says the theme comes in at the next start, which is true either way.
+    /// </remarks>
+    private void OfferRestart()
+    {
+        if (_transfer is not null)
+            return;
+
+        if (!(AskToRestart ?? AskUserToRestart)())
+            return;
+
+        RestartRequested = true;
+        _exiting = true;
+        Close();
+    }
+
+    /// <summary>
+    /// Asks whether to restart for a new theme. A property so a test can answer without a box
+    /// appearing; null, as the window leaves it, asks the user.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<bool>? AskToRestart { get; set; }
+
+    /// <summary>Puts the restart question to the user.</summary>
+    /// <returns>True when they chose to restart now</returns>
+    private bool AskUserToRestart()
+    {
+        var restart = new TaskDialogButton(Strings.ThemeRestartNow);
+        var page = new TaskDialogPage
+        {
+            Caption = "Termyn",
+            Heading = Strings.ThemeRestartHeading,
+            Text = Strings.ThemeRestartText,
+            Icon = TaskDialogIcon.Information,
+            AllowCancel = true,
+            Buttons = { restart, new TaskDialogButton(Strings.ThemeRestartLater) },
+        };
+
+        return TaskDialog.ShowDialog(this, page, TaskDialogStartupLocation.CenterOwner) == restart;
+    }
+
+    /// <summary>Paints the window's theme onto everything Termyn draws itself.</summary>
+    /// <remarks>
+    /// Only the colours. Loading publishes and renders a moment later anyway, and rendering the
+    /// whole outline twice before the window is even up is time the user waits for.
+    /// </remarks>
+    private void ApplyTheme()
     {
         _theme.Apply(this);
         _outline.Theme = _theme;
@@ -1283,13 +1363,10 @@ internal sealed class MainForm : Form
         _sidebar.MarkColour = _theme.Accent;
         _outline.BackColor = _theme.Panel;
 
-        // The mark is a theme colour, so it has to be laid down again in the new one.
+        // The mark is a theme colour, and the headers' colours are set per node as the tree is built.
         MarkSidebarSelection();
-        _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
+        _renderedSidebar = null;
         Invalidate(invalidateChildren: true);
-
-        if (render)
-            Render();
     }
 
     // ---- View state ----------------------------------------------------------------------------

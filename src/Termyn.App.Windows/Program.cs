@@ -37,14 +37,36 @@ internal static class Program
 
         // What throws before the message loop is running — building the window, the token dialog —
         // isn't the UI thread's to catch, and would otherwise go straight to the crash dialog.
+        bool restart;
         try
         {
-            Run(args);
+            restart = Run(args);
         }
         catch (Exception ex)
         {
             _log?.Error("Termyn failed and has to close.", ex);
             Tell(Strings.UnexpectedErrorClosing, _log?.Path ?? ex.Message, MessageBoxIcon.Error);
+            return;
+        }
+
+        // Out here, once Run has let go of the single-instance lock and the cache.
+        if (restart)
+            StartAgain();
+    }
+
+    /// <summary>Starts the next copy of Termyn, which waits for this one to end before it begins.</summary>
+    private static void StartAgain()
+    {
+        try
+        {
+            var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The program's own path isn't known.");
+            using var started = System.Diagnostics.Process.Start(Restart.StartInfo(executable, Environment.ProcessId));
+            _log?.Info("Closed to restart, and started the next copy.");
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            _log?.Error("Termyn closed to restart but couldn't start again.", ex);
+            Tell(Strings.RestartFailed, ex.Message, MessageBoxIcon.Error);
         }
     }
 
@@ -99,10 +121,16 @@ internal static class Program
         }
     }
 
-    private static void Run(string[] args)
+    /// <returns>True when the window closed so Termyn could start again</returns>
+    private static bool Run(string[] args)
     {
         var quickAdd = Has(args, "--quick-add");
         var tray = quickAdd || Has(args, "--tray");
+
+        // A restart, which mustn't reach for the lock while the copy it replaces still holds it.
+        // Otherwise it would hand itself over to that one, which is closing, and nothing would be
+        // left running. Should the wait run out, this carries on as any second launch would.
+        var waited = Restart.Replacing(args) is not { } replacing || Restart.WaitFor(replacing, Restart.Patience);
 
         using var instance = new WindowsSingleInstance();
         if (!instance.TryAcquire())
@@ -110,7 +138,7 @@ internal static class Program
             // Two processes would share one cache and outbox, and the second would fail to take the
             // global hotkey. Hand over what this launch was asked to do and get out of the way.
             instance.TrySignal(quickAdd ? InstanceSignals.QuickAdd : InstanceSignals.Show);
-            return;
+            return false;
         }
 
         IAppPaths paths = new WindowsAppPaths();
@@ -122,6 +150,8 @@ internal static class Program
         var log = new FileLog(paths);
         _log = log;
         log.Info($"Termyn {AppVersion.Tag} starting on {Environment.OSVersion.VersionString}, .NET {Environment.Version}.");
+        if (!waited)
+            log.Warn("Restarted, but the copy before was still running after the wait. Started anyway.");
 
         // Before any window exists, which is the only time the framework will take it.
         Theme.ApplyToFramework(settings.Theme);
@@ -148,7 +178,8 @@ internal static class Program
         // Signing out comes back round to the token dialog in this same process. Starting a fresh
         // one instead would race this one for the single-instance lock, and lose: it would hand
         // itself to a window that was already on its way out.
-        while (RunSession(launch, settings, tray, quickAdd))
+        SessionEnd end;
+        while ((end = RunSession(launch, settings, tray, quickAdd)) == SessionEnd.SignedOut)
         {
             // Only the launch itself was asked to start in the tray or with quick-add open. The
             // settings are read again because the window that just closed has written to them —
@@ -158,6 +189,21 @@ internal static class Program
             settings = settingsStore.Load();
             settings = settings with { View = settings.View.WithoutAccount() };
         }
+
+        return end == SessionEnd.Restart;
+    }
+
+    /// <summary>Why a session's window closed.</summary>
+    private enum SessionEnd
+    {
+        /// <summary>Termyn is closing.</summary>
+        Closed,
+
+        /// <summary>The user signed out or switched account, so there's another session to run.</summary>
+        SignedOut,
+
+        /// <summary>Termyn is closing so it can start again, for a change that only takes at startup.</summary>
+        Restart,
     }
 
     /// <summary>What lasts for the whole process, however many times the user signs in.</summary>
@@ -178,11 +224,8 @@ internal static class Program
     /// <param name="settings">The settings to start this session with</param>
     /// <param name="tray">Start with no window on screen</param>
     /// <param name="quickAdd">Open the quick-add box straight away</param>
-    /// <returns>
-    /// True when the window closed because the user signed out or switched account, so there's
-    /// another session to run
-    /// </returns>
-    private static bool RunSession(Launch launch, AppSettings settings, bool tray, bool quickAdd)
+    /// <returns>Why the window closed</returns>
+    private static SessionEnd RunSession(Launch launch, AppSettings settings, bool tray, bool quickAdd)
     {
         var (paths, settingsStore, api, secrets, instance, updates, log) = launch;
 
@@ -208,7 +251,7 @@ internal static class Program
         {
             using var tokenForm = new TokenEntryForm(auth);
             if (tokenForm.ShowDialog() != DialogResult.OK)
-                return false;
+                return SessionEnd.Closed;
         }
 
         // Swept on the way up rather than only after a download: an app left closed for a month
@@ -270,6 +313,7 @@ internal static class Program
         var shell = new Shell(paths, settingsStore, settings, hotkey, autoStart, notifier, instance, updates, log, tray, quickAdd, store.Rebuilt, auth);
 
         bool signedOut;
+        bool restart;
         TokenCheck? switchTo;
         try
         {
@@ -277,6 +321,7 @@ internal static class Program
             Application.Run(form);
             signedOut = form.SignedOut;
             switchTo = form.SwitchTo;
+            restart = form.RestartRequested;
         }
         finally
         {
@@ -306,11 +351,13 @@ internal static class Program
                     MessageBoxIcon.Error);
             }
 
-            return false;
+            // Still restarted. The next copy waits for this process to end, and the files left
+            // open here are closed as it does.
+            return restart ? SessionEnd.Restart : SessionEnd.Closed;
         }
 
         if (!signedOut)
-            return false;
+            return restart ? SessionEnd.Restart : SessionEnd.Closed;
 
         // Only now the loop has stopped, so nothing can start a sync on the token while it goes. One
         // still on its way back after the loop's bounded wait is dropped by the engine when it
@@ -367,7 +414,7 @@ internal static class Program
                 MessageBoxIcon.Error);
         }
 
-        return true;
+        return SessionEnd.SignedOut;
     }
 
     /// <summary>
