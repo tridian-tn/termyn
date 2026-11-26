@@ -1467,19 +1467,36 @@ internal sealed class OutlineView : ListView
     private const int ArrowWidth = 14;
 
     protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
+        => DrawHeader(e.Graphics, e.Bounds, e.Header);
+
+    /// <summary>Draws one column's header in the theme.</summary>
+    /// <remarks>
+    /// Not the event's own DrawBackground, which draws the stock light header whatever the theme,
+    /// so a dark window had a white strip across the top of its list. The divider and the line
+    /// underneath are what that background gave, in the theme's border colour instead. Internal so
+    /// a test can draw one onto a bitmap: the header is a native window a test can't capture.
+    /// </remarks>
+    /// <param name="g">Where to draw</param>
+    /// <param name="cell">The header's bounds</param>
+    /// <param name="header">The column it heads</param>
+    internal void DrawHeader(Graphics g, Rectangle cell, ColumnHeader? header)
     {
-        e.DrawBackground();
+        using (var background = new SolidBrush(Theme.Panel))
+            g.FillRectangle(background, cell);
 
-        var bounds = Inset(e.Bounds);
+        g.DrawLine(Rule, cell.Right - 1, cell.Top, cell.Right - 1, cell.Bottom - 1);
+        g.DrawLine(Rule, cell.Left, cell.Bottom - 1, cell.Right - 1, cell.Bottom - 1);
 
-        if (!Ordering.IsDefault && e.Header?.Tag is TaskColumn column && column == Ordering.Column)
+        var bounds = Inset(cell);
+
+        if (!Ordering.IsDefault && header?.Tag is TaskColumn column && column == Ordering.Column)
         {
             // Drawn as a glyph of its own at the end of the header rather than added to the text,
             // so the narrow priority column shows which way it is sorted instead of ellipsizing
             // the arrow away.
             var arrow = bounds with { X = bounds.Right - ArrowWidth, Width = ArrowWidth };
             TextRenderer.DrawText(
-                e.Graphics,
+                g,
                 Ordering.Descending ? "▼" : "▲",
                 Font,
                 arrow,
@@ -1489,14 +1506,14 @@ internal sealed class OutlineView : ListView
             bounds = bounds with { Width = Math.Max(0, bounds.Width - ArrowWidth) };
         }
 
-        var alignment = e.Header?.TextAlign switch
+        var alignment = header?.TextAlign switch
         {
             HorizontalAlignment.Center => TextFormatFlags.HorizontalCenter,
             HorizontalAlignment.Right => TextFormatFlags.Right,
             _ => TextFormatFlags.Left,
         };
 
-        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, bounds, Theme.Muted, Flags | alignment);
+        TextRenderer.DrawText(g, header?.Text, Font, bounds, Theme.Muted, Flags | alignment);
     }
 
     /// <summary>

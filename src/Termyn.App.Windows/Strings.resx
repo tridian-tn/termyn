@@ -777,9 +777,31 @@ Open the release page?</value>
     <value>Windows would not change the launch-at-login setting.</value>
     <comment>Status bar after saving settings, when Windows refused to change whether the app starts at sign-in.</comment>
   </data>
-  <data name="NoticeFrameTheme" xml:space="preserve">
-    <value>Restart Termyn for the window frame to follow the theme.</value>
-    <comment>Status bar after changing the theme: the title bar only changes after a restart.</comment>
+  <data name="NoticeThemeAtNextStart" xml:space="preserve">
+    <value>The new theme takes effect when Termyn next starts.</value>
+    <comment>Status bar after changing the theme without restarting: the window stays in the old theme until then.</comment>
+  </data>
+  <data name="ThemeRestartHeading" xml:space="preserve">
+    <value>Restart Termyn now to change the theme?</value>
+    <comment>Heading of the question asked after saving a new theme in Settings.</comment>
+  </data>
+  <data name="ThemeRestartText" xml:space="preserve">
+    <value>Your work is saved first. Choose Later and the new theme is used next time Termyn starts.</value>
+    <comment>Body of the question asked after saving a new theme in Settings.</comment>
+  </data>
+  <data name="ThemeRestartNow" xml:space="preserve">
+    <value>Restart now</value>
+    <comment>Button: close Termyn and start it again in the new theme.</comment>
+  </data>
+  <data name="ThemeRestartLater" xml:space="preserve">
+    <value>Later</value>
+    <comment>Button: keep the current theme until Termyn next starts.</comment>
+  </data>
+  <data name="RestartFailed" xml:space="preserve">
+    <value>Termyn closed to restart, but couldn't start again: {0}
+
+Open it from the Start menu.</value>
+    <comment>Message when the new copy started for a theme change couldn't be launched. {0} is the error.</comment>
   </data>
   <data name="NoticeSyncCadence" xml:space="preserve">
     <value>The sync cadence takes effect when Termyn next starts.</value>
