@@ -483,12 +483,12 @@ public static class Commands
                 Strings.CommandViewComments,
                 !context.ShowingDescription || !context.ShowingComments),
 
-            // Ticked while the markdown is in front, and run again it goes back to the rendering.
-            // From anywhere else — the outline, the comments, a shut panel — it opens the panel on
-            // the description and starts writing. Greyed where nothing typed would be kept.
+            // Switches the description in front between the rendering and the markdown, ticked
+            // while it's the markdown. Greyed with the description not in front, since getting it
+            // there is View description's job, and where nothing typed would be kept.
             AppCommand.EditDescription => new CommandState(
                 Strings.CommandEditDescription,
-                context.CanWriteDescription,
+                context.CanWriteDescription && context.ShowingDescription && !context.ShowingComments,
                 context.ShowingDescription && !context.ShowingComments && context.WritingDescription),
 
             // The description panel already zooms to the wheel; these are the same thing said out

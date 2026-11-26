@@ -73,31 +73,121 @@ public class DescriptionModeTests
     }
 
     [WinFormsFact]
-    public void Ctrl_and_E_from_the_outline_opens_a_shut_panel_on_the_markdown()
+    public void Ctrl_and_E_from_the_outline_switches_the_description_in_front()
     {
         using var window = Window("termyn-ctrl-e-outline.json", out _, out _);
-        var outline = TestWindow.Find<OutlineView>(window);
-        window.Run(AppCommand.ToggleDescription);
-        Assert.False(window.NewContext(null).ShowingDescription, "the panel didn't shut, so this says nothing");
 
-        Press(outline, Keys.Control | Keys.E);
+        Press(TestWindow.Find<OutlineView>(window), Keys.Control | Keys.E);
 
-        var context = window.NewContext(null);
-        Assert.True(context.ShowingDescription, "the panel stayed shut");
-        Assert.True(context.WritingDescription, "the panel opened on the rendering");
+        Assert.True(Writing(window));
     }
 
     [WinFormsFact]
-    public void Edit_description_from_the_comments_tab_goes_to_the_markdown()
+    public void Ctrl_and_E_leaves_a_shut_panel_shut()
     {
-        using var window = Window("termyn-edit-from-comments.json", out _, out _);
+        // Bringing the description forward is F6's job. Ctrl+E only switches the one in front.
+        using var window = Window("termyn-ctrl-e-shut.json", out _, out _);
+        window.Run(AppCommand.ToggleDescription);
+        Assert.False(window.NewContext(null).ShowingDescription, "the panel didn't shut, so this says nothing");
+
+        Press(TestWindow.Find<OutlineView>(window), Keys.Control | Keys.E);
+
+        var context = window.NewContext(null);
+        Assert.False(context.ShowingDescription, "the panel opened");
+        Assert.False(context.WritingDescription, "the markdown opened behind a shut panel");
+    }
+
+    [WinFormsFact]
+    public void Ctrl_and_E_leaves_the_comments_in_front()
+    {
+        using var window = Window("termyn-ctrl-e-comments.json", out _, out _);
         window.ShowPanelTab(comments: true);
 
         window.Run(AppCommand.EditDescription);
 
         var context = window.NewContext(null);
+        Assert.True(context.ShowingComments, "the description was brought forward");
+        Assert.False(context.WritingDescription, "the markdown opened behind the comments");
+    }
+
+    // ---- F6 and F7 -------------------------------------------------------------------------------
+
+    [WinFormsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void F6_takes_the_keyboard_to_the_description(bool fromComments)
+    {
+        // So the next key acts there: Enter or Ctrl+E to write, the arrows to read. It used to bring
+        // the tab forward and leave the keyboard in the outline. From the description tab already in
+        // front as well, where nothing about the panel changes but the keyboard still has to move.
+        using var window = Window("termyn-f6-focus.json", out var view, out _, shown: true);
+        var outline = TestWindow.Find<OutlineView>(window);
+
+        if (fromComments)
+            window.ShowPanelTab(comments: true);
+
+        outline.Focus();
+        Application.DoEvents();
+        Assert.True(outline.Focused, "the outline never took the focus, so this says nothing");
+
+        Press(outline, Keys.F6);
+
+        Assert.False(window.NewContext(null).ShowingComments, "the comments stayed in front");
+        Assert.True(view.Focused, "the keyboard stayed where it was");
+    }
+
+    [WinFormsFact]
+    public void F7_takes_the_keyboard_to_the_comments_even_with_them_already_in_front()
+    {
+        using var window = Window("termyn-f7-focus.json", out _, out _, shown: true);
+        var outline = TestWindow.Find<OutlineView>(window);
+        window.ShowPanelTab(comments: true);
+
+        outline.Focus();
+        Application.DoEvents();
+        Assert.True(outline.Focused, "the outline never took the focus, so this says nothing");
+
+        Press(outline, Keys.F7);
+
+        Assert.True(TestWindow.Find<CommentsView>(window).ContainsFocus, "the keyboard stayed where it was");
+    }
+
+    // ---- Return on a task ------------------------------------------------------------------------
+
+    [WinFormsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Return_on_a_task_with_the_panel_open_starts_writing_its_description(bool fromComments)
+    {
+        using var window = Window("termyn-return-writes.json", out _, out var editor, shown: true);
+        var outline = TestWindow.Find<OutlineView>(window);
+
+        if (fromComments)
+            window.ShowPanelTab(comments: true);
+
+        outline.Focus();
+        Application.DoEvents();
+
+        Press(outline, Keys.Return);
+
+        var context = window.NewContext(null);
         Assert.False(context.ShowingComments, "the comments stayed in front");
-        Assert.True(context.WritingDescription);
+        Assert.True(context.WritingDescription, "the markdown didn't open");
+        Assert.True(editor.Focused, "the keyboard didn't go to the markdown");
+    }
+
+    [WinFormsFact]
+    public void Return_on_a_task_with_the_panel_shut_does_nothing()
+    {
+        // Return mustn't reopen a panel somebody shut.
+        using var window = Window("termyn-return-shut.json", out _, out _);
+        window.Run(AppCommand.ToggleDescription);
+
+        Press(TestWindow.Find<OutlineView>(window), Keys.Return);
+
+        var context = window.NewContext(null);
+        Assert.False(context.ShowingDescription, "the panel opened");
+        Assert.False(context.WritingDescription);
     }
 
     [WinFormsFact]

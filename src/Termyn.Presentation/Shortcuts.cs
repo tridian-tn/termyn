@@ -114,9 +114,10 @@ public static class Shortcuts
         Bind(None, Key.F6, AppCommand.ViewDescription, Window),
         Bind(None, Key.F7, AppCommand.ViewComments, Window),
 
-        // Window-wide, so it opens the description for writing from the outline as well as
-        // switching it back and forth in the panel. No text box here has a use of its own for it:
-        // a rich edit control's is centring the paragraph, which the description box refuses.
+        // Window-wide, so it switches the description in front whether the keyboard's in it or
+        // still in the outline. It never brings the description forward; F6 does that. No text box
+        // here has a use of its own for it: a rich edit control's is centring the paragraph, which
+        // the description box refuses.
         Bind(Ctrl, Key.E, AppCommand.EditDescription, Window),
 
         // The key the menu shows first, then the number pad's own, which people reach for without

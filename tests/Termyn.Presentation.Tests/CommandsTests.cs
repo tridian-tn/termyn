@@ -207,13 +207,16 @@ public class CommandsTests
     }
 
     [Fact]
-    public void Editing_the_description_is_offered_where_typing_would_be_kept_and_ticked_while_it_is_happening()
+    public void Editing_the_description_is_offered_on_the_one_in_front_and_ticked_while_it_is_happening()
     {
-        // Lit from a shut panel or the comments as well, since from there it opens the description.
-        // Ticked only with the markdown actually in front: writing left behind the comments tab or
-        // a shut panel isn't anything the user can see.
-        Assert.False(State(AppCommand.EditDescription).Enabled);
-        Assert.True(State(AppCommand.EditDescription, new CommandContext(CanWriteDescription: true)).Enabled);
+        // Only with the description in front, since bringing it forward is View description's job,
+        // and only where typing would be kept. Ticked only with the markdown actually in front:
+        // writing left behind the comments tab or a shut panel isn't anything the user can see.
+        var inFront = new CommandContext(ShowingDescription: true, CanWriteDescription: true);
+        Assert.True(State(AppCommand.EditDescription, inFront).Enabled);
+        Assert.False(State(AppCommand.EditDescription, inFront with { CanWriteDescription = false }).Enabled);
+        Assert.False(State(AppCommand.EditDescription, inFront with { ShowingComments = true }).Enabled);
+        Assert.False(State(AppCommand.EditDescription, inFront with { ShowingDescription = false }).Enabled);
 
         var writing = new CommandContext(ShowingDescription: true, WritingDescription: true, CanWriteDescription: true);
         Assert.True(State(AppCommand.EditDescription, writing).Checked);

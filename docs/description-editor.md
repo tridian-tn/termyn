@@ -173,11 +173,16 @@ back and saves. A single click still selects and still follows a link. A task wi
 ready to write. `F4` opens and closes the panel; `F6` and `F7` pick which of its two tabs is in front.
 `showPreview` and `previewWidth` retire.
 
-Later additions: **Edit description** in the View menu, on `Ctrl+E`, switches between the two both
-ways, and from the outline or the comments opens the description for writing. A pencil at the left of
-a strip above the description runs the same command and stays pressed while the markdown is showing.
-The markdown has an accent ring round it while it has the keyboard, so it's clear a key pressed now
-would change the description.
+Later additions: the keys split into ones that go somewhere and ones that change the mode where you
+are. `F6` and `F7` bring their tab forward, opening the panel if it's shut, and take the keyboard
+there. **Edit description** in the View menu, on `Ctrl+E`, switches the description in front between
+the two, and is greyed when it isn't in front. A pencil at the left of a strip above the description
+runs the same command and stays pressed while the markdown is showing. So from the outline, `F6` then
+`Ctrl+E` (or `Enter`) gets you writing. `Enter` on a task in the outline is the shortcut for both:
+with the panel open, it brings the description forward and opens the markdown. With the panel shut it
+does nothing, so it can't reopen a panel somebody shut. It isn't in the menus, which only list
+commands. The markdown has an accent ring round it while it has the keyboard, so it's clear a key
+pressed now would change the description.
 
 Typing at the rendering to open the markdown with the character already in was tried and taken out:
 where the caret lands in the markdown, between markers especially, wasn't reliable enough.

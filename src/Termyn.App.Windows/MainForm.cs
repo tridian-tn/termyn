@@ -3025,12 +3025,12 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Edit description, from the View menu, Ctrl+E or the pencil above the description.
+    /// Edit description, from the View menu, Ctrl+E or the pencil above the description: switches
+    /// the description in front between the rendering and the markdown.
     /// </summary>
     /// <remarks>
-    /// With the markdown in front, back to the rendering. From anywhere else — the rendering, the
-    /// outline, the comments tab or a shut panel — on to the description and into the markdown,
-    /// with the keyboard, since asking to edit is asking to type.
+    /// Only ever the description that's already in front. Getting there is F6's job, and a key that
+    /// did both left two ways to reach the same tab that differed only in the mode they arrived in.
     ///
     /// Going back takes the keyboard to the rendering only if the description had it. An empty
     /// description opens in the markdown without the focus, and looking at it formatted shouldn't
@@ -3038,26 +3038,47 @@ internal sealed class MainForm : Form
     /// </remarks>
     private void ToggleWriting()
     {
-        if (_writingDescription && !_detail.Panel2Collapsed && !_showingComments)
+        if (_detail.Panel2Collapsed || _showingComments)
+            return;
+
+        if (!_writingDescription)
         {
-            var hadFocus = _descriptionFrame.ContainsFocus;
-            StopWriting();
-
-            if (hadFocus)
-                _rendered.Focus();
-
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
             return;
         }
 
-        if (_description.ReadOnly)
-            return;
+        var hadFocus = _descriptionFrame.ContainsFocus;
+        StopWriting();
 
+        if (hadFocus)
+            _rendered.Focus();
+    }
+
+    /// <summary>
+    /// Takes the keyboard to whichever half of the description is showing.
+    /// </summary>
+    private void FocusDescription() => (_writingDescription ? (Control)_description : _rendered).Focus();
+
+    /// <summary>
+    /// Return on a task in the outline, with the panel open: on to its description, in the markdown.
+    /// </summary>
+    /// <remarks>
+    /// F6 and then Ctrl+E in one key. Kept out of the menus and the shortcut table: it isn't a command
+    /// of its own, and a menu entry for it would only repeat those two. Only with the panel open, so
+    /// Return can't open a panel somebody shut. A description that can't be written to is shown rather than opened,
+    /// so the key still lands somewhere that says why.
+    /// </remarks>
+    private void WriteSelectedDescription()
+    {
         ShowPanelTab(comments: false);
 
-        if (_writingDescription)
-            _description.Focus();
-        else
-            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+        if (_description.ReadOnly || _writingDescription)
+        {
+            FocusDescription();
+            return;
+        }
+
+        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
     }
 
     /// <summary>Writes what was typed and goes back to reading.</summary>
@@ -3728,12 +3749,22 @@ internal sealed class MainForm : Form
                 Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
+            // Each takes the keyboard to the tab it puts in front, so the next key acts there: Enter
+            // or Ctrl+E in the description, typing a comment in the comments.
             case AppCommand.ViewDescription:
-                Guarded(() => ShowPanelTab(comments: false));
+                Guarded(() =>
+                {
+                    ShowPanelTab(comments: false);
+                    FocusDescription();
+                });
                 return false;
 
             case AppCommand.ViewComments:
-                Guarded(() => ShowPanelTab(comments: true));
+                Guarded(() =>
+                {
+                    ShowPanelTab(comments: true);
+                    _comments.Focus();
+                });
                 return false;
 
             case AppCommand.EditDescription:
@@ -4061,6 +4092,14 @@ internal sealed class MainForm : Form
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.KeyData == Keys.Return && _outline.SelectedRows.Count == 1 && !_detail.Panel2Collapsed)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            Guarded(WriteSelectedDescription);
+            return;
+        }
+
         var command = CommandFor(e.KeyData, ShortcutScope.Outline);
         if (command == AppCommand.None)
             return;
