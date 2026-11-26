@@ -367,9 +367,11 @@ internal sealed class MainForm : Form
             Indent = SidebarIndent,
             BorderStyle = BorderStyle.None,
 
-            // Only the text, so the tree goes on drawing the row's background, its selection and
-            // its expander — and a row with no colour of its own is left to it entirely.
-            DrawMode = TreeViewDrawMode.OwnerDrawText,
+            // The whole row, background and selection included. Left to the tree, the selection
+            // came out in Windows' own colours: system blue in the light theme, and in the dark one
+            // a pale band with a focus box round it and the tree's copy of the name showing beside
+            // ours.
+            DrawMode = TreeViewDrawMode.OwnerDrawAll,
         };
         _sidebar.DrawNode += OnSidebarDrawNode;
         _sidebar.MouseDown += (_, _) => Noticed();
@@ -2122,29 +2124,51 @@ internal sealed class MainForm : Form
     /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
     /// display is scaled to — an image list would have had to be rebuilt at every DPI.
     ///
-    /// The row's background is left to the tree, which keeps both of the ways a selected row is
-    /// marked.
+    /// The background is drawn here too, in the theme: the accent behind the focused selection,
+    /// as in the outline, and the row's own colour otherwise, which is how
+    /// <see cref="MarkSidebarSelection(bool)"/> marks the selection while the tree hasn't got the
+    /// focus.
     /// </remarks>
     private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
     {
-        if (e.Node is not { } drawn || drawn.Tag is not SidebarNode node)
+        if (e.Node is not { } drawn || drawn.Tag is not SidebarNode)
         {
             e.DrawDefault = true;
             return;
         }
 
-        var bounds = Widened(e.Bounds, _sidebar.ClientSize.Width);
-        var lit = Lit(drawn, e.State);
+        DrawSidebarRow(e.Graphics, drawn, e.Bounds, Lit(drawn, e.State));
+    }
+
+    /// <summary>Draws one sidebar row, from its background up.</summary>
+    /// <remarks>Internal so a test can draw a row onto a bitmap and read back its colours.</remarks>
+    /// <param name="g">Where to draw</param>
+    /// <param name="drawn">The row, which carries a <see cref="SidebarNode"/></param>
+    /// <param name="row">The whole row, edge to edge</param>
+    /// <param name="lit">Whether it's the focused selection</param>
+    internal void DrawSidebarRow(Graphics g, TreeNode drawn, Rectangle row, bool lit)
+    {
+        if (drawn.Tag is not SidebarNode node)
+            return;
+
+        var back = lit ? _theme.Accent : drawn.BackColor.IsEmpty ? _sidebar.BackColor : drawn.BackColor;
+        using (var brush = new SolidBrush(back))
+            g.FillRectangle(brush, row);
+
+        // Where the tree would have put the name, which is after the row's indent, on the row
+        // being drawn.
+        var label = drawn.Bounds with { Y = row.Y, Height = row.Height };
+        var bounds = Widened(label, _sidebar.ClientSize.Width);
         var taken = _sidebar.ExpanderRoom;
 
         if (drawn.Nodes.Count > 0)
         {
             ExpanderGlyph.Draw(
-                e.Graphics,
+                g,
                 bounds with { Width = taken },
                 collapsed: !drawn.IsExpanded,
                 _sidebar.LogicalToDeviceUnits(ExpanderGlyph.SizeAt96),
-                lit ? SystemColors.HighlightText : _theme.Muted);
+                lit ? _theme.OnAccent : _theme.Muted);
         }
 
         if (node.SitsInDotColumn)
@@ -2155,7 +2179,7 @@ internal sealed class MainForm : Form
             if (size > 0 && node.Colour is { } colour)
             {
                 Dots.Fill(
-                    e.Graphics,
+                    g,
                     new Rectangle(bounds.X + taken + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
                     Theme.ToColor(colour));
             }
@@ -2167,29 +2191,33 @@ internal sealed class MainForm : Form
         // row's background is already drawn, and a name shortened by them would be the wrong thing
         // to trim.
         TextRenderer.DrawText(
-            e.Graphics,
+            g,
             drawn.Text,
             drawn.NodeFont ?? _sidebar.Font,
             bounds with { X = bounds.X + taken },
-            lit ? SystemColors.HighlightText : drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor,
+            lit ? _theme.OnAccent : drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor,
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
     }
 
     /// <summary>
-    /// Whether a sidebar row is drawn on the focused selection's highlight, and so in its ink.
+    /// Whether a sidebar row is drawn as the focused selection, on the accent and in its ink.
     /// </summary>
     /// <remarks>
-    /// The selection is taken from the tree as well as from the row handed over, because the two
-    /// disagree for as long as a mouse button is held: the row is selected the moment the button
-    /// goes down, and the tree holds the item's own selected state back until it goes up in case
-    /// the press turns into a drag. Read from the state alone, a row would be written in ordinary
-    /// ink over the highlight already behind it.
+    /// A row the button is being held on is lit, and it's the only one: the tree doesn't select it
+    /// until the button comes up, in case the press turns into a drag, and lighting it straight
+    /// away is how Windows' own trees show the click has landed. Lit whether or not the tree has
+    /// the focus yet, since the press is about to give it the focus.
+    ///
+    /// Otherwise the selection is read from the tree as well as from the row handed over. The two
+    /// can disagree for a moment as the selection moves, and either is enough.
     /// </remarks>
     /// <param name="drawn">The row being drawn</param>
     /// <param name="state">What the tree says about it</param>
     /// <returns>True when it's on the highlight</returns>
-    private bool Lit(TreeNode drawn, TreeNodeStates state)
-        => ((state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn) && _sidebar.Focused;
+    internal bool Lit(TreeNode drawn, TreeNodeStates state)
+        => _sidebar.Pressed is { } pressed
+            ? pressed == drawn
+            : ((state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn) && _sidebar.Focused;
 
     /// <summary>
     /// A row's text given the rest of the sidebar's width to be written in.

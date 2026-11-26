@@ -26,6 +26,8 @@ internal sealed class SidebarTree : BufferedTreeView
     private const int ScrollEvery = 60;
 
     private const int WmLButtonDown = 0x0201;
+    private const int WmLButtonUp = 0x0202;
+    private const int WmCaptureChanged = 0x0215;
 
     public SidebarTree()
     {
@@ -97,6 +99,14 @@ internal sealed class SidebarTree : BufferedTreeView
     /// <summary>When the tree last scrolled for a drag, so holding still near an edge doesn't race.</summary>
     private long _scrolled;
 
+    /// <summary>The row the left button is being held on, or null when it isn't held on one.</summary>
+    /// <remarks>
+    /// The tree only selects a row once the button comes back up, since the press might turn into a
+    /// drag, and it showed the press until then by lighting the row in its own drawing. The sidebar
+    /// draws its rows itself, so it lights this one instead.
+    /// </remarks>
+    internal TreeNode? Pressed { get; private set; }
+
     /// <summary>The room at the head of every row that a row's arrow takes, at the display's scale.</summary>
     internal int ExpanderRoom => LogicalToDeviceUnits(ExpanderGlyph.RoomAt96);
 
@@ -129,10 +139,55 @@ internal sealed class SidebarTree : BufferedTreeView
     /// </remarks>
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WmLButtonDown && TookPress(PointOf(m.LParam)))
+        switch (m.Msg)
+        {
+            case WmLButtonDown when TookPress(PointOf(m.LParam)):
+                return;
+
+            case WmLButtonDown:
+                Press(PointOf(m.LParam));
+                base.WndProc(ref m);
+
+                // The tree holds on to a press, waiting to see if it's a drag, and only hands it
+                // back once it's over. A button that's already up by then won't be heard of again.
+                if ((MouseButtons & MouseButtons.Left) == 0)
+                    Release();
+                return;
+
+            case WmLButtonUp or WmCaptureChanged:
+                base.WndProc(ref m);
+                Release();
+                return;
+
+            default:
+                base.WndProc(ref m);
+                return;
+        }
+    }
+
+    /// <summary>Lights the row under a press, at once rather than when the tree next paints.</summary>
+    /// <remarks>Internal so a test can press without the tree's own wait for a drag.</remarks>
+    /// <param name="client">Where the press was, in the tree's own coordinates</param>
+    internal void Press(Point client)
+    {
+        Pressed = GetNodeAt(client);
+        if (Pressed is null)
             return;
 
-        base.WndProc(ref m);
+        // The whole tree, since the selected row stops being lit as well. Painted now: what follows
+        // is the tree's own wait for a drag, which doesn't stop to paint.
+        Invalidate();
+        Update();
+    }
+
+    /// <summary>Puts the row a press lit back to how the selection has it.</summary>
+    internal void Release()
+    {
+        if (Pressed is null)
+            return;
+
+        Pressed = null;
+        Invalidate();
     }
 
     /// <summary>
@@ -176,6 +231,8 @@ internal sealed class SidebarTree : BufferedTreeView
     /// </remarks>
     protected override void OnItemDrag(ItemDragEventArgs e)
     {
+        // It's a drag now, not a press, and the row being dragged isn't about to be opened.
+        Release();
         base.OnItemDrag(e);
 
         if (e.Button != MouseButtons.Left || e.Item is not TreeNode { Tag: SidebarNode node } || CanDrag?.Invoke(node) != true)
