@@ -173,10 +173,13 @@ back and saves. A single click still selects and still follows a link. A task wi
 ready to write. `F4` opens and closes the panel; `F6` and `F7` pick which of its two tabs is in front.
 `showPreview` and `previewWidth` retire.
 
-Later additions: `F6` and `F7` bring their tab forward, opening the panel if it's shut, and take the
-keyboard there. **Edit description**, in the Task menu beside Rename, on `Ctrl+E`, opens the
-description's markdown from wherever you are: the outline, the comments, the rendering or a shut
-panel. Like Rename it's an action rather than a switch, so it has no tick, it's greyed while the
+Later additions: `F6` and `F7` bring their tab forward, opening the panel if it's shut, and leave the
+keyboard in the list, so you can keep moving between tasks with the panel following. `Tab` is the
+way into the panel. Only a keyboard already in the tab going behind goes along to the one coming
+forward. Clicking the Comments tab still takes the keyboard there.
+
+**Edit description**, in the Task menu beside Rename, on `Ctrl+E`, opens the description's markdown
+from wherever you are: the outline, the comments, the rendering or a shut panel. Like Rename it's an action rather than a switch, so it has no tick, it's greyed while the
 markdown is already in front, and `Escape` is the way back. `Enter` on a task in the outline is a
 second key for it that isn't in the menus, with one difference: with the panel shut it does nothing,
 so it can't reopen a panel somebody shut.

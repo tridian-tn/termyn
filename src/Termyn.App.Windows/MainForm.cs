@@ -2661,6 +2661,12 @@ internal sealed class MainForm : Form
         // Selected rather than shown: the tabs own which one is in front now, and this is the same
         // move the user makes by clicking one. Held quiet so the handler doesn't answer back into
         // the middle of this.
+        //
+        // Selecting a tab from code moves the keyboard as well, into the page coming forward or
+        // onto the strip of tabs when nothing on the page takes it. So a keyboard that was outside
+        // the panel is put back where it was, and a caller that wants it in the panel takes it there.
+        var keyboard = ContainsFocus && !_tabs.ContainsFocus ? KeyboardAt() : null;
+
         _switchingTabs = true;
         try
         {
@@ -2671,14 +2677,14 @@ internal sealed class MainForm : Form
             _switchingTabs = false;
         }
 
+        if (keyboard is { Focused: false })
+            keyboard.Focus();
+
         // Puts whichever of the two was behind the comments back on top.
         SetDescriptionMode(_writingDescription, focus: false);
 
         if (showing)
-        {
             RefreshComments();
-            _comments.Focus();
-        }
     }
 
     /// <summary>
@@ -2718,18 +2724,54 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
+    /// View → Description or View → Comments, on F6 and F7: puts that tab in front and leaves the
+    /// keyboard where it is.
+    /// </summary>
+    /// <remarks>
+    /// The keyboard's nearly always in the list, and it stays there, so you can carry on moving
+    /// between tasks with the panel following. Tab is the way into the panel.
+    ///
+    /// The one exception is the keyboard being in the tab that's going behind. Left there, it'd be
+    /// on something no longer showing, so it goes to the tab coming forward instead.
+    /// </remarks>
+    /// <param name="comments">True for the comments, false for the description</param>
+    private void ViewPanelTab(bool comments)
+    {
+        var leaving = _tabs.ContainsFocus && _showingComments != comments;
+
+        ShowPanelTab(comments);
+
+        if (!leaving)
+            return;
+
+        if (comments)
+            _comments.Focus();
+        else
+            FocusDescription();
+    }
+
+    /// <summary>
     /// Follows the user clicking a tab, so the panel's own state agrees with what is in front.
     /// </summary>
     /// <remarks>
     /// The same move as the Comments menu entry, and it goes through the same method — a tab that
     /// changed only what was visible would leave the comments unfetched and the entry unticked.
+    ///
+    /// Clicking the Comments tab takes the keyboard there, ready to type one, which F7 doesn't. A
+    /// click has already taken the keyboard off the list, onto the tab itself.
     /// </remarks>
     private void OnPanelTabChanged(object? sender, EventArgs e)
     {
         if (_switchingTabs)
             return;
 
-        Guarded(() => ShowComments(_tabs.SelectedTab == _commentsTab));
+        Guarded(() =>
+        {
+            ShowComments(_tabs.SelectedTab == _commentsTab);
+
+            if (_showingComments)
+                _comments.Focus();
+        });
     }
 
     /// <summary>
@@ -3860,22 +3902,12 @@ internal sealed class MainForm : Form
                 Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
-            // Each takes the keyboard to the tab it puts in front, so the next key acts there: Enter
-            // or Ctrl+E in the description, typing a comment in the comments.
             case AppCommand.ViewDescription:
-                Guarded(() =>
-                {
-                    ShowPanelTab(comments: false);
-                    FocusDescription();
-                });
+                Guarded(() => ViewPanelTab(comments: false));
                 return false;
 
             case AppCommand.ViewComments:
-                Guarded(() =>
-                {
-                    ShowPanelTab(comments: true);
-                    _comments.Focus();
-                });
+                Guarded(() => ViewPanelTab(comments: true));
                 return false;
 
             case AppCommand.EditDescription:
@@ -4262,13 +4294,19 @@ internal sealed class MainForm : Form
     /// Whether the focus is in a box that takes typing, where keys like Insert and AltGr+Shift+N
     /// belong to the text. A read-only one is only being read, so the window's keys still apply.
     /// </summary>
-    private bool Typing()
+    private bool Typing() => KeyboardAt() is TextBoxBase { ReadOnly: false } or ComboBox { DropDownStyle: not ComboBoxStyle.DropDownList };
+
+    /// <summary>
+    /// The control the keyboard's in, looking inside the splits and panels that hold it.
+    /// </summary>
+    /// <returns>The innermost active control, or null when there's none</returns>
+    private Control? KeyboardAt()
     {
         Control? focused = ActiveControl;
         while (focused is ContainerControl { ActiveControl: { } inner })
             focused = inner;
 
-        return focused is TextBoxBase { ReadOnly: false } or ComboBox { DropDownStyle: not ComboBoxStyle.DropDownList };
+        return focused;
     }
 
     /// <summary>Shows or hides completed tasks, fetching them the first time they're asked for.</summary>
