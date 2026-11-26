@@ -26,6 +26,11 @@ internal sealed class MainWindowController : NSWindowController
     private const string FrameName = "Main";
     private const string NewTaskItemId = "NewTask";
     private const string SyncItemId = "Sync";
+    private const string StyleItemId = "ViewStyle";
+    private const string SortItemId = "Sort";
+
+    /// <summary>What the toolbar's list-or-table control sends when one of its two is chosen.</summary>
+    private const string StyleChosen = "styleChosen:";
 
     private readonly MainPresenter _presenter;
     private readonly SyncScheduler _scheduler;
@@ -42,19 +47,16 @@ internal sealed class MainWindowController : NSWindowController
     private NSTimer? _lingering;
     private NSPopover? _popover;
     private string? _notice;
+
+    /// <summary>The rows there were when the notice was said, which it's taken to be about.</summary>
+    private IReadOnlyList<TaskRow>? _noticeRows;
     private NSObject? _activated;
     private NSObject? _woke;
-
-    /// <summary>
-    /// Set while the last sync found the token stored but out of reach — the Keychain locked, or
-    /// its access prompt unanswered — and cleared by the first sync that gets through.
-    /// </summary>
-    private bool _waitingForToken;
 
     /// <param name="switchAccount">Forgets this account for another's token, once the user has agreed</param>
     public MainWindowController(MainPresenter presenter, SyncScheduler scheduler, AuthPresenter auth, ILog log, Action<TokenCheck> switchAccount)
         : base(new NSWindow(
-            new CGRect(0, 0, 980, 640),
+            new CGRect(0, 0, 1180, 640),
             NSWindowStyle.Titled | NSWindowStyle.Closable | NSWindowStyle.Miniaturizable
                 | NSWindowStyle.Resizable | NSWindowStyle.FullSizeContentView,
             NSBackingStore.Buffered,
@@ -68,7 +70,12 @@ internal sealed class MainWindowController : NSWindowController
         _commands = new TaskCommands(presenter, log, Say)
         {
             OpenDue = OpenDue,
+            OpenDeadline = OpenDeadline,
+            OpenReminders = OpenReminders,
             OpenNewTask = OpenNewTask,
+            OpenNewSubtask = OpenNewSubtask,
+            OpenLabels = OpenLabels,
+            OpenMoveTo = OpenMoveTo,
         };
         _sidebar = new SidebarController(key => _presenter.SelectByKey(key), _commands);
         _tasks = new TaskListController(_commands);
@@ -81,7 +88,7 @@ internal sealed class MainWindowController : NSWindowController
         split.AddSplitViewItem(NSSplitViewItem.FromViewController(_tasks));
         split.SplitView.AutosaveName = "MainSplit";
 
-        _toolbar = new Toolbar();
+        _toolbar = new Toolbar(() => _tasks.Style);
         var window = Window;
         window.ContentViewController = split;
         window.MinSize = new CGSize(600, 380);
@@ -96,7 +103,7 @@ internal sealed class MainWindowController : NSWindowController
         // The frame AppKit saved last time, or a sensible one centred on a first launch.
         if (!window.SetFrameUsingName(FrameName))
         {
-            window.SetContentSize(new CGSize(980, 640));
+            window.SetContentSize(new CGSize(1180, 640));
             window.Center();
         }
 
@@ -123,28 +130,27 @@ internal sealed class MainWindowController : NSWindowController
         _activated = NSNotificationCenter.DefaultCenter.AddObserver(NSApplication.DidBecomeActiveNotification, _ => RetryForToken());
         _woke = NSWorkspace.SharedWorkspace.NotificationCenter.AddObserver(NSWorkspace.DidWakeNotification, _ => RetryForToken());
 
+        SyncOutcome? first = null;
         try
         {
-            await _presenter.LoadAsync(_cts.Token);
-            Synced();
+            // A token out of reach doesn't throw: the presenter says it's waiting, and what it
+            // returns has the loop try again soon.
+            first = await _presenter.LoadAsync(_cts.Token);
         }
         catch (OperationCanceledException)
         {
             return;
         }
-        catch (TodoistAuthException)
+        catch (TodoistAuthException) when (_presenter.ReconnectNeeded)
         {
-            // Turned away, which the presenter says from here on; or out of reach, which is said
-            // until it can be read.
-            if (!_presenter.ReconnectNeeded)
-                WaitForToken();
+            // Turned away, which the presenter says from here on.
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             OnSyncFailed(ex);
         }
 
-        _scheduler.Start();
+        _scheduler.Start(first);
     }
 
     /// <summary>Stops listening, so nothing arrives for a window on its way out.</summary>
@@ -184,6 +190,65 @@ internal sealed class MainWindowController : NSWindowController
     [Export(NewTaskAction)]
     private void NewTaskClicked(NSObject sender) => _commands.Run(AppCommand.NewTask, null);
 
+    [Export(ViewMenus.ShowAsList)]
+    private void ShowAsList(NSObject sender) => ShowStyle(TaskViewStyle.List);
+
+    [Export(ViewMenus.ShowAsTable)]
+    private void ShowAsTable(NSObject sender) => ShowStyle(TaskViewStyle.Table);
+
+    [Export(StyleChosen)]
+    private void StyleClicked(NSToolbarItemGroup sender)
+        => ShowStyle(sender.SelectedIndex == (int)TaskViewStyle.Table ? TaskViewStyle.Table : TaskViewStyle.List);
+
+    /// <summary>Lays the tasks out as a list or a table, and has the toolbar's control say which.</summary>
+    private void ShowStyle(TaskViewStyle style)
+    {
+        _tasks.SetStyle(style);
+        if (_toolbar.StyleItem is { } group)
+            group.SelectedIndex = (int)_tasks.Style;
+    }
+
+    /// <summary>
+    /// Sorts by the column an item in Sort By names, the way the tasks already point — or from the
+    /// top, coming from Todoist's order — as Mail keeps its direction when the column changes.
+    /// </summary>
+    [Export(ViewMenus.SortBy)]
+    private void SortByColumn(NSMenuItem sender)
+        => _commands.SortBy(new TaskSort(ViewMenus.ColumnOf(sender), !_presenter.Sort.IsDefault && _presenter.Sort.Descending));
+
+    [Export(ViewMenus.SortAscending)]
+    private void SortAscending(NSObject sender)
+    {
+        if (!_presenter.Sort.IsDefault)
+            _commands.SortBy(_presenter.Sort with { Descending = false });
+    }
+
+    [Export(ViewMenus.SortDescending)]
+    private void SortDescending(NSObject sender)
+    {
+        if (!_presenter.Sort.IsDefault)
+            _commands.SortBy(_presenter.Sort with { Descending = true });
+    }
+
+    [Export(ViewMenus.ToggleColumn)]
+    private void ToggleColumn(NSMenuItem sender) => _tasks.ToggleColumn(ViewMenus.ColumnOf(sender));
+
+    [Export(ViewMenus.ShowAllColumns)]
+    private void ShowAllColumns(NSObject sender) => _tasks.ShowAllColumns();
+
+    /// <summary>Turns grouping by section on or off, where the open view is a project with sections.</summary>
+    [Export(ViewMenus.GroupBySection)]
+    private void ToggleGroupBySection(NSObject sender)
+    {
+        if (_presenter.CanGroupBySection) _presenter.SetGroupBySection(!_presenter.GroupBySection);
+    }
+
+    [Export(ViewMenus.ExpandAll)]
+    private void ExpandAll(NSObject sender) => _tasks.FoldAll(collapsed: false);
+
+    [Export(ViewMenus.CollapseAll)]
+    private void CollapseAll(NSObject sender) => _tasks.FoldAll(collapsed: true);
+
     /// <summary>
     /// Fills in a task item as its menu is about to show — or its key is about to be pressed — and
     /// says whether it can run. Everything else this window answers can always run.
@@ -191,11 +256,63 @@ internal sealed class MainWindowController : NSWindowController
     [Export("validateMenuItem:")]
     private bool ValidateMenuItem(NSMenuItem item)
     {
-        if (item.Action?.Name == MainMenu.Reconnect)
-            return _presenter.ReconnectNeeded;
+        var sort = _presenter.Sort;
+        var table = _tasks.Style == TaskViewStyle.Table;
 
-        if (item.Action?.Name != TaskMenu.Action)
-            return true;
+        switch (item.Action?.Name)
+        {
+            case MainMenu.Reconnect:
+                return _presenter.ReconnectNeeded;
+
+            case ViewMenus.ShowAsList:
+                item.State = table ? NSCellStateValue.Off : NSCellStateValue.On;
+                return true;
+
+            case ViewMenus.ShowAsTable:
+                item.State = table ? NSCellStateValue.On : NSCellStateValue.Off;
+                return true;
+
+            // Sorting works in the list as well, which has no header to click.
+            case ViewMenus.SortBy:
+                item.State = sort.Column == ViewMenus.ColumnOf(item) ? NSCellStateValue.On : NSCellStateValue.Off;
+                return true;
+
+            case ViewMenus.SortAscending:
+                item.State = !sort.IsDefault && !sort.Descending ? NSCellStateValue.On : NSCellStateValue.Off;
+                return !sort.IsDefault;
+
+            case ViewMenus.SortDescending:
+                item.State = !sort.IsDefault && sort.Descending ? NSCellStateValue.On : NSCellStateValue.Off;
+                return !sort.IsDefault;
+
+            // The Task column is always there, ticked and greyed, as Finder's Name column is.
+            case ViewMenus.ToggleColumn:
+                var column = ViewMenus.ColumnOf(item);
+                item.State = _tasks.IsShown(column) ? NSCellStateValue.On : NSCellStateValue.Off;
+                return table && column != TaskColumn.Content;
+
+            case ViewMenus.ShowAllColumns:
+                return table && !_tasks.AllShown;
+
+            // Ticked for the setting, which holds for every project, and greyed where the open view
+            // isn't a project with sections, as on Windows.
+            case ViewMenus.GroupBySection:
+                var grouping = _commands.State(AppCommand.GroupBySection, null);
+                item.State = grouping.Checked ? NSCellStateValue.On : NSCellStateValue.Off;
+                return grouping.Enabled;
+
+            case ViewMenus.ExpandAll:
+                return _commands.State(AppCommand.ExpandAll, null).Enabled;
+
+            case ViewMenus.CollapseAll:
+                return _commands.State(AppCommand.CollapseAll, null).Enabled;
+
+            case TaskMenu.Action:
+                break;
+
+            default:
+                return true;
+        }
 
         var command = TaskMenu.CommandOf(item);
         var id = _tasks.SelectedId;
@@ -228,50 +345,18 @@ internal sealed class MainWindowController : NSWindowController
 
     private void OnSyncFailed(Exception ex)
     {
-        // A token Todoist turned away is said by the banner; one out of reach is waited out. Neither
-        // is a failure worth a line in the log every time the loop comes round.
-        if (ex is TodoistAuthException)
-        {
-            BeginInvokeOnMainThread(() =>
-            {
-                if (!_presenter.ReconnectNeeded)
-                    WaitForToken();
-            });
-            return;
-        }
+        // A token Todoist turned away is said by the banner, and isn't a failure worth a line in
+        // the log every time the loop comes round. One out of reach never gets here: the presenter
+        // waits it out, and says so in the status.
+        if (ex is TodoistAuthException && _presenter.ReconnectNeeded) return;
 
         _log.Error("A sync failed.", ex);
         BeginInvokeOnMainThread(() => Say(string.Format(CultureInfo.CurrentCulture, Strings.SyncFailed, ex.Message)));
     }
 
-    /// <summary>
-    /// Told after every sync that got through, from whichever thread ran it — which means the token
-    /// was there to send, so anything said about waiting for it is over.
-    /// </summary>
-    public void Synced() => BeginInvokeOnMainThread(() =>
-    {
-        if (!_waitingForToken)
-            return;
-
-        _waitingForToken = false;
-        _log.Info("The token can be read again, and syncing has carried on.");
-        RenderStatus();
-    });
-
-    /// <summary>The token is stored but can't be read yet: say so, quietly, and wait for it.</summary>
-    private void WaitForToken()
-    {
-        if (!_waitingForToken)
-            _log.Info("The token is stored but can't be read yet, so syncing waits for it.");
-
-        _waitingForToken = true;
-        RenderStatus();
-    }
-
     private void RetryForToken()
     {
-        if (_waitingForToken)
-            _scheduler.RequestNow();
+        if (_presenter.SyncStatus.State == SyncState.WaitingForToken) _scheduler.RequestNow();
     }
 
     /// <summary>
@@ -281,16 +366,20 @@ internal sealed class MainWindowController : NSWindowController
     private void Say(string notice)
     {
         _notice = notice;
+        _noticeRows = _presenter.Rows;
         RenderStatus();
     }
 
     private void Render()
     {
         _sidebar.Render(_presenter.Sidebar, _presenter.SelectedKey);
-        _tasks.Render(_presenter.Rows, _presenter.LabelColours, _presenter.UnsupportedFilter, _presenter.Today);
+        _tasks.Render(_presenter.Rows, _presenter.LabelColours, _presenter.UnsupportedFilter, _presenter.Today, _presenter.Sort);
 
         // A fresh publish is the model moving on, so whatever was said about the last one has passed.
-        _notice = null;
+        // Not the render of the publish it was said about, which is often still on its way: "Moved
+        // to Work, which this view doesn't show" is said about the very rows this is about to show.
+        if (!ReferenceEquals(_presenter.Rows, _noticeRows))
+            _notice = null;
         RenderStatus();
         Linger();
     }
@@ -299,7 +388,7 @@ internal sealed class MainWindowController : NSWindowController
     {
         var crumbs = _presenter.Breadcrumbs;
         Window.Title = crumbs.Count > 0 ? crumbs[^1].Label : "Termyn";
-        Window.Subtitle = _notice ?? (_waitingForToken && !_presenter.ReconnectNeeded ? Strings.TokenOutOfReach : _presenter.Status);
+        Window.Subtitle = _notice ?? _presenter.Status;
         RenderBanner();
     }
 
@@ -412,12 +501,38 @@ internal sealed class MainWindowController : NSWindowController
     }
 
     /// <summary>Opens the due-date popover beside the task's row.</summary>
-    private void OpenDue(string id)
-    {
-        if (_tasks.AnchorFor(id) is not { } anchor)
-            return;
+    private void OpenDue(string id) => ShowBeside(id, new DueController(_presenter, _commands, id, ClosePopover));
 
-        Popover(new DueController(_presenter, _commands, id, ClosePopover)).Show(anchor.Rect, anchor.View, NSRectEdge.MaxYEdge);
+    /// <summary>Opens the deadline popover beside the task's row.</summary>
+    private void OpenDeadline(string id) => ShowBeside(id, new DeadlineController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the reminders popover beside the task's row.</summary>
+    private void OpenReminders(string id) => ShowBeside(id, new RemindersController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the labels popover beside the task's row.</summary>
+    private void OpenLabels(string id) => ShowBeside(id, new LabelsController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the move popover beside the task's row.</summary>
+    private void OpenMoveTo(string id) => ShowBeside(id, new MoveToController(_presenter, _commands, id, ClosePopover));
+
+    /// <summary>Opens the new-task popover beside a task's row, to add a sub-task to it.</summary>
+    private void OpenNewSubtask(string id)
+    {
+        var content = new NewTaskController(_presenter, _log, ClosePopover, id, _commands.Added);
+        content.Prepare();
+        ShowBeside(id, content);
+    }
+
+    /// <summary>Runs a command on a task, for a test with no menu or key to reach it by.</summary>
+    internal void RunOnTask(AppCommand command, string id) => _commands.Run(command, id);
+
+    /// <summary>The popover opened last, for a test to look at. It may have closed since.</summary>
+    internal NSPopover? LastPopover => _popover;
+
+    private void ShowBeside(string id, NSViewController content)
+    {
+        if (_tasks.AnchorFor(id) is { } anchor)
+            Popover(content).Show(anchor.Rect, anchor.View, NSRectEdge.MaxYEdge);
     }
 
     /// <summary>
@@ -427,14 +542,34 @@ internal sealed class MainWindowController : NSWindowController
     private NSPopover Popover(NSViewController content)
     {
         _popover?.Close();
-        _popover = new NSPopover
+
+        var popover = new NSPopover
         {
             ContentViewController = content,
             Behavior = NSPopoverBehavior.Transient,
             Animates = true,
         };
-        _popover.Delegate = new Closing(() => Window.MakeFirstResponder(_tasks.FocusView));
-        return _popover;
+
+        popover.Delegate = new Closing(() => HandBackKeyboard(popover));
+
+        _popover = popover;
+        return popover;
+    }
+
+    /// <summary>Gives the list the keyboard once a popover has gone, if nothing else has taken it.</summary>
+    /// <remarks>
+    /// A popover says it's closed only once it's finished animating, and a lot can happen by then.
+    /// The next popover may have opened, or the click that closed this one may have landed in the
+    /// sidebar, and taking the keyboard from either would leave what's typed going somewhere else.
+    /// </remarks>
+    /// <param name="closed">The popover that closed</param>
+    private void HandBackKeyboard(NSPopover closed)
+    {
+        var newerPopover = _popover is not null && !ReferenceEquals(_popover, closed);
+        var movedOn = Window.FirstResponder is NSView view && view.Window == Window;
+
+        if (!newerPopover && !movedOn)
+            Window.MakeFirstResponder(_tasks.FocusView);
     }
 
     private void ClosePopover()
@@ -453,19 +588,24 @@ internal sealed class MainWindowController : NSWindowController
     /// The toolbar: the sidebar's own toggle over the sidebar; over the list, + to add a task, as
     /// Reminders has it, and Sync, either side of the separator that tracks the sidebar's edge.
     /// </summary>
-    private sealed class Toolbar : NSToolbarDelegate
+    private sealed class Toolbar(Func<TaskViewStyle> style) : NSToolbarDelegate
     {
         private static readonly string[] Items =
         [
             NSToolbar.NSToolbarToggleSidebarItemIdentifier,
             NSToolbar.NSToolbarSidebarTrackingSeparatorItemIdentifier,
             NSToolbar.NSToolbarFlexibleSpaceItemIdentifier,
+            StyleItemId,
+            SortItemId,
             SyncItemId,
             NewTaskItemId,
         ];
 
         /// <summary>The + item, once the toolbar has made it, for the new-task popover to point from.</summary>
         public NSToolbarItem? NewTaskItem { get; private set; }
+
+        /// <summary>The list-or-table control, for the window to keep in step with the View menu.</summary>
+        public NSToolbarItemGroup? StyleItem { get; private set; }
 
         public override string[] AllowedItemIdentifiers(NSToolbar toolbar) => Items;
 
@@ -481,6 +621,33 @@ internal sealed class MainWindowController : NSWindowController
                 case NewTaskItemId:
                     NewTaskItem = Item(NewTaskItemId, "plus", Strings.MenuNewTask, Strings.NewTaskTip, NewTaskAction);
                     return NewTaskItem;
+
+                // A pair to choose between, in the order of the View menu's, as Finder's view
+                // control is.
+                case StyleItemId:
+                    StyleItem = NSToolbarItemGroup.Create(
+                        StyleItemId,
+                        [NSImage.GetSystemSymbol("list.bullet", Strings.MenuAsList)!, NSImage.GetSystemSymbol("tablecells", Strings.MenuAsTable)!],
+                        NSToolbarItemGroupSelectionMode.SelectOne,
+                        [Strings.MenuAsList, Strings.MenuAsTable],
+                        null,
+                        new ObjCRuntime.Selector(StyleChosen));
+                    StyleItem.Label = Strings.ToolbarView;
+                    StyleItem.ToolTip = Strings.ToolbarViewTip;
+                    StyleItem.SelectedIndex = (int)style();
+                    return StyleItem;
+
+                // The same Sort By the View menu has, so the list can be sorted from where the
+                // pointer is, and when there's no header to click.
+                case SortItemId:
+                    return new NSMenuToolbarItem(SortItemId)
+                    {
+                        Image = NSImage.GetSystemSymbol("arrow.up.arrow.down", Strings.ToolbarSort),
+                        Label = Strings.ToolbarSort,
+                        ToolTip = Strings.ToolbarSortTip,
+                        Menu = ViewMenus.SortByMenu(Strings.MenuSortBy),
+                        ShowsIndicator = true,
+                    };
 
                 default:
                     return new NSToolbarItem(itemIdentifier);

@@ -271,6 +271,10 @@
     <value>Completed tasks</value>
     <comment>Ticked in the menu while completed tasks are shown in the list. Names the thing, not the action: it never changes to say show or hide.</comment>
   </data>
+  <data name="CommandGroupBySection" xml:space="preserve">
+    <value>Group by section</value>
+    <comment>Ticked in the menu while a project's tasks are shown under a heading for each of its sections. Names the setting, not the action.</comment>
+  </data>
   <data name="CommandExpandAll" xml:space="preserve">
     <value>Expand all</value>
     <comment>Opens every task in the list to show its sub-tasks.</comment>
@@ -294,6 +298,10 @@
   <data name="CommandViewComments" xml:space="preserve">
     <value>View comments</value>
     <comment>Opens the panel under the list on the selected task's comments.</comment>
+  </data>
+  <data name="CommandEditDescription" xml:space="preserve">
+    <value>Edit description</value>
+    <comment>Task menu action that opens the selected task's description as markdown, ready to type into. An action, not an on/off setting.</comment>
   </data>
   <data name="CommandZoomIn" xml:space="preserve">
     <value>Zoom in</value>
@@ -406,6 +414,10 @@
   <data name="SyncStatusReconnectNeeded" xml:space="preserve">
     <value>Reconnect needed</value>
     <comment>In the status bar once Todoist has turned the token away. Nothing syncs until a new one is given.</comment>
+  </data>
+  <data name="SyncStatusWaitingForToken" xml:space="preserve">
+    <value>Waiting to read the saved Todoist token…</value>
+    <comment>In the status bar while the token is saved but can't be read yet: another program has its file open on Windows, or the Keychain is locked or waiting on its prompt on a Mac. Termyn keeps trying, and syncing carries on by itself once it can.</comment>
   </data>
   <data name="SyncStatusSynced" xml:space="preserve">
     <value>Synced</value>
@@ -712,6 +724,10 @@
   <data name="PanelProject" xml:space="preserve">
     <value>Project: {0}</value>
     <comment>The heading over the panel under the list while it's showing a project's description and comments. {0} is the project's name.</comment>
+  </data>
+  <data name="PanelTasksSelected_Other" xml:space="preserve">
+    <value>{0} tasks selected</value>
+    <comment>The heading over the panel under the list while several tasks are selected in it, when the panel shows nothing. {0} is how many, always more than one.</comment>
   </data>
   <data name="CommentNotSentYet" xml:space="preserve">
     <value>Not sent yet</value>

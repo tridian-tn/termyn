@@ -207,6 +207,28 @@ public class CommandsTests
     }
 
     [Fact]
+    public void Editing_the_description_is_offered_wherever_it_would_open_something_and_never_ticked()
+    {
+        // An action like Rename, so no tick, and lit from anywhere it has somewhere to take you: the
+        // rendering, the comments, a shut panel. Greyed where typing wouldn't be kept, and with the
+        // markdown already in front, where it would do nothing.
+        var reading = new CommandContext(ShowingDescription: true, CanWriteDescription: true);
+        Assert.True(State(AppCommand.EditDescription, reading).Enabled);
+        Assert.True(State(AppCommand.EditDescription, reading with { ShowingComments = true }).Enabled);
+        Assert.True(State(AppCommand.EditDescription, reading with { ShowingDescription = false }).Enabled);
+        Assert.False(State(AppCommand.EditDescription, reading with { CanWriteDescription = false }).Enabled);
+
+        var writing = reading with { WritingDescription = true };
+        Assert.False(State(AppCommand.EditDescription, writing).Enabled);
+
+        // Writing left behind the comments tab or a shut panel can be brought back.
+        Assert.True(State(AppCommand.EditDescription, writing with { ShowingComments = true }).Enabled);
+        Assert.True(State(AppCommand.EditDescription, writing with { ShowingDescription = false }).Enabled);
+
+        Assert.All([reading, writing], c => Assert.False(State(AppCommand.EditDescription, c).Checked));
+    }
+
+    [Fact]
     public void No_command_in_the_catalogue_renames_itself_for_its_own_state()
     {
         // The rule this keeps: a label may change with what is selected — "Rename project" against

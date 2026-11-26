@@ -9,10 +9,14 @@ public sealed class MacAppPaths : IAppPaths
     private const string AppFolder = "Termyn";
 
     public MacAppPaths()
+        : this(UserLibrary)
     {
-        var library = Folder(NSSearchPathDirectory.LibraryDirectory)
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library");
+    }
 
+    /// <summary>The folders under a library of the caller's choosing, so the tests make none in the real one.</summary>
+    /// <param name="library">The library folder</param>
+    internal MacAppPaths(string library)
+    {
         // The settings and the cache share Application Support, which is the one place on a Mac
         // for both. The cache isn't only a cache: it holds the queue of changes not yet sent, so it
         // can't go in Caches, which the system empties when it wants the space.
@@ -35,6 +39,11 @@ public sealed class MacAppPaths : IAppPaths
     public string LogDirectory { get; }
 
     public string AttachmentDirectory { get; }
+
+    /// <summary>The user's Library folder.</summary>
+    internal static string UserLibrary
+        => Folder(NSSearchPathDirectory.LibraryDirectory)
+           ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library");
 
     /// <summary>
     /// The user's Downloads folder.

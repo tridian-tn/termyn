@@ -31,7 +31,7 @@ public class ReconnectWindowTests
         Assert.True(sync.IsFaulted);
         Assert.IsType<TodoistAuthException>(sync.Exception?.InnerException);
 
-        var status = Status(window);
+        var status = TestWindow.StatusLine(window);
         Assert.Contains("Todoist turned your token away", status.Text);
         Assert.Equal(Cursors.Hand, status.Cursor);
     }
@@ -64,8 +64,8 @@ public class ReconnectWindowTests
 
         Assert.False(context.ReconnectNeeded);
         Assert.False(Commands.StateOf(AppCommand.Reconnect, context).Enabled);
-        Assert.Contains("Synced", Status(window).Text);
-        Assert.Equal(Cursors.Default, Status(window).Cursor);
+        Assert.Contains("Synced", TestWindow.StatusLine(window).Text);
+        Assert.Equal(Cursors.Default, TestWindow.StatusLine(window).Cursor);
     }
 
     [WinFormsFact]
@@ -126,10 +126,6 @@ public class ReconnectWindowTests
             File.Delete(settings);
         }
     }
-
-    /// <summary>The status line along the bottom of the window.</summary>
-    private static System.Windows.Forms.Label Status(Form window)
-        => TestWindow.Descendants(window).OfType<System.Windows.Forms.Label>().Single(l => l.Parent == window && l.Dock == DockStyle.Bottom);
 
     /// <summary>Account u1, holding one project with a task in it.</summary>
     private static InMemorySnapshotStore Held()

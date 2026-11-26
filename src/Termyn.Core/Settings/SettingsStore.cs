@@ -214,6 +214,7 @@ public sealed class SettingsStore
                 : defaults.CollapsedTasks,
             SidebarWidth = Nullable(view, "sidebarWidth"),
             ShowDescription = Flag(view, "showDescription", defaults.ShowDescription),
+            GroupBySection = Flag(view, "groupBySection", defaults.GroupBySection),
             DescriptionHeight = Nullable(view, "descriptionHeight"),
             WindowX = Nullable(view, "windowX"),
             WindowY = Nullable(view, "windowY"),

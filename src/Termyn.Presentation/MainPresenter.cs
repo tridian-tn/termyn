@@ -65,15 +65,21 @@ public sealed record TaskRow(
     DateOnly? DeadlineOn = null,
 
     /// <summary>
-    /// Whether this row is a day's heading rather than a task.
+    /// Whether this row is a heading rather than a task: a day's in Upcoming, or a section's in a
+    /// project grouped by section.
     /// </summary>
     /// <remarks>
-    /// Upcoming is grouped by day, and a virtualised list can't use the control's own grouping —
-    /// so a heading is a row like any other, and everything that acts on a task has to know the
-    /// difference. It carries the day's name in <c>Content</c> and nothing else.
+    /// A virtualised list can't use the control's own grouping, so a heading is a row like any
+    /// other, and everything that acts on a task has to know the difference. It carries the day's
+    /// or the section's name in <c>Content</c>, and a section's id in <c>SectionId</c>.
     /// </remarks>
     bool IsHeading = false,
-    bool Advancing = false);
+    bool Advancing = false,
+
+    /// <summary>
+    /// The section the task is in, or the one a section's heading heads, or null for neither.
+    /// </summary>
+    string? SectionId = null);
 
 /// <summary>
 /// One comment, as the pane draws it.
@@ -206,6 +212,20 @@ public sealed class MainPresenter
     private int _rateLimitStreak;
 
     private bool _syncing;
+
+    /// <summary>Whether the last sync found the token stored but out of reach, so it couldn't go.</summary>
+    private bool _waitingForToken;
+
+    /// <summary>
+    /// How soon a sync that couldn't read the token is tried again, whatever the cadence.
+    /// </summary>
+    /// <remarks>
+    /// Sooner than the loop's own interval, since a scanner or a backup lets go of a file in seconds,
+    /// and in manual mode as well, which otherwise wouldn't come round until F5. It isn't polling
+    /// Todoist: until the token can be read, nothing is sent, and once it can, the retry is the sync
+    /// that was asked for going through.
+    /// </remarks>
+    internal static readonly TimeSpan TokenRetry = TimeSpan.FromSeconds(10);
 
     /// <param name="fetcher">
     /// Fetches comment attachments on request. Optional: everything except opening and attaching a
@@ -380,7 +400,8 @@ public sealed class MainPresenter
     /// Publishes the cached model immediately, then reconciles with the server and publishes again.
     /// Losing the network leaves the cached rows on screen; only a rejected token propagates.
     /// </summary>
-    public async Task LoadAsync(CancellationToken ct = default)
+    /// <returns>What the sync loop should do next, for <see cref="SyncScheduler.Start"/> to begin from</returns>
+    public async Task<SyncOutcome> LoadAsync(CancellationToken ct = default)
     {
         // Set rather than noted (see NoteReachable): nothing has been tried yet, so this is where
         // the session starts from and not something learnt about the network.
@@ -388,11 +409,11 @@ public sealed class MainPresenter
             IsOffline = false;
 
         Publish();
-        await SyncAsync(ct);
+        return await SyncAsync(ct);
     }
 
     /// <summary>Reconciles with the server and republishes, keeping the current view if offline.</summary>
-    /// <returns>What the sync loop should do next — come straight back, or hold off.</returns>
+    /// <returns>What the sync loop should do next: come straight back, hold off, or try again soon</returns>
     public async Task<SyncOutcome> SyncAsync(CancellationToken ct = default)
     {
         lock (_publishing)
@@ -447,6 +468,7 @@ public sealed class MainPresenter
         // never comes back has still written what was waiting.
         History.Flush();
 
+        var outOfReach = false;
         try
         {
             await _engine.SyncAsync(ct);
@@ -458,6 +480,13 @@ public sealed class MainPresenter
                 _pausedUntil = null;
                 _rateLimitStreak = 0;
             }
+        }
+        catch (TodoistAuthException ex) when (ex.Unreachable)
+        {
+            // Stored, but not to be had just now: another program has the file, or the Keychain is
+            // locked. Nothing's wrong with the account, so it's waited for rather than reported,
+            // and tried again soon. Nothing went out, so this says nothing about the network.
+            outOfReach = true;
         }
         catch (TodoistRateLimitException ex)
         {
@@ -474,7 +503,12 @@ public sealed class MainPresenter
         finally
         {
             lock (_publishing)
+            {
                 _syncing = false;
+
+                // Any other way out had the token to send, a rejection included, so the wait's over.
+                NoteTokenReach(outOfReach);
+            }
 
             // A rejected token propagates, so this has to publish on the way out too: otherwise the
             // status goes on saying it's syncing rather than asking for a token.
@@ -482,7 +516,29 @@ public sealed class MainPresenter
         }
 
         // Only ask for another round while the network is answering, or the loop would spin.
-        return new SyncOutcome(!IsOffline && pause is null && _engine.WritesDue, pause);
+        return new SyncOutcome(
+            !IsOffline && pause is null && !outOfReach && _engine.WritesDue,
+            pause,
+            outOfReach ? TokenRetry : null);
+    }
+
+    /// <summary>
+    /// Notes whether the last sync could read the token, and writes down the change.
+    /// </summary>
+    /// <remarks>
+    /// Only the change, as <see cref="NoteReachable"/> does, so a file held for a minute is a line
+    /// when the wait starts and one when it ends rather than one every time the loop comes round.
+    /// Called holding <see cref="_publishing"/>.
+    /// </remarks>
+    /// <param name="outOfReach">Whether the sync stopped because the token couldn't be read</param>
+    private void NoteTokenReach(bool outOfReach)
+    {
+        if (_waitingForToken == outOfReach) return;
+
+        _waitingForToken = outOfReach;
+        _log?.Info(outOfReach
+            ? "The token is stored but can't be read yet, so syncing waits for it."
+            : "Syncing has stopped waiting for the token.");
     }
 
     /// <summary>
@@ -805,6 +861,10 @@ public sealed class MainPresenter
     {
         if (string.IsNullOrWhiteSpace(text))
             return null;
+
+        // By its name now. A parent added a moment ago can be renamed by a sync while the sub-task
+        // is being typed, and under the old name nothing finds it to file the new one beneath.
+        parentId = _engine.Resolve(parentId);
 
         var snapshot = _engine.Snapshot();
         if (snapshot.Items.FirstOrDefault(i => i.Id == parentId) is not { } parent || !_engine.CanNestUnder(parentId))
@@ -1764,27 +1824,49 @@ public sealed class MainPresenter
     /// Asked before the change rather than after: a delete takes the name with it, and a rename
     /// makes the old one the interesting half. A task the model has never heard of is quoted as
     /// nothing at all, which reads better in a sentence than an id nobody recognises.
+    ///
+    /// A completed task fetched from the archive is named from there, since that's where the row
+    /// being acted on came from.
     /// </remarks>
     /// <param name="id">The task to name</param>
     /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
     private string Named(string id)
-        => _engine.Snapshot().Items.FirstOrDefault(i => i.Id == id) is { Content.Length: > 0 } item
+    {
+        var snapshot = _engine.Snapshot();
+        return NameOf(snapshot.Items.FirstOrDefault(i => i.Id == id) ?? snapshot.CompletedItems.FirstOrDefault(i => i.Id == id));
+    }
+
+    /// <summary>What a task is called in a line of history, once it's been found.</summary>
+    /// <param name="item">The task, or null when there's none to name</param>
+    /// <returns>Its content in quotes, or "a task" where there is no name to give</returns>
+    private static string NameOf(TaskItem? item)
+        => item is { Content.Length: > 0 }
             ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryTaskNamed, item.Content)
             : Strings.HistoryTaskUnnamed;
 
     public void SetPriority(string id, Priority priority)
     {
         var named = Named(id);
-        _engine.UpdateItem(id, new JsonObject { ["priority"] = PriorityMap.ToApi(priority) });
+        _engine.UpdateItem(id, PriorityChange(priority));
+        NotePriority(id, named, priority);
+        Publish();
+    }
 
-        History.Note(
+    /// <summary>The change to a task that gives it a priority.</summary>
+    /// <param name="priority">The priority to give it</param>
+    /// <returns>The field to write</returns>
+    private static JsonObject PriorityChange(Priority priority) => new() { ["priority"] = PriorityMap.ToApi(priority) };
+
+    /// <summary>Puts a priority given to a task in the history.</summary>
+    /// <param name="id">The task</param>
+    /// <param name="named">What it's called, from before the change</param>
+    /// <param name="priority">The priority it was given</param>
+    private void NotePriority(string id, string named, Priority priority)
+        => History.Note(
             priority == Priority.P4
                 ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryPriorityCleared, named)
                 : string.Format(CultureInfo.CurrentCulture, Strings.HistoryPrioritySet, named, (int)priority),
             $"priority:{id}");
-
-        Publish();
-    }
 
     /// <summary>Sets or, with a null date, clears the due date.</summary>
     public void SetDue(string id, DateOnly? date, TimeOnly? time = null)
@@ -1814,6 +1896,10 @@ public sealed class MainPresenter
     /// <returns>False when it's already due that day or isn't there, so nothing was written</returns>
     public bool Reschedule(string id, DateOnly day)
     {
+        // By its name now. A popover holds what it opened with, and a sync can rename a task added
+        // a moment ago while it's up.
+        id = _engine.Resolve(id);
+
         var snapshot = _engine.Snapshot();
         if (snapshot.Items.FirstOrDefault(i => i.Id == id) is not { } item
             || SmartViews.DueOn(item, snapshot.TimeZone) == day)
@@ -1953,10 +2039,20 @@ public sealed class MainPresenter
     public DateOnly Today => _engine.Today;
 
     /// <summary>Sets or, with a null date, clears the day a task has to be finished by.</summary>
-    public void SetDeadline(string id, DateOnly? date)
+    /// <param name="id">The task, by any name it has gone by</param>
+    /// <param name="date">The day, or null to clear it</param>
+    /// <returns>
+    /// False when the account doesn't hold the task, with nothing changed: one a sync has deleted,
+    /// or a finished one out of the history
+    /// </returns>
+    public bool SetDeadline(string id, DateOnly? date)
     {
+        id = _engine.Resolve(id);
+
+        // Asked of the write itself rather than beforehand: a sync can take the task away in between.
         var named = Named(id);
-        _engine.UpdateItem(id, new JsonObject { ["deadline"] = ItemFields.Deadline(date) });
+        if (!_engine.UpdateItem(id, new JsonObject { ["deadline"] = ItemFields.Deadline(date) }))
+            return false;
 
         History.Note(
             date is { } day
@@ -1965,6 +2061,7 @@ public sealed class MainPresenter
             $"deadline:{id}");
 
         Publish();
+        return true;
     }
 
     /// <summary>
@@ -2089,6 +2186,243 @@ public sealed class MainPresenter
         Publish();
     }
 
+    // ---- Several tasks at once -----------------------------------------------------------------
+
+    /// <summary>
+    /// Ticks off several tasks, as one thing for Ctrl+Z to take back.
+    /// </summary>
+    /// <remarks>
+    /// A task picked out alongside its parent is left to the parent, which ticks it off with
+    /// everything else under it. Closing it as well would queue a second close for a task the first
+    /// has already finished.
+    ///
+    /// Not under a repeating parent, which moves on to its next date rather than being finished,
+    /// and takes nothing under it along. A sub-task picked out with one is closed in its own right.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    public void Complete(IReadOnlyList<string> ids)
+    {
+        var outermost = _engine.OutermostOf(ids, covers: parent => !parent.IsRecurring);
+        var named = Names(_engine.Snapshot(), outermost);
+
+        // Under the lock for the reason the single close is: a publish from the sync mustn't catch
+        // them finished and not yet kept.
+        lock (_publishing)
+        {
+            var now = _clock.UtcNow;
+            foreach (var (id, under) in _engine.CompleteItems(outermost))
+            {
+                _ticked[id] = new Ticked(now, under);
+            }
+        }
+
+        foreach (var id in outermost)
+        {
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryCompleted, named[id]), $"complete:{id}");
+        }
+
+        Publish();
+    }
+
+    /// <summary>Puts several completed tasks back among the active ones.</summary>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    public void Reopen(IReadOnlyList<string> ids)
+    {
+        var named = Names(_engine.Snapshot(), ids);
+        _engine.ReopenItems(ids);
+
+        lock (_publishing)
+        {
+            foreach (var id in ids)
+            {
+                _ticked.Remove(id);
+            }
+        }
+
+        foreach (var id in ids)
+        {
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryReopened, named[id]), $"reopen:{id}");
+        }
+
+        Publish();
+    }
+
+    /// <summary>
+    /// Deletes several tasks, as one thing for Ctrl+Z to bring back.
+    /// </summary>
+    /// <remarks>
+    /// A task picked out alongside its parent goes with the parent, the way Todoist deletes a
+    /// task's sub-tasks along with it, rather than being deleted a second time.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    public void Delete(IReadOnlyList<string> ids)
+    {
+        var outermost = _engine.OutermostOf(ids);
+
+        // Named first: the delete is what takes the names away.
+        var named = Names(_engine.Snapshot(), outermost);
+        _engine.DeleteItems(outermost);
+
+        foreach (var id in outermost)
+        {
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryDeleted, named[id]), $"delete:{id}");
+        }
+
+        Publish();
+    }
+
+    /// <summary>
+    /// Gives several tasks one priority, passing over any that already have it.
+    /// </summary>
+    /// <remarks>
+    /// Only the tasks the model holds. The rest are completed tasks out of the archive, which an
+    /// edit is declined for, and counting them had the history say they'd been changed.
+    /// </remarks>
+    /// <param name="ids">The tasks</param>
+    /// <param name="priority">The priority to give them</param>
+    /// <returns>False when none of them was changed, so nothing was written</returns>
+    public bool SetPriority(IReadOnlyList<string> ids, Priority priority)
+    {
+        var snapshot = _engine.Snapshot();
+        var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+        var changing = ids.Distinct(StringComparer.Ordinal)
+            .Where(id => held.GetValueOrDefault(_engine.Resolve(id)) is { } item && item.Priority != priority)
+            .ToList();
+
+        var named = Names(snapshot, changing);
+        var written = new List<string>();
+
+        // Together, so the store commits them once. Only the writes go inside: the gate is held
+        // there, and the history is noted outside it.
+        _engine.Together(() =>
+        {
+            foreach (var id in changing)
+            {
+                // Declined for one a sync has taken away since the snapshot.
+                if (_engine.UpdateItem(id, PriorityChange(priority))) written.Add(id);
+            }
+        });
+
+        foreach (var id in written)
+        {
+            NotePriority(id, named[id], priority);
+        }
+
+        if (written.Count == 0) return false;
+
+        Publish();
+        return true;
+    }
+
+    /// <summary>
+    /// Everywhere several tasks could be moved to, with the place they sit marked when they all sit
+    /// in the same one.
+    /// </summary>
+    /// <param name="ids">The tasks about to move</param>
+    /// <returns>Every project and section the sidebar shows</returns>
+    public IReadOnlyList<MoveDestination> DestinationsFor(IReadOnlyList<string> ids)
+    {
+        var snapshot = _engine.Snapshot();
+        var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+
+        // The ones that will move: a sub-task picked out with its parent goes with it, so where it
+        // sits doesn't count. Counted, it stopped the parent's own place being marked, and choosing
+        // it moved nothing.
+        var tasks = _engine.OutermostOf(ids).Select(id => held.GetValueOrDefault(_engine.Resolve(id))).ToList();
+
+        // Marked only when it's true of all of them. Marking where the first one sits would have the
+        // picker refuse a place the rest could perfectly well go to.
+        var first = tasks.FirstOrDefault();
+        var together = first is not null
+                       && tasks.All(t => t is { ParentId: null }
+                                         && t.SectionId == first.SectionId
+                                         && (t.ProjectId ?? snapshot.InboxProjectId) == (first.ProjectId ?? snapshot.InboxProjectId));
+
+        return MoveDestinations.From(Sidebar, together ? first : null, snapshot.InboxProjectId);
+    }
+
+    /// <summary>
+    /// Moves several tasks to the top level of a project or a section, each taking its sub-tasks
+    /// with it.
+    /// </summary>
+    /// <remarks>
+    /// A task picked out alongside its parent stays with the parent. Moving it on its own would
+    /// take it out from under the task it was filed beneath, which nobody picking out a branch to
+    /// move has asked for.
+    /// </remarks>
+    /// <param name="ids">The tasks, in the order the outline shows them</param>
+    /// <param name="destination">Where to, from <see cref="DestinationsFor(IReadOnlyList{string})"/></param>
+    /// <returns>How many were moved, which leaves out any already there, or gone</returns>
+    public int MoveTo(IReadOnlyList<string> ids, MoveDestination destination)
+    {
+        var outermost = _engine.OutermostOf(ids);
+        var named = Names(_engine.Snapshot(), outermost);
+        var moved = new List<string>();
+
+        // Together, for the reason a priority given to several is.
+        _engine.Together(() =>
+        {
+            foreach (var id in outermost)
+            {
+                if (Send(id, destination)) moved.Add(id);
+            }
+        });
+
+        foreach (var id in moved)
+        {
+            NoteMoved(id, named[id], destination);
+        }
+
+        if (moved.Count > 0) Publish();
+
+        return moved.Count;
+    }
+
+    /// <summary>
+    /// What can be done to several tasks at once, so a menu can grey out the rest.
+    /// </summary>
+    /// <remarks>
+    /// Only a move to somewhere else is asked about: the rest of what <see cref="TaskAbilities"/>
+    /// holds is about one task's place among its neighbours, and a batch doesn't have one. A move is
+    /// offered when every one of them can go, since one that can't is a completed task out of the
+    /// archive and would be left behind without a word.
+    /// </remarks>
+    /// <param name="ids">The tasks</param>
+    /// <returns>What they can be made to do together</returns>
+    public TaskAbilities AbilitiesForAll(IReadOnlyList<string> ids) => ids.Count switch
+    {
+        0 => TaskAbilities.None,
+        1 => AbilitiesFor(ids[0]),
+        _ => new TaskAbilities(CanMoveTo: ids.All(_engine.Holds)),
+    };
+
+    /// <summary>What to call each of several tasks in the history.</summary>
+    /// <remarks>
+    /// Read from a snapshot the caller already has. Each one projects every task in the account,
+    /// and taking one per question made a batch pay for three or four.
+    /// </remarks>
+    /// <param name="snapshot">The model as it stands</param>
+    /// <param name="ids">The tasks, by whatever names the outline holds them under</param>
+    /// <returns>Each one's name, the way <see cref="Named"/> gives it</returns>
+    private Dictionary<string, string> Names(ModelSnapshot snapshot, IReadOnlyList<string> ids)
+    {
+        // The model's own copy first, then what's been fetched from the archive.
+        var held = snapshot.Items.ToDictionary(i => i.Id, StringComparer.Ordinal);
+        foreach (var done in snapshot.CompletedItems)
+        {
+            held.TryAdd(done.Id, done);
+        }
+
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var id in ids)
+        {
+            names[id] = NameOf(held.GetValueOrDefault(_engine.Resolve(id)));
+        }
+
+        return names;
+    }
+
     public bool Undo()
     {
         var undone = _engine.Undo();
@@ -2128,10 +2462,10 @@ public sealed class MainPresenter
         => id is null
             ? TaskAbilities.None
             : new TaskAbilities(
-                _engine.CanIndentItem(id),
+                _engine.CanIndentItem(id, OneSectionAtATime),
                 _engine.CanOutdentItem(id),
-                _engine.CanMoveItem(id, -1),
-                _engine.CanMoveItem(id, 1),
+                _engine.CanMoveItem(id, -1, OneSectionAtATime),
+                _engine.CanMoveItem(id, 1, OneSectionAtATime),
                 _engine.Holds(id),
                 TodoistLinkFor(id) is not null,
                 _engine.CanNestUnder(id));
@@ -2155,7 +2489,7 @@ public sealed class MainPresenter
     public bool Move(string id, int offset)
     {
         var named = Named(id);
-        var moved = _engine.MoveItem(id, offset);
+        var moved = _engine.MoveItem(id, offset, OneSectionAtATime);
 
         if (moved)
         {
@@ -2168,13 +2502,24 @@ public sealed class MainPresenter
     }
 
     /// <summary>Makes a task a child of the one above it.</summary>
+    /// <remarks>
+    /// A task indented under one that's folded unfolds it, the way adding a sub-task does. Left
+    /// folded, the task would vanish as it landed, and the selection with it.
+    /// </remarks>
     public bool Indent(string id)
     {
         var named = Named(id);
-        var indented = _engine.IndentItem(id);
+        var indented = _engine.IndentItem(id, OneSectionAtATime);
 
         if (indented)
         {
+            var moved = _engine.Resolve(id);
+            if (_engine.Snapshot().Items.FirstOrDefault(i => i.Id == moved)?.ParentId is { } parent)
+            {
+                lock (_publishing)
+                    _collapsed.Remove(parent);
+            }
+
             History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryIndented, named), $"nest:{id}");
             Publish();
         }
@@ -2188,7 +2533,19 @@ public sealed class MainPresenter
     /// </summary>
     /// <param name="id">The task that wouldn't indent</param>
     /// <returns>True when there was somewhere to go and it was too deep to go there</returns>
-    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id);
+    public bool IndentTooDeep(string id) => _engine.IndentTooDeep(id, OneSectionAtATime);
+
+    /// <summary>
+    /// Whether the outline shows a section at a time: grouped under its headings, or one section
+    /// open on its own.
+    /// </summary>
+    /// <remarks>
+    /// Moving and indenting a task go by the project's order, which runs through every section, so
+    /// the task above one in that order can be in another section. Shown a section at a time, that
+    /// task isn't beside it on screen, and a nudge past it would look like nothing happened, or an
+    /// indent under it would carry the task off into the other section.
+    /// </remarks>
+    private bool OneSectionAtATime => GroupingBySection || Selection.SectionId is not null;
 
     /// <summary>Promotes a sub-task alongside its parent.</summary>
     public bool Outdent(string id)
@@ -2230,22 +2587,37 @@ public sealed class MainPresenter
     public bool MoveTo(string id, MoveDestination destination)
     {
         var named = Named(id);
-        var moved = destination.Kind switch
-        {
-            SidebarKind.Project => _engine.MoveItemToProject(id, destination.Id),
-            SidebarKind.Section => _engine.MoveItemToSection(id, destination.Id),
-            _ => false,
-        };
 
-        if (!moved)
-            return false;
+        if (!Send(id, destination)) return false;
 
-        // Its own run rather than the nudges' one. Moving a row up and then sending it to another
-        // project are two things done, and folding them would leave only the second.
-        History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedTo, named, destination.Path), $"move:to:{id}");
+        NoteMoved(id, named, destination);
         Publish();
         return true;
     }
+
+    /// <summary>Sends one task to the top level of a project or a section.</summary>
+    /// <param name="id">The task</param>
+    /// <param name="destination">Where to</param>
+    /// <returns>False when it was already there, or the task or the destination has gone</returns>
+    private bool Send(string id, MoveDestination destination) => destination.Kind switch
+    {
+        SidebarKind.Project => _engine.MoveItemToProject(id, destination.Id),
+        SidebarKind.Section => _engine.MoveItemToSection(id, destination.Id),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Puts a task sent somewhere else in the history.
+    /// </summary>
+    /// <remarks>
+    /// Its own run rather than the nudges' one. Moving a row up and then sending it to another
+    /// project are two things done, and folding them would leave only the second.
+    /// </remarks>
+    /// <param name="id">The task</param>
+    /// <param name="named">What it's called, from before the move</param>
+    /// <param name="destination">Where it went</param>
+    private void NoteMoved(string id, string named, MoveDestination destination)
+        => History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedTo, named, destination.Path), $"move:to:{id}");
 
     /// <summary>
     /// Whether tasks can be dragged about the outline as it's shown now.
@@ -2277,9 +2649,13 @@ public sealed class MainPresenter
     {
         id = _engine.Resolve(id);
 
-        return CanDrag && OutlineDrop.Moves(Rows, id, target) && (target.Zone == DropZone.Onto
+        if (!CanDrag || !OutlineDrop.Moves(Rows, id, target)) return false;
+
+        if (SectionHeadedBy(target) is { } section) return IntoSection(id, section, act: false);
+
+        return target.Zone == DropZone.Onto
             ? _engine.CanNestItem(id, target.Id)
-            : _engine.CanPlaceItem(id, target.Id, after: target.Zone == DropZone.After));
+            : _engine.CanPlaceItem(id, target.Id, after: target.Zone == DropZone.After, bySection: GroupingBySection);
     }
 
     /// <summary>
@@ -2301,10 +2677,20 @@ public sealed class MainPresenter
             return false;
 
         var named = Named(id);
+
+        if (SectionHeadedBy(target) is { } section)
+        {
+            if (!IntoSection(id, section, act: true)) return false;
+
+            History.Note(string.Format(CultureInfo.CurrentCulture, Strings.HistoryMoved, named), $"drop:{Guid.NewGuid():N}");
+            Publish();
+            return true;
+        }
+
         var onto = target.Zone == DropZone.Onto;
         var dropped = onto
             ? _engine.NestItem(id, target.Id)
-            : _engine.PlaceItem(id, target.Id, after: target.Zone == DropZone.After);
+            : _engine.PlaceItem(id, target.Id, after: target.Zone == DropZone.After, bySection: GroupingBySection);
 
         if (!dropped)
             return false;
@@ -2320,6 +2706,44 @@ public sealed class MainPresenter
         History.Note(onto ? string.Format(CultureInfo.CurrentCulture, Strings.HistoryMovedUnder, named, Named(target.Id)) : string.Format(CultureInfo.CurrentCulture, Strings.HistoryMoved, named), $"drop:{Guid.NewGuid():N}");
         Publish();
         return true;
+    }
+
+    /// <summary>The section whose heading a drop is over, or null when it's over a task.</summary>
+    /// <param name="target">The drop, from <see cref="OutlineDrop"/></param>
+    /// <returns>The section's id</returns>
+    private string? SectionHeadedBy(DropTarget target)
+        => target.Row >= 0 && target.Row < Rows.Count && Rows[target.Row] is { IsHeading: true } heading && heading.Id == target.Id
+            ? heading.SectionId
+            : null;
+
+    /// <summary>
+    /// Puts a task first in a section, which is what a drop on the section's heading asks for.
+    /// </summary>
+    /// <remarks>
+    /// Before the first task shown under the heading, when there is one, so it lands right under
+    /// where it was let go. An empty section has nothing to go before, so the task is just moved in.
+    /// </remarks>
+    /// <param name="id">The task being put down</param>
+    /// <param name="section">The section whose heading it's on</param>
+    /// <param name="act">Whether to make the move, or only say whether it could be made</param>
+    /// <returns>False when it's already first there, or the engine won't take it</returns>
+    private bool IntoSection(string id, string section, bool act)
+    {
+        var at = Rows.ToList().FindIndex(r => r.IsHeading && r.SectionId == section);
+        var first = at < 0 || at + 1 >= Rows.Count || Rows[at + 1] is not { IsHeading: false, Completed: false, Depth: 0 } next
+            ? null
+            : next.Id;
+
+        if (first is null)
+        {
+            return act ? _engine.MoveItemToSection(id, section) : _engine.CanMoveItemToSection(id, section);
+        }
+
+        if (first == id) return false;
+
+        return act
+            ? _engine.PlaceItem(id, first, after: false, bySection: true)
+            : _engine.CanPlaceItem(id, first, after: false, bySection: true);
     }
 
     // ---- Reminder intents ----------------------------------------------------------------------
@@ -2377,6 +2801,21 @@ public sealed class MainPresenter
         return [.. RemindersFor(itemId).Select(r => new ReminderRow(r, zone))];
     }
 
+    /// <summary>
+    /// Whether a reminder can be set a number of minutes before a task is due, which needs a due
+    /// date with a time: Todoist has nothing to count back from otherwise.
+    /// </summary>
+    /// <param name="itemId">The task, by any name it has gone by</param>
+    /// <returns>True when it has a due time</returns>
+    public bool TakesRelativeReminder(string itemId)
+    {
+        itemId = _engine.Resolve(itemId);
+
+        var snapshot = _engine.Snapshot();
+        return snapshot.Items.FirstOrDefault(i => i.Id == itemId) is { } item
+            && SmartViews.DueTimeOf(item, snapshot.TimeZone) is not null;
+    }
+
     /// <summary>Adds a reminder a number of minutes before the task is due.</summary>
     /// <returns>False when the plan won't take it, so the caller can say why rather than failing later.</returns>
     public bool AddRelativeReminder(string itemId, int minutesBefore)
@@ -2431,7 +2870,9 @@ public sealed class MainPresenter
 
     public void DeleteReminder(string id)
     {
-        _engine.DeleteReminder(id);
+        // One a sync has taken away meanwhile: there was nothing to remove, so nothing to note.
+        if (!_engine.DeleteReminder(id))
+            return;
 
         History.Note(Strings.HistoryReminderRemoved, $"reminder:delete:{id}");
         Publish();
@@ -3110,7 +3551,7 @@ public sealed class MainPresenter
             .GroupBy(r => r.ItemId!)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
-        var selected = scoped ? InSelection(snapshot) : _ => true;
+        var (selected, selectedCompleted) = scoped ? InSelection(snapshot) : (_ => true, _ => true);
         var visible = VisibleItems(snapshot, withKept: true)
             .Where(i => i.Id.Length > 0 && selected(i))
             .ToList();
@@ -3131,7 +3572,7 @@ public sealed class MainPresenter
 
         // Less what's already up there, kept where it was for a moment after being ticked off.
         if (ShowingCompleted)
-            rows.AddRange(CompletedRows(snapshot, i => selected(i) && !present.Contains(i.Id), Row));
+            rows.AddRange(CompletedRows(snapshot, i => selectedCompleted(i) && !present.Contains(i.Id), Row));
 
         return rows;
 
@@ -3173,7 +3614,8 @@ public sealed class MainPresenter
                 ProjectColour: project.Name is null ? null : project.Colour,
                 Deadline: DateShown(item.Deadline, snapshot.TimeZone, snapshot.Today),
                 DeadlineOn: SmartViews.DeadlineOn(item, snapshot.TimeZone),
-                Advancing: item.IsRecurring && snapshot.Closing.Contains(item.Id));
+                Advancing: item.IsRecurring && snapshot.Closing.Contains(item.Id),
+                SectionId: item.SectionId);
         }
     }
 
@@ -3182,13 +3624,15 @@ public sealed class MainPresenter
     /// </summary>
     /// <remarks>
     /// Todoist supplies the wording for a due date — "1 Aug", "every Monday" — and one set here has
-    /// none until it has been round-tripped, so the stored ISO date shows through and the row reads
-    /// as a different kind of thing from the ones either side of it. Writing it out the same way
-    /// closes that gap. A deadline is never worded at all, so it comes through here every time. The
-    /// year is only worth the width when it isn't this one.
+    /// none until it has been round-tripped, so without this the stored ISO date would show through
+    /// and the row would read as a different kind of thing from the ones either side of it. A
+    /// deadline is never worded at all, so it comes through here every time. The year is only worth
+    /// the width when it isn't this one, by the calendar the date is written in.
     ///
-    /// Written in the invariant culture rather than the machine's, since what's being reproduced
-    /// here is the server's wording and not a date of Termyn's own.
+    /// Written in the machine's region, like the rest of Termyn's own dates, the day headings above
+    /// these rows among them. It isn't trying to copy the server's wording: that's in the language
+    /// the account reads and follows the account's own date format, so no one culture would match it
+    /// for every account, and a deadline has no wording of the server's to match anyway.
     /// </remarks>
     /// <param name="stored">The ISO date, floating datetime, or UTC instant Todoist stores, or null</param>
     /// <param name="zone">The account's timezone, which a UTC instant is shown in</param>
@@ -3215,8 +3659,16 @@ public sealed class MainPresenter
 
         string Written(DateTime moment, bool withTime)
         {
-            var date = moment.Year == today.Year ? "d MMM" : "d MMM yyyy";
-            return moment.ToString(withTime ? date + ", HH:mm" : date, CultureInfo.InvariantCulture);
+            var culture = CultureInfo.CurrentCulture;
+            var day = DateOnly.FromDateTime(moment);
+
+            return (DisplayDates.SameYear(day, today, culture), withTime) switch
+            {
+                (true, true) => DisplayDates.DayMonthAndTime(moment, culture),
+                (true, false) => DisplayDates.DayMonth(day, culture),
+                (false, true) => DisplayDates.DateAndTime(moment, culture),
+                (false, false) => DisplayDates.DayMonthYear(day, culture),
+            };
         }
     }
 
@@ -3252,33 +3704,44 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// The test for "is this task in the current view", resolved once per publish. A filter has to
+    /// The tests for "is this task in the current view", resolved once per publish. A filter has to
     /// be parsed and its projects indexed, which is far too much work to repeat per task.
     /// </summary>
-    private Func<TaskItem, bool> InSelection(ModelSnapshot snapshot)
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>
+    /// The test for an active task and the one for a completed task. They're the same test except
+    /// in a smart view or a filter, where being done changes what a date means
+    /// </returns>
+    private (Func<TaskItem, bool> Active, Func<TaskItem, bool> Completed) InSelection(ModelSnapshot snapshot)
     {
         if (Selection.SectionId is { } sectionId)
-            return item => item.SectionId == sectionId;
+            return Both(item => item.SectionId == sectionId);
 
         if (Selection.ProjectId is { } projectId)
-            return item => item.ProjectId == projectId;
+            return Both(item => item.ProjectId == projectId);
 
         if (Selection.LabelName is { } label)
-            return item => item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase);
+            return Both(item => item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase));
 
         if (Selection.FilterId is { } filterId)
-            return FilterPredicate(snapshot, filterId);
+            return FilterPredicates(snapshot, filterId);
 
-        return Selection.View is not { } view
-            ? _ => true
-            : item => SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId);
+        if (Selection.View is not { } view)
+            return Both(_ => true);
+
+        return (
+            item => SmartViews.Matches(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId),
+            item => SmartViews.MatchesCompleted(item, view, snapshot.Today, snapshot.TimeZone, snapshot.InboxProjectId));
     }
 
-    private Func<TaskItem, bool> FilterPredicate(ModelSnapshot snapshot, string filterId)
+    /// <summary>One test that serves active and completed tasks alike.</summary>
+    private static (Func<TaskItem, bool>, Func<TaskItem, bool>) Both(Func<TaskItem, bool> test) => (test, test);
+
+    private (Func<TaskItem, bool> Active, Func<TaskItem, bool> Completed) FilterPredicates(ModelSnapshot snapshot, string filterId)
     {
         var filter = snapshot.Filters.FirstOrDefault(f => f.Id == filterId);
         if (filter is null)
-            return _ => false;
+            return Both(_ => false);
 
         var vocabulary = FilterVocabulary.From(snapshot.Projects, snapshot.Labels, snapshot.Sections);
         var parsed = FilterParser.Parse(filter.Query, vocabulary);
@@ -3299,7 +3762,7 @@ public sealed class MainPresenter
             _unsupportedFilter = new UnreadableFilter(
                 ForDisplay(filter.Query),
                 Links.TodoistFilter(filter.Id, filter.Name));
-            return _ => false;
+            return Both(_ => false);
         }
 
         var context = new FilterContext(
@@ -3309,7 +3772,9 @@ public sealed class MainPresenter
             snapshot.Sections,
             snapshot.UserId,
             snapshot.NextWeek);
-        return item => FilterEvaluator.Matches(parsed.Expression!, item, context);
+        return (
+            item => FilterEvaluator.Matches(parsed.Expression!, item, context),
+            item => FilterEvaluator.MatchesCompleted(parsed.Expression!, item, context));
     }
 
     /// <summary>
@@ -3356,8 +3821,10 @@ public sealed class MainPresenter
         var ordered = Ordered(rows);
 
         // One or the other, never both. Grouping lays the view out flat under its days, and a fold
-        // hides what sits under a task — which, under a day, is nothing at all.
-        Rows = Grouping ? ByDay(ordered) : Folded(ordered);
+        // hides what sits under a task — which, under a day, is nothing at all. Sections are another
+        // matter: a sub-task is always in its parent's section, so the tree survives being grouped
+        // and folds work under the headings as they do without them.
+        Rows = Grouping ? ByDay(ordered) : BySection(Folded(ordered));
         Status = ComposeStatus(pending, failed);
     }
 
@@ -3419,6 +3886,150 @@ public sealed class MainPresenter
         return grouped;
     }
 
+    /// <summary>
+    /// Whether a project with sections is shown under a heading for each one.
+    /// </summary>
+    /// <remarks>
+    /// A setting rather than anything about the view: it holds for every project, and it's saved
+    /// with the rest of the view state so a restart keeps it.
+    /// </remarks>
+    public bool GroupBySection { get; private set; }
+
+    /// <summary>
+    /// Turns grouping by section on or off.
+    /// </summary>
+    /// <remarks>
+    /// Republished only when there's already something on screen. On a start this is put back
+    /// before the first projection, and there's nothing yet for it to change.
+    /// </remarks>
+    /// <param name="on">True to group a project's tasks under its sections</param>
+    /// <returns>False when it was already that way, so the caller can leave the list alone</returns>
+    public bool SetGroupBySection(bool on)
+    {
+        lock (_publishing)
+        {
+            if (GroupBySection == on) return false;
+
+            GroupBySection = on;
+        }
+
+        if (_projectedFrom is not null) Republish();
+
+        return true;
+    }
+
+    /// <summary>Whether the open view is a project with sections, which is where grouping by them shows.</summary>
+    public bool CanGroupBySection
+    {
+        get
+        {
+            lock (_publishing)
+                return _projectedFrom is { } snapshot && SectionsToGroup(snapshot).Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// The sections the open view would be grouped under, in the sidebar's order.
+    /// </summary>
+    /// <remarks>
+    /// None outside a project, though the Inbox counts as one since it can have sections too. None
+    /// during a search either, which answers from the whole account with matches rather than with
+    /// the project's own outline.
+    /// </remarks>
+    /// <param name="snapshot">The account as it stands</param>
+    /// <returns>The project's sections still in use, or none where the view isn't one project</returns>
+    private List<Section> SectionsToGroup(ModelSnapshot snapshot)
+    {
+        var project = Selection.ProjectId ?? (Selection.View == SmartView.Inbox ? snapshot.InboxProjectId : null);
+
+        if (project is null || Searching) return [];
+
+        return snapshot.Sections
+            .Where(s => s.ProjectId == project && !s.IsArchived && s.Id.Length > 0)
+            .DistinctBy(s => s.Id)
+            // The sidebar's own order, name and all, so two sections a sync has left with the same
+            // order come out the same way round under both.
+            .OrderBy(s => s.SectionOrder)
+            .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(s => s.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>Whether the outline is being laid out under a heading for each section.</summary>
+    private bool GroupingBySection => GroupBySection && _projectedFrom is { } snapshot && SectionsToGroup(snapshot).Count > 0;
+
+    /// <summary>
+    /// A project's tasks under a heading for each of its sections, when that's been asked for.
+    /// Every other view, and a project with no sections, is handed back untouched.
+    /// </summary>
+    /// <remarks>
+    /// Laid over whatever order and folding settled on, the way the day headings are: each top-level
+    /// task goes under its section's heading with everything nested beneath it, so a sort orders the
+    /// tasks within each section and the sections stay in their own order.
+    ///
+    /// Tasks in no section come first under no heading, which is where Todoist puts them too. Every
+    /// section gets its heading even with nothing in it, since that heading is the only place left to
+    /// drop a task into it. A finished task keeps to the bottom under no heading, as it does in
+    /// Upcoming; one only just ticked off stays where it was until it goes.
+    /// </remarks>
+    /// <param name="rows">The outline as ordering and folding left it</param>
+    /// <returns>The rows to show, headings and all</returns>
+    private IReadOnlyList<TaskRow> BySection(IReadOnlyList<TaskRow> rows)
+    {
+        if (!GroupBySection || _projectedFrom is not { } snapshot) return rows;
+
+        var sections = SectionsToGroup(snapshot);
+        if (sections.Count == 0) return rows;
+
+        var under = sections.ToDictionary(s => s.Id, _ => new List<TaskRow>(), StringComparer.Ordinal);
+        var loose = new List<TaskRow>();
+        var settled = new List<TaskRow>();
+        var kept = Kept();
+
+        // Where the rows are going, set by each top-level task for itself and everything after it
+        // until the next. A section the project no longer has, archived say, files its tasks with
+        // the ones in no section rather than dropping them.
+        var into = loose;
+
+        foreach (var row in rows)
+        {
+            if (row.Depth == 0)
+            {
+                into = Settled(row, kept) ? settled
+                    : row.SectionId is { } section && under.TryGetValue(section, out var heading) ? heading
+                    : loose;
+            }
+
+            into.Add(row);
+        }
+
+        var grouped = new List<TaskRow>(rows.Count + sections.Count);
+        grouped.AddRange(loose);
+
+        foreach (var section in sections)
+        {
+            grouped.Add(SectionRow(section));
+            grouped.AddRange(under[section.Id]);
+        }
+
+        grouped.AddRange(settled);
+        return grouped;
+    }
+
+    /// <summary>The row that heads a section's tasks.</summary>
+    /// <param name="section">The section being headed</param>
+    /// <returns>A row carrying the section's name and id, which is no task</returns>
+    private static TaskRow SectionRow(Section section)
+        => new(
+            $"section:{section.Id}",
+            section.Name,
+            Priority.P4,
+            string.Empty,
+            string.Empty,
+            [],
+            IsHeading: true,
+            SectionId: section.Id);
+
     /// <summary>Whether the outline is being laid out under a heading for each day.</summary>
     /// <remarks>
     /// Upcoming alone, and not while searching: a search crosses the whole account and answers
@@ -3430,9 +4041,9 @@ public sealed class MainPresenter
     /// The row that heads a day's tasks.
     /// </summary>
     /// <remarks>
-    /// Written in the machine's own culture rather than the invariant one the due column uses:
-    /// that column reproduces the server's wording, and this is Termyn's own words about a day.
-    /// Tomorrow is named rather than given its weekday, since that is how anybody would say it.
+    /// Written in the machine's own culture, as the dates Termyn writes in the due and deadline
+    /// columns are. Tomorrow is named rather than given its weekday, since that's how anybody would
+    /// say it.
     /// </remarks>
     /// <param name="day">The day being headed</param>
     /// <param name="today">Today in the account's timezone, for naming tomorrow</param>
@@ -3721,6 +4332,34 @@ public sealed class MainPresenter
         Republish();
     }
 
+    /// <summary>
+    /// Orders the outline exactly as asked: by a column pointing one way, or in the account's own
+    /// order.
+    /// </summary>
+    /// <remarks>
+    /// For a menu that names the direction outright — the Mac's Sort By, with Ascending and
+    /// Descending under the columns — where a header click only ever turns the current one round.
+    /// No column is the account's order whichever way it's said to point, so the two can't come out
+    /// as different orders that look the same.
+    /// </remarks>
+    /// <param name="sort">The order wanted</param>
+    /// <returns>False when the outline was already in it, so the caller can leave things be.</returns>
+    public bool SortBy(TaskSort sort)
+    {
+        var wanted = sort.IsDefault ? TaskSort.Default : sort;
+
+        lock (_publishing)
+        {
+            if (wanted == Sort)
+                return false;
+
+            Sort = wanted;
+        }
+
+        Republish();
+        return true;
+    }
+
     /// <summary>Puts the outline back into the account's own order.</summary>
     /// <returns>False when it was already in it, so the caller can leave things be.</returns>
     public bool ClearSort()
@@ -3907,6 +4546,9 @@ public sealed class MainPresenter
         if (ReconnectNeeded)
             return new SyncStatus(SyncState.ReconnectNeeded, null, null, pending, failed);
 
+        // Ahead of syncing, or each retry would flash "Syncing…" over it every few seconds.
+        if (_waitingForToken) return new SyncStatus(SyncState.WaitingForToken, null, null, pending, failed);
+
         if (_syncing)
             return new SyncStatus(SyncState.Syncing, null, null, pending, failed);
 
@@ -3953,6 +4595,7 @@ public sealed class MainPresenter
         AppCommand.NewSection,
         AppCommand.SyncNow,
         AppCommand.ToggleCompleted,
+        AppCommand.GroupBySection,
         AppCommand.Undo,
         AppCommand.Settings,
         AppCommand.CheckForUpdates,
@@ -3966,7 +4609,12 @@ public sealed class MainPresenter
         // Only what the presenter itself knows. The palette lists an action whether or not it can
         // be run right now — typing "undo" and finding nothing there reads as a missing feature,
         // where running it and being told there is nothing to undo does not.
-        var context = new CommandContext(ShowingCompleted: ShowingCompleted, CanUndo: CanUndo, ReconnectNeeded: ReconnectNeeded);
+        var context = new CommandContext(
+            ShowingCompleted: ShowingCompleted,
+            CanUndo: CanUndo,
+            ReconnectNeeded: ReconnectNeeded,
+            GroupingBySection: GroupBySection,
+            CanGroupBySection: CanGroupBySection);
 
         foreach (var command in PaletteActions)
         {

@@ -304,10 +304,6 @@
     <value>Done</value>
     <comment>Button that closes the sheet listing refused changes.</comment>
   </data>
-  <data name="TokenOutOfReach" xml:space="preserve">
-    <value>Waiting to read the Todoist token from your Keychain…</value>
-    <comment>Window subtitle while the token is stored but can't be read yet: the Keychain is locked or its access prompt hasn't been answered. Syncing carries on by itself once it can.</comment>
-  </data>
   <data name="ReconnectButton" xml:space="preserve">
     <value>Reconnect…</value>
     <comment>Button in the banner shown when Todoist has turned the saved token away; asks for a new one.</comment>
@@ -343,5 +339,273 @@
   <data name="SyncStillRunning" xml:space="preserve">
     <value>A sync was still running and didn't stop in time. Open Termyn again and try once more.</value>
     <comment>Shown under SwitchAccountFailed when a sync wouldn't finish, so the last account's data couldn't be removed safely. Termyn quits after it.</comment>
+  </data>
+  <data name="MenuAsList" xml:space="preserve">
+    <value>as List</value>
+    <comment>View menu item, and the toolbar's choice, that shows the tasks as a two-line list. Finder's wording for its view styles.</comment>
+  </data>
+  <data name="MenuAsTable" xml:space="preserve">
+    <value>as Table</value>
+    <comment>View menu item, and the toolbar's choice, that shows the tasks as a table with a column for each thing about a task.</comment>
+  </data>
+  <data name="MenuSortBy" xml:space="preserve">
+    <value>Sort By</value>
+    <comment>View menu submenu, and the toolbar button's menu, that orders the tasks by a column.</comment>
+  </data>
+  <data name="MenuColumns" xml:space="preserve">
+    <value>Columns</value>
+    <comment>View menu submenu, and the menu on the table's header, that hides and shows the table's columns.</comment>
+  </data>
+  <data name="MenuGroupBySection" xml:space="preserve">
+    <value>Group by Section</value>
+    <comment>View menu item, ticked while a project's tasks are shown under a heading for each of its sections.</comment>
+  </data>
+  <data name="MenuExpandAll" xml:space="preserve">
+    <value>Expand All</value>
+    <comment>View menu item that shows every task's sub-tasks in the view.</comment>
+  </data>
+  <data name="MenuCollapseAll" xml:space="preserve">
+    <value>Collapse All</value>
+    <comment>View menu item that hides every task's sub-tasks in the view.</comment>
+  </data>
+  <data name="SortTodoistOrder" xml:space="preserve">
+    <value>Todoist Order</value>
+    <comment>Sort By item that puts the tasks back in the order they have in Todoist.</comment>
+  </data>
+  <data name="SortAscending" xml:space="preserve">
+    <value>Ascending</value>
+    <comment>Sort By item that orders the chosen column from the top: earliest, most urgent, A to Z.</comment>
+  </data>
+  <data name="SortDescending" xml:space="preserve">
+    <value>Descending</value>
+    <comment>Sort By item that orders the chosen column the other way round.</comment>
+  </data>
+  <data name="ShowAllColumns" xml:space="preserve">
+    <value>Show All Columns</value>
+    <comment>Columns menu item that shows every column the table has hidden.</comment>
+  </data>
+  <data name="ColumnTask" xml:space="preserve">
+    <value>Task</value>
+    <comment>The table's column for the task's name.</comment>
+  </data>
+  <data name="ColumnPriority" xml:space="preserve">
+    <value>Priority</value>
+    <comment>The table's column for the task's priority, headed with a flag. Also the column's name in the menus and its header's tooltip.</comment>
+  </data>
+  <data name="ColumnProject" xml:space="preserve">
+    <value>Project</value>
+    <comment>The table's column for the task's project.</comment>
+  </data>
+  <data name="ColumnDue" xml:space="preserve">
+    <value>Due</value>
+    <comment>The table's column for the task's due date.</comment>
+  </data>
+  <data name="ColumnDeadline" xml:space="preserve">
+    <value>Deadline</value>
+    <comment>The table's column for the task's deadline.</comment>
+  </data>
+  <data name="ColumnLabels" xml:space="preserve">
+    <value>Labels</value>
+    <comment>The table's column for the task's labels.</comment>
+  </data>
+  <data name="ShowSubtasks" xml:space="preserve">
+    <value>Show Sub-tasks</value>
+    <comment>Tooltip on the triangle in front of a task whose sub-tasks are hidden.</comment>
+  </data>
+  <data name="HideSubtasks" xml:space="preserve">
+    <value>Hide Sub-tasks</value>
+    <comment>Tooltip on the triangle in front of a task whose sub-tasks are showing.</comment>
+  </data>
+  <data name="ToolbarView" xml:space="preserve">
+    <value>View</value>
+    <comment>Label of the toolbar control that chooses between the list and the table.</comment>
+  </data>
+  <data name="ToolbarViewTip" xml:space="preserve">
+    <value>Show the tasks as a list or as a table</value>
+    <comment>Tooltip on the toolbar control that chooses between the list and the table.</comment>
+  </data>
+  <data name="ToolbarSort" xml:space="preserve">
+    <value>Sort</value>
+    <comment>Label of the toolbar button whose menu orders the tasks.</comment>
+  </data>
+  <data name="ToolbarSortTip" xml:space="preserve">
+    <value>Choose how the tasks are ordered</value>
+    <comment>Tooltip on the toolbar's Sort button.</comment>
+  </data>
+  <data name="NewSubtask" xml:space="preserve">
+    <value>New Sub-task…</value>
+    <comment>Task menu item that adds a sub-task under the selected task.</comment>
+  </data>
+  <data name="Labels" xml:space="preserve">
+    <value>Labels…</value>
+    <comment>Task menu item that opens the labels popover.</comment>
+  </data>
+  <data name="Indent" xml:space="preserve">
+    <value>Indent</value>
+    <comment>Task menu item that files the task under the one above it.</comment>
+  </data>
+  <data name="Outdent" xml:space="preserve">
+    <value>Outdent</value>
+    <comment>Task menu item that lifts a sub-task out one level.</comment>
+  </data>
+  <data name="MoveUp" xml:space="preserve">
+    <value>Move Up</value>
+    <comment>Task menu item that moves the task up past its neighbour.</comment>
+  </data>
+  <data name="MoveDown" xml:space="preserve">
+    <value>Move Down</value>
+    <comment>Task menu item that moves the task down past its neighbour.</comment>
+  </data>
+  <data name="MoveTo" xml:space="preserve">
+    <value>Move To…</value>
+    <comment>Task menu item that opens the popover for moving the task to another project or section.</comment>
+  </data>
+  <data name="IndentTopLevel" xml:space="preserve">
+    <value>Already at the top level.</value>
+    <comment>Said in the subtitle when a task at the top level can't be outdented.</comment>
+  </data>
+  <data name="IndentTooDeep" xml:space="preserve">
+    <value>Todoist holds four levels of sub-task, and this is as deep as it goes.</value>
+    <comment>Said in the subtitle when a task is already as deep as Todoist allows.</comment>
+  </data>
+  <data name="IndentNothingAbove" xml:space="preserve">
+    <value>Nothing above it to indent under.</value>
+    <comment>Said in the subtitle when there's no task above to indent under.</comment>
+  </data>
+  <data name="MoveAtEnd" xml:space="preserve">
+    <value>Already at the end of its list.</value>
+    <comment>Said in the subtitle when a task can't move any further up or down.</comment>
+  </data>
+  <data name="MoveCompletedRefused" xml:space="preserve">
+    <value>Tasks from the completed history can't be moved.</value>
+    <comment>Said in the subtitle when Move To is asked of an archived completed task.</comment>
+  </data>
+  <data name="MoveTargetGone" xml:space="preserve">
+    <value>Not moved — the task or where it was going is no longer there.</value>
+    <comment>Said in the subtitle when something changed while the Move To popover was open.</comment>
+  </data>
+  <data name="MovedNotShown" xml:space="preserve">
+    <value>Moved to {0}, which this view doesn't show.</value>
+    <comment>Said in the subtitle after a move takes the task out of the view. {0} is the path to where it went.</comment>
+  </data>
+  <data name="AddedNotShown" xml:space="preserve">
+    <value>Added, but this view doesn't show it.</value>
+    <comment>Said in the subtitle when a new sub-task doesn't belong in the view on screen.</comment>
+  </data>
+  <data name="DragTaskFailed" xml:space="preserve">
+    <value>Couldn't move the task there. Something changed while it was being dragged.</value>
+    <comment>Said in the subtitle when a drop is refused.</comment>
+  </data>
+  <data name="SubtaskUnder" xml:space="preserve">
+    <value>Under: {0}</value>
+    <comment>Line at the top of the new sub-task popover. {0} is the parent task's name.</comment>
+  </data>
+  <data name="SubtaskPlaceholder" xml:space="preserve">
+    <value>Sub-task</value>
+    <comment>Placeholder in the new sub-task popover's field.</comment>
+  </data>
+  <data name="MovePlaceholder" xml:space="preserve">
+    <value>Project or Section</value>
+    <comment>Placeholder in the Move To popover's search field.</comment>
+  </data>
+  <data name="MoveButton" xml:space="preserve">
+    <value>Move</value>
+    <comment>Button that confirms the Move To popover.</comment>
+  </data>
+  <data name="MoveKindProject" xml:space="preserve">
+    <value>project</value>
+    <comment>Marks a row of the Move To popover as a project.</comment>
+  </data>
+  <data name="MoveKindSection" xml:space="preserve">
+    <value>section</value>
+    <comment>Marks a row of the Move To popover as a section.</comment>
+  </data>
+  <data name="LabelsPlaceholder" xml:space="preserve">
+    <value>Find or Add a Label</value>
+    <comment>Placeholder in the labels popover's search field.</comment>
+  </data>
+  <data name="LabelsNew" xml:space="preserve">
+    <value>New Label “{0}”</value>
+    <comment>Last row of the labels popover when what's typed isn't a label yet. {0} is what's been typed.</comment>
+  </data>
+  <data name="SubtaskRefused" xml:space="preserve">
+    <value>This task can't take a sub-task any more.</value>
+    <comment>Said in the new sub-task popover when the parent was finished or nested too deep while it was open.</comment>
+  </data>
+  <data name="Deadline" xml:space="preserve">
+    <value>Deadline…</value>
+    <comment>Task menu item that opens the deadline popover for the selected task.</comment>
+  </data>
+  <data name="DeadlinePrompt" xml:space="preserve">
+    <value>Finish it by:</value>
+    <comment>Line above the field in the deadline popover.</comment>
+  </data>
+  <data name="DeadlineClear" xml:space="preserve">
+    <value>Clear Deadline</value>
+    <comment>Button in the deadline popover that takes the task's deadline off.</comment>
+  </data>
+  <data name="DeadlineNotSet" xml:space="preserve">
+    <value>Deadline not changed — the task is finished or no longer there.</value>
+    <comment>Said in the subtitle when a deadline can't be written because the account no longer holds the task.</comment>
+  </data>
+  <data name="Reminders" xml:space="preserve">
+    <value>Reminders…</value>
+    <comment>Task menu item that opens the reminders popover for the selected task.</comment>
+  </data>
+  <data name="RemindersNone" xml:space="preserve">
+    <value>No reminders on this task.</value>
+    <comment>Shown in the reminders popover's list when the task has none.</comment>
+  </data>
+  <data name="RemindersRemindMe" xml:space="preserve">
+    <value>Remind me:</value>
+    <comment>Label beside the list of offsets in the reminders popover.</comment>
+  </data>
+  <data name="RemindersOrOn" xml:space="preserve">
+    <value>Or on:</value>
+    <comment>Label beside the field for a moment of its own in the reminders popover.</comment>
+  </data>
+  <data name="RemindersAdd" xml:space="preserve">
+    <value>Add</value>
+    <comment>Button that adds a reminder in the reminders popover.</comment>
+  </data>
+  <data name="RemindersRemove" xml:space="preserve">
+    <value>Remove Reminder</value>
+    <comment>Tooltip and spoken name of the button that removes a reminder from the task.</comment>
+  </data>
+  <data name="RemindersAtTime" xml:space="preserve">
+    <value>At the Time It's Due</value>
+    <comment>Choice in the reminders popover: a reminder when the task falls due.</comment>
+  </data>
+  <data name="RemindersMinutesBefore" xml:space="preserve">
+    <value>{0} Minutes Before</value>
+    <comment>Choice in the reminders popover. {0} is a number of minutes.</comment>
+  </data>
+  <data name="RemindersHourBefore" xml:space="preserve">
+    <value>1 Hour Before</value>
+    <comment>Choice in the reminders popover.</comment>
+  </data>
+  <data name="RemindersDayBefore" xml:space="preserve">
+    <value>1 Day Before</value>
+    <comment>Choice in the reminders popover.</comment>
+  </data>
+  <data name="RemindersNeedDueTime" xml:space="preserve">
+    <value>Reminding before it's due needs a due date with a time.</value>
+    <comment>Said in the reminders popover when the task has no due time for an offset to count back from.</comment>
+  </data>
+  <data name="RemindersUpgrade" xml:space="preserve">
+    <value>Reminders need Todoist Pro.</value>
+    <comment>Said in the reminders popover on a plan without reminders.</comment>
+  </data>
+  <data name="RemindersPlanNotSynced" xml:space="preserve">
+    <value>Your plan hasn't synced yet.</value>
+    <comment>Said in the reminders popover when the app doesn't know yet whether the plan allows reminders.</comment>
+  </data>
+  <data name="RemindersAtLimit" xml:space="preserve">
+    <value>This plan is at its limit for reminders.</value>
+    <comment>Said in the reminders popover when the plan allows no more.</comment>
+  </data>
+  <data name="RemindersTaskGone" xml:space="preserve">
+    <value>That task is no longer here.</value>
+    <comment>Said in the reminders popover when the task was deleted or moved away while it was open.</comment>
   </data>
 </root>

@@ -69,6 +69,7 @@ internal sealed class SidebarController : NSViewController
         _outline.RowSizeStyle = NSTableViewRowSizeStyle.Default;
         _outline.DataSource = new Source(this);
         _outline.Delegate = new Delegate(this);
+        _outline.RegisterForDraggedTypes([TaskListController.TaskDragType]);
 
         View = new NSScrollView
         {
@@ -192,6 +193,9 @@ internal sealed class SidebarController : NSViewController
 
     private sealed class Source(SidebarController owner) : NSOutlineViewDataSource
     {
+        /// <summary>AppKit's NSOutlineViewDropOnItemIndex, which says on the row and not between two.</summary>
+        private const int DropOnItem = -1;
+
         public override nint GetChildrenCount(NSOutlineView outlineView, NSObject? item)
             => item is Item parent ? parent.Children.Count : owner._roots.Count;
 
@@ -200,6 +204,32 @@ internal sealed class SidebarController : NSViewController
 
         public override bool ItemExpandable(NSOutlineView outlineView, NSObject item)
             => ((Item)item).Children.Count > 0;
+
+        /// <summary>
+        /// A task dragged out of the list can be let go on a project or section to move it there.
+        /// Always on the row itself: the gaps between rows mean nothing to a task.
+        /// </summary>
+        public override NSDragOperation ValidateDrop(NSOutlineView outlineView, INSDraggingInfo info, NSObject? item, nint index)
+        {
+            if (Under(outlineView, info) is not { } row
+                || TaskListController.DraggedTask(info) is not { } id
+                || !owner._commands.CanDropTaskOn(id, row.Node))
+            {
+                return NSDragOperation.None;
+            }
+
+            outlineView.SetDropItem(row, DropOnItem);
+            return NSDragOperation.Move;
+        }
+
+        public override bool AcceptDrop(NSOutlineView outlineView, INSDraggingInfo info, NSObject? item, nint index)
+            => item is Item row && TaskListController.DraggedTask(info) is { } id && owner._commands.DropTaskOn(id, row.Node);
+
+        private static Item? Under(NSOutlineView outlineView, INSDraggingInfo info)
+        {
+            var row = outlineView.GetRow(outlineView.ConvertPointFromView(info.DraggingLocation, null));
+            return row >= 0 ? outlineView.ItemAtRow(row) as Item : null;
+        }
     }
 
     private sealed class Delegate(SidebarController owner) : NSOutlineViewDelegate

@@ -40,6 +40,39 @@ public class PerformanceBudgetTests : IDisposable
     /// </summary>
     private static readonly TimeSpan InteractiveCeiling = TimeSpan.FromMilliseconds(200);
 
+    /// <summary>
+    /// The part of the spec's 500 ms from launch to interactive that Termyn's own code owns: loading
+    /// the cache and the first projection. Measured at 111–141 ms in Release on the development
+    /// laptop.
+    /// </summary>
+    /// <remarks>
+    /// Not raised to suit a slow build agent, unlike <see cref="InteractiveCeiling"/>. A limit loose
+    /// enough to ride out a busy agent would let start-up get slower a little at a time, which is
+    /// what this is here to stop. More rounds steady it instead (<see cref="StartupRounds"/>), and
+    /// <see cref="StartupAllocationCeiling"/> catches the creep that no time limit on a shared agent
+    /// can.
+    /// </remarks>
+    private static readonly TimeSpan StartupBudget = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>
+    /// Rounds the start-up measurement takes, keeping the best. More than the others take, since
+    /// its budget isn't loosened: a busy patch on an agent passes, and a real slowdown shows in
+    /// every round.
+    /// </summary>
+    private const int StartupRounds = 20;
+
+    /// <summary>
+    /// What loading the cache and the first projection may allocate, in bytes. Unlike a time, the
+    /// count comes out the same on a busy agent as on an idle laptop, so it can sit close to the
+    /// measured cost and catch the slow creep that a time limit can't tell from a slow machine.
+    /// </summary>
+    /// <remarks>
+    /// Measured at 30.3 MB on 18 Nov 2026, the same in Debug and Release, so this is about 10%
+    /// above it. When a change has good reason to cost more, raise it in the same change and say
+    /// why. When one makes start-up cheaper, lower it, so the room doesn't quietly fill up.
+    /// </remarks>
+    private const long StartupAllocationCeiling = 33_000_000;
+
     private readonly string _dir = Directory.CreateTempSubdirectory("termyn-perf").FullName;
 
     public void Dispose()
@@ -59,29 +92,40 @@ public class PerformanceBudgetTests : IDisposable
     {
         var path = Seeded();
         var best = TimeSpan.MaxValue;
+        var leastAllocated = long.MaxValue;
 
-        for (var round = 0; round < Rounds; round++)
+        for (var round = 0; round < StartupRounds; round++)
         {
             // A fresh store each round, so this is a cold read of the file rather than a warm one of
             // the connection's own caches — which is what a cold start actually does.
             using var store = new SqliteSnapshotStore(path);
             var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
 
+            // Loading and projecting stay on this thread, so its own count is all of their
+            // allocations and none of the tests running alongside.
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var watch = Stopwatch.StartNew();
             engine.Load();
             var presenter = new MainPresenter(engine, Parser(), new FixedClock(ReferenceAccount.Today));
             watch.Stop();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
             Assert.Equal(ReferenceAccount.Tasks, engine.Snapshot().Items.Count);
             Assert.NotEmpty(presenter.Rows);
 
             if (watch.Elapsed < best)
                 best = watch.Elapsed;
+
+            // The least of the rounds, as the first pays for setting up statics that another test
+            // may already have done, depending on the order they ran in.
+            leastAllocated = Math.Min(leastAllocated, allocated);
         }
 
-        // The spec allows 500 ms from launch to interactive, of which process start, the runtime and
-        // WinForms take the bulk. This is the part Termyn's own code owns.
-        Assert.True(best < TimeSpan.FromMilliseconds(400), $"load and first projection took {best.TotalMilliseconds:N0} ms");
+        Assert.True(
+            leastAllocated < StartupAllocationCeiling,
+            $"load and first projection allocated {leastAllocated / 1_000_000.0:N1} MB");
+
+        Assert.True(best < StartupBudget, $"load and first projection took {best.TotalMilliseconds:N0} ms");
     }
 
     [Fact]
@@ -168,6 +212,172 @@ public class PerformanceBudgetTests : IDisposable
         }
 
         Assert.True(best < InteractiveCeiling, $"ticking a task off took {best.TotalMilliseconds:N1} ms to reach the rows");
+    }
+
+    [Fact]
+    public void Deleting_every_task_in_the_account_together_stays_interactive()
+    {
+        // One Ctrl+Z for the lot means the undo stack counts batches rather than writes. Counted by
+        // a walk of the stack for every write, a batch of thousands was quadratic, and made with
+        // the sync's lock held.
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < 3; round++)
+        {
+            var store = new InMemorySnapshotStore();
+            ReferenceAccount.Seed(store);
+            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+            engine.Load();
+            var ids = engine.Snapshot().Items.Select(i => i.Id).ToList();
+
+            var watch = Stopwatch.StartNew();
+            engine.DeleteItems(ids);
+            watch.Stop();
+
+            Assert.Empty(engine.Snapshot().Items);
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < InteractiveCeiling, $"deleting {ReferenceAccount.Tasks:N0} tasks together took {best.TotalMilliseconds:N0} ms");
+    }
+
+    [Fact]
+    public void A_batch_of_thousands_going_off_the_bottom_of_the_undo_stack_stays_interactive()
+    {
+        // Past fifty presses the oldest goes, all of it. Taken a write at a time from the front,
+        // each one shifted the rest of the stack along and then walked it again to count it.
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < 3; round++)
+        {
+            var store = new InMemorySnapshotStore();
+            ReferenceAccount.Seed(store);
+            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+            engine.Load();
+            var ids = engine.Snapshot().Items.Select(i => i.Id).ToList();
+
+            // The batch, and then fifty presses of their own on top of it: the last of those is the
+            // one that pushes the batch off.
+            engine.DeleteItems(ids.Take(ids.Count - 50).ToList());
+            foreach (var id in ids.Skip(ids.Count - 50).SkipLast(1))
+                engine.DeleteItem(id);
+
+            var watch = Stopwatch.StartNew();
+            engine.DeleteItem(ids[^1]);
+            watch.Stop();
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < InteractiveCeiling, $"letting go of a batch of {ReferenceAccount.Tasks - 50:N0} took {best.TotalMilliseconds:N1} ms");
+    }
+
+    /// <summary>How many tasks the batches on disk below are made of.</summary>
+    /// <remarks>
+    /// Twice the five hundred they were first timed at, so a commit made for each task is several
+    /// times the ceiling rather than a little over it: 0.7 seconds to delete them that way, and 1.4
+    /// to undo it, against about 30 ms each in one commit, in Debug on the development laptop.
+    /// The undo was 53–74 ms until the queue was indexed by uuid, and over the ceiling with the
+    /// whole suite running alongside it.
+    /// </remarks>
+    private const int DiskBatch = 1_000;
+
+    [Fact]
+    public void Deleting_a_thousand_tasks_together_on_disk_stays_interactive()
+    {
+        // Each commit waits on the disk. Made one for each task, five hundred deleted together took
+        // 0.4 seconds, so they're made in one. The same thousand each round, put back untimed in
+        // between, so there are rounds enough for a busy agent's slow one to be outvoted.
+        using var store = new SqliteSnapshotStore(Seeded());
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+        engine.Load();
+        var batch = engine.Snapshot().Items.Select(i => i.Id).Take(DiskBatch).ToList();
+
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < Rounds; round++)
+        {
+            var watch = Stopwatch.StartNew();
+            engine.DeleteItems(batch);
+            watch.Stop();
+
+            Assert.Equal(ReferenceAccount.Tasks - DiskBatch, engine.Snapshot().Items.Count);
+            Assert.True(engine.Undo());
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < InteractiveCeiling, $"deleting {DiskBatch:N0} tasks together on disk took {best.TotalMilliseconds:N0} ms");
+    }
+
+    [Fact]
+    public void Undoing_a_thousand_tasks_deleted_together_on_disk_stays_interactive()
+    {
+        // The undo is one transaction too. Made one for each task, putting back five hundred took
+        // 0.7 seconds.
+        using var store = new SqliteSnapshotStore(Seeded());
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+        engine.Load();
+        var batch = engine.Snapshot().Items.Select(i => i.Id).Take(DiskBatch).ToList();
+
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < Rounds; round++)
+        {
+            engine.DeleteItems(batch);
+
+            var watch = Stopwatch.StartNew();
+            Assert.True(engine.Undo());
+            watch.Stop();
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.Equal(ReferenceAccount.Tasks, engine.Snapshot().Items.Count);
+        Assert.True(best < InteractiveCeiling, $"undoing {DiskBatch:N0} tasks deleted together on disk took {best.TotalMilliseconds:N0} ms");
+    }
+
+    /// <summary>
+    /// How many tasks the whole-account undo below puts back: twice the reference account, where
+    /// work that walks the queue once for each task takes seconds.
+    /// </summary>
+    private const int WholeAccount = 2 * ReferenceAccount.Tasks;
+
+    /// <summary>
+    /// A loose ceiling for undoing a delete of <see cref="WholeAccount"/> tasks at once, as a
+    /// regression gate rather than a measurement. Measured at 0.27–0.30 s in Debug on the
+    /// development laptop, against the 4 s or so it takes when each task undone walks the queue.
+    /// It's not an interactive figure: nobody deletes ten thousand tasks to see it happen quickly.
+    /// </summary>
+    private static readonly TimeSpan WholeAccountCeiling = TimeSpan.FromSeconds(1);
+
+    [Fact]
+    public void Undoing_every_task_in_a_large_account_deleted_together_takes_one_pass()
+    {
+        // Each write undone was looked for from the oldest end of the queue, though a batch's
+        // writes are the newest, and was forgotten twice, the second time by walking the whole
+        // undo stack for a write already taken off it.
+        var best = TimeSpan.MaxValue;
+        for (var round = 0; round < 3; round++)
+        {
+            var store = new InMemorySnapshotStore();
+            ReferenceAccount.Seed(store, WholeAccount);
+            var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets(), new FixedClock(ReferenceAccount.Today));
+            engine.Load();
+            engine.DeleteItems(engine.Snapshot().Items.Select(i => i.Id).ToList());
+
+            var watch = Stopwatch.StartNew();
+            Assert.True(engine.Undo());
+            watch.Stop();
+
+            Assert.Equal(WholeAccount, engine.Snapshot().Items.Count);
+
+            if (watch.Elapsed < best)
+                best = watch.Elapsed;
+        }
+
+        Assert.True(best < WholeAccountCeiling, $"undoing {WholeAccount:N0} tasks deleted together took {best.TotalMilliseconds:N0} ms");
     }
 
     [Fact]

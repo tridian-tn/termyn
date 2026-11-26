@@ -75,13 +75,26 @@ public class OutlineDropTests
         => Assert.Equal(new DropTarget("e", DropZone.After, 4, 0), OutlineDrop.Over(Rows, 4, DropZone.After));
 
     [Fact]
-    public void A_heading_or_a_row_that_is_not_there_is_nothing_to_drop_by()
+    public void A_days_heading_or_a_row_that_is_not_there_is_nothing_to_drop_by()
     {
         TaskRow heading = new("day:2026-08-01", "1 Aug · Tomorrow", Priority.P4, string.Empty, string.Empty, [], IsHeading: true);
 
         Assert.Null(OutlineDrop.Over([heading, Task("a", 0)], 0, DropZone.Onto));
         Assert.Null(OutlineDrop.Over(Rows, -1, DropZone.Before));
         Assert.Null(OutlineDrop.Over(Rows, Rows.Count, DropZone.Before));
+    }
+
+    [Theory]
+    [InlineData(DropZone.Before)]
+    [InlineData(DropZone.Onto)]
+    [InlineData(DropZone.After)]
+    public void Anywhere_on_a_sections_heading_is_onto_it(DropZone zone)
+    {
+        TaskRow heading = new("section:s1", "Admin", Priority.P4, string.Empty, string.Empty, [], IsHeading: true, SectionId: "s1");
+
+        Assert.Equal(
+            new DropTarget("section:s1", DropZone.Onto, 1, 0),
+            OutlineDrop.Over([Task("a", 0), heading, Task("b", 0)], 1, zone));
     }
 
     // ---- Below the rows ------------------------------------------------------------------------

@@ -156,6 +156,21 @@ public class FilterEvaluatorTests
     }
 
     [Fact]
+    public void A_completed_task_is_never_overdue()
+    {
+        var late = Item(due: "2026-07-30");
+
+        Assert.False(MatchesCompleted("overdue", late));
+        Assert.False(MatchesCompleted("today | overdue", late));
+        Assert.False(MatchesCompleted("p4 & overdue", late));
+        Assert.True(MatchesCompleted("!overdue", late));
+        Assert.True(MatchesCompleted("today | overdue", Item(due: "2026-07-31")));
+
+        // Asking for a date is still answered by the date.
+        Assert.True(MatchesCompleted("due before: today", late));
+    }
+
+    [Fact]
     public void No_date_means_the_field_is_absent()
     {
         Assert.True(Matches("no date", Item()));
@@ -747,14 +762,20 @@ public class FilterEvaluatorTests
         TaskItem item,
         DateOnly today,
         DayOfWeek? nextWeek,
-        string? userId = Me)
+        string? userId = Me,
+        bool completed = false)
     {
         var parsed = FilterParser.Parse(query, Vocabulary());
         Assert.True(parsed.IsSupported, $"query not supported: {query}");
 
         var context = new FilterContext(Projects, today, TimeZoneInfo.Utc, Sections, userId, nextWeek);
-        return FilterEvaluator.Matches(parsed.Expression!, item, context);
+        return completed
+            ? FilterEvaluator.MatchesCompleted(parsed.Expression!, item, context)
+            : FilterEvaluator.Matches(parsed.Expression!, item, context);
     }
+
+    private static bool MatchesCompleted(string query, TaskItem item)
+        => Matches(query, item, Today, DayOfWeek.Monday, completed: true);
 
     private static FilterVocabulary Vocabulary()
         => new(Projects.Select(p => p.Name), ["home"], Sections.Select(s => s.Name));

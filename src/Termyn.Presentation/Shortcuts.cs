@@ -105,10 +105,19 @@ public static class Shortcuts
         Bind(Ctrl, Key.N, AppCommand.NewTask, Window),
         Bind(None, Key.F5, AppCommand.SyncNow, Window),
         Bind(Ctrl, Key.H, AppCommand.ToggleCompleted, Window),
+
+        // G for group. Window-wide like Ctrl+H, the other switch for what the list shows, since a
+        // text box has no use of its own for it.
+        Bind(Ctrl, Key.G, AppCommand.GroupBySection, Window),
         // F4 shows and hides the panel; F6 and F7 pick which of its tabs is in front.
         Bind(None, Key.F4, AppCommand.ToggleDescription, Window),
         Bind(None, Key.F6, AppCommand.ViewDescription, Window),
         Bind(None, Key.F7, AppCommand.ViewComments, Window),
+
+        // Window-wide, so it opens the description for typing from the outline, the comments or the
+        // description being read alike. No text box here has a use of its own for it: a rich edit
+        // control's is centring the paragraph, which the description box refuses.
+        Bind(Ctrl, Key.E, AppCommand.EditDescription, Window),
 
         // The key the menu shows first, then the number pad's own, which people reach for without
         // thinking and which is a different key entirely.

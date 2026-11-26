@@ -158,6 +158,7 @@ public class CommandPaletteTests
                 AppCommand.NewSection,
                 AppCommand.SyncNow,
                 AppCommand.ToggleCompleted,
+                AppCommand.GroupBySection,
                 AppCommand.Undo,
                 AppCommand.Settings,
                 AppCommand.CheckForUpdates,

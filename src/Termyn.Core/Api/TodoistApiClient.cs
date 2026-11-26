@@ -23,6 +23,7 @@ public sealed class TodoistApiClient : ITodoistApi
 {
     private const string SyncUrl = "https://api.todoist.com/api/v1/sync";
     private const string CompletedUrl = "https://api.todoist.com/api/v1/tasks/completed/by_completion_date";
+    private const string CompletedByDueUrl = "https://api.todoist.com/api/v1/tasks/completed/by_due_date";
     private const string UploadUrl = "https://api.todoist.com/api/v1/uploads";
 
     private readonly HttpClient _http;
@@ -183,7 +184,8 @@ public sealed class TodoistApiClient : ITodoistApi
         if (query.Cursor is { Length: > 0 } cursor)
             parameters.Add(new("cursor", cursor));
 
-        var url = CompletedUrl + "?" + string.Join('&', parameters.Select(p => $"{p.Key}={Uri.EscapeDataString(p.Value)}"));
+        var endpoint = query.ByDueDate ? CompletedByDueUrl : CompletedUrl;
+        var url = endpoint + "?" + string.Join('&', parameters.Select(p => $"{p.Key}={Uri.EscapeDataString(p.Value)}"));
 
         try
         {

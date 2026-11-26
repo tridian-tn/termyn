@@ -214,6 +214,37 @@ public class SubtaskCreationTests
         return new MainPresenter(_engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today));
     }
 
+    [Fact]
+    public async Task A_parent_the_server_has_just_renamed_can_still_take_a_sub_task()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"Parent","project_id":"p","child_order":1}""");
+
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today));
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        // Added here, so it goes by a name of our own until the sync hears what the server calls it.
+        var named = presenter.AddSubtask("a", "Made here");
+        Assert.NotNull(named);
+
+        api.Next = FakeApi.Naming(
+            new Dictionary<string, string> { ["item_add"] = "real" },
+            Json.Change("items", "real", """{"id":"real","content":"Made here","project_id":"p","parent_id":"a","child_order":1}"""));
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("real", presenter.CurrentIdOf(named));
+
+        // Still holding the old name, as a popover opened before the sync would be.
+        Assert.True(engine.CanNestUnder(named));
+        var under = presenter.AddSubtask(named, "Typed meanwhile");
+
+        Assert.NotNull(under);
+        Assert.Equal("real", engine.Snapshot().Items.Single(i => i.Id == under).ParentId);
+    }
+
     private MainPresenter All(InMemorySnapshotStore store)
     {
         var presenter = NewPresenter(store);

@@ -11,7 +11,7 @@ using Termyn.TestSupport;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// A whole main window, over an account with nothing in it.
+/// A whole main window, over an account with nothing in it, and the quick-add box that goes with it.
 /// </summary>
 /// <remarks>
 /// The shell it needs is eight interfaces, and the record that carries them always said tests could
@@ -72,6 +72,32 @@ internal static class TestWindow
             new FakeSecrets { Stored = null });
 
     /// <summary>
+    /// A window over a signed-in account, whose token the test can put out of reach or take away,
+    /// and whose log it can read.
+    /// </summary>
+    /// <param name="settingsName">A file name of its own, so two suites can't share one</param>
+    /// <param name="store">What the account holds</param>
+    /// <param name="secrets">Where the token's kept</param>
+    /// <param name="log">The log the window writes to</param>
+    /// <param name="presenter">The presenter, for a test that needs to drive it</param>
+    /// <returns>The window, which the caller disposes</returns>
+    internal static MainForm WithSecrets(
+        string settingsName,
+        InMemorySnapshotStore store,
+        FakeSecrets secrets,
+        RecordingLog log,
+        out MainPresenter presenter)
+        => Build(
+            new SettingsStore(Path.Combine(Path.GetTempPath(), settingsName)),
+            new AppSettings(),
+            store,
+            new FakeApi(),
+            out _,
+            out presenter,
+            secrets,
+            log: log);
+
+    /// <summary>
     /// A window that starts the way the app does, from the settings the last one wrote.
     /// </summary>
     /// <param name="settingsPath">The settings file to read and write, which the caller deletes</param>
@@ -127,7 +153,8 @@ internal static class TestWindow
         out Notifier notifier,
         out MainPresenter presenter,
         FakeSecrets? secrets = null,
-        string? attachments = null)
+        string? attachments = null,
+        RecordingLog? log = null)
     {
         secrets ??= new FakeSecrets { Stored = "tok" };
         var engine = new SyncEngine(api, store, secrets);
@@ -153,7 +180,7 @@ internal static class TestWindow
             notifier,
             new Instance(),
             new GitHubReleaseCheck(Http),
-            new RecordingLog());
+            log ?? new RecordingLog());
 
         var window = new MainForm(presenter, scheduler, shell);
 
@@ -161,6 +188,27 @@ internal static class TestWindow
         // would see.
         window.CreateControl();
         return window;
+    }
+
+    /// <summary>A quick-add box over an empty account, which can't reach the server.</summary>
+    /// <returns>The box, realised but not shown, which the caller disposes</returns>
+    internal static QuickAddForm QuickAdd() => QuickAdd(new InMemorySnapshotStore(), out _, out _);
+
+    /// <summary>A quick-add box over an account, which can't reach the server.</summary>
+    /// <param name="store">What the account holds</param>
+    /// <param name="engine">The engine, to read what a capture added</param>
+    /// <param name="presenter">The presenter, to ask what a view starts a task with</param>
+    /// <returns>The box, realised but not shown, which the caller disposes</returns>
+    internal static QuickAddForm QuickAdd(InMemorySnapshotStore store, out SyncEngine engine, out MainPresenter presenter)
+    {
+        engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
+        engine.Load();
+        var clock = new SystemClock();
+        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
+
+        var box = new QuickAddForm(presenter, Theme.From(ThemePalette.Light));
+        box.CreateControl();
+        return box;
     }
 
     /// <summary>
@@ -199,6 +247,12 @@ internal static class TestWindow
     /// <param name="parent">Where to look</param>
     /// <returns>The control, of which there must be exactly one</returns>
     internal static T Find<T>(Control parent) where T : Control => Descendants(parent).OfType<T>().Single();
+
+    /// <summary>The status line along the bottom of a window.</summary>
+    /// <param name="window">The window to look in</param>
+    /// <returns>The label, of which there must be exactly one</returns>
+    internal static System.Windows.Forms.Label StatusLine(Form window)
+        => window.Controls.OfType<System.Windows.Forms.Label>().Single(l => l.Dock == DockStyle.Bottom);
 
     /// <summary>Picks a row in the sidebar, the way a click does.</summary>
     /// <param name="window">The window whose sidebar to click in</param>

@@ -88,10 +88,21 @@ public sealed class AppDelegate : NSApplicationDelegate
     {
         _mainWindow?.Stop();
 
-        // The last view is remembered here rather than by AppKit's window restoration, because
-        // it's the presenter's key for it, and the Windows app keeps it in the same place.
+        // The last view and the folds are remembered here rather than by AppKit's window
+        // restoration, because they're the presenter's, and the Windows app keeps them in the same
+        // place.
         if (_presenter is not null && _settingsStore is not null)
-            _settingsStore.Save(_settings with { View = _settings.View with { SelectedKey = _presenter.SelectedKey } });
+        {
+            _settingsStore.Save(_settings with
+            {
+                View = _settings.View with
+                {
+                    SelectedKey = _presenter.SelectedKey,
+                    CollapsedTasks = _presenter.CollapsedTasks,
+                    GroupBySection = _presenter.GroupBySection,
+                },
+            });
+        }
 
         // The loop waits for a sync in flight, but only so long: quitting shouldn't hang on a slow
         // network.
@@ -115,17 +126,10 @@ public sealed class AppDelegate : NSApplicationDelegate
 
         // The status line names the undo key, so it's told how a Mac writes one.
         _presenter = new MainPresenter(engine, new QuickAddParser(new SystemClock()), log: _log, shortcutText: MacShortcuts.Text);
-        // Every sync that gets through had a token to send, which the window wants to hear when
-        // it's been waiting for the Keychain to hand one over.
-        var presenter = _presenter;
-        _scheduler = new SyncScheduler(
-            async ct =>
-            {
-                var outcome = await presenter.SyncAsync(ct);
-                _mainWindow?.Synced();
-                return outcome;
-            },
-            _settings.Cadence);
+        _presenter.RestoreCollapsed(_settings.View.CollapsedTasks);
+        _presenter.SetGroupBySection(_settings.View.GroupBySection);
+
+        _scheduler = new SyncScheduler(_presenter.SyncAsync, _settings.Cadence);
 
         // Every change queued is a reason to sync soon, as on Windows.
         engine.Queued += _scheduler.NotifyWrite;

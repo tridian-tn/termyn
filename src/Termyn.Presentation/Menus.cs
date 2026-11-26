@@ -47,7 +47,10 @@ public static class Menus
         MenuEntry.Of(AppCommand.ToggleComplete),
         MenuEntry.Of(AppCommand.Rename),
 
-        // With the two above it: what this task is, before what it is due or where it sits.
+        // Beside Rename, which is the same kind of thing: opening part of the task for typing.
+        MenuEntry.Of(AppCommand.EditDescription),
+
+        // With those above it: what this task is, before what it is due or where it sits.
         MenuEntry.Of(AppCommand.NewSubtask),
 
         MenuEntry.AfterRule(AppCommand.Due),
@@ -119,6 +122,7 @@ public static class Menus
             MenuEntry.Of(AppCommand.PreviousView),
             MenuEntry.Of(AppCommand.NextView),
             MenuEntry.AfterRule(AppCommand.ToggleCompleted),
+            MenuEntry.Of(AppCommand.GroupBySection),
             MenuEntry.AfterRule(AppCommand.ToggleDescription),
             MenuEntry.Of(AppCommand.ViewDescription),
             MenuEntry.Of(AppCommand.ViewComments),

@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+using Termyn.Core.Api;
 using Termyn.Core.Capture;
 using Termyn.Core.Model;
 using Termyn.Core.Sync;
@@ -89,7 +91,7 @@ public class ReminderFormTests
     [WinFormsFact]
     public void Nothing_typed_does_nothing()
     {
-        var presenter = Pro();
+        var presenter = Pro(due: Timed);
         using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
 
         dialog.AddAt("   ");
@@ -113,23 +115,382 @@ public class ReminderFormTests
         Assert.Equal(DialogResult.None, dialog.DialogResult);
     }
 
+    [WinFormsTheory]
+    [InlineData(null)]
+    [InlineData(DayOnly)]
+    public void Offsets_are_greyed_on_a_task_with_no_due_time_and_it_says_why(string? due)
+    {
+        // Todoist: "the item should have a due date with time set in order to add a relative reminder".
+        using var dialog = ReminderForm.For(Pro(due: due), "i1", "Ship it");
+
+        Assert.False(dialog.OffsetChoiceEnabled);
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.Equal(NeedsDueTime, dialog.Message);
+        Assert.Equal(NeedsDueTime, dialog.Tip);
+    }
+
+    [WinFormsTheory]
+    [InlineData(null)]
+    [InlineData(DayOnly)]
+    public void A_moment_of_its_own_needs_no_due_time(string? due)
+    {
+        var presenter = Pro(due: due);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+
+        Assert.True(dialog.MomentBoxEnabled);
+        Assert.True(dialog.MomentAddEnabled);
+
+        dialog.AddAt("4 aug 2026 at 4pm");
+
+        Assert.Equal("2026-08-04T16:00:00", Single(presenter).DueDate);
+    }
+
+    [WinFormsFact]
+    public void Offsets_are_lit_on_a_task_with_a_due_time_and_add_what_was_chosen()
+    {
+        var presenter = Pro(due: Timed);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+
+        Assert.True(dialog.OffsetChoiceEnabled);
+        Assert.True(dialog.OffsetAddEnabled);
+        Assert.True(dialog.MomentBoxEnabled);
+        Assert.True(dialog.MomentAddEnabled);
+        Assert.Equal(string.Empty, dialog.Message);
+        Assert.Equal(string.Empty, dialog.Tip);
+
+        // The third in the list: at the time, then 10 minutes, then 30.
+        dialog.AddOffset(2);
+
+        var reminder = Single(presenter);
+        Assert.Equal(ReminderKind.Relative, reminder.Kind);
+        Assert.Equal(30, reminder.MinuteOffset);
+        Assert.Equal(string.Empty, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public void Why_the_offsets_are_greyed_is_still_said_after_a_moment_is_added()
+    {
+        // An add clears the line, and the offsets would have been left grey with nothing to say why.
+        using var dialog = ReminderForm.For(Pro(), "i1", "Ship it");
+
+        dialog.AddAt("4 aug 2026 at 4pm");
+
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.Equal(NeedsDueTime, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public void Why_the_offsets_are_greyed_is_said_again_once_a_moment_goes_in_after_one_was_turned_down()
+    {
+        using var dialog = ReminderForm.For(Pro(), "i1", "Ship it");
+
+        dialog.AddAt("tomorrow please");
+        Assert.Equal(DayBoxText.ForReminder(DayReading.Unread, english: true).Says, dialog.Message);
+
+        dialog.AddAt("4 aug 2026 at 4pm");
+
+        Assert.Equal(NeedsDueTime, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public void Why_the_offsets_are_greyed_is_still_said_after_a_reminder_is_removed()
+    {
+        var presenter = Pro(reminder: Moment);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+
+        dialog.SelectReminder(0);
+        dialog.PressRemove();
+
+        Assert.Empty(presenter.RemindersFor("i1"));
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.Equal(NeedsDueTime, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public void A_due_time_lost_while_the_dialog_was_open_is_found_out_at_the_press()
+    {
+        // A sync runs behind the dialog, and the button was lit for a due time that's since gone.
+        var presenter = Pro(due: Timed);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        presenter.SetDue("i1", new DateOnly(2026, 8, 4));
+
+        dialog.AddOffset(0);
+
+        Assert.Empty(presenter.RemindersFor("i1"));
+        Assert.False(dialog.OffsetChoiceEnabled);
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.Equal(NeedsDueTime, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public void A_task_gone_while_the_dialog_was_open_is_said_to_be_gone_rather_than_to_need_a_due_time()
+    {
+        var presenter = Pro(due: Timed);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        presenter.Delete("i1");
+
+        dialog.AddOffset(0);
+
+        Assert.Equal(Strings.RemindersTaskGone, dialog.Message);
+    }
+
+    [WinFormsTheory]
+    [InlineData(null)]
+    [InlineData(Timed)]
+    public void A_plan_without_reminders_greys_everything_that_writes_and_gives_the_plan_as_the_reason(string? due)
+    {
+        // The plan comes first whatever the due date: adding a due time wouldn't light anything here.
+        using var dialog = ReminderForm.For(Holding(Free, due: due), "i1", "Ship it");
+
+        Assert.False(dialog.OffsetChoiceEnabled);
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.False(dialog.MomentBoxEnabled);
+        Assert.False(dialog.MomentAddEnabled);
+        Assert.Equal(Strings.RemindersUpgrade, dialog.Message);
+        Assert.Equal(Strings.RemindersUpgrade, dialog.Tip);
+    }
+
+    [WinFormsFact]
+    public void A_plan_not_heard_of_yet_is_said_to_be_not_synced_rather_than_too_small()
+    {
+        using var dialog = ReminderForm.For(Holding(plan: null, due: Timed), "i1", "Ship it");
+
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.False(dialog.MomentAddEnabled);
+        Assert.Equal(Strings.RemindersPlanNotSynced, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public void A_plan_that_lapsed_can_still_clear_its_reminders_and_goes_on_saying_why_it_cant_add()
+    {
+        var presenter = Holding(Free, reminder: Moment);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+
+        dialog.SelectReminder(0);
+        Assert.True(dialog.RemoveEnabled);
+
+        dialog.PressRemove();
+
+        Assert.Empty(presenter.RemindersFor("i1"));
+        Assert.False(dialog.MomentAddEnabled);
+        Assert.Equal(Strings.RemindersUpgrade, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public async Task It_keeps_up_with_a_task_the_server_has_just_renamed()
+    {
+        // A sub-task added a moment ago goes by a name of ours until a sync hears the server's, and
+        // a list asked by the old name said the task had no reminders with one just added to it.
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, api: api);
+        var temporary = presenter.AddSubtask("i1", "New")!;
+        using var dialog = ReminderForm.For(presenter, temporary, "New");
+        dialog.AddAt("4 aug 2026 at 4pm");
+
+        api.Next = FakeApi.Naming(new Dictionary<string, string> { ["item_add"] = "real1", ["reminder_add"] = "rem1" });
+        await presenter.SyncAsync();
+        Assert.NotEqual(temporary, presenter.CurrentIdOf(temporary));
+
+        dialog.AddAt("5 aug 2026 at 4pm");
+
+        Assert.Equal(2, presenter.RemindersFor("real1").Count);
+        Assert.Equal(2, dialog.Listed.Count);
+    }
+
+    [WinFormsFact]
+    public async Task A_due_time_a_sync_brings_lights_the_offsets()
+    {
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+        Assert.False(dialog.OffsetAddEnabled);
+
+        await Hears(presenter, api, Item(Timed));
+
+        Assert.True(dialog.OffsetChoiceEnabled);
+        Assert.True(dialog.OffsetAddEnabled);
+        Assert.Equal(string.Empty, dialog.Message);
+        Assert.Equal(string.Empty, dialog.Tip);
+    }
+
+    [WinFormsFact]
+    public async Task A_due_time_a_sync_takes_away_greys_the_offsets_and_says_why()
+    {
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, due: Timed, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+        Assert.True(dialog.OffsetAddEnabled);
+
+        await Hears(presenter, api, Item(DayOnly));
+
+        Assert.False(dialog.OffsetChoiceEnabled);
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.Equal(NeedsDueTime, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public async Task A_sync_brings_the_plan_and_the_reminders_up_to_date()
+    {
+        var api = new FakeApi();
+        var presenter = Holding(Free, due: Timed, reminder: Moment, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+        Assert.False(dialog.MomentAddEnabled);
+        Assert.NotEqual(Strings.RemindersNone, Assert.Single(dialog.Listed));
+
+        await Hears(
+            presenter,
+            api,
+            Json.Change("user_plan_limits", "user_plan_limits", ProPlan),
+            new ResourceChange("reminders", "r1", true, new JsonObject { ["id"] = "r1" }));
+
+        Assert.True(dialog.MomentAddEnabled);
+        Assert.True(dialog.OffsetAddEnabled);
+        Assert.Equal(string.Empty, dialog.Message);
+        Assert.Equal(Strings.RemindersNone, Assert.Single(dialog.Listed));
+    }
+
+    [WinFormsFact]
+    public async Task A_sync_leaves_alone_what_was_just_said_about_a_moment_turned_down()
+    {
+        // The words are what's being corrected, and they'd go from under whoever was reading them.
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+        dialog.AddAt("tomorrow please");
+        var said = dialog.Message;
+
+        await Hears(presenter, api, Item(Timed));
+
+        Assert.Equal(said, dialog.Message);
+        Assert.True(dialog.OffsetAddEnabled);
+    }
+
+    [WinFormsFact]
+    public async Task A_plan_lapsing_in_a_sync_says_so_over_what_was_said_before()
+    {
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, due: Timed, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+        dialog.AddAt("tomorrow please");
+
+        await Hears(presenter, api, Json.Change("user_plan_limits", "user_plan_limits", Free));
+
+        Assert.False(dialog.MomentAddEnabled);
+        Assert.Equal(Strings.RemindersUpgrade, dialog.Message);
+    }
+
+    [WinFormsFact]
+    public async Task A_sync_leaves_the_reminder_selected_so_it_can_still_be_removed()
+    {
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, reminder: Moment, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+        TestWindow.ShowOffScreen(dialog);
+        dialog.SelectReminder(0);
+
+        await Hears(presenter, api, Item(Timed));
+
+        Assert.True(dialog.RemoveEnabled);
+
+        dialog.PressRemove();
+
+        Assert.Empty(presenter.RemindersFor("i1"));
+    }
+
+    [WinFormsFact]
+    public async Task A_refusal_found_out_by_pressing_greys_what_no_longer_stands()
+    {
+        // The plan lapsed in a sync whose news hasn't reached the window, so Add was still lit.
+        var api = new FakeApi();
+        var presenter = Holding(ProPlan, due: Timed, api: api);
+        using var dialog = ReminderForm.For(presenter, "i1", "Ship it");
+
+        await Hears(presenter, api, Json.Change("user_plan_limits", "user_plan_limits", Free));
+        Assert.True(dialog.OffsetAddEnabled);
+
+        dialog.AddOffset(0);
+
+        Assert.Empty(presenter.RemindersFor("i1"));
+        Assert.False(dialog.OffsetAddEnabled);
+        Assert.False(dialog.MomentAddEnabled);
+        Assert.Equal(Strings.RemindersUpgrade, dialog.Message);
+    }
+
+    private const string NeedsDueTime = "Reminding before it's due needs a due date with a time.";
+
+    /// <summary>A due date with a time, which an offset can count back from.</summary>
+    private const string Timed = "2026-08-04T09:00:00";
+
+    /// <summary>A due date with no time, which an offset can't.</summary>
+    private const string DayOnly = "2026-08-04";
+
+    /// <summary>A reminder for a moment of its own.</summary>
+    private const string Moment = """{"id":"r1","item_id":"i1","type":"absolute","due":{"date":"2026-08-04T16:00:00"}}""";
+
+    private const string ProPlan = """{"current":{"plan_name":"pro","reminders":true}}""";
+
+    private const string Free = """{"current":{"plan_name":"free","reminders":false}}""";
+
     /// <summary>A presenter on a Pro plan, which may set reminders, holding one task.</summary>
     /// <param name="language">The language the account reads its dates in, or null for no user synced yet</param>
+    /// <param name="due">When the task is due, or null for no due date</param>
+    /// <param name="reminder">A reminder already on the task, if any</param>
     /// <returns>The presenter</returns>
-    private static MainPresenter Pro(string? language = null)
+    private static MainPresenter Pro(string? language = null, string? due = null, string? reminder = null)
+        => Holding(ProPlan, language, due, reminder);
+
+    /// <summary>A presenter holding one task.</summary>
+    /// <param name="plan">What the account's plan allows, or null for no plan synced yet</param>
+    /// <param name="language">The language the account reads its dates in, or null for no user synced yet</param>
+    /// <param name="due">When the task is due, or null for no due date</param>
+    /// <param name="reminder">A reminder already on the task, if any</param>
+    /// <param name="api">What a sync will hear from, if a test is going to sync</param>
+    /// <returns>The presenter</returns>
+    private static MainPresenter Holding(string? plan, string? language = null, string? due = null, string? reminder = null, FakeApi? api = null)
     {
+        var dated = due is null ? string.Empty : $$""","due":{"date":"{{due}}"}""";
+
         var store = new InMemorySnapshotStore();
         store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
-        store.PutResource("items", "i1", """{"id":"i1","content":"Ship it","project_id":"p1","child_order":1}""");
-        store.PutResource("user_plan_limits", "user_plan_limits", """{"current":{"plan_name":"pro","reminders":true}}""");
+        store.PutResource("items", "i1", $$"""{"id":"i1","content":"Ship it","project_id":"p1","child_order":1{{dated}} }""");
+
+        if (plan is not null)
+            store.PutResource("user_plan_limits", "user_plan_limits", plan);
+
+        if (reminder is not null)
+            store.PutResource("reminders", "r1", reminder);
 
         if (language is not null)
             store.PutResource("user", "user", $$$"""{"id":"u","lang":"{{{language}}}","tz_info":{"timezone":"UTC"}}""");
 
-        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        var engine = new SyncEngine(api ?? new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
         engine.Load();
         return new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)));
     }
+
+    /// <summary>A sync that hears these changes from the server.</summary>
+    /// <param name="presenter">The presenter syncing</param>
+    /// <param name="api">The server it hears them from</param>
+    /// <param name="changes">What the server says has changed</param>
+    /// <returns>The sync</returns>
+    private static Task Hears(MainPresenter presenter, FakeApi api, params ResourceChange[] changes)
+    {
+        api.Response = new SyncResponse { SyncToken = "s1", Changes = changes };
+        return presenter.SyncAsync();
+    }
+
+    /// <summary>The task as the server now has it, due then.</summary>
+    /// <param name="due">When it's due</param>
+    /// <returns>The change</returns>
+    private static ResourceChange Item(string due)
+        => Json.Change("items", "i1", $$$"""{"id":"i1","content":"Ship it","project_id":"p1","child_order":1,"due":{"date":"{{{due}}}"}}""");
 
     /// <summary>The one reminder on the task.</summary>
     private static Reminder Single(MainPresenter presenter) => Assert.Single(presenter.RemindersFor("i1"));

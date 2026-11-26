@@ -40,6 +40,34 @@ public static class SmartViews
     };
 
     /// <summary>
+    /// Whether a completed task belongs in a view. The same as <see cref="Matches"/> except in
+    /// Today, which has no overdue once a task is done.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Todoist's own apps work this way. A completed task is shown on the day it was due, whenever
+    /// it was finished, so Today's are the ones due today. An overdue task drops out of Today once
+    /// it's done, even if it was done today, and one with no due date never shows there.
+    /// </para>
+    /// <para>
+    /// Todoist also places a completed task with no due date by its deadline. That's left out on
+    /// purpose: Termyn's lists don't place open tasks by deadline, and doing it only for finished
+    /// ones would put a task in Today for the first time once it was done.
+    /// </para>
+    /// </remarks>
+    /// <param name="item">The completed task</param>
+    /// <param name="view">The view being shown</param>
+    /// <param name="today">Today in the account's timezone</param>
+    /// <param name="zone">The account's timezone</param>
+    /// <param name="inboxProjectId">The inbox's project id, or null when it isn't known</param>
+    /// <returns>True when the task is shown in the view's completed list</returns>
+    public static bool MatchesCompleted(TaskItem item, SmartView view, DateOnly today, TimeZoneInfo zone, string? inboxProjectId) => view switch
+    {
+        SmartView.Today => DueOn(item, zone) == today,
+        _ => Matches(item, view, today, zone, inboxProjectId),
+    };
+
+    /// <summary>
     /// The day a task falls due in the account's timezone. Todoist sends a floating date or local
     /// datetime as-is, but a task with a fixed timezone arrives as a UTC instant — taking the date
     /// off the front of that would be a day out either side of midnight.

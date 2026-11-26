@@ -253,6 +253,10 @@
     <value>Your plan hasn't synced yet.</value>
     <comment>Reminders dialog: the app doesn't know yet whether the account's plan allows reminders.</comment>
   </data>
+  <data name="RemindersNeedDueTime" xml:space="preserve">
+    <value>Reminding before it's due needs a due date with a time.</value>
+    <comment>Reminders dialog: the task has no due time for an offset to count back from.</comment>
+  </data>
   <data name="RemindersAtLimit" xml:space="preserve">
     <value>This plan is at its limit for reminders.</value>
     <comment>Reminders dialog: Todoist refused a new reminder because the plan allows no more.</comment>
@@ -663,6 +667,22 @@
     <value>Description</value>
     <comment>Tab above the task's description.</comment>
   </data>
+  <data name="PencilEdit" xml:space="preserve">
+    <value>Edit description</value>
+    <comment>Name of the pencil button above a description shown formatted. Clicking it shows the markdown to type into.</comment>
+  </data>
+  <data name="PencilEditTip" xml:space="preserve">
+    <value>Edit description ({0})</value>
+    <comment>Tooltip on the pencil button above a description shown formatted. {0} is the shortcut that does the same, such as Ctrl+E.</comment>
+  </data>
+  <data name="PencilPreview" xml:space="preserve">
+    <value>Preview description</value>
+    <comment>Name of the pencil button, shown pressed in, above a description's markdown. Clicking it goes back to showing the description formatted.</comment>
+  </data>
+  <data name="PencilPreviewTip" xml:space="preserve">
+    <value>Preview description (Esc)</value>
+    <comment>Tooltip on the pencil button, shown pressed in, above a description's markdown. Esc is the Escape key, which does the same from the markdown.</comment>
+  </data>
   <data name="MainCommentsTab" xml:space="preserve">
     <value>Comments</value>
     <comment>Tab above the task's comments, when it has none.</comment>
@@ -757,9 +777,31 @@ Open the release page?</value>
     <value>Windows would not change the launch-at-login setting.</value>
     <comment>Status bar after saving settings, when Windows refused to change whether the app starts at sign-in.</comment>
   </data>
-  <data name="NoticeFrameTheme" xml:space="preserve">
-    <value>Restart Termyn for the window frame to follow the theme.</value>
-    <comment>Status bar after changing the theme: the title bar only changes after a restart.</comment>
+  <data name="NoticeThemeAtNextStart" xml:space="preserve">
+    <value>The new theme takes effect when Termyn next starts.</value>
+    <comment>Status bar after changing the theme without restarting: the window stays in the old theme until then.</comment>
+  </data>
+  <data name="ThemeRestartHeading" xml:space="preserve">
+    <value>Restart Termyn now to change the theme?</value>
+    <comment>Heading of the question asked after saving a new theme in Settings.</comment>
+  </data>
+  <data name="ThemeRestartText" xml:space="preserve">
+    <value>Your work is saved first. Choose Later and the new theme is used next time Termyn starts.</value>
+    <comment>Body of the question asked after saving a new theme in Settings.</comment>
+  </data>
+  <data name="ThemeRestartNow" xml:space="preserve">
+    <value>Restart now</value>
+    <comment>Button: close Termyn and start it again in the new theme.</comment>
+  </data>
+  <data name="ThemeRestartLater" xml:space="preserve">
+    <value>Later</value>
+    <comment>Button: keep the current theme until Termyn next starts.</comment>
+  </data>
+  <data name="RestartFailed" xml:space="preserve">
+    <value>Termyn closed to restart, but couldn't start again: {0}
+
+Open it from the Start menu.</value>
+    <comment>Message when the new copy started for a theme change couldn't be launched. {0} is the error.</comment>
   </data>
   <data name="NoticeSyncCadence" xml:space="preserve">
     <value>The sync cadence takes effect when Termyn next starts.</value>
@@ -972,5 +1014,17 @@ The file is deleted from Todoist as well, and that can't be undone.</value>
   <data name="MovedNotShown" xml:space="preserve">
     <value>Moved to {0}, which this view doesn't show.</value>
     <comment>Status bar after a move. {0} is where the task went, as a project and section path.</comment>
+  </data>
+  <data name="MoveTasksCount_Other" xml:space="preserve">
+    <value>{0} tasks</value>
+    <comment>In the Move To dialog, the line above the box, in place of a task's name while several tasks are being moved together. {0} is how many, always more than one.</comment>
+  </data>
+  <data name="MoveTargetGoneSeveral" xml:space="preserve">
+    <value>Not moved — the tasks or where they were going are no longer there.</value>
+    <comment>Status bar when moving several tasks together moves none of them, because they or their destination were deleted while the dialog was open.</comment>
+  </data>
+  <data name="OneTaskOnly" xml:space="preserve">
+    <value>Select just one task for that.</value>
+    <comment>Status bar when a command that works on a single task, such as renaming or setting a due date, is asked for with several tasks selected in the list.</comment>
   </data>
 </root>

@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Globalization;
+using System.Runtime.InteropServices;
 using Termyn.Core.Model;
 using Termyn.Core.Settings;
 using Termyn.Presentation;
@@ -20,18 +22,11 @@ internal sealed class OutlineView : ListView
     private const int IndentAt96 = 18;
     private const int TextInset = 6;
 
-    /// <summary>
-    /// How much room the expander takes at the head of a row.
-    /// </summary>
-    /// <remarks>
-    /// Kept on every row and not only the ones that have an expander, so a task with sub-tasks and
-    /// one without still start their words in the same place. A gutter that appeared and vanished
-    /// would shuffle the whole column sideways as tasks gained and lost children.
-    /// </remarks>
-    private const int ExpanderAt96 = 14;
+    /// <summary>How much room the expander takes at the head of a row, the same as the sidebar's.</summary>
+    private const int ExpanderAt96 = ExpanderGlyph.RoomAt96;
 
     /// <summary>How big the arrow itself is drawn inside that room.</summary>
-    private const int ExpanderGlyphAt96 = 8;
+    private const int ExpanderGlyphAt96 = ExpanderGlyph.SizeAt96;
 
     /// <summary>
     /// How much room the box that ticks a task off takes, between the expander and the words.
@@ -48,6 +43,9 @@ internal sealed class OutlineView : ListView
     /// <summary>The largest a project's dot is drawn, and a priority's.</summary>
     private const int DotAt96 = 8;
     private const int PriorityDotAt96 = 9;
+
+    /// <summary>How thick the ring round a project's dot is on a selected row.</summary>
+    private const int DotRingAt96 = 1;
 
     /// <summary>A size at 100% at the scale of the display the list is on.</summary>
     /// <param name="logical">The size at 100%</param>
@@ -72,17 +70,24 @@ internal sealed class OutlineView : ListView
     /// </summary>
     private ListViewItem?[] _cache = [];
 
-    /// <summary>Cached so painting doesn't ask the native control once per cell.</summary>
-    private int _selectedIndex = -1;
+    /// <summary>
+    /// The task rows selected, cached so painting doesn't ask the native control once per cell.
+    /// </summary>
+    /// <remarks>
+    /// Never a day's heading. Shift can take one into a run of rows, and the native list holds it
+    /// there along with the rest, but it isn't a task: nothing acts on it, so it isn't drawn as if
+    /// something might.
+    /// </remarks>
+    private int[] _selected = [];
 
     /// <summary>
-    /// True while the selection is being put back on the task it was already on, so the two native
+    /// True while the selection is being put back on the tasks it was already on, so the native
     /// events that takes aren't published as the user having chosen something.
     /// </summary>
     private bool _reseating;
 
     /// <summary>The selection last published, so a refresh that lands back where it was is silent.</summary>
-    private int _publishedIndex = -1;
+    private int[] _published = [];
 
     public OutlineView()
     {
@@ -90,7 +95,10 @@ internal sealed class OutlineView : ListView
         VirtualMode = true;
         OwnerDraw = true;
         FullRowSelect = true;
-        MultiSelect = false;
+
+        // Shift with an arrow or a click takes in a run of rows, and Ctrl with a click adds or takes
+        // away one, the way every list in Windows does it.
+        MultiSelect = true;
         HideSelection = false;
         HoverSelection = false;
         HotTracking = false;
@@ -129,7 +137,8 @@ internal sealed class OutlineView : ListView
     /// Once the list is on its screen and laid out. Before that it only knows the scale of the screen
     /// the app started on, and on a second screen scaled differently that's the wrong one.
     ///
-    /// A column with no saved width takes its default. When none of them had one, the task column
+    /// A column with no saved width takes its default, widened for a date column when the region
+    /// writes its dates longer than that has room for. When none of them had one, the task column
     /// then takes whatever the others leave of the outline, so every column shows without scrolling
     /// sideways. A scroll bar is allowed for, showing or not: this runs before the rows are in, and a
     /// real account soon has more than fit.
@@ -142,9 +151,7 @@ internal sealed class OutlineView : ListView
         foreach (var header in headers)
         {
             var column = (TaskColumn)header.Tag!;
-            header.Width = saved.TryGetValue(column, out var width)
-                ? width
-                : StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi);
+            header.Width = saved.TryGetValue(column, out var width) ? width : DefaultWidth(column);
         }
 
         // Asked of the outline's own columns, so a width saved for one it no longer has doesn't
@@ -158,6 +165,22 @@ internal sealed class OutlineView : ListView
         foreach (var header in headers.Where(h => h.Tag is TaskColumn.Content))
             header.Width = StartupLayout.TaskColumnWidth(room, others, DeviceDpi);
     }
+
+    /// <summary>
+    /// How wide a column starts when no width has been saved for it.
+    /// </summary>
+    /// <remarks>
+    /// The layout's default at this screen's scale, widened for a date column whose region needs
+    /// it, measured the way a cell is drawn.
+    /// </remarks>
+    /// <param name="column">The column</param>
+    /// <returns>Its width in pixels</returns>
+    private int DefaultWidth(TaskColumn column)
+        => (int)StartupLayout.StartWidth(
+            column,
+            StartupLayout.Scaled(StartupLayout.ColumnWidth(column), DeviceDpi),
+            CultureInfo.CurrentCulture,
+            words => TextRenderer.MeasureText(words, Font).Width + (TextInset * 2));
 
     /// <summary>Raised when a header is clicked, with the column it stands for.</summary>
     public event Action<TaskColumn>? SortRequested;
@@ -257,7 +280,11 @@ internal sealed class OutlineView : ListView
         get => _rows;
         set
         {
-            var selected = SelectedId;
+            // Read off the rows being replaced, which are the ones the native selection's indices
+            // still point into.
+            var selected = SelectedIds;
+            var focused = FocusedId;
+            var anchored = SelectionMark is var mark and >= 0 && mark < _rows.Count ? _rows[mark].Id : null;
 
             _rows = value;
             _cache = new ListViewItem?[value.Count];
@@ -280,39 +307,42 @@ internal sealed class OutlineView : ListView
             _reseating = true;
             try
             {
-                // Put the selection back on the same task, if it's still here. Deliberately no
-                // scrolling and no fallback selection: a background sync refreshes these rows every
-                // 45 seconds, and it must not move the selection or the viewport under the user.
-                var index = selected is null ? -1 : IndexOf(selected);
+                // Put the selection back on the same tasks, those that are still here. Deliberately
+                // no scrolling and no fallback selection: a background sync refreshes these rows
+                // every 45 seconds, and it must not move the selection or the viewport under the user.
+                //
+                // Any task that's gone is left out. Leaving the native selection on its old index
+                // would silently hand the selection to whichever task now occupies that row.
+                //
+                // A walk of the rows per task is nothing for the one or two a selection usually
+                // holds, and quadratic for a run Shift took over a whole view, so past a few
+                // they're looked up in a map of the rows made once.
+                Func<string, int> rowOf = selected.Count > 4 ? RowsById(value) : RowOf;
+                var indices = selected.Select(rowOf).Where(i => i >= 0).Distinct().Order().ToArray();
 
-                // Not here under the name it had, which for a task created a moment ago means the
-                // sync has just been told what the server calls it. Same task, same row, new name —
-                // and indistinguishable from a deletion without something that knows the difference.
-                if (index < 0 && selected is not null && Renamed?.Invoke(selected) is { } now && now != selected)
+                if (!SelectedIndices.Cast<int>().Order().SequenceEqual(indices))
                 {
-                    index = IndexOf(now);
-                    selected = now;
-                }
-                if (index >= 0)
-                {
-                    if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+                    SelectedIndices.Clear();
+                    foreach (var index in indices)
                     {
-                        SelectedIndices.Clear();
                         SelectedIndices.Add(index);
                     }
-
-                    // Keyboard navigation moves from the focused row, not the selected one, so they
-                    // must not drift apart. Setting focus here does not scroll the viewport.
-                    Items[index].Focused = true;
-                }
-                else
-                {
-                    // The selected task is gone. Leaving the native selection on its old index would
-                    // silently hand the selection to whichever task now occupies that row.
-                    SelectedIndices.Clear();
                 }
 
-                _selectedIndex = index;
+                // Keyboard navigation moves from the focused row, so it has to stay on the task it
+                // was on. Failing that, on a selected one, so the two don't drift apart. Setting
+                // focus here doesn't scroll the viewport.
+                var focus = focused is null ? -1 : rowOf(focused);
+                if (focus < 0 && indices.Length > 0) focus = indices[0];
+                if (focus >= 0) Items[focus].Focused = true;
+
+                // And the row a Shift run is measured from, which the native list holds by index
+                // too. Left where it was, a task ticked off above the run takes its row away, and
+                // the next Shift press lets go of the task the run started from.
+                var anchor = anchored is null ? -1 : rowOf(anchored);
+                SelectionMark = anchor >= 0 ? anchor : focus;
+
+                Remember(moved: false);
             }
             finally
             {
@@ -321,10 +351,9 @@ internal sealed class OutlineView : ListView
 
             // Once, now that it has settled — and only when it has actually landed somewhere else,
             // so a refresh that changed nothing stays as quiet as it was before.
-            if (_selectedIndex != _publishedIndex)
-                base.OnSelectedIndexChanged(EventArgs.Empty);
+            if (!_selected.SequenceEqual(_published)) base.OnSelectedIndexChanged(EventArgs.Empty);
 
-            _publishedIndex = _selectedIndex;
+            _published = _selected;
 
             // A tip names the priority of whatever task was under the pointer, and a sync can put
             // another one there, or change this one's, without the pointer moving at all.
@@ -337,17 +366,39 @@ internal sealed class OutlineView : ListView
     public string? SelectedId => SelectedRow?.Id;
 
     /// <summary>
-    /// The task the list is on, or null when it is on none.
+    /// The task the list is on, or null when it's on none — or on several.
     /// </summary>
     /// <remarks>
     /// A day's heading answers null. The selection is moved off one as soon as it lands there, so
     /// this is the second line rather than the first — but everything that acts on a task reads
     /// the selection through here, and none of it should ever be handed a row that isn't one.
+    ///
+    /// Null with several selected, since everything that asks this is about to act on one task,
+    /// and picking one of several to act on would be a guess. What can act on several reads
+    /// <see cref="SelectedRows"/>.
     /// </remarks>
-    public TaskRow? SelectedRow
-        => SelectedIndices.Count > 0 && SelectedIndices[0] < _rows.Count && !_rows[SelectedIndices[0]].IsHeading
-            ? _rows[SelectedIndices[0]]
-            : null;
+    public TaskRow? SelectedRow => SelectedRows is [var only] ? only : null;
+
+    /// <summary>
+    /// Every task selected, top to bottom, leaving out any day's heading taken in with them.
+    /// </summary>
+    /// <remarks>
+    /// Asked of the native list rather than of the cache painting reads, so it's right even in the
+    /// middle of the list's own handling of a click, before the change has been published.
+    /// </remarks>
+    public IReadOnlyList<TaskRow> SelectedRows
+        => SelectedIndices.Cast<int>()
+            .Where(i => i < _rows.Count && !_rows[i].IsHeading)
+            .Order()
+            .Select(i => _rows[i])
+            .ToList();
+
+    /// <summary>The tasks selected, by id, top to bottom.</summary>
+    public IReadOnlyList<string> SelectedIds => SelectedRows.Select(r => r.Id).ToList();
+
+    /// <summary>The row the keyboard moves from, by id, or null when no row has the focus.</summary>
+    private string? FocusedId
+        => FocusedItem?.Index is { } index && index >= 0 && index < _rows.Count ? _rows[index].Id : null;
 
     /// <summary>
     /// Selects a task and scrolls it into view. For explicit navigation, not for refreshes.
@@ -365,8 +416,31 @@ internal sealed class OutlineView : ListView
             SelectedIndices.Clear();
             SelectedIndices.Add(index);
             FocusedItem = Items[index];
+            SelectionMark = index;
             EnsureVisible(index);
             _tips.Recheck();
+        }
+    }
+
+    /// <summary>LVM_GETSELECTIONMARK and LVM_SETSELECTIONMARK, the row a Shift run is measured from.</summary>
+    private const int LvmGetSelectionMark = 0x1000 + 66;
+    private const int LvmSetSelectionMark = 0x1000 + 67;
+
+    /// <summary>
+    /// The row Shift with an arrow or a click runs a selection from, or -1 when there's none.
+    /// </summary>
+    /// <remarks>
+    /// The native list's own, which it only moves for a click or a key. A row selected from code
+    /// leaves it wherever the last of those put it, so the next Shift press ran from a row the user
+    /// had long since left, and took in everything in between. So everything here that selects a
+    /// row moves it too.
+    /// </remarks>
+    private int SelectionMark
+    {
+        get => IsHandleCreated ? (int)SendMessage(Handle, LvmGetSelectionMark, 0, 0) : -1;
+        set
+        {
+            if (IsHandleCreated) SendMessage(Handle, LvmSetSelectionMark, 0, value);
         }
     }
 
@@ -390,29 +464,129 @@ internal sealed class OutlineView : ListView
     {
         // Held while the selection is being moved off a heading; that path publishes once when it
         // has landed on a task.
-        if (_stepping)
-            return;
+        if (_stepping) return;
 
-        var index = SelectedIndices.Count > 0 ? SelectedIndices[0] : -1;
+        // Held while the rows are being reassigned, which puts back each selected task in turn and
+        // raises this for every one of them. Read each time, the whole selection was read once per
+        // task, which over a run of thousands is millions of questions to the native list. That
+        // path reads it once, and publishes once, when it's done.
+        if (_reseating) return;
 
         // A day's heading is not a task, so the selection carries on past it the way it arrived —
-        // down onto the day's first task, or up onto the last of the day before.
-        if (index >= 0 && index < _rows.Count && _rows[index].IsHeading && OutlineSelection.PastHeading(_rows, index, _lastOnTask) is { } landed)
-            index = Step(landed);
+        // down onto the day's first task, or up onto the last of the day before. Only when it's the
+        // whole of the selection: one Shift has taken into a run with tasks either side is left
+        // where it is, since stepping would throw the run away, and nothing counts it as a task.
+        //
+        // And only when it got there from one row or none, which is how an arrow or a click
+        // arrives. Left alone on a heading because Ctrl+click let go of the task beside it, it has
+        // arrived from nowhere, and stepping would select a task the user never went near.
+        if (SelectedIndices.Count == 1
+            && _held <= 1
+            && SelectedIndices[0] is var index and >= 0
+            && index < _rows.Count
+            && _rows[index].IsHeading
+            && OutlineSelection.PastHeading(_rows, index, _lastOnTask) is { } landed)
+        {
+            Step(landed);
+        }
 
-        _selectedIndex = index;
+        Remember();
+        Publish(e);
+    }
+
+    /// <summary>
+    /// A run of rows selected or let go at once, which in a virtual list arrives here rather than
+    /// as a selection change: Shift with a click, or a press that drops a run for a single row.
+    /// </summary>
+    protected override void OnVirtualItemsSelectionRangeChanged(ListViewVirtualItemsSelectionRangeChangedEventArgs e)
+    {
+        base.OnVirtualItemsSelectionRangeChanged(e);
+
+        if (_stepping || _reseating) return;
+
+        Remember();
+        Publish(EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Reads the selection off the native list into what painting and the next step go by.
+    /// </summary>
+    /// <remarks>
+    /// The rows it changed are redrawn as well. The native list repaints a row whose state it has
+    /// changed, but a range can be let go in one message, and a row drawn from a cache read before
+    /// that message would stay lit. Only those rows, and only the ones on screen: redrawing the
+    /// whole list for every arrow press repainted every row in view to move the highlight by one.
+    /// </remarks>
+    /// <param name="moved">
+    /// Whether the selection has moved, so where it's come from says which way the next arrival is
+    /// travelling. Not when the rows have only been replaced under it: that's forgotten with them
+    /// </param>
+    private void Remember(bool moved = true)
+    {
+        var was = _selected;
+        _selected = SelectedIndices.Cast<int>().Where(i => i < _rows.Count && !_rows[i].IsHeading).Order().ToArray();
 
         // Which way the next arrival is travelling is measured from here rather than from the row
         // last selected: moving a selection clears it first, and that empty moment would otherwise
-        // read as having come from the top of the list every time.
-        if (index >= 0 && index < _rows.Count && !_rows[index].IsHeading)
-            _lastOnTask = index;
+        // read as having come from the top of the list every time. With several selected it's the
+        // row the keyboard is moving from.
+        if (moved && _selected is [var only])
+        {
+            _lastOnTask = only;
+        }
+        else if (moved && _selected.Length > 1 && FocusedItem?.Index is { } focus and >= 0 && focus < _rows.Count && !_rows[focus].IsHeading)
+        {
+            _lastOnTask = focus;
+        }
 
-        // Held while the rows are being reassigned; that path publishes once when it is done.
-        if (_reseating)
-            return;
+        if (!was.SequenceEqual(_selected)) RedrawChanged(was, _selected);
 
-        _publishedIndex = _selectedIndex;
+        _held = SelectedIndices.Count;
+    }
+
+    /// <summary>LVM_GETTOPINDEX and LVM_GETCOUNTPERPAGE, which rows are on screen.</summary>
+    private const int LvmGetTopIndex = 0x1000 + 39;
+    private const int LvmGetCountPerPage = 0x1000 + 40;
+
+    /// <summary>
+    /// Redraws the rows on screen that have been selected or let go.
+    /// </summary>
+    /// <param name="was">The task rows selected before, in order</param>
+    /// <param name="now">The task rows selected now, in order</param>
+    private void RedrawChanged(int[] was, int[] now)
+    {
+        if (!IsHandleCreated || _rows.Count == 0) return;
+
+        var top = Math.Max(0, (int)SendMessage(Handle, LvmGetTopIndex, 0, 0));
+
+        // One past what fits, for the row the bottom edge cuts through.
+        var last = Math.Min(_rows.Count - 1, top + (int)SendMessage(Handle, LvmGetCountPerPage, 0, 0));
+
+        for (var i = top; i <= last; i++)
+        {
+            if ((Array.BinarySearch(was, i) >= 0) != (Array.BinarySearch(now, i) >= 0)) Invalidate(GetItemRect(i));
+        }
+    }
+
+    /// <summary>
+    /// How many rows the native list had selected when it was last read, headings and all, so a
+    /// change can tell where it's come from.
+    /// </summary>
+    private int _held;
+
+    /// <summary>
+    /// Tells whatever's listening that the selection has moved, once for each place it settles.
+    /// </summary>
+    /// <remarks>
+    /// A virtual list can say the same change twice, as one row and as a run, so a change that
+    /// leaves the selection where it was last published is kept quiet.
+    /// </remarks>
+    /// <param name="e">What to pass on</param>
+    private void Publish(EventArgs e)
+    {
+        if (_selected.SequenceEqual(_published)) return;
+
+        _published = _selected;
         base.OnSelectedIndexChanged(e);
     }
 
@@ -440,6 +614,10 @@ internal sealed class OutlineView : ListView
             SelectedIndices.Clear();
             SelectedIndices.Add(index);
             FocusedItem = Items[index];
+
+            // And the Shift run with it: left on the heading, Shift+↑ from here ran from the
+            // heading to itself and selected no task at all.
+            SelectionMark = index;
         }
         finally
         {
@@ -456,6 +634,10 @@ internal sealed class OutlineView : ListView
     /// by then. A click past the last row leaves the selection alone — there is nothing to act on,
     /// and the menu declines to open.
     /// </summary>
+    /// <remarks>
+    /// A right-click on a row that's already one of several selected leaves them all selected, so
+    /// the menu is about the lot, the way Explorer's is over a handful of files.
+    /// </remarks>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Right
@@ -463,7 +645,7 @@ internal sealed class OutlineView : ListView
             && index >= 0
             && index < _rows.Count)
         {
-            if (SelectedIndices.Count != 1 || SelectedIndices[0] != index)
+            if (!SelectedIndices.Contains(index))
             {
                 SelectedIndices.Clear();
                 SelectedIndices.Add(index);
@@ -476,7 +658,7 @@ internal sealed class OutlineView : ListView
         base.OnMouseDown(e);
     }
 
-    private bool IsSelected(int index) => _selectedIndex == index;
+    private bool IsSelected(int index) => Array.BinarySearch(_selected, index) >= 0;
 
     /// <summary>
     /// The row a task is on, by the name it was noted under or the one it goes by now.
@@ -493,6 +675,24 @@ internal sealed class OutlineView : ListView
         var index = IndexOf(id);
 
         return index < 0 && Renamed?.Invoke(id) is { } now && now != id ? IndexOf(now) : index;
+    }
+
+    /// <summary>
+    /// <see cref="RowOf"/> for a set of rows looked up in many times, by a map made once.
+    /// </summary>
+    /// <param name="rows">The rows to look in</param>
+    /// <returns>Each task's row, the way <see cref="RowOf"/> finds it</returns>
+    private Func<string, int> RowsById(IReadOnlyList<TaskRow> rows)
+    {
+        var at = new Dictionary<string, int>(rows.Count, StringComparer.Ordinal);
+        for (var i = 0; i < rows.Count; i++)
+        {
+            at.TryAdd(rows[i].Id, i);
+        }
+
+        return id => at.TryGetValue(id, out var index) ? index
+            : Renamed?.Invoke(id) is { } now && now != id && at.TryGetValue(now, out var renamed) ? renamed
+            : -1;
     }
 
     private int IndexOf(string id)
@@ -725,6 +925,161 @@ internal sealed class OutlineView : ListView
         return false;
     }
 
+    // ---- Renaming ------------------------------------------------------------------------------
+
+    /// <summary>LVM_GETEDITCONTROL, which hands back the box a rename is being typed in.</summary>
+    private const int LvmGetEditControl = 0x1000 + 24;
+
+    /// <summary>EM_GETRECT, which says where in an edit box its text is laid out.</summary>
+    private const int EmGetRect = 0x00B2;
+
+    /// <summary>
+    /// The box the current rename is being typed in, or the last one's once it's closed.
+    /// </summary>
+    /// <remarks>
+    /// Held so it isn't collected while it's still listening to the box. It lets go of the window
+    /// by itself when the window goes.
+    /// </remarks>
+    private RenameBox? _renameBox;
+
+    /// <summary>
+    /// Holds the box a rename is typed in over the words it's renaming.
+    /// </summary>
+    /// <remarks>
+    /// The list puts the box where it would have written the name itself, at the left of the cell,
+    /// and here the words start past the indent, the expander and the box that ticks the task off.
+    /// It also moves the box back every time the name changes length, so moving it once as it
+    /// opens doesn't last past the first key.
+    ///
+    /// A day's heading isn't opened at all, before anything listening is asked. It isn't a task and
+    /// has no name to change, but the list opens its own edit on F2 over whichever row has the
+    /// focus, and Shift+↓ onto a heading leaves the focus there.
+    /// </remarks>
+    protected override void OnBeforeLabelEdit(LabelEditEventArgs e)
+    {
+        if (e.Item >= 0 && e.Item < _rows.Count && _rows[e.Item].IsHeading)
+        {
+            e.CancelEdit = true;
+            return;
+        }
+
+        base.OnBeforeLabelEdit(e);
+
+        if (e.CancelEdit || e.Item < 0 || e.Item >= _rows.Count) return;
+
+        var box = SendMessage(Handle, LvmGetEditControl, 0, 0);
+        if (box != 0) _renameBox = new RenameBox(this, e.Item, box);
+    }
+
+    /// <summary>
+    /// Moves a rename's box so the name in it starts where the row's words do.
+    /// </summary>
+    /// <remarks>
+    /// The box is left where the list put it when the Task column's too narrow to show any words,
+    /// since there's nothing on the row for it to line up with.
+    /// </remarks>
+    /// <param name="index">The row being renamed</param>
+    /// <param name="box">The box's window</param>
+    /// <param name="pos">Where the list is about to put the box, changed in place</param>
+    /// <returns>True when it was changed</returns>
+    private bool PlaceRenameBox(int index, nint box, ref WindowPos pos)
+    {
+        const uint NoSize = 0x0001;
+        const uint NoMove = 0x0002;
+
+        if ((pos.Flags & NoMove) != 0 || index >= _rows.Count) return false;
+
+        var words = WordsOf(index);
+        if (words.Width <= 0 || words.X >= ClientSize.Width) return false;
+
+        var layout = default(NativeRect);
+        SendMessage(box, EmGetRect, 0, ref layout);
+        pos.X = words.X + LetterPadding - layout.Left;
+
+        // The list sizes the box to fit the name from where it opened it, and the name's no wider
+        // for being moved, but the box's right edge now runs that much further. It stops at the
+        // list's edge, where the box starts scrolling the name instead.
+        var room = ClientSize.Width - pos.X;
+        if ((pos.Flags & NoSize) == 0 && room > 0) pos.Cx = Math.Min(pos.Cx, room);
+
+        return true;
+    }
+
+    /// <summary>
+    /// How far in from the left of its rectangle TextRenderer writes the first letter.
+    /// </summary>
+    /// <remarks>
+    /// A sixth of the line's height, rounded up: the room it leaves for a letter that overhangs,
+    /// unless it's told NoPadding. The height's measured rather than read from Font.Height, which
+    /// is a pixel out at some sizes and takes the answer with it.
+    /// </remarks>
+    private int LetterPadding
+        => (int)Math.Ceiling(TextRenderer.MeasureText("x", Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Height / 6f);
+
+    /// <summary>
+    /// The box a rename is typed in, listened to so the list can't put it back at the cell's edge.
+    /// </summary>
+    private sealed class RenameBox : NativeWindow
+    {
+        private const int WmWindowPosChanging = 0x0046;
+
+        private readonly OutlineView _outline;
+        private readonly int _index;
+
+        /// <summary>Starts listening to a rename's box.</summary>
+        /// <param name="outline">The list the rename is in</param>
+        /// <param name="index">The row being renamed</param>
+        /// <param name="box">The box's window</param>
+        public RenameBox(OutlineView outline, int index, nint box)
+        {
+            _outline = outline;
+            _index = index;
+            AssignHandle(box);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WmWindowPosChanging)
+            {
+                var pos = Marshal.PtrToStructure<WindowPos>(m.LParam);
+                if (_outline.PlaceRenameBox(_index, Handle, ref pos))
+                {
+                    Marshal.StructureToPtr(pos, m.LParam, false);
+                }
+            }
+
+            base.WndProc(ref m);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPos
+    {
+        public nint Window;
+        public nint InsertAfter;
+        public int X;
+        public int Y;
+        public int Cx;
+        public int Cy;
+        public uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    // DllImport rather than LibraryImport, matching the rest of the app.
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint window, int message, nint wParam, ref NativeRect lParam);
+
     // ---- Dragging ------------------------------------------------------------------------------
 
     /// <summary>What a drag out of the outline carries, under a name of its own.</summary>
@@ -805,6 +1160,18 @@ internal sealed class OutlineView : ListView
 
         if (e.Button != MouseButtons.Left || _pressedTask is not { } pressed || RowOf(pressed) is not (>= 0 and var index))
             return;
+
+        // Not while several are selected. A drag carries one task, and taking only the one under
+        // the pointer out of a selection would leave the rest behind with nothing to say so.
+        //
+        // The press is taken as the click it nearly was instead. The list holds back selecting the
+        // row alone until it knows no drag is starting, and once one has, it never does: a click
+        // that wandered a few pixels left all of them selected for the next Delete to take.
+        if (SelectedRows.Count > 1)
+        {
+            SelectId(_rows[index].Id);
+            return;
+        }
 
         var row = _rows[index];
         if (row.IsHeading || row.Completed)
@@ -1100,19 +1467,36 @@ internal sealed class OutlineView : ListView
     private const int ArrowWidth = 14;
 
     protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
+        => DrawHeader(e.Graphics, e.Bounds, e.Header);
+
+    /// <summary>Draws one column's header in the theme.</summary>
+    /// <remarks>
+    /// Not the event's own DrawBackground, which draws the stock light header whatever the theme,
+    /// so a dark window had a white strip across the top of its list. The divider and the line
+    /// underneath are what that background gave, in the theme's border colour instead. Internal so
+    /// a test can draw one onto a bitmap: the header is a native window a test can't capture.
+    /// </remarks>
+    /// <param name="g">Where to draw</param>
+    /// <param name="cell">The header's bounds</param>
+    /// <param name="header">The column it heads</param>
+    internal void DrawHeader(Graphics g, Rectangle cell, ColumnHeader? header)
     {
-        e.DrawBackground();
+        using (var background = new SolidBrush(Theme.Panel))
+            g.FillRectangle(background, cell);
 
-        var bounds = Inset(e.Bounds);
+        g.DrawLine(Rule, cell.Right - 1, cell.Top, cell.Right - 1, cell.Bottom - 1);
+        g.DrawLine(Rule, cell.Left, cell.Bottom - 1, cell.Right - 1, cell.Bottom - 1);
 
-        if (!Ordering.IsDefault && e.Header?.Tag is TaskColumn column && column == Ordering.Column)
+        var bounds = Inset(cell);
+
+        if (!Ordering.IsDefault && header?.Tag is TaskColumn column && column == Ordering.Column)
         {
             // Drawn as a glyph of its own at the end of the header rather than added to the text,
             // so the narrow priority column shows which way it is sorted instead of ellipsizing
             // the arrow away.
             var arrow = bounds with { X = bounds.Right - ArrowWidth, Width = ArrowWidth };
             TextRenderer.DrawText(
-                e.Graphics,
+                g,
                 Ordering.Descending ? "▼" : "▲",
                 Font,
                 arrow,
@@ -1122,14 +1506,14 @@ internal sealed class OutlineView : ListView
             bounds = bounds with { Width = Math.Max(0, bounds.Width - ArrowWidth) };
         }
 
-        var alignment = e.Header?.TextAlign switch
+        var alignment = header?.TextAlign switch
         {
             HorizontalAlignment.Center => TextFormatFlags.HorizontalCenter,
             HorizontalAlignment.Right => TextFormatFlags.Right,
             _ => TextFormatFlags.Left,
         };
 
-        TextRenderer.DrawText(e.Graphics, e.Header?.Text, Font, bounds, Theme.Muted, Flags | alignment);
+        TextRenderer.DrawText(g, header?.Text, Font, bounds, Theme.Muted, Flags | alignment);
     }
 
     /// <summary>
@@ -1173,8 +1557,9 @@ internal sealed class OutlineView : ListView
     internal void ForgetDrawCounts() => (DrawnInPaint, AskedOutsidePaint) = (0, 0);
 
     /// <summary>
-    /// Notes which side of a paint the drawing is on, and swallows the background erase and the
-    /// request for a menu where there is no task to put one on.
+    /// Notes which side of a paint the drawing is on, keeps the list's size current through a
+    /// resize, and swallows the background erase and the request for a menu where there is no task
+    /// to put one on.
     /// </summary>
     /// <remarks>
     /// The control repaints a row as the pointer crosses it, and erasing first leaves it blank for a
@@ -1193,6 +1578,17 @@ internal sealed class OutlineView : ListView
         const int WmLeftDouble = 0x0203;
         const int WmRightDown = 0x0204;
         const int WmKeyDown = 0x0100;
+        const int WmWindowPosChanged = 0x0047;
+
+        // WinForms leaves any row outside the size it has stored for the list to the control's plain
+        // drawing — no box, no dots, the system's highlight — and only stores the new size after
+        // Windows has handled the resize. Windows can paint during that handling: a list that grows
+        // past its last row scrolls back up, and with smooth scrolling on that scroll paints as it
+        // goes, so the rows the resize uncovered came out plain and stayed that way. The window
+        // already has its new size by now, so this only learns it a step sooner, and WinForms' own
+        // update afterwards finds nothing changed.
+        if (m.Msg == WmWindowPosChanged)
+            UpdateBounds();
 
         if (m.Msg == WmPaint)
         {
@@ -1371,16 +1767,14 @@ internal sealed class OutlineView : ListView
 
                 // The words start after the expander whether or not there is one to draw.
                 if (row.HasChildren)
-                    DrawExpander(e.Graphics, Expander(bounds), row.Collapsed, AtScale(ExpanderGlyphAt96), selected ? Theme.OnAccent : Theme.Muted);
+                    ExpanderGlyph.Draw(e.Graphics, Expander(bounds), row.Collapsed, AtScale(ExpanderGlyphAt96), selected ? Theme.OnAccent : Theme.Muted);
 
                 bounds.X += ExpanderWidth;
                 bounds.Width -= ExpanderWidth;
 
                 DrawCheck(e.Graphics, Checkbox(bounds, DeviceDpi), done, selected ? Theme.OnAccent : Theme.Muted);
 
-                bounds.X += CheckWidth;
-                bounds.Width -= CheckWidth;
-                TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Inset(bounds), text, Flags);
+                TextRenderer.DrawText(e.Graphics, OutlineCells.CellOf(row, column), font, Words(e.Bounds, row.Depth), text, Flags);
                 break;
 
             // The same face the task's own column uses, so a finished task's dates are struck
@@ -1435,6 +1829,28 @@ internal sealed class OutlineView : ListView
     /// <summary>Where the expander sits, given the row's first column already moved in by its depth.</summary>
     private Rectangle Expander(Rectangle indented)
         => new(indented.X, indented.Y, ExpanderWidth, indented.Height);
+
+    /// <summary>
+    /// Where a task's words are written in its Task cell: past its indent, the expander's room and
+    /// the box's.
+    /// </summary>
+    /// <param name="cell">The row's Task cell</param>
+    /// <param name="depth">How many levels down the task sits</param>
+    /// <returns>The rectangle the words are handed to TextRenderer in</returns>
+    private Rectangle Words(Rectangle cell, int depth)
+    {
+        var taken = (depth * IndentWidth) + ExpanderWidth + CheckWidth;
+        return Inset(new Rectangle(cell.X + taken, cell.Y, cell.Width - taken, cell.Height));
+    }
+
+    /// <summary>Where a row's words are written, in the list's own coordinates.</summary>
+    /// <param name="index">The row</param>
+    /// <returns>The rectangle the words are handed to TextRenderer in</returns>
+    internal Rectangle WordsOf(int index)
+    {
+        var row = GetItemRect(index, ItemBoundsPortion.Entire);
+        return Words(new Rectangle(row.X, row.Y, Columns[0].Width, row.Height), _rows[index].Depth);
+    }
 
     /// <summary>
     /// Where the box that ticks a task off sits, given the row already moved past its expander.
@@ -1497,40 +1913,6 @@ internal sealed class OutlineView : ListView
         }
     }
 
-    /// <summary>
-    /// The arrow that hides and shows a task's sub-tasks — right when they are hidden, down when
-    /// they are not.
-    /// </summary>
-    /// <remarks>
-    /// Drawn rather than written. A glyph would mean a font that has it, which is a thing to check
-    /// for and fall back from, and three points are cheaper than either. Filled rather than outlined
-    /// so it reads at this size in both themes.
-    /// </remarks>
-    /// <param name="g">What to draw on</param>
-    /// <param name="bounds">The room the expander has</param>
-    /// <param name="collapsed">Whether the sub-tasks are currently hidden</param>
-    /// <param name="glyph">How big the arrow is at most, at the display's scale</param>
-    /// <param name="colour">What to draw it in</param>
-    private static void DrawExpander(Graphics g, Rectangle bounds, bool collapsed, int glyph, Color colour)
-    {
-        var size = Math.Min(glyph, Math.Min(bounds.Width, bounds.Height));
-        var left = bounds.X + ((bounds.Width - size) / 2);
-        var top = bounds.Y + ((bounds.Height - size) / 2);
-
-        var arrow = collapsed
-            ? new[] { new Point(left, top), new Point(left + size, top + (size / 2)), new Point(left, top + size) }
-            : new[] { new Point(left, top), new Point(left + size, top), new Point(left + (size / 2), top + size) };
-
-        // Smoothed, since the diagonals are the whole shape and unsmoothed they read as a staircase.
-        var was = g.SmoothingMode;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-        using (var brush = new SolidBrush(colour))
-            g.FillPolygon(brush, arrow);
-
-        g.SmoothingMode = was;
-    }
-
     /// <summary>Faint vertical rules showing how deep a sub-task sits.</summary>
     private static void DrawGuides(Graphics g, Rectangle bounds, int depth, int indent, Color colour)
     {
@@ -1564,7 +1946,7 @@ internal sealed class OutlineView : ListView
         var text = Inset(bounds);
 
         if (OutlineCells.ProjectDot(row, selected) is { } dot)
-            DrawDot(g, ref text, Theme.ToColor(dot));
+            DrawDot(g, ref text, Theme.ToColor(dot.Colour), dot.Ringed ? Theme.OnAccent : null);
 
         TextRenderer.DrawText(g, row.Project, Font, text, muted, Flags);
     }
@@ -1602,14 +1984,32 @@ internal sealed class OutlineView : ListView
         }
     }
 
-    /// <summary>Draws a colour's dot at the left of <paramref name="bounds"/>, and takes its room.</summary>
-    private void DrawDot(Graphics g, ref Rectangle bounds, Color colour)
+    /// <summary>
+    /// Draws a colour's dot at the left of <paramref name="bounds"/>, and takes its room.
+    /// </summary>
+    /// <remarks>
+    /// A ring goes round the outside rather than eating into the dot, so the dot's the same size
+    /// either way and the text after it doesn't shift when the row's selected.
+    /// </remarks>
+    /// <param name="g">What to draw on</param>
+    /// <param name="bounds">The room left in the cell, moved past the dot once it's drawn</param>
+    /// <param name="colour">What the dot's filled with</param>
+    /// <param name="ring">What to ring it with, or null for no ring</param>
+    private void DrawDot(Graphics g, ref Rectangle bounds, Color colour, Color? ring)
     {
         var size = Math.Min(AtScale(DotAt96), bounds.Height - AtScale(8));
         if (size <= 0)
             return;
 
-        Dots.Fill(g, new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size), colour);
+        var dot = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - size) / 2), size, size);
+
+        if (ring is { } around)
+        {
+            var width = AtScale(DotRingAt96);
+            Dots.Fill(g, Rectangle.Inflate(dot, width, width), around);
+        }
+
+        Dots.Fill(g, dot, colour);
 
         var taken = size + (TextInset / 2);
         bounds.X += taken;

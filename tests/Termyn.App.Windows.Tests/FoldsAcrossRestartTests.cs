@@ -11,7 +11,8 @@ using Termyn.TestSupport;
 namespace Termyn.App.Windows.Tests;
 
 /// <summary>
-/// That a folded task is still folded after a restart.
+/// That a folded task is still folded after a restart, and a project grouped by section still
+/// grouped.
 /// </summary>
 /// <remarks>
 /// The middle of it, which neither end can see. The presenter can be asked to fold a task and the
@@ -136,14 +137,73 @@ public class FoldsAcrossRestartTests : IDisposable
         Assert.Equal(new[] { "Parent", "Child" }, presenter.Rows.Select(r => r.Content).ToArray());
     }
 
+    // ---- Grouping by section, saved alongside the folds -----------------------------------------
+
+    /// <summary>A project with a task in no section and one in a section.</summary>
+    private static InMemorySnapshotStore Sectioned()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p", """{"id":"p","name":"Work","child_order":1}""");
+        store.PutResource("sections", "s1", """{"id":"s1","name":"Admin","project_id":"p","section_order":1}""");
+        store.PutResource("items", "a", """{"id":"a","content":"Loose","project_id":"p","child_order":1}""");
+        store.PutResource("items", "b", """{"id":"b","content":"Filed","project_id":"p","section_id":"s1","child_order":2}""");
+        return store;
+    }
+
+    [WinFormsFact]
+    public void Grouping_by_section_survives_a_restart()
+    {
+        using (var window = Window(out var first, Sectioned()))
+        {
+            first.Select(ViewSelection.OfProject("p"));
+            window.Run(AppCommand.GroupBySection);
+            window.Close();
+        }
+
+        Assert.Contains("\"groupBySection\": true", Saved());
+
+        using var second = Window(out var presenter, Sectioned());
+        presenter.Select(ViewSelection.OfProject("p"));
+
+        Assert.True(presenter.GroupBySection);
+        Assert.Equal(new[] { "Loose", "Admin", "Filed" }, presenter.Rows.Select(r => r.Content).ToArray());
+    }
+
+    [WinFormsFact]
+    public void Ctrl_G_where_there_is_nothing_to_group_leaves_the_setting_alone()
+    {
+        using var window = Window(out var presenter, Sectioned());
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        Assert.Equal(AppCommand.GroupBySection, MainForm.CommandFor(Keys.Control | Keys.G, Presentation.ShortcutScope.Window));
+        window.Run(AppCommand.GroupBySection);
+        Assert.False(presenter.GroupBySection);
+
+        presenter.Select(ViewSelection.OfProject("p"));
+        window.Run(AppCommand.GroupBySection);
+        Assert.True(presenter.GroupBySection);
+    }
+
+    [WinFormsFact]
+    public void A_file_that_says_nothing_about_grouping_leaves_a_project_flat()
+    {
+        File.WriteAllText(_config, """{"view":{"sidebarWidth":240}}""");
+
+        using var window = Window(out var presenter, Sectioned());
+        presenter.Select(ViewSelection.OfProject("p"));
+
+        Assert.False(presenter.GroupBySection);
+        Assert.Equal(new[] { "Loose", "Filed" }, presenter.Rows.Select(r => r.Content).ToArray());
+    }
+
     private string Saved() => File.Exists(_config) ? File.ReadAllText(_config) : string.Empty;
 
     /// <summary>One for the run. Nothing here reaches the network; the check just wants a client.</summary>
     private static readonly HttpClient Http = new();
 
-    private MainForm Window(out MainPresenter presenter)
+    private MainForm Window(out MainPresenter presenter, InMemorySnapshotStore? snapshot = null)
     {
-        var engine = new SyncEngine(new FakeApi(), Store(), new FakeSecrets { Stored = "tok" });
+        var engine = new SyncEngine(new FakeApi(), snapshot ?? Store(), new FakeSecrets { Stored = "tok" });
         engine.Load();
 
         var clock = new SystemClock();

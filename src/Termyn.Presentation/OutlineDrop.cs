@@ -60,17 +60,21 @@ public static class OutlineDrop
     /// An unfolded task's sub-tasks are drawn straight under it, so the gap below it is the gap above
     /// its first one. A task dropped there goes where the mark was drawn — first among them — rather
     /// than after the parent's whole subtree, a screenful away from where it was let go.
+    ///
+    /// A section's heading takes a drop anywhere on it, into that section. A day's heading takes
+    /// none: a day isn't somewhere a task can be filed by dragging it.
     /// </remarks>
     /// <param name="rows">The outline's rows</param>
     /// <param name="index">The row the pointer is over</param>
     /// <param name="zone">Which part of it, from <see cref="ZoneAt"/></param>
-    /// <returns>The drop, or null when the row isn't a task to drop by</returns>
+    /// <returns>The drop, or null when the row isn't a task or a section to drop by</returns>
     public static DropTarget? Over(IReadOnlyList<TaskRow> rows, int index, DropZone zone)
     {
-        if (index < 0 || index >= rows.Count || rows[index].IsHeading)
-            return null;
+        if (index < 0 || index >= rows.Count) return null;
 
         var row = rows[index];
+
+        if (row.IsHeading) return row.SectionId is null ? null : new DropTarget(row.Id, DropZone.Onto, index, 0);
 
         if (zone == DropZone.After && index + 1 < rows.Count && rows[index + 1] is { IsHeading: false } next && next.Depth > row.Depth)
             return new DropTarget(next.Id, DropZone.Before, index + 1, next.Depth);

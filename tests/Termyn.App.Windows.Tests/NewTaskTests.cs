@@ -1,7 +1,4 @@
-using Termyn.Core.Capture;
 using Termyn.Core.Model;
-using Termyn.Core.Platform;
-using Termyn.Core.Settings;
 using Termyn.Core.Sync;
 using Termyn.Presentation;
 using Termyn.TestSupport;
@@ -121,22 +118,8 @@ public class NewTaskTests
         return TestWindow.Build("termyn-new-task-tests.json", store);
     }
 
-    private static QuickAddForm Box() => Box(new InMemorySnapshotStore(), out _, out _);
+    private static QuickAddForm Box() => TestWindow.QuickAdd();
 
-    /// <summary>A box over an account, which can't reach the server.</summary>
-    /// <param name="store">What the account holds</param>
-    /// <param name="engine">The engine, to read what a capture added</param>
-    /// <param name="presenter">The presenter, to ask what a view starts a task with</param>
-    /// <returns>The box, realised but not shown</returns>
     private static QuickAddForm Box(InMemorySnapshotStore store, out SyncEngine engine, out MainPresenter presenter)
-    {
-        engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" });
-        engine.Load();
-        var clock = new SystemClock();
-        presenter = new MainPresenter(engine, new QuickAddParser(clock), clock);
-
-        var box = new QuickAddForm(presenter, Theme.From(ThemePalette.Light));
-        box.CreateControl();
-        return box;
-    }
+        => TestWindow.QuickAdd(store, out engine, out presenter);
 }

@@ -18,15 +18,19 @@ public sealed record ResourceChange(string ResourceType, string Id, bool IsDelet
 public sealed record CommandResult(bool Ok, string? ErrorCode, string? Error, int? HttpCode = null);
 
 /// <summary>
-/// What to fetch from the completed-items endpoint. The window is required by the API and capped at
-/// three months.
+/// What to fetch from the completed-items endpoints. The window is required by the API and capped at
+/// three months of completion dates, or six weeks of due dates.
 /// </summary>
 /// <param name="Cursor">The previous page's <c>next_cursor</c>, or null for the first page.</param>
+/// <param name="ByDueDate">
+/// Whether the window is of the days the tasks were due rather than the days they were finished
+/// </param>
 public sealed record CompletedQuery(
     DateTimeOffset Since,
     DateTimeOffset Until,
     string? Cursor = null,
-    int Limit = 100)
+    int Limit = 100,
+    bool ByDueDate = false)
 {
     /// <summary>The furthest back one request may reach, per the endpoint's own limit.</summary>
     public static readonly TimeSpan MaxWindow = TimeSpan.FromDays(90);

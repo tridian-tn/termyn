@@ -40,12 +40,22 @@ public sealed record PanelSubject(SubjectKind Kind, string? Id, string About)
     /// that one. Drop back to the project and you are asking about the project — which is the whole
     /// of it: a project's comments used to need a menu entry of their own to reach, and now they are
     /// just what you get when you have not narrowed things down to a task.
+    ///
+    /// Several tasks selected are about none of them. The panel says how many and shows nothing,
+    /// rather than dropping back to the project, whose description would then be open to edit
+    /// while the user was busy with its tasks.
     /// </remarks>
     /// <param name="task">The row the outline is on, or null when it is on none</param>
     /// <param name="selection">The row the sidebar is on, or null when it is on none</param>
+    /// <param name="selected">How many tasks the outline has selected</param>
     /// <returns>What the panel is about, and what to call it</returns>
-    public static PanelSubject Of(TaskRow? task, SidebarNode? selection) => (task, selection) switch
+    public static PanelSubject Of(TaskRow? task, SidebarNode? selection, int selected = 0) => (task, selection) switch
     {
+        _ when selected > 1 => new PanelSubject(
+            SubjectKind.None,
+            null,
+            Plurals.Format(Strings.ResourceManager, nameof(Strings.PanelTasksSelected_Other), selected)),
+
         ({ } row, _) => new PanelSubject(SubjectKind.Task, row.Id, string.Format(CultureInfo.CurrentCulture, Strings.PanelTask, row.Content)),
         (_, { Kind: SidebarKind.Project } project)
             => new PanelSubject(SubjectKind.Project, project.Id, string.Format(CultureInfo.CurrentCulture, Strings.PanelProject, project.Label)),

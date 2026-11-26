@@ -21,7 +21,11 @@ public class MenuTests
         TaskAbilities? can = null,
         bool completed = false,
         int depth = 0)
-        => new(row ?? Row(completed: completed, depth: depth), can ?? new TaskAbilities(true, true, true, true, true, true, true), Schedule: Days);
+        => new(
+            row ?? Row(completed: completed, depth: depth),
+            can ?? new TaskAbilities(true, true, true, true, true, true, true),
+            Schedule: Days,
+            CanWriteDescription: true);
 
     private static SidebarNode Node(SidebarKind kind, bool favourite = false)
         => new(kind, "id", "Work", 1, "key", IsFavorite: favourite);
@@ -76,6 +80,7 @@ public class MenuTests
             [
                 AppCommand.ToggleComplete,
                 AppCommand.Rename,
+                AppCommand.EditDescription,
                 AppCommand.NewSubtask,
                 AppCommand.Due,
                 AppCommand.DueToday,

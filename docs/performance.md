@@ -23,6 +23,7 @@ which seed the reference account described in §14 into a real SQLite cache.
 | Idle private working set | < 100 MB | **17.6 MB** (82 MB total working set) | ✓ |
 | Write → visible | < 16 ms | 8–13 ms at 5,000 tasks | ✓ |
 | Snapshot load + first projection, 5,000 tasks | (part of cold start) | 134–142 ms | — |
+| Allocated by that load + first projection | (regression gate: < 33 MB) | 30.3 MB | ✓ |
 | Switching view, 5,000 tasks | one frame | 4–8 ms | ✓ |
 | Search keystroke, 5,000 tasks | interactive | 0.4 ms | ✓ |
 | Quick-add after hotkey | < 100 ms | not measured numerically | ? |
@@ -97,6 +98,15 @@ the screen from **16 ms to 8 ms** — from the edge of the frame budget to comfo
 **Search rows are built on the first keystroke, not on every publish.** Search runs over the whole
 account rather than the current view, which needs a second full projection. Most publishes happen
 with the search box empty, and that projection is now built only when something is typed.
+
+Later, with several tasks selected at once:
+
+**Writes made together are one transaction.** Deleting, ticking off or moving several tasks, and
+the Ctrl+Z that takes such a batch back, each committed once per task, and every commit waits on
+the disk. A thousand tasks deleted together took **718 ms**, and undoing it **1,411 ms**; in one
+transaction they take **28–31 ms** and **27–30 ms** (Debug, the SQLite cache, the five-thousand-task
+reference account). The undo was 53–74 ms until the queue was indexed by uuid: each command taken
+off it was found by reading the whole queue.
 
 ## Metrics not measured numerically
 

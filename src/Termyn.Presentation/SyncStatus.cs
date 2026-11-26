@@ -19,6 +19,12 @@ public enum SyncState
 
     /// <summary>The token was rejected. Nothing will sync until it is replaced.</summary>
     ReconnectNeeded,
+
+    /// <summary>
+    /// The token's stored but can't be read just now, so the last sync couldn't go. The account is
+    /// still signed in, writes queue, and the loop keeps trying until it can read it.
+    /// </summary>
+    WaitingForToken,
 }
 
 /// <summary>
@@ -55,6 +61,7 @@ public sealed record SyncStatus(
             ? string.Format(CultureInfo.CurrentCulture, Strings.SyncStatusPausedRetry, Seconds(wait))
             : Strings.SyncStatusPaused,
         SyncState.ReconnectNeeded => Strings.SyncStatusReconnectNeeded,
+        SyncState.WaitingForToken => Strings.SyncStatusWaitingForToken,
         SyncState.Synced => Since is { } ago
             ? string.Format(CultureInfo.CurrentCulture, Strings.SyncStatusSyncedAgo, Ago(ago))
             : Strings.SyncStatusSynced,

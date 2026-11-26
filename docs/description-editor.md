@@ -173,6 +173,23 @@ back and saves. A single click still selects and still follows a link. A task wi
 ready to write. `F4` opens and closes the panel; `F6` and `F7` pick which of its two tabs is in front.
 `showPreview` and `previewWidth` retire.
 
+Later additions: `F6` and `F7` bring their tab forward, opening the panel if it's shut, and take the
+keyboard there. **Edit description**, in the Task menu beside Rename, on `Ctrl+E`, opens the
+description's markdown from wherever you are: the outline, the comments, the rendering or a shut
+panel. Like Rename it's an action rather than a switch, so it has no tick, it's greyed while the
+markdown is already in front, and `Escape` is the way back. `Enter` on a task in the outline is a
+second key for it that isn't in the menus, with one difference: with the panel shut it does nothing,
+so it can't reopen a panel somebody shut.
+
+A pencil at the left of a strip above the description is a real switch between the two. It stays
+pressed while the markdown is showing, and its tooltip says what a click would do next: Edit
+description (Ctrl+E) over the rendering, Preview description (Esc) over the markdown. The markdown
+has an accent ring round it while it has the keyboard, so it's clear a key pressed now would change
+the description.
+
+Typing at the rendering to open the markdown with the character already in was tried and taken out:
+where the caret lands in the markdown, between markers especially, wasn't reliable enough.
+
 The case turns on how much of the highlighting the control can be left to do. Configured, Lexilla
 does most of it — but not checklists, not bare URLs, and not a list or quotation opening a
 description, which between them cover a lot of what people actually write. Fixing those means

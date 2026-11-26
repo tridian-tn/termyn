@@ -107,6 +107,133 @@ public class SyncSchedulerTests
     }
 
     [Fact]
+    public async Task A_sync_that_asks_to_be_retried_is_in_manual_mode_too()
+    {
+        // No timer at all, and nothing written or asked for: only the retry brings it round. A sync
+        // that couldn't read the token otherwise waited for an F5 nobody knew to press.
+        var calls = 0;
+        var twice = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            if (Interlocked.Increment(ref calls) >= 2) twice.TrySetResult();
+
+            return Task.FromResult(new SyncOutcome(RetryIn: TimeSpan.FromMilliseconds(50)));
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start();
+        scheduler.RequestNow();
+
+        await twice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_write_brings_a_loop_waiting_to_retry_round_sooner()
+    {
+        // Unlike a pause, which holds off whatever's asked, since there the server is refusing.
+        var calls = 0;
+        var twice = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            if (Interlocked.Increment(ref calls) >= 2) twice.TrySetResult();
+
+            return Task.FromResult(new SyncOutcome(RetryIn: TimeSpan.FromMinutes(10)));
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start();
+        scheduler.RequestNow();
+        await WaitFor(() => Volatile.Read(ref calls) == 1);
+
+        scheduler.NotifyWrite();
+
+        await twice.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_retry_isnt_carried_past_a_sync_that_then_fails()
+    {
+        // The retry time left over from the first sync was long past by the second, so the loop
+        // came straight back round after the failure, and again, and again.
+        var calls = 0;
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) return Task.FromResult(new SyncOutcome(RetryIn: TimeSpan.FromMilliseconds(30)));
+
+            throw new InvalidOperationException("boom");
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start();
+        scheduler.RequestNow();
+        await WaitFor(() => Volatile.Read(ref calls) >= 2);
+
+        // Nothing else brings a manual loop round, so any more is the stale retry.
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.Equal(2, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task A_retry_asked_for_before_the_loop_started_is_kept()
+    {
+        // The sync a window makes as it loads runs before the loop does. Its retry was dropped, so
+        // a token that couldn't be read at startup waited for the ordinary interval, or for ever in
+        // manual mode, as here.
+        var ran = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            ran.TrySetResult();
+            return Task.CompletedTask;
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start(new SyncOutcome(RetryIn: TimeSpan.FromMilliseconds(50)));
+
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task A_pause_asked_for_before_the_loop_started_is_waited_out()
+    {
+        // Rate-limited at startup, the loop went on to try again on its ordinary interval.
+        var calls = 0;
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.CompletedTask;
+        }, Fast);
+
+        scheduler.Start(new SyncOutcome(PauseFor: TimeSpan.FromSeconds(30)));
+        scheduler.RequestNow();
+
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.Equal(0, Volatile.Read(ref calls));
+    }
+
+    [Fact]
+    public async Task More_writes_queued_before_the_loop_started_are_gone_straight_back_for()
+    {
+        var ran = new TaskCompletionSource();
+        await using var scheduler = new SyncScheduler(_ =>
+        {
+            ran.TrySetResult();
+            return Task.CompletedTask;
+        }, new SyncCadence(Timeout.InfiniteTimeSpan, TimeSpan.FromMilliseconds(20)));
+
+        scheduler.Start(new SyncOutcome(MoreQueued: true));
+
+        await ran.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>Waits until something's true, failing the test if it isn't within the patience allowed.</summary>
+    /// <param name="condition">What to wait for</param>
+    private static async Task WaitFor(Func<bool> condition)
+    {
+        var giveUp = DateTime.UtcNow + Patience;
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < giveUp, "Gave up waiting.");
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task A_failing_sync_is_surfaced_and_the_loop_keeps_running()
     {
         var failures = new TaskCompletionSource<Exception>();

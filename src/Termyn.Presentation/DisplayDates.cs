@@ -34,6 +34,13 @@ public static class DisplayDates
     public static string DayMonth(DateOnly day, CultureInfo culture)
         => Write(culture, f => Brief(f.MonthDayPattern), (pattern, c) => day.ToString(pattern, c));
 
+    /// <summary>A day, month and year, such as "5 Oct 2027".</summary>
+    /// <param name="day">The day</param>
+    /// <param name="culture">The culture to write it in, normally the machine's</param>
+    /// <returns>The date, briefly</returns>
+    public static string DayMonthYear(DateOnly day, CultureInfo culture)
+        => Write(culture, BriefDate, (pattern, c) => day.ToString(pattern, c));
+
     /// <summary>A weekday, abbreviated, such as "Mon".</summary>
     /// <param name="day">The day</param>
     /// <param name="culture">The culture to write it in, normally the machine's</param>
@@ -53,7 +60,14 @@ public static class DisplayDates
     /// <param name="culture">The culture to write it in, normally the machine's</param>
     /// <returns>The date, briefly, then the time</returns>
     public static string DateAndTime(DateTime moment, CultureInfo culture)
-        => Write(culture, f => Brief(WithoutWeekday(f.LongDatePattern)) + " " + f.ShortTimePattern, (pattern, c) => moment.ToString(pattern, c));
+        => Write(culture, f => BriefDate(f) + " " + f.ShortTimePattern, (pattern, c) => moment.ToString(pattern, c));
+
+    /// <summary>A day and month with a time, such as "5 Oct 09:30".</summary>
+    /// <param name="moment">The moment, already in the timezone it's to be read in</param>
+    /// <param name="culture">The culture to write it in, normally the machine's</param>
+    /// <returns>The day and month, briefly, then the time</returns>
+    public static string DayMonthAndTime(DateTime moment, CultureInfo culture)
+        => Write(culture, f => Brief(f.MonthDayPattern) + " " + f.ShortTimePattern, (pattern, c) => moment.ToString(pattern, c));
 
     /// <summary>A moment in the coming days, such as "Mon, 5 Oct 09:30".</summary>
     /// <param name="moment">The moment, already in the timezone it's to be read in</param>
@@ -68,6 +82,35 @@ public static class DisplayDates
     /// <returns>The long date, such as "Monday, 5 October 2026"</returns>
     public static string LongDay(DateOnly day, CultureInfo culture)
         => Write(culture, f => f.LongDatePattern, (pattern, c) => day.ToString(pattern, c));
+
+    /// <summary>
+    /// Whether two days fall in the same year of the calendar a region writes its dates in.
+    /// </summary>
+    /// <remarks>
+    /// Not always the Gregorian year. Saudi Arabia's Umm al-Qura year and Iran's Persian one start
+    /// partway through it, so a day can be in this Gregorian year and last year's Hijri one, and a
+    /// Japanese era starts its years again from one. A day the calendar can't hold is written the
+    /// invariant way, so it's compared that way too.
+    /// </remarks>
+    /// <param name="day">One day</param>
+    /// <param name="other">The other day</param>
+    /// <param name="culture">The culture whose calendar decides, normally the machine's</param>
+    /// <returns>True when both are in the same year and era of that calendar</returns>
+    public static bool SameYear(DateOnly day, DateOnly other, CultureInfo culture)
+    {
+        var calendar = culture.DateTimeFormat.Calendar;
+        var one = day.ToDateTime(TimeOnly.MinValue);
+        var two = other.ToDateTime(TimeOnly.MinValue);
+
+        try
+        {
+            return calendar.GetEra(one) == calendar.GetEra(two) && calendar.GetYear(one) == calendar.GetYear(two);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return day.Year == other.Year;
+        }
+    }
 
     /// <summary>
     /// Formats with a culture's pattern, or the invariant one's for a day its calendar can't hold.
@@ -87,6 +130,12 @@ public static class DisplayDates
             return format(pattern(CultureInfo.InvariantCulture.DateTimeFormat), CultureInfo.InvariantCulture);
         }
     }
+
+    /// <summary>The region's long date without its weekday, briefly.</summary>
+    /// <param name="format">The region's date formats</param>
+    /// <returns>A pattern for the day, month and year</returns>
+    private static string BriefDate(DateTimeFormatInfo format)
+        => Brief(WithoutWeekday(format.LongDatePattern));
 
     /// <summary>A pattern with its month names abbreviated and its day unpadded.</summary>
     /// <param name="pattern">A date pattern</param>

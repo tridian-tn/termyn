@@ -35,6 +35,9 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
     private readonly string _path;
     private SqliteConnection _conn;
 
+    /// <summary>The transaction a batch is holding open, or null outside one.</summary>
+    private SqliteTransaction? _batch;
+
     /// <summary>
     /// The two SQLite codes that mean the file will never be readable, whatever we do.
     /// </summary>
@@ -169,7 +172,12 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL, type TEXT NOT NULL, temp_id TEXT, args TEXT NOT NULL, prior TEXT, attempts INTEGER NOT NULL, no_verdict INTEGER NOT NULL DEFAULT 0, state INTEGER NOT NULL, last_error TEXT);
             CREATE TABLE IF NOT EXISTS deferred_deletes (type TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (type, id));
+            CREATE INDEX IF NOT EXISTS outbox_by_uuid ON outbox (uuid);
             """, tx);
+
+        // The index is made here rather than in a step, since it's made the same way for a file of
+        // any age and an older build reads past it. Without it, each command taken off the queue
+        // by uuid read the whole queue, and undoing a batch of a thousand read it a thousand times.
 
         // Unversioned files from before the outbox counted rounds without a verdict.
         if (version < 1 && !HasColumn(conn, tx, "outbox", "no_verdict"))
@@ -314,7 +322,8 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
 
     public void SaveSync(IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes, string syncToken, IReadOnlyList<ResourceKey>? deferredDeletes = null)
     {
-        using var tx = _conn.BeginTransaction();
+        using var write = Begin();
+        var tx = write.Transaction;
         foreach (var u in upserts)
             UpsertResource(u.Type, u.Id, u.Json, tx);
         foreach (var d in deletes)
@@ -322,12 +331,78 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
         SetSyncToken(syncToken, tx);
         if (deferredDeletes is not null)
             SaveDeferredDeletes(deferredDeletes, tx);
-        tx.Commit();
+        write.Commit();
+    }
+
+    /// <remarks>
+    /// A transaction on the connection, held open until the batch is committed. Every write goes in
+    /// it meanwhile, since a connection with one open takes nothing outside it.
+    /// </remarks>
+    public IStoreBatch BeginBatch()
+    {
+        if (_batch is not null) throw new InvalidOperationException("A batch is already open on this store.");
+
+        _batch = _conn.BeginTransaction();
+        return new Batch(this, _batch);
+    }
+
+    /// <summary>The batch <see cref="BeginBatch"/> hands out.</summary>
+    /// <remarks>
+    /// It holds its own transaction and only ever acts on that, so one committed late or disposed
+    /// twice can't commit or roll back a batch opened after it. The transaction refuses a second
+    /// commit, or one after it's been rolled back.
+    /// </remarks>
+    private sealed class Batch(SqliteSnapshotStore store, SqliteTransaction transaction) : IStoreBatch
+    {
+        public void Commit()
+        {
+            transaction.Commit();
+            Close();
+        }
+
+        /// <remarks>
+        /// Rolls back anything not committed. Disposing the transaction does that, and knows to
+        /// leave alone one SQLite has already rolled back itself, as it does on a full disk.
+        /// </remarks>
+        public void Dispose()
+        {
+            Close();
+            transaction.Dispose();
+        }
+
+        /// <summary>Lets the store's writes go back to making their own transactions.</summary>
+        private void Close()
+        {
+            if (store._batch == transaction) store._batch = null;
+        }
+    }
+
+    /// <summary>
+    /// The transaction a write goes in: an open batch's, left for the batch to commit, or one of
+    /// its own.
+    /// </summary>
+    private Write Begin() => _batch is { } open ? new Write(open, owned: false) : new Write(_conn.BeginTransaction(), owned: true);
+
+    /// <summary>A transaction a write is made in, committed and disposed only when the write began it.</summary>
+    private readonly struct Write(SqliteTransaction transaction, bool owned) : IDisposable
+    {
+        public SqliteTransaction Transaction => transaction;
+
+        public void Commit()
+        {
+            if (owned) transaction.Commit();
+        }
+
+        public void Dispose()
+        {
+            if (owned) transaction.Dispose();
+        }
     }
 
     public long ApplyLocalWrite(OutboxCommand command, IReadOnlyList<StoredResource> upserts, IReadOnlyList<ResourceKey> deletes)
     {
-        using var tx = _conn.BeginTransaction();
+        using var write = Begin();
+        var tx = write.Transaction;
 
         foreach (var u in upserts)
             UpsertResource(u.Type, u.Id, u.Json, tx);
@@ -360,17 +435,18 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             command.Seq = (long)(query.ExecuteScalar() ?? 0L);
         }
 
-        tx.Commit();
+        write.Commit();
         return command.Seq;
     }
 
-    public void PutResource(string type, string id, string json) => UpsertResource(type, id, json, null);
+    public void PutResource(string type, string id, string json) => UpsertResource(type, id, json, _batch);
 
-    public void DeleteResource(string type, string id) => DeleteResource(type, id, null);
+    public void DeleteResource(string type, string id) => DeleteResource(type, id, _batch);
 
     public void RenameResource(string type, string oldId, string newId)
     {
-        using var tx = _conn.BeginTransaction();
+        using var write = Begin();
+        var tx = write.Transaction;
 
         string? json;
         using (var read = _conn.CreateCommand())
@@ -390,12 +466,13 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
             UpsertResource(type, newId, json, tx);
         }
 
-        tx.Commit();
+        write.Commit();
     }
 
     public void UpdateCommand(OutboxCommand command)
     {
         using var cmd = _conn.CreateCommand();
+        cmd.Transaction = _batch;
         cmd.CommandText = "UPDATE outbox SET args = $args, prior = $prior, attempts = $attempts, no_verdict = $noVerdict, state = $state, last_error = $error WHERE seq = $seq";
         cmd.Parameters.AddWithValue("$args", command.ArgsJson);
         cmd.Parameters.AddWithValue("$prior", (object?)command.PriorJson ?? DBNull.Value);
@@ -411,16 +488,16 @@ public sealed class SqliteSnapshotStore : ISnapshotStore
     {
         if (uuids.Count == 0)
             return;
-        using var tx = _conn.BeginTransaction();
+        using var write = Begin();
         foreach (var uuid in uuids)
         {
             using var cmd = _conn.CreateCommand();
-            cmd.Transaction = tx;
+            cmd.Transaction = write.Transaction;
             cmd.CommandText = "DELETE FROM outbox WHERE uuid = $uuid";
             cmd.Parameters.AddWithValue("$uuid", uuid);
             cmd.ExecuteNonQuery();
         }
-        tx.Commit();
+        write.Commit();
     }
 
     public void Purge()

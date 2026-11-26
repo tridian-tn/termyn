@@ -18,6 +18,7 @@ public class RecurringAndReminderTests
     public void A_date_the_local_grammar_knows_is_sent_as_a_date()
     {
         // Resolved here so it still means the right day with no network.
+        using var british = new CultureScope(Regions.British);
         var presenter = NewPresenter(Store());
 
         presenter.SetDueFromText("i1", "tomorrow");
@@ -71,10 +72,11 @@ public class RecurringAndReminderTests
     }
 
     [Fact]
-    public void A_date_set_here_is_written_out_the_way_the_server_would_have_written_it()
+    public void A_date_set_here_is_written_out_before_the_server_words_it()
     {
         // A date set locally has no words on it until it has been round-tripped, and showing the
         // stored ISO date meanwhile left the row looking unlike every other one due that day.
+        using var british = new CultureScope(Regions.British);
         var presenter = NewPresenter(Store());
 
         presenter.SetDue("i1", new DateOnly(2026, 8, 1));
@@ -85,6 +87,7 @@ public class RecurringAndReminderTests
     [Fact]
     public void A_due_date_in_another_year_says_which()
     {
+        using var british = new CultureScope(Regions.British);
         var store = new InMemorySnapshotStore();
         store.PutResource("items", "i1", """{"id":"i1","content":"Renew","due":{"date":"2027-12-25"}}""");
 
@@ -96,11 +99,28 @@ public class RecurringAndReminderTests
     {
         // A task with a timezone of its own arrives as a UTC instant, and half past eleven on the
         // first is half past midnight on the second in London.
+        using var british = new CultureScope(Regions.British);
         var store = new InMemorySnapshotStore();
         store.PutResource("user", "user", """{"id":"u","tz_info":{"timezone":"Europe/London"}}""");
         store.PutResource("items", "i1", """{"id":"i1","content":"Call","due":{"date":"2026-08-01T23:30:00Z"}}""");
 
-        Assert.Equal("2 Aug, 00:30", Due(NewPresenter(store)));
+        Assert.Equal("2 Aug 00:30", Due(NewPresenter(store)));
+    }
+
+    [Theory]
+    [InlineData("2026-08-01", "Aug 1")]
+    [InlineData("2026-08-01T16:00:00", "Aug 1 4:00 PM")]
+    [InlineData("2027-12-25", "Dec 25, 2027")]
+    [InlineData("2027-12-25T09:30:00", "Dec 25, 2027 9:30 AM")]
+    public void A_due_date_with_no_words_yet_is_written_in_the_regions_order(string stored, string expected)
+    {
+        // American English puts the month first and writes the time with AM and PM, the way the
+        // day headings and the history beside the column do.
+        using var american = new CultureScope(Regions.American);
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "i1", $$$"""{"id":"i1","content":"Call","due":{"date":"{{{stored}}}"}}""");
+
+        Assert.Equal(expected, Regions.Spaced(Due(NewPresenter(store))));
     }
 
     [Fact]
@@ -265,6 +285,33 @@ public class RecurringAndReminderTests
         Assert.Empty(presenter.RemindersFor("i1"));
     }
 
+    [Fact]
+    public void Removing_one_already_gone_isnt_noted_as_done()
+    {
+        var presenter = NewPresenter(Store());
+
+        presenter.DeleteReminder("ghost");
+
+        Assert.Empty(presenter.History.Recent());
+    }
+
+    [Theory]
+    [InlineData("""{"id":"i1","content":"Timed","project_id":"p1","child_order":1,"due":{"date":"2026-08-04T09:00:00"}}""", true)]
+    [InlineData("""{"id":"i1","content":"A day","project_id":"p1","child_order":1,"due":{"date":"2026-08-04"}}""", false)]
+    [InlineData("""{"id":"i1","content":"No date","project_id":"p1","child_order":1}""", false)]
+    public void A_reminder_before_its_due_needs_a_due_time(string item, bool takes)
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("items", "i1", item);
+
+        Assert.Equal(takes, NewPresenter(store).TakesRelativeReminder("i1"));
+    }
+
+    [Fact]
+    public void A_task_not_held_takes_no_reminder_before_its_due()
+        => Assert.False(NewPresenter(Store()).TakesRelativeReminder("ghost"));
+
     // ---- Regressions -------------------------------------------------------------------------------
 
     [Fact]
@@ -324,11 +371,12 @@ public class RecurringAndReminderTests
     [Fact]
     public void A_time_typed_with_a_date_survives_to_the_task()
     {
+        using var british = new CultureScope(Regions.British);
         var presenter = NewPresenter(Store());
 
         presenter.SetDueFromText("i1", "tomorrow 4pm");
 
-        Assert.Equal("1 Aug, 16:00", Due(presenter));
+        Assert.Equal("1 Aug 16:00", Due(presenter));
     }
 
     // ---- Second round ------------------------------------------------------------------------------
@@ -352,12 +400,13 @@ public class RecurringAndReminderTests
 
     [Theory]
     [InlineData("tomorrow", "1 Aug")]
-    [InlineData("tomorrow 4pm", "1 Aug, 16:00")]
+    [InlineData("tomorrow 4pm", "1 Aug 16:00")]
     [InlineData("2026-12-25", "25 Dec")]
     [InlineData("friday", "31 Jul")]
     public void A_plain_date_is_still_resolved_here(string text, string expected)
     {
         // The rule has to keep working offline for the dates the grammar does cover.
+        using var british = new CultureScope(Regions.British);
         var presenter = NewPresenter(Store());
 
         presenter.SetDueFromText("i1", text);

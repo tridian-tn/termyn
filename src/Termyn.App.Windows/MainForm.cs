@@ -59,8 +59,8 @@ internal sealed class MainForm : Form
 
     /// <summary>
     /// The space around the search box at 100%, so it sits in from the window's edges rather than
-    /// running into them. The sides line its border up with where the sidebar's text starts below
-    /// it, which is <see cref="DotLead"/> scaled the same way.
+    /// running into them. The sides line its border up with the column of arrows in the sidebar
+    /// below it, each centred in the room <see cref="ExpanderGlyph.RoomAt96"/> gives it.
     /// </summary>
     internal static readonly Padding SearchPadding = new(4, 6, 4, 6);
 
@@ -130,6 +130,12 @@ internal sealed class MainForm : Form
     /// <summary>The same description, rendered.</summary>
     private readonly MarkdownView _rendered;
 
+    /// <summary>The ring round the two, lit while typing would change the description.</summary>
+    private readonly FocusFrame _descriptionFrame;
+
+    /// <summary>The strip above the two, saying which is showing and offering the other.</summary>
+    private readonly DescriptionBar _descriptionBar;
+
     /// <summary>The conversation on whatever the pane is pointed at.</summary>
     private readonly CommentsView _comments;
 
@@ -149,9 +155,18 @@ internal sealed class MainForm : Form
     /// <remarks>
     /// Read off the selection rather than held. Held, it went stale the moment the selection moved
     /// without passing through whatever set it — which it did.
+    ///
+    /// The outline's selection is read once. Each read asks the native list for every row in it,
+    /// and this is asked several times a render.
     /// </remarks>
     private PanelSubject Subject
-        => PanelSubject.Of(_outline.SelectedRow, _sidebar.SelectedNode?.Tag as SidebarNode);
+    {
+        get
+        {
+            var rows = _outline.SelectedRows;
+            return PanelSubject.Of(rows is [var only] ? only : null, _sidebar.SelectedNode?.Tag as SidebarNode, rows.Count);
+        }
+    }
 
     /// <summary>The task or project the comments hang off, or null when neither is picked out.</summary>
     private string? CommentsOwner => Subject.Id;
@@ -251,6 +266,17 @@ internal sealed class MainForm : Form
     /// </remarks>
     public TokenCheck? SwitchTo { get; private set; }
 
+    /// <summary>
+    /// True once the window has closed so that Termyn can start again, which is how a new theme
+    /// reaches the parts Windows draws.
+    /// </summary>
+    /// <remarks>
+    /// The window has closed the way Exit closes it, so what was being typed and the view state are
+    /// saved. Starting the next copy is left to whoever ran the window, once this one has let go of
+    /// everything it held.
+    /// </remarks>
+    public bool RestartRequested { get; private set; }
+
     /// <summary>The sidebar row the user actually clicked, which the id alone can't identify.</summary>
     private string _sidebarKey = ViewSelection.Default.Key;
 
@@ -333,13 +359,19 @@ internal sealed class MainForm : Form
             HideSelection = true,
             ShowLines = false,
             ShowRootLines = false,
+
+            // The arrows are drawn with the rows, the outline's own, and the tree's boxes would be a
+            // second kind beside them.
+            ShowPlusMinus = false,
             FullRowSelect = true,
             Indent = SidebarIndent,
             BorderStyle = BorderStyle.None,
 
-            // Only the text, so the tree goes on drawing the row's background, its selection and
-            // its expander — and a row with no colour of its own is left to it entirely.
-            DrawMode = TreeViewDrawMode.OwnerDrawText,
+            // The whole row, background and selection included. Left to the tree, the selection
+            // came out in Windows' own colours: system blue in the light theme, and in the dark one
+            // a pale band with a focus box round it and the tree's copy of the name showing beside
+            // ours.
+            DrawMode = TreeViewDrawMode.OwnerDrawAll,
         };
         _sidebar.DrawNode += OnSidebarDrawNode;
         _sidebar.MouseDown += (_, _) => Noticed();
@@ -449,6 +481,13 @@ internal sealed class MainForm : Form
         _rendered.EditRequested += StartWriting;
         _rendered.ZoomWheeled += OnDescriptionWheeled;
 
+        _descriptionFrame = new FocusFrame();
+        _descriptionFrame.Controls.Add(_description);
+        _descriptionFrame.Controls.Add(_rendered);
+
+        _descriptionBar = new DescriptionBar();
+        _descriptionBar.PencilClicked += () => Guarded(TogglePencil);
+
         // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
         // worse, nowhere to type one.
@@ -486,9 +525,12 @@ internal sealed class MainForm : Form
         // The description keeps its own pair inside its tab — the markdown and the rendering, one
         // visible at a time — because that is a mode rather than a place, and reading and writing
         // the same text are not two tabs' worth of different.
+        //
+        // The frame first and the strip after, so the strip takes the top: a docked control added
+        // later sits nearer the edge.
         _descriptionTab = new TabPage(Strings.MainDescriptionTab);
-        _descriptionTab.Controls.Add(_description);
-        _descriptionTab.Controls.Add(_rendered);
+        _descriptionTab.Controls.Add(_descriptionFrame);
+        _descriptionTab.Controls.Add(_descriptionBar);
 
         _commentsTab = new TabPage(Strings.MainCommentsTab);
         _commentsTab.Controls.Add(_comments);
@@ -634,9 +676,7 @@ internal sealed class MainForm : Form
 
         RestoreViewState(_settings.View);
 
-        // Only the colours here. Loading publishes and renders a moment later anyway, and rendering
-        // the whole outline twice before the window is even up is time the user waits for.
-        ApplyTheme(render: false);
+        ApplyTheme();
 
         _presenter.RowsChanged += OnRowsChanged;
         _presenter.StatusChanged += OnStatusChanged;
@@ -705,8 +745,18 @@ internal sealed class MainForm : Form
         _quickAdd?.Dispose();
         _headerFont?.Dispose();
         _taskMenu.Dispose();
+
+        // Here rather than on closing, which is also Windows asking whether it may shut down. Any
+        // other app can still say no to that, and the window then carries on with its work.
+        _cts.Cancel();
         _cts.Dispose();
     }
+
+    /// <summary>
+    /// Whether the window has stopped the work it started, which it only does once it has closed.
+    /// </summary>
+    /// <remarks>Internal so a test can see that Windows asking about a shutdown leaves it running.</remarks>
+    internal bool Stopped => _cts.IsCancellationRequested;
 
     protected override void Dispose(bool disposing)
     {
@@ -722,6 +772,11 @@ internal sealed class MainForm : Form
     /// Closing leaves Termyn in the tray when that is what the user asked for, because the global
     /// hotkey only works while the process is alive. Exit from the tray menu closes for real.
     /// </summary>
+    /// <remarks>
+    /// Raised when Windows asks whether it may shut down, as well as for a close. That's only a
+    /// question, and another app can still refuse it, so nothing here may leave the window unable to
+    /// carry on; what ends its work waits for <see cref="Teardown"/>.
+    /// </remarks>
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
         // Before the state is written either way: closing to the tray leaves the window standing,
@@ -740,10 +795,9 @@ internal sealed class MainForm : Form
         SaveViewState();
 
         // The run still being added to is only in memory until now, so this is what stops the last
-        // thing somebody did going unrecorded.
+        // thing somebody did going unrecorded. Safe to carry on from: it writes what it holds, and
+        // the history goes on taking notes afterwards.
         _presenter.History.Dispose();
-
-        _cts.Cancel();
     }
 
     /// <summary>
@@ -783,11 +837,14 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>The quick-add box, built on first use.</summary>
-    private QuickAddForm QuickAdd
+    /// <remarks>Internal so a test can see a box that's been closed replaced by a new one.</remarks>
+    internal QuickAddForm QuickAdd
     {
         get
         {
-            if (_quickAdd is not null)
+            // Built again if it's gone: the user closing the box only hides it, but a close from
+            // anywhere else is a real one, another program's included.
+            if (_quickAdd is { IsDisposed: false })
                 return _quickAdd;
 
             _quickAdd = new QuickAddForm(_presenter, _theme);
@@ -1148,6 +1205,12 @@ internal sealed class MainForm : Form
     internal void ApplySettings(AppSettings amended)
     {
         var themeChanged = amended.Theme != _settings.Theme;
+
+        // Against the theme on screen, which is the one the window was built in, rather than the
+        // last one saved. Going back to it needs no restart, and nor does a choice that comes out
+        // the same: System on a dark desktop is Dark.
+        var themePending = Theme.Resolve(amended.Theme) != _theme;
+
         var hotkeyChanged = amended.HotkeyEnabled != _settings.HotkeyEnabled
                             || amended.HotkeyBinding != _settings.HotkeyBinding;
         var cadenceChanged = amended.SyncMode != _settings.SyncMode
@@ -1187,16 +1250,6 @@ internal sealed class MainForm : Form
         _settings = amended;
         _outline.PriorityTips = _settings.ShowPriorityTips;
 
-        if (themeChanged)
-        {
-            _theme = Theme.Resolve(_settings.Theme);
-            ApplyTheme();
-            _quickAdd?.ApplyTheme(_theme);
-
-            // The framework's own chrome — scrollbars, menus, title bars — is set once at startup.
-            notices.Add(Strings.NoticeFrameTheme);
-        }
-
         if (hotkeyNotice is not null)
             notices.Add(hotkeyNotice);
 
@@ -1209,20 +1262,91 @@ internal sealed class MainForm : Form
         if (cacheChanged)
             _presenter.SetDownloadLimits(amended.AttachmentCache);
 
-        // Saved last, so the theme and hotkey are applied even when the file can't be written.
-        if (!SaveViewState())
+        // Saved last, so the hotkey is applied even when the file can't be written.
+        //
+        // A new theme isn't painted on. What Windows draws — the tab headers, scrollbars, menus, the
+        // title bar and the sidebar tree's own look — takes the framework's colour mode, which is
+        // only read as the first window is made, so repainting the rest left the window half in
+        // each. It's said to be coming once it's on disk, since the next start reads it from there.
+        var saved = SaveViewState();
+        if (!saved)
             notices.Add(Strings.NoticeSettingsNotSaved);
+        else if (themePending)
+            notices.Insert(0, Strings.NoticeThemeAtNextStart);
 
+        // With nothing to say after going back to the theme on screen, what was said about the
+        // other one is put right rather than left standing.
         if (notices.Count > 0)
             _status.Text = string.Join("  ·  ", notices);
+        else if (themeChanged)
+            RenderStatus();
+
+        // Only once it's on disk, since the next copy reads the theme from there. A file that
+        // couldn't be written would restart into the same theme. Asked only when the theme has just
+        // changed, so saving something else meanwhile doesn't ask again.
+        if (themeChanged && themePending && saved)
+            OfferRestart();
     }
 
-    private void ApplyTheme(bool render = true)
+    /// <summary>
+    /// Asks whether to restart now for the new theme, and closes the window to do it if so.
+    /// </summary>
+    /// <remarks>
+    /// Not offered while a file is on its way, which closing would cut off. The status bar already
+    /// says the theme comes in at the next start, which is true either way.
+    /// </remarks>
+    private void OfferRestart()
+    {
+        if (_transfer is not null)
+            return;
+
+        if (!(AskToRestart ?? AskUserToRestart)())
+            return;
+
+        RestartRequested = true;
+        _exiting = true;
+        Close();
+    }
+
+    /// <summary>
+    /// Asks whether to restart for a new theme. A property so a test can answer without a box
+    /// appearing; null, as the window leaves it, asks the user.
+    /// </summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    internal Func<bool>? AskToRestart { get; set; }
+
+    /// <summary>Puts the restart question to the user.</summary>
+    /// <returns>True when they chose to restart now</returns>
+    private bool AskUserToRestart()
+    {
+        var restart = new TaskDialogButton(Strings.ThemeRestartNow);
+        var page = new TaskDialogPage
+        {
+            Caption = "Termyn",
+            Heading = Strings.ThemeRestartHeading,
+            Text = Strings.ThemeRestartText,
+            Icon = TaskDialogIcon.Information,
+            AllowCancel = true,
+            Buttons = { restart, new TaskDialogButton(Strings.ThemeRestartLater) },
+        };
+
+        return TaskDialog.ShowDialog(this, page, TaskDialogStartupLocation.CenterOwner) == restart;
+    }
+
+    /// <summary>Paints the window's theme onto everything Termyn draws itself.</summary>
+    /// <remarks>
+    /// Only the colours. Loading publishes and renders a moment later anyway, and rendering the
+    /// whole outline twice before the window is even up is time the user waits for.
+    /// </remarks>
+    private void ApplyTheme()
     {
         _theme.Apply(this);
         _outline.Theme = _theme;
         _rendered.Theme = _theme;
         _description.Theme = _theme;
+        _descriptionFrame.Theme = _theme;
+        _descriptionBar.Theme = _theme;
         _comments.Theme = _theme;
         _panelHeader.Theme = _theme;
 
@@ -1235,13 +1359,10 @@ internal sealed class MainForm : Form
         _sidebar.MarkColour = _theme.Accent;
         _outline.BackColor = _theme.Panel;
 
-        // The mark is a theme colour, so it has to be laid down again in the new one.
+        // The mark is a theme colour, and the headers' colours are set per node as the tree is built.
         MarkSidebarSelection();
-        _renderedSidebar = null; // header colours are set per node, so the tree has to be rebuilt
+        _renderedSidebar = null;
         Invalidate(invalidateChildren: true);
-
-        if (render)
-            Render();
     }
 
     // ---- View state ----------------------------------------------------------------------------
@@ -1315,6 +1436,7 @@ internal sealed class MainForm : Form
         // Straight to the presenter rather than held like the sidebar's: which rows exist is its
         // answer, so it needs these before it works the outline out rather than after.
         _presenter.RestoreCollapsed(state.CollapsedTasks);
+        _presenter.SetGroupBySection(state.GroupBySection);
     }
 
     /// <summary>A size in the window's display pixels as it would be at 100%, which is how sizes are saved.</summary>
@@ -1347,6 +1469,8 @@ internal sealed class MainForm : Form
     {
         _viewHeader.ScaleTo(dpi);
         _panelHeader.Height = StartupLayout.Scaled(DetailHeader.LogicalHeight, dpi);
+        _descriptionBar.ScaleTo(dpi);
+        _descriptionFrame.ScaleTo(dpi);
         _status.Height = StartupLayout.Scaled(StatusHeight, dpi);
     }
 
@@ -1395,6 +1519,7 @@ internal sealed class MainForm : Form
             ColumnWidths = _outline.ColumnWidths.ToDictionary(c => c.Key.ToString(), c => AtHundred(c.Value)),
             SidebarWidth = AtHundred(_split.SplitterDistance),
             ShowDescription = !_detail.Panel2Collapsed,
+            GroupBySection = _presenter.GroupBySection,
             DescriptionHeight = _descriptionHeight,
             WindowX = bounds.X,
             WindowY = bounds.Y,
@@ -1465,17 +1590,18 @@ internal sealed class MainForm : Form
     ///
     /// The rows are republished from inside the fold and the list has taken them by the time it
     /// returns, so the selection read here is the one the fold left behind.
+    ///
+    /// Several selected are left alone while any of them is still on screen. Folded away together,
+    /// they go to the place the first of them was folded into.
     /// </remarks>
     /// <param name="fold">The fold to carry out, answering whether it changed anything</param>
     private void Folding(Func<bool> fold)
     {
-        var was = _outline.SelectedId;
+        var was = _outline.SelectedIds;
 
-        if (!fold() || was is null || _outline.SelectedId is not null)
-            return;
+        if (!fold() || was.Count == 0 || _outline.SelectedRows.Count > 0) return;
 
-        if (_presenter.NearestShown(was) is { } instead)
-            _outline.SelectId(instead);
+        if (_presenter.NearestShown(was[0]) is { } instead) _outline.SelectId(instead);
     }
 
     // ---- Rendering -----------------------------------------------------------------------------
@@ -1522,10 +1648,10 @@ internal sealed class MainForm : Form
         _status.Text = _presenter.Status;
 
         // Coloured by state, which is why the presenter hands back a status rather than a sentence:
-        // offline and reconnect are worth noticing, and everything else is not.
+        // offline, waiting and reconnect are worth noticing, and everything else is not.
         _status.ForeColor = _presenter.SyncStatus.State switch
         {
-            SyncState.Offline or SyncState.Paused => _theme.Accent,
+            SyncState.Offline or SyncState.Paused or SyncState.WaitingForToken => _theme.Accent,
             SyncState.ReconnectNeeded => Theme.ForPriority(Priority.P1),
             _ => _theme.Muted,
         };
@@ -1977,35 +2103,73 @@ internal sealed class MainForm : Form
     private const int DotSize = 8;
 
     /// <summary>
-    /// How far in from the text's own left edge the dot starts.
+    /// How far past the arrow's room the dot starts.
     /// </summary>
     /// <remarks>
-    /// The expander is drawn immediately to the left of that edge, with next to nothing between the
-    /// two, so a dot starting there sits against it while the same expander has clear space on its
-    /// other side. Scaled with the display, since the expander is.
+    /// The arrow is centred in its room, so it already has a little clear space on its right; this
+    /// takes the dot far enough on that it reads as the row's and not as part of the arrow. Scaled
+    /// with the display, since the arrow is.
     /// </remarks>
     private const int DotLead = 4;
 
     /// <summary>
-    /// Draws a row of the dot column: its name, and the dot in front of it where it has one.
+    /// Draws a sidebar row: its arrow where it folds, its dot where it has one, and its name.
     /// </summary>
     /// <remarks>
+    /// The arrow is the outline's, drawn here rather than left to the tree, whose own boxes didn't
+    /// match it and which draws nothing at all for the headings: they're its top rows, and the tree
+    /// only draws those an expander with lines running to them. Every row keeps the arrow's room
+    /// whether or not it has one, so the names line up down the sidebar.
+    ///
     /// The dot is sized from the row rather than fixed, so it follows the font and whatever the
     /// display is scaled to — an image list would have had to be rebuilt at every DPI.
     ///
-    /// Every other row is left to the tree, which keeps the headings' own font and both of the ways
-    /// a selected row is marked.
+    /// The background is drawn here too, in the theme: the accent behind the focused selection,
+    /// as in the outline, and the row's own colour otherwise, which is how
+    /// <see cref="MarkSidebarSelection(bool)"/> marks the selection while the tree hasn't got the
+    /// focus.
     /// </remarks>
     private void OnSidebarDrawNode(object? sender, DrawTreeNodeEventArgs e)
     {
-        if (e.Node is not { } drawn || drawn.Tag is not SidebarNode node)
+        if (e.Node is not { } drawn || drawn.Tag is not SidebarNode)
         {
             e.DrawDefault = true;
             return;
         }
 
-        var bounds = Widened(e.Bounds, _sidebar.ClientSize.Width);
-        var taken = 0;
+        DrawSidebarRow(e.Graphics, drawn, e.Bounds, Lit(drawn, e.State));
+    }
+
+    /// <summary>Draws one sidebar row, from its background up.</summary>
+    /// <remarks>Internal so a test can draw a row onto a bitmap and read back its colours.</remarks>
+    /// <param name="g">Where to draw</param>
+    /// <param name="drawn">The row, which carries a <see cref="SidebarNode"/></param>
+    /// <param name="row">The whole row, edge to edge</param>
+    /// <param name="lit">Whether it's the focused selection</param>
+    internal void DrawSidebarRow(Graphics g, TreeNode drawn, Rectangle row, bool lit)
+    {
+        if (drawn.Tag is not SidebarNode node)
+            return;
+
+        var back = lit ? _theme.Accent : drawn.BackColor.IsEmpty ? _sidebar.BackColor : drawn.BackColor;
+        using (var brush = new SolidBrush(back))
+            g.FillRectangle(brush, row);
+
+        // Where the tree would have put the name, which is after the row's indent, on the row
+        // being drawn.
+        var label = drawn.Bounds with { Y = row.Y, Height = row.Height };
+        var bounds = Widened(label, _sidebar.ClientSize.Width);
+        var taken = _sidebar.ExpanderRoom;
+
+        if (drawn.Nodes.Count > 0)
+        {
+            ExpanderGlyph.Draw(
+                g,
+                bounds with { Width = taken },
+                collapsed: !drawn.IsExpanded,
+                _sidebar.LogicalToDeviceUnits(ExpanderGlyph.SizeAt96),
+                lit ? _theme.OnAccent : _theme.Muted);
+        }
 
         if (node.SitsInDotColumn)
         {
@@ -2015,47 +2179,45 @@ internal sealed class MainForm : Form
             if (size > 0 && node.Colour is { } colour)
             {
                 Dots.Fill(
-                    e.Graphics,
-                    new Rectangle(bounds.X + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
+                    g,
+                    new Rectangle(bounds.X + taken + lead, bounds.Y + ((bounds.Height - size) / 2), size, size),
                     Theme.ToColor(colour));
             }
 
-            // The text keeps its full width rather than losing the dot's room: the row's background
-            // is already drawn, and a name shortened by a dot would be the wrong thing to trim.
-            taken = lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
+            taken += lead + Math.Max(0, size) + _sidebar.LogicalToDeviceUnits(DotGap);
         }
 
+        // The text keeps its full width rather than losing the arrow's and the dot's room: the
+        // row's background is already drawn, and a name shortened by them would be the wrong thing
+        // to trim.
         TextRenderer.DrawText(
-            e.Graphics,
+            g,
             drawn.Text,
             drawn.NodeFont ?? _sidebar.Font,
             bounds with { X = bounds.X + taken },
-            Writing(drawn, e.State),
+            lit ? _theme.OnAccent : drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor,
             TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
     }
 
     /// <summary>
-    /// What to write a sidebar row in.
+    /// Whether a sidebar row is drawn as the focused selection, on the accent and in its ink.
     /// </summary>
     /// <remarks>
-    /// The selection is taken from the tree as well as from the row handed over, because the two
-    /// disagree for as long as a mouse button is held: the row is selected the moment the button
-    /// goes down, and the tree holds the item's own selected state back until it goes up in case
-    /// the press turns into a drag. Read from the state alone, a row would be written in ordinary
-    /// ink over the highlight already behind it.
+    /// A row the button is being held on is lit, and it's the only one: the tree doesn't select it
+    /// until the button comes up, in case the press turns into a drag, and lighting it straight
+    /// away is how Windows' own trees show the click has landed. Lit whether or not the tree has
+    /// the focus yet, since the press is about to give it the focus.
+    ///
+    /// Otherwise the selection is read from the tree as well as from the row handed over. The two
+    /// can disagree for a moment as the selection moves, and either is enough.
     /// </remarks>
     /// <param name="drawn">The row being drawn</param>
     /// <param name="state">What the tree says about it</param>
-    /// <returns>The colour to write its name in</returns>
-    private Color Writing(TreeNode drawn, TreeNodeStates state)
-    {
-        var selected = (state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn;
-
-        if (selected && _sidebar.Focused)
-            return SystemColors.HighlightText;
-
-        return drawn.ForeColor.IsEmpty ? _sidebar.ForeColor : drawn.ForeColor;
-    }
+    /// <returns>True when it's on the highlight</returns>
+    internal bool Lit(TreeNode drawn, TreeNodeStates state)
+        => _sidebar.Pressed is { } pressed
+            ? pressed == drawn
+            : ((state & TreeNodeStates.Selected) != 0 || _sidebar.SelectedNode == drawn) && _sidebar.Focused;
 
     /// <summary>
     /// A row's text given the rest of the sidebar's width to be written in.
@@ -2414,6 +2576,7 @@ internal sealed class MainForm : Form
     {
         _description.ReadOnly = access is not DescriptionAccess.Writable;
         _rendered.Inert = _description.ReadOnly;
+        RenderDescriptionMode();
 
         // A completed task's description is shown and can't be edited, and there is no room to say so
         // over the top of them — the recessed background carries that one on its own.
@@ -2440,6 +2603,7 @@ internal sealed class MainForm : Form
         // that tab was selected is how the comments pane itself came to be invisible.
         _description.Visible = writing;
         _rendered.Visible = !writing;
+        RenderDescriptionMode();
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
@@ -2453,6 +2617,21 @@ internal sealed class MainForm : Form
 
         if (focus && !_detail.Panel2Collapsed && !_showingComments)
             (writing ? (Control)_description : _rendered).Focus();
+    }
+
+    /// <summary>
+    /// Puts the pencil above the description and the ring round it in step with what the panel is
+    /// showing and whether the account would take typing.
+    /// </summary>
+    /// <remarks>
+    /// The ring only round the markdown. The rendering takes Enter and F2 to open it, but typing
+    /// at it changes nothing, so a ring there would promise something that doesn't happen.
+    /// </remarks>
+    private void RenderDescriptionMode()
+    {
+        var writable = !_description.ReadOnly;
+        _descriptionFrame.TakesTyping = _writingDescription && writable;
+        _descriptionBar.Render(_writingDescription, writable);
     }
 
     // ---- Comments ----------------------------------------------------------------------------------
@@ -2934,6 +3113,85 @@ internal sealed class MainForm : Form
         _description.ScrollToCaret();
     }
 
+    /// <summary>
+    /// Edit description, from the Task menu or Ctrl+E: on to the description, in the markdown,
+    /// with the keyboard.
+    /// </summary>
+    /// <remarks>
+    /// One way only, like Rename: Escape is how you leave. So it does nothing with the markdown
+    /// already in front, where the menu has it greyed, and nothing where typing wouldn't be kept.
+    /// From a shut panel it opens the panel, since this is asked for by name.
+    /// </remarks>
+    private void EditDescription()
+    {
+        if (_description.ReadOnly)
+            return;
+
+        if (_writingDescription && !_detail.Panel2Collapsed && !_showingComments)
+            return;
+
+        ShowPanelTab(comments: false);
+
+        if (_writingDescription)
+            _description.Focus();
+        else
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+    }
+
+    /// <summary>
+    /// The pencil above the description: switches it between the rendering and the markdown.
+    /// </summary>
+    /// <remarks>
+    /// A real switch, unlike the menu entry, since a button can show which way it's set by being
+    /// pressed in. Going back takes the keyboard to the rendering only if the description had it:
+    /// an empty description opens in the markdown without the focus, and looking at it formatted
+    /// shouldn't pull the keyboard off the outline.
+    /// </remarks>
+    private void TogglePencil()
+    {
+        if (_detail.Panel2Collapsed || _showingComments)
+            return;
+
+        if (!_writingDescription)
+        {
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+            return;
+        }
+
+        var hadFocus = _descriptionFrame.ContainsFocus;
+        StopWriting();
+
+        if (hadFocus)
+            _rendered.Focus();
+    }
+
+    /// <summary>
+    /// Takes the keyboard to whichever half of the description is showing.
+    /// </summary>
+    private void FocusDescription() => (_writingDescription ? (Control)_description : _rendered).Focus();
+
+    /// <summary>
+    /// Return on a task in the outline, with the panel open: on to its description, in the markdown.
+    /// </summary>
+    /// <remarks>
+    /// A second key for Edit description, kept out of the menus and the shortcut table, which list
+    /// each command once. It differs in two ways. It's only answered with the panel open, so Return
+    /// can't open a panel somebody shut. And a description that can't be written to is shown rather
+    /// than left alone, so the key still lands somewhere that says why.
+    /// </remarks>
+    private void WriteSelectedDescription()
+    {
+        ShowPanelTab(comments: false);
+
+        if (_description.ReadOnly || _writingDescription)
+        {
+            FocusDescription();
+            return;
+        }
+
+        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+    }
+
     /// <summary>Writes what was typed and goes back to reading.</summary>
     private void StopWriting()
     {
@@ -3214,23 +3472,32 @@ internal sealed class MainForm : Form
     /// </summary>
     /// <param name="selection">The sidebar row to answer about, or null for none</param>
     /// <returns>What the menus would read from</returns>
-    internal CommandContext NewContext(SidebarNode? selection) => new(
-        _outline.SelectedRow,
-        _presenter.AbilitiesFor(_outline.SelectedId),
-        selection,
-        _presenter.ShowingCompleted,
-        _presenter.CanUndo,
-        _presenter.Sort,
-        !_detail.Panel2Collapsed,
-        _writingDescription,
-        _showingComments,
-        Zoomed,
-        _presenter.CanExpandAll,
-        _presenter.CanCollapseAll,
-        _presenter.SelectionAbilitiesFor(selection),
-        NewTaskText(selection),
-        _presenter.ReconnectNeeded,
-        _presenter.ScheduleDays);
+    internal CommandContext NewContext(SidebarNode? selection)
+    {
+        var rows = _outline.SelectedRows;
+
+        return new(
+            rows is [var only] ? only : null,
+            _presenter.AbilitiesForAll(rows.Select(r => r.Id).ToList()),
+            selection,
+            _presenter.ShowingCompleted,
+            _presenter.CanUndo,
+            _presenter.Sort,
+            !_detail.Panel2Collapsed,
+            _writingDescription,
+            _showingComments,
+            Zoomed,
+            _presenter.CanExpandAll,
+            _presenter.CanCollapseAll,
+            _presenter.SelectionAbilitiesFor(selection),
+            NewTaskText(selection),
+            _presenter.ReconnectNeeded,
+            _presenter.ScheduleDays,
+            rows.Count > 1 ? rows : null,
+            _presenter.GroupBySection,
+            _presenter.CanGroupBySection,
+            !_description.ReadOnly);
+    }
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
     /// <param name="selection">The row, or null for none</param>
@@ -3331,7 +3598,7 @@ internal sealed class MainForm : Form
     {
         // The outline turns away a right-click that missed every row, so what's left to catch here
         // is the keyboard asking for a menu with nothing selected — an empty list, most likely.
-        if (_outline.SelectedRow is null)
+        if (_outline.SelectedRows.Count == 0)
         {
             e.Cancel = true;
             return;
@@ -3516,7 +3783,14 @@ internal sealed class MainForm : Form
         }
 
         if (Presentation.Commands.IsTaskCommand(command))
-            return _outline.SelectedId is { } id && RunTaskCommand(command, id);
+        {
+            return _outline.SelectedRows switch
+            {
+                [var only] => RunTaskCommand(command, only.Id),
+                { Count: > 1 } several => RunOnSeveral(command, several),
+                _ => false,
+            };
+        }
 
         if (Presentation.Commands.IsSelectionCommand(command))
             return RunSelectionCommand(command);
@@ -3555,6 +3829,17 @@ internal sealed class MainForm : Form
                 _ = ToggleCompletedAsync();
                 return false;
 
+            // Only where the menu entry's lit. Ctrl+G reaches here from any view, and flipping the
+            // setting where it changes nothing on screen would leave the next project looking
+            // different with no idea why.
+            case AppCommand.GroupBySection:
+                if (_presenter.CanGroupBySection)
+                {
+                    Guarded(() => _presenter.SetGroupBySection(!_presenter.GroupBySection));
+                }
+
+                return false;
+
             case AppCommand.History:
                 Guarded(() => HistoryForm.Show(this, _theme, _presenter.History.Recent, _presenter.History.Clear));
                 return false;
@@ -3575,12 +3860,26 @@ internal sealed class MainForm : Form
                 Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
+            // Each takes the keyboard to the tab it puts in front, so the next key acts there: Enter
+            // or Ctrl+E in the description, typing a comment in the comments.
             case AppCommand.ViewDescription:
-                Guarded(() => ShowPanelTab(comments: false));
+                Guarded(() =>
+                {
+                    ShowPanelTab(comments: false);
+                    FocusDescription();
+                });
                 return false;
 
             case AppCommand.ViewComments:
-                Guarded(() => ShowPanelTab(comments: true));
+                Guarded(() =>
+                {
+                    ShowPanelTab(comments: true);
+                    _comments.Focus();
+                });
+                return false;
+
+            case AppCommand.EditDescription:
+                Guarded(EditDescription);
                 return false;
 
             case AppCommand.ZoomIn:
@@ -3846,18 +4145,79 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// Runs an action on several tasks at once, or says why it can't be.
+    /// </summary>
+    /// <remarks>
+    /// The menus grey whatever needs a single task, but a keystroke reaches here without a menu
+    /// having opened, so the reason is still said.
+    /// </remarks>
+    /// <param name="command">The action to run</param>
+    /// <param name="rows">The tasks to run it on, top to bottom</param>
+    /// <returns>True when it changed something the server has yet to hear about</returns>
+    private bool RunOnSeveral(AppCommand command, IReadOnlyList<TaskRow> rows)
+    {
+        if (!Presentation.Commands.ActsOnSeveral(command))
+        {
+            _status.Text = Strings.OneTaskOnly;
+            return false;
+        }
+
+        var ids = rows.Select(r => r.Id).ToList();
+        var wrote = false;
+
+        switch (command)
+        {
+            // Put back only when every one of them is done already, which is when the menu says
+            // Reopen. Otherwise the open ones are ticked off and the done ones left as they are.
+            case AppCommand.ToggleComplete:
+                Guarded(() =>
+                {
+                    if (Presentation.Commands.Reopens(rows)) _presenter.Reopen(ids);
+                    else _presenter.Complete(rows.Where(r => !r.Completed).Select(r => r.Id).ToList());
+                });
+                return true;
+
+            case AppCommand.Priority1:
+            case AppCommand.Priority2:
+            case AppCommand.Priority3:
+            case AppCommand.Priority4:
+                Guarded(() => wrote = _presenter.SetPriority(ids, Presentation.Commands.PriorityOf(command) ?? Priority.P4));
+                return wrote;
+
+            case AppCommand.MoveTo:
+                Guarded(() => wrote = MoveElsewhere(ids));
+                return wrote;
+
+            // Unconfirmed for the reason a single delete is: Ctrl+Z brings the lot back.
+            case AppCommand.Delete:
+                Guarded(() => _presenter.Delete(ids));
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
     // ---- Outline keys --------------------------------------------------------------------------
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.KeyData == Keys.Return && _outline.SelectedRows.Count == 1 && !_detail.Panel2Collapsed)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            Guarded(WriteSelectedDescription);
+            return;
+        }
+
         var command = CommandFor(e.KeyData, ShortcutScope.Outline);
         if (command == AppCommand.None)
             return;
 
         // A task command with no row under the cursor was never handled here: swallowing the key
         // would leave an empty list eating keystrokes that mean nothing in it.
-        if (Presentation.Commands.IsTaskCommand(command) && _outline.SelectedId is null)
-            return;
+        if (Presentation.Commands.IsTaskCommand(command) && _outline.SelectedRows.Count == 0) return;
 
         // Left unhandled deliberately: the editor is open by the time the control sees its own F2,
         // and suppressing the key would stop the two agreeing about what is being edited.
@@ -4049,8 +4409,15 @@ internal sealed class MainForm : Form
 
     private void BeginRename()
     {
-        if (_outline.SelectedIndices.Count > 0)
-            _outline.Items[_outline.SelectedIndices[0]].BeginEdit();
+        // The row of the task rather than the first index selected, which can be a day's heading
+        // that Shift took in along with it.
+        if (_outline.SelectedRow is { } row && _outline.RowOf(row.Id) is var index and >= 0)
+        {
+            _outline.Items[index].BeginEdit();
+            return;
+        }
+
+        if (_outline.SelectedRows.Count > 1) _status.Text = Strings.OneTaskOnly;
     }
 
     private void OnBeforeLabelEdit(object? sender, LabelEditEventArgs e)
@@ -4063,7 +4430,20 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var row = _outline.SelectedRow;
+        // The list starts an edit of its own on F2, on whichever row has the focus. With several
+        // selected there's no one task it's the name of.
+        if (_outline.SelectedRows.Count > 1)
+        {
+            e.CancelEdit = true;
+            _status.Text = Strings.OneTaskOnly;
+            return;
+        }
+
+        // The row the box is open over, which isn't always the one selected. The list's own F2
+        // opens it over whichever row has the focus, and Ctrl+click can leave the focus on a task
+        // it's just let go of. Taken from the selection, what was typed over one task renamed
+        // another.
+        var row = e.Item >= 0 && e.Item < _outline.Rows.Count ? _outline.Rows[e.Item] : null;
         _editingId = row?.Id;
         _editingText = row?.Content;
     }
@@ -4236,8 +4616,7 @@ internal sealed class MainForm : Form
         if (!answered || day == row.DeadlineOn)
             return false;
 
-        _presenter.SetDeadline(id, day);
-        return true;
+        return _presenter.SetDeadline(id, day);
     }
 
     /// <summary>Puts the deadline dialog up, which is what <see cref="AskForDeadline"/> is by default.</summary>
@@ -4302,6 +4681,38 @@ internal sealed class MainForm : Form
         return true;
     }
 
+    /// <summary>Sends several tasks to another project or section together.</summary>
+    /// <param name="ids">The tasks, top to bottom</param>
+    /// <returns>True when any of them moved</returns>
+    private bool MoveElsewhere(IReadOnlyList<string> ids)
+    {
+        // Refused whole rather than moving the rest: a completed task left behind where it was would
+        // look like the move hadn't worked for it.
+        if (!ids.All(_presenter.HasTask))
+        {
+            _status.Text = Strings.MoveCompletedRefused;
+            return false;
+        }
+
+        var heading = Plurals.Format(Strings.ResourceManager, nameof(Strings.MoveTasksCount_Other), ids.Count);
+        if (MoveTaskForm.Pick(this, heading, _presenter.DestinationsFor(ids), _theme) is not { } destination) return false;
+
+        if (_presenter.MoveTo(ids, destination) == 0)
+        {
+            _status.Text = Strings.MoveTargetGoneSeveral;
+            return false;
+        }
+
+        // The ones still in view stay selected by themselves. Only when none is left is there
+        // anything to say about where they went.
+        if (!_outline.Rows.Any(r => ids.Contains(r.Id)))
+        {
+            _status.Text = string.Format(CultureInfo.CurrentCulture, Strings.MovedNotShown, destination.Path);
+        }
+
+        return true;
+    }
+
     /// <summary>Ticks the labels on a task, creating any the account doesn't have yet.</summary>
     private bool PickLabels(string id)
     {
@@ -4357,8 +4768,12 @@ internal sealed class MainForm : Form
             _outline.LayColumns(_savedColumns.ToDictionary(c => c.Key, c => AtScale(c.Value)));
         });
 
-        await GuardedAsync(() => _presenter.LoadAsync(_cts.Token));
-        Guarded(_scheduler.Start);
+        // The loop's told what the first sync asked for. Otherwise it starts on its ordinary
+        // interval, and a token that couldn't be read yet waited 45 seconds, or for ever in manual
+        // mode, rather than being tried again in ten.
+        SyncOutcome? first = null;
+        await GuardedAsync(async () => first = await _presenter.LoadAsync(_cts.Token));
+        Guarded(() => _scheduler.Start(first));
     }
 
     private void Guarded(Action action)

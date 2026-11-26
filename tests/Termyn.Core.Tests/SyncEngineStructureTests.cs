@@ -40,9 +40,42 @@ public class SyncEngineStructureTests
         Assert.True(engine.OutdentItem("c"));
 
         Assert.Null(engine.Snapshot().Items.Single(i => i.Id == "c").ParentId);
-        var cmd = engine.Outbox.Single();
+        var cmd = engine.Outbox.First();
         Assert.Equal("item_move", cmd.Type);
         Assert.Equal("p", Args(cmd)["project_id"]!.ToString());
+    }
+
+    [Fact]
+    public void Outdenting_puts_the_task_straight_after_its_parent_rather_than_last()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1}""");
+        store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","parent_id":"a","child_order":1}""");
+        store.PutResource("items", "x", """{"id":"x","content":"X","project_id":"p","child_order":2}""");
+        store.PutResource("items", "y", """{"id":"y","content":"Y","project_id":"p","child_order":3}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)));
+        engine.Load();
+
+        Assert.True(engine.OutdentItem("c"));
+
+        var top = engine.Snapshot().Items.Where(i => i.ParentId is null).OrderBy(i => i.ChildOrder).Select(i => i.Id);
+        Assert.Equal(["a", "c", "x", "y"], top);
+        Assert.Equal(["item_move", "item_reorder"], engine.Outbox.Select(c => c.Type));
+    }
+
+    [Fact]
+    public void Outdenting_from_under_a_finished_parent_still_moves_the_task()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("items", "a", """{"id":"a","content":"A","project_id":"p","child_order":1,"checked":true}""");
+        store.PutResource("items", "c", """{"id":"c","content":"C","project_id":"p","parent_id":"a","child_order":1}""");
+        var engine = new SyncEngine(new FakeApi(), store, new FakeSecrets { Stored = "tok" }, new FixedClock(new DateOnly(2026, 7, 31)));
+        engine.Load();
+
+        Assert.True(engine.OutdentItem("c"));
+
+        Assert.Null(engine.Snapshot().Items.Single(i => i.Id == "c").ParentId);
+        Assert.Equal("item_move", engine.Outbox.Single().Type);
     }
 
     [Fact]
