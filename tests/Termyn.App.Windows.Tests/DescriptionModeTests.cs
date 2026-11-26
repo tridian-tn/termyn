@@ -200,6 +200,48 @@ public class DescriptionModeTests
     [WinFormsTheory]
     [InlineData(true)]
     [InlineData(false)]
+    public void The_view_menus_description_and_comments_leave_the_keyboard_in_the_list(bool comments)
+    {
+        // The same commands as F6 and F7, clicked in the menu bar rather than pressed.
+        using var window = Window("termyn-view-menu-focus.json", out _, out _, shown: true);
+        var outline = TestWindow.Find<OutlineView>(window);
+
+        if (!comments)
+            window.ShowPanelTab(comments: true);
+
+        outline.Focus();
+        Application.DoEvents();
+        Assert.True(outline.Focused, "the outline never took the focus, so this says nothing");
+
+        // Opened first, as a click on the menu bar does, since that's when its entries are lit for
+        // what's on screen now.
+        var command = comments ? AppCommand.ViewComments : AppCommand.ViewDescription;
+        var label = Termyn.Presentation.Commands.StateOf(command, window.NewContext(null)).Label;
+        var heading = window.MainMenuStrip!.Items.OfType<ToolStripMenuItem>()
+            .Single(menu => MenuItems(menu.DropDownItems).Any(item => item.Text == label));
+
+        heading.ShowDropDown();
+        Application.DoEvents();
+
+        var entry = MenuItems(heading.DropDownItems).Single(item => item.Text == label);
+        Assert.True(entry.Enabled, $"{label} is greyed, so this says nothing");
+
+        entry.PerformClick();
+        Application.DoEvents();
+
+        Assert.Equal((true, comments), window.PanelTab);
+        Assert.True(outline.Focused, $"the keyboard left the list, for the {Focused().GetType().Name}");
+    }
+
+    /// <summary>Every entry in a menu, and in the menus under it.</summary>
+    /// <param name="items">The menu's items</param>
+    /// <returns>Each entry, a heading before what's under it</returns>
+    private static IEnumerable<ToolStripMenuItem> MenuItems(ToolStripItemCollection items) =>
+        items.OfType<ToolStripMenuItem>().SelectMany(item => MenuItems(item.DropDownItems).Prepend(item));
+
+    [WinFormsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
     public void A_keyboard_in_the_tab_going_behind_goes_to_the_one_coming_forward(bool toComments)
     {
         // Left where it was, it'd be on something no longer showing.
