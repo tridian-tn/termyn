@@ -418,17 +418,21 @@ public class ViewHeaderTests : IDisposable
     public void The_window_sizes_its_fixed_strips_for_the_display_it_is_told_of()
     {
         // The status line and the panel's own header had the line above the outline's bug: a fixed
-        // 24 pixels while their text grew. The window sizes all three together now.
+        // 24 pixels while their text grew. The window sizes them all together now, the strip above
+        // the description and its pencil with them.
         using var window = Shown(out _);
         var header = TestWindow.Find<ViewHeader>(window);
         var panel = TestWindow.Find<DetailHeader>(window);
+        var bar = TestWindow.Find<DescriptionBar>(window);
         var status = TestWindow.StatusLine(window);
 
         window.SizeStrips(144);
 
         Assert.Equal(ViewHeader.HeightAt(144), header.Height);
         Assert.All(header.Tools.Items.OfType<ToolStripButton>(), b => Assert.Equal(ViewHeader.ButtonSizeAt(144), b.Size));
-        Assert.Equal(36, panel.Height);
+        Assert.Equal(DetailHeader.LogicalHeight * 3 / 2, panel.Height);
+        Assert.Equal(DescriptionBar.LogicalHeight * 3 / 2, bar.Height);
+        Assert.Equal(ViewHeader.ButtonSizeAt(144), bar.Pencil.Size);
         Assert.Equal(36, status.Height);
     }
 

@@ -137,7 +137,8 @@ public class ShortcutTests
 
         // And the keys the tabs had before are theirs no longer. Still claimed window-wide, Ctrl+M
         // would be answered before the outline ever saw it, and the move it now means wouldn't run.
-        Assert.Equal(AppCommand.None, In(ShortcutScope.Window, Ctrl, Key.E));
+        // Ctrl+E has since gone to editing the description, which is a mode and not a tab.
+        Assert.Equal(AppCommand.EditDescription, In(ShortcutScope.Window, Ctrl, Key.E));
         Assert.Equal(AppCommand.None, In(ShortcutScope.Window, Ctrl, Key.M));
     }
 

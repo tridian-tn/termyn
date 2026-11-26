@@ -24,12 +24,22 @@ internal sealed class DetailHeader : Panel
     /// <remarks>
     /// Scaled with the display by whoever holds it, the way the line above the outline is. Held at
     /// 24 pixels whatever the scale, the name's tails were cut off from 125% up as the text grew and
-    /// the strip didn't.
+    /// the strip didn't. The same height as that line now, which the larger name needs.
     /// </remarks>
-    internal const int LogicalHeight = 24;
+    internal const int LogicalHeight = 28;
+
+    /// <summary>How much bigger than the panel's own text the name is drawn.</summary>
+    /// <remarks>
+    /// A tenth bigger read as hardly bigger at all beside the tabs. Grow it further and the strip
+    /// has to grow with it, or the name loses its tails at the larger display scales.
+    /// </remarks>
+    private const float NameScale = 1.25f;
 
     private readonly Label _name;
     private Theme _theme = Theme.Resolve(ThemePreference.System);
+
+    /// <summary>The bold face the name is drawn in, built from the panel's font and kept to dispose.</summary>
+    private Font? _nameFont;
 
     public DetailHeader()
     {
@@ -55,7 +65,40 @@ internal sealed class DetailHeader : Panel
         };
 
         Controls.Add(_name);
+        ApplyFont();
         ApplyTheme();
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        ApplyFont();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+
+        if (disposing)
+            _nameFont?.Dispose();
+    }
+
+    /// <summary>
+    /// Gives the name a bold face a step bigger than the panel's text.
+    /// </summary>
+    /// <remarks>
+    /// It's what the whole panel is about, and drawn muted at body size it read as a caption to the
+    /// tabs. Built afresh whenever the panel's font changes, since that's how a change of display
+    /// scale arrives, and a font set on the label itself no longer follows its parent's.
+    /// </remarks>
+    private void ApplyFont()
+    {
+        var previous = _nameFont;
+
+        _nameFont = new Font(Font.FontFamily, Font.SizeInPoints * NameScale, FontStyle.Bold, GraphicsUnit.Point);
+        _name.Font = _nameFont;
+
+        previous?.Dispose();
     }
 
     /// <summary>What the panel is about, or empty when the selection names nothing it can show.</summary>
@@ -101,7 +144,7 @@ internal sealed class DetailHeader : Panel
     {
         BackColor = _theme.Panel;
         _name.BackColor = _theme.Panel;
-        _name.ForeColor = _theme.Muted;
+        _name.ForeColor = _theme.Text;
         Invalidate();
     }
 }

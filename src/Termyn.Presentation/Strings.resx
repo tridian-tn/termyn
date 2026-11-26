@@ -299,6 +299,10 @@
     <value>View comments</value>
     <comment>Opens the panel under the list on the selected task's comments.</comment>
   </data>
+  <data name="CommandEditDescription" xml:space="preserve">
+    <value>Edit description</value>
+    <comment>Task menu action that opens the selected task's description as markdown, ready to type into. An action, not an on/off setting.</comment>
+  </data>
   <data name="CommandZoomIn" xml:space="preserve">
     <value>Zoom in</value>
     <comment>Makes the description's text larger.</comment>

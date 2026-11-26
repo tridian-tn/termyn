@@ -50,6 +50,26 @@ public class DetailHeaderTests
     }
 
     [WinFormsFact]
+    public void The_name_stands_out_from_the_text_below_it_and_follows_its_font()
+    {
+        // Muted and at body size, the name read as a caption to the tabs rather than as what the
+        // panel is about. And a font set on the label stops it following the header's, so a change
+        // of scale has to be passed on by hand or the name stays the size it started.
+        using var header = Header();
+        var name = header.Controls.OfType<Label>().Single();
+
+        Assert.True(name.Font.Bold, "the name isn't bold");
+        Assert.Equal(header.Theme.Text, name.ForeColor);
+        Assert.True(name.Font.SizeInPoints > header.Font.SizeInPoints, "the name is no bigger than the body");
+
+        using var larger = new Font(header.Font.FontFamily, header.Font.SizeInPoints * 1.5f);
+        header.Font = larger;
+
+        Assert.True(name.Font.Bold, "the name lost its weight when the font changed");
+        Assert.True(name.Font.SizeInPoints > larger.SizeInPoints, "the name didn't follow the header's font");
+    }
+
+    [WinFormsFact]
     public void The_name_is_drawn_and_stays_inside_the_strip()
     {
         // Ink on the line, and none of it below the rule. A name long enough to need more room than

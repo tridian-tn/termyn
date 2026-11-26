@@ -130,6 +130,12 @@ internal sealed class MainForm : Form
     /// <summary>The same description, rendered.</summary>
     private readonly MarkdownView _rendered;
 
+    /// <summary>The ring round the two, lit while typing would change the description.</summary>
+    private readonly FocusFrame _descriptionFrame;
+
+    /// <summary>The strip above the two, saying which is showing and offering the other.</summary>
+    private readonly DescriptionBar _descriptionBar;
+
     /// <summary>The conversation on whatever the pane is pointed at.</summary>
     private readonly CommentsView _comments;
 
@@ -462,6 +468,13 @@ internal sealed class MainForm : Form
         _rendered.EditRequested += StartWriting;
         _rendered.ZoomWheeled += OnDescriptionWheeled;
 
+        _descriptionFrame = new FocusFrame();
+        _descriptionFrame.Controls.Add(_description);
+        _descriptionFrame.Controls.Add(_rendered);
+
+        _descriptionBar = new DescriptionBar();
+        _descriptionBar.PencilClicked += () => Guarded(TogglePencil);
+
         // Visible from the start, and never hidden by hand: the tab it lives on decides whether it
         // is on screen. Left hidden the way it used to be, its tab came up empty — no comments and,
         // worse, nowhere to type one.
@@ -499,9 +512,12 @@ internal sealed class MainForm : Form
         // The description keeps its own pair inside its tab — the markdown and the rendering, one
         // visible at a time — because that is a mode rather than a place, and reading and writing
         // the same text are not two tabs' worth of different.
+        //
+        // The frame first and the strip after, so the strip takes the top: a docked control added
+        // later sits nearer the edge.
         _descriptionTab = new TabPage(Strings.MainDescriptionTab);
-        _descriptionTab.Controls.Add(_description);
-        _descriptionTab.Controls.Add(_rendered);
+        _descriptionTab.Controls.Add(_descriptionFrame);
+        _descriptionTab.Controls.Add(_descriptionBar);
 
         _commentsTab = new TabPage(Strings.MainCommentsTab);
         _commentsTab.Controls.Add(_comments);
@@ -1253,6 +1269,8 @@ internal sealed class MainForm : Form
         _outline.Theme = _theme;
         _rendered.Theme = _theme;
         _description.Theme = _theme;
+        _descriptionFrame.Theme = _theme;
+        _descriptionBar.Theme = _theme;
         _comments.Theme = _theme;
         _panelHeader.Theme = _theme;
 
@@ -1378,6 +1396,8 @@ internal sealed class MainForm : Form
     {
         _viewHeader.ScaleTo(dpi);
         _panelHeader.Height = StartupLayout.Scaled(DetailHeader.LogicalHeight, dpi);
+        _descriptionBar.ScaleTo(dpi);
+        _descriptionFrame.ScaleTo(dpi);
         _status.Height = StartupLayout.Scaled(StatusHeight, dpi);
     }
 
@@ -2457,6 +2477,7 @@ internal sealed class MainForm : Form
     {
         _description.ReadOnly = access is not DescriptionAccess.Writable;
         _rendered.Inert = _description.ReadOnly;
+        RenderDescriptionMode();
 
         // A completed task's description is shown and can't be edited, and there is no room to say so
         // over the top of them — the recessed background carries that one on its own.
@@ -2483,6 +2504,7 @@ internal sealed class MainForm : Form
         // that tab was selected is how the comments pane itself came to be invisible.
         _description.Visible = writing;
         _rendered.Visible = !writing;
+        RenderDescriptionMode();
 
         // Anything typed while the panel was reading — which is nothing, but also anything the
         // theme changed under it — is drawn before the box is looked at.
@@ -2496,6 +2518,21 @@ internal sealed class MainForm : Form
 
         if (focus && !_detail.Panel2Collapsed && !_showingComments)
             (writing ? (Control)_description : _rendered).Focus();
+    }
+
+    /// <summary>
+    /// Puts the pencil above the description and the ring round it in step with what the panel is
+    /// showing and whether the account would take typing.
+    /// </summary>
+    /// <remarks>
+    /// The ring only round the markdown. The rendering takes Enter and F2 to open it, but typing
+    /// at it changes nothing, so a ring there would promise something that doesn't happen.
+    /// </remarks>
+    private void RenderDescriptionMode()
+    {
+        var writable = !_description.ReadOnly;
+        _descriptionFrame.TakesTyping = _writingDescription && writable;
+        _descriptionBar.Render(_writingDescription, writable);
     }
 
     // ---- Comments ----------------------------------------------------------------------------------
@@ -2977,6 +3014,85 @@ internal sealed class MainForm : Form
         _description.ScrollToCaret();
     }
 
+    /// <summary>
+    /// Edit description, from the Task menu or Ctrl+E: on to the description, in the markdown,
+    /// with the keyboard.
+    /// </summary>
+    /// <remarks>
+    /// One way only, like Rename: Escape is how you leave. So it does nothing with the markdown
+    /// already in front, where the menu has it greyed, and nothing where typing wouldn't be kept.
+    /// From a shut panel it opens the panel, since this is asked for by name.
+    /// </remarks>
+    private void EditDescription()
+    {
+        if (_description.ReadOnly)
+            return;
+
+        if (_writingDescription && !_detail.Panel2Collapsed && !_showingComments)
+            return;
+
+        ShowPanelTab(comments: false);
+
+        if (_writingDescription)
+            _description.Focus();
+        else
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+    }
+
+    /// <summary>
+    /// The pencil above the description: switches it between the rendering and the markdown.
+    /// </summary>
+    /// <remarks>
+    /// A real switch, unlike the menu entry, since a button can show which way it's set by being
+    /// pressed in. Going back takes the keyboard to the rendering only if the description had it:
+    /// an empty description opens in the markdown without the focus, and looking at it formatted
+    /// shouldn't pull the keyboard off the outline.
+    /// </remarks>
+    private void TogglePencil()
+    {
+        if (_detail.Panel2Collapsed || _showingComments)
+            return;
+
+        if (!_writingDescription)
+        {
+            StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+            return;
+        }
+
+        var hadFocus = _descriptionFrame.ContainsFocus;
+        StopWriting();
+
+        if (hadFocus)
+            _rendered.Focus();
+    }
+
+    /// <summary>
+    /// Takes the keyboard to whichever half of the description is showing.
+    /// </summary>
+    private void FocusDescription() => (_writingDescription ? (Control)_description : _rendered).Focus();
+
+    /// <summary>
+    /// Return on a task in the outline, with the panel open: on to its description, in the markdown.
+    /// </summary>
+    /// <remarks>
+    /// A second key for Edit description, kept out of the menus and the shortcut table, which list
+    /// each command once. It differs in two ways. It's only answered with the panel open, so Return
+    /// can't open a panel somebody shut. And a description that can't be written to is shown rather
+    /// than left alone, so the key still lands somewhere that says why.
+    /// </remarks>
+    private void WriteSelectedDescription()
+    {
+        ShowPanelTab(comments: false);
+
+        if (_description.ReadOnly || _writingDescription)
+        {
+            FocusDescription();
+            return;
+        }
+
+        StartWriting(_rendered.SourceAt(_rendered.SelectionStart));
+    }
+
     /// <summary>Writes what was typed and goes back to reading.</summary>
     private void StopWriting()
     {
@@ -3280,7 +3396,8 @@ internal sealed class MainForm : Form
             _presenter.ScheduleDays,
             rows.Count > 1 ? rows : null,
             _presenter.GroupBySection,
-            _presenter.CanGroupBySection);
+            _presenter.CanGroupBySection,
+            !_description.ReadOnly);
     }
 
     /// <summary>What a task started from a sidebar row begins with, or null when it has nothing.</summary>
@@ -3644,12 +3761,26 @@ internal sealed class MainForm : Form
                 Guarded(() => ShowDescriptionPanel(_detail.Panel2Collapsed));
                 return false;
 
+            // Each takes the keyboard to the tab it puts in front, so the next key acts there: Enter
+            // or Ctrl+E in the description, typing a comment in the comments.
             case AppCommand.ViewDescription:
-                Guarded(() => ShowPanelTab(comments: false));
+                Guarded(() =>
+                {
+                    ShowPanelTab(comments: false);
+                    FocusDescription();
+                });
                 return false;
 
             case AppCommand.ViewComments:
-                Guarded(() => ShowPanelTab(comments: true));
+                Guarded(() =>
+                {
+                    ShowPanelTab(comments: true);
+                    _comments.Focus();
+                });
+                return false;
+
+            case AppCommand.EditDescription:
+                Guarded(EditDescription);
                 return false;
 
             case AppCommand.ZoomIn:
@@ -3973,6 +4104,14 @@ internal sealed class MainForm : Form
 
     private void OnOutlineKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.KeyData == Keys.Return && _outline.SelectedRows.Count == 1 && !_detail.Panel2Collapsed)
+        {
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            Guarded(WriteSelectedDescription);
+            return;
+        }
+
         var command = CommandFor(e.KeyData, ShortcutScope.Outline);
         if (command == AppCommand.None)
             return;

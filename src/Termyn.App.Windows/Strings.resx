@@ -667,6 +667,22 @@
     <value>Description</value>
     <comment>Tab above the task's description.</comment>
   </data>
+  <data name="PencilEdit" xml:space="preserve">
+    <value>Edit description</value>
+    <comment>Name of the pencil button above a description shown formatted. Clicking it shows the markdown to type into.</comment>
+  </data>
+  <data name="PencilEditTip" xml:space="preserve">
+    <value>Edit description ({0})</value>
+    <comment>Tooltip on the pencil button above a description shown formatted. {0} is the shortcut that does the same, such as Ctrl+E.</comment>
+  </data>
+  <data name="PencilPreview" xml:space="preserve">
+    <value>Preview description</value>
+    <comment>Name of the pencil button, shown pressed in, above a description's markdown. Clicking it goes back to showing the description formatted.</comment>
+  </data>
+  <data name="PencilPreviewTip" xml:space="preserve">
+    <value>Preview description (Esc)</value>
+    <comment>Tooltip on the pencil button, shown pressed in, above a description's markdown. Esc is the Escape key, which does the same from the markdown.</comment>
+  </data>
   <data name="MainCommentsTab" xml:space="preserve">
     <value>Comments</value>
     <comment>Tab above the task's comments, when it has none.</comment>
