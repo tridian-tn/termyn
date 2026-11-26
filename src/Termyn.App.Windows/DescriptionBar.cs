@@ -201,8 +201,10 @@ internal sealed class DescriptionBar : Panel
         /// Draws the button's background for its state, then the pencil.
         /// </summary>
         /// <remarks>
-        /// Pressed in, it's filled the way a hovered row is and the pencil goes to the accent, so it
-        /// reads as on from across the panel and not only under the pointer.
+        /// Pressed in, it's filled the way a hovered row is, edged in the accent, and the pencil goes
+        /// to the accent too, so it reads as on from across the panel and not only under the
+        /// pointer. The edge is what does that in the dark theme, where the row colour is too close
+        /// to the panel's to see.
         /// </remarks>
         /// <param name="e">The button, and where to draw it</param>
         protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
@@ -216,8 +218,22 @@ internal sealed class DescriptionBar : Panel
                 e.Graphics.FillRectangle(brush, bounds);
             }
 
+            if (e.Item.Enabled && on)
+                DrawEdge(e.Graphics, bounds, theme.Accent);
+
             var colour = !e.Item.Enabled ? _disabled : on ? theme.Accent : theme.Text;
             DrawPencil(e.Graphics, bounds, colour);
+        }
+
+        /// <summary>A solid edge just inside the button, a pixel thick at 100% and thicker with the scale.</summary>
+        private static void DrawEdge(Graphics g, Rectangle bounds, Color colour)
+        {
+            var thickness = Math.Max(1, bounds.Height / LogicalButtonSide);
+
+            using var brush = new SolidBrush(colour);
+            using var edge = new Region(bounds);
+            edge.Exclude(Rectangle.Inflate(bounds, -thickness, -thickness));
+            g.FillRegion(brush, edge);
         }
 
         /// <summary>The pencil, centred in the button at about two thirds of its height.</summary>

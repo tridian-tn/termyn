@@ -333,6 +333,30 @@ public class DescriptionModeTests
         }
     }
 
+    [WinFormsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_pressed_pencil_has_a_solid_edge_in_the_accent_and_the_other_has_none(bool writing)
+    {
+        // In the dark theme, where the fill a pressed pencil has is too close to the panel to see,
+        // and the edge is all there is to say it's on.
+        var theme = Theme.Resolve(ThemePreference.Dark);
+        using var bar = new DescriptionBar { Width = 300, Theme = theme };
+        bar.CreateControl();
+        bar.Render(writing, writable: true);
+
+        using var shot = new Bitmap(bar.Width, bar.Height);
+        bar.DrawToBitmap(shot, new Rectangle(0, 0, bar.Width, bar.Height));
+
+        var pencil = bar.Pencil.Bounds;
+        var edge = Color.FromArgb(255, shot.GetPixel(bar.Tools.Left + pencil.Left, bar.Tools.Top + pencil.Top + (pencil.Height / 2)));
+
+        if (writing)
+            Assert.Equal(theme.Accent, edge);
+        else
+            Assert.NotEqual(theme.Accent, edge);
+    }
+
     private static ToolStripButton Pencil(MainForm window) => TestWindow.Find<DescriptionBar>(window).Pencil;
 
     // ---- The ring --------------------------------------------------------------------------------
