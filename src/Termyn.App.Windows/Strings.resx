@@ -782,13 +782,11 @@ Open the release page?</value>
     <comment>Status bar after changing the theme without restarting: the window stays in the old theme until then.</comment>
   </data>
   <data name="ThemeRestartHeading" xml:space="preserve">
-    <value>Restart Termyn to change the theme?</value>
+    <value>Restart Termyn now to change the theme?</value>
     <comment>Heading of the question asked after saving a new theme in Settings.</comment>
   </data>
   <data name="ThemeRestartText" xml:space="preserve">
-    <value>Parts of the window are drawn by Windows, and they only take a new theme when Termyn starts. What you were working on is saved first, and nothing waiting to sync is lost.
-
-Until then the window stays in the theme it has now.</value>
+    <value>Your work is saved first. Choose Later and the new theme is used next time Termyn starts.</value>
     <comment>Body of the question asked after saving a new theme in Settings.</comment>
   </data>
   <data name="ThemeRestartNow" xml:space="preserve">

@@ -28,9 +28,12 @@ public class ThemeRestartTests : IDisposable
     }
 
     /// <summary>A window started from a settings file that says dark.</summary>
-    private MainForm DarkWindow()
+    private MainForm DarkWindow() => WindowIn(ThemePreference.Dark);
+
+    /// <summary>A window started from a settings file that names a theme.</summary>
+    private MainForm WindowIn(ThemePreference theme)
     {
-        Assert.True(new SettingsStore(Config).Save(new AppSettings { Theme = ThemePreference.Dark }));
+        Assert.True(new SettingsStore(Config).Save(new AppSettings { Theme = theme }));
         return TestWindow.Start(Config, new InMemorySnapshotStore(), new FakeApi(), out _);
     }
 
@@ -127,6 +130,32 @@ public class ThemeRestartTests : IDisposable
     }
 
     [WinFormsFact]
+    public void A_theme_that_comes_out_the_same_as_the_one_on_screen_asks_nothing()
+    {
+        // Following the system on a dark desktop is dark, so naming dark changes nothing anyone
+        // would see. Whichever way this machine is set, the theme naming it is the same one.
+        using var window = WindowIn(ThemePreference.System);
+        var asked = 0;
+        window.AskToRestart = () =>
+        {
+            asked++;
+            return false;
+        };
+        var same = Theme.SystemPrefersLight() ? ThemePreference.Light : ThemePreference.Dark;
+        var other = same == ThemePreference.Light ? ThemePreference.Dark : ThemePreference.Light;
+
+        window.ApplySettings(new AppSettings { Theme = same });
+
+        Assert.Equal(0, asked);
+        Assert.DoesNotContain(Strings.NoticeThemeAtNextStart, TestWindow.StatusLine(window).Text, StringComparison.Ordinal);
+        Assert.Equal(same, new SettingsStore(Config).Load().Theme);
+
+        window.ApplySettings(new AppSettings { Theme = other });
+
+        Assert.Equal(1, asked);
+    }
+
+    [WinFormsFact]
     public void Another_setting_alone_asks_nothing()
     {
         using var window = DarkWindow();
@@ -147,9 +176,11 @@ public class ThemeRestartTests : IDisposable
         using var window = TestWindow.Start(Config, new InMemorySnapshotStore(), new FakeApi(), out _);
         window.AskToRestart = () => throw new InvalidOperationException("Offered a restart into a theme that wasn't saved.");
 
-        window.ApplySettings(new AppSettings { Theme = ThemePreference.Light });
+        // Opposite to this machine's own, since the window follows the system with no file to read.
+        window.ApplySettings(new AppSettings { Theme = Theme.SystemPrefersLight() ? ThemePreference.Dark : ThemePreference.Light });
 
         Assert.False(window.RestartRequested);
         Assert.Contains(Strings.NoticeSettingsNotSaved, TestWindow.StatusLine(window).Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(Strings.NoticeThemeAtNextStart, TestWindow.StatusLine(window).Text, StringComparison.Ordinal);
     }
 }

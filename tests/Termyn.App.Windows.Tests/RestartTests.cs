@@ -74,6 +74,34 @@ public class RestartTests
     }
 
     [WinFormsFact]
+    public void An_id_now_running_another_program_of_the_same_name_isnt_waited_for()
+    {
+        // A copy of ping under this process's own name, somewhere else: the name matches, and only
+        // the path says it's not the copy being replaced.
+        var folder = Path.Combine(Path.GetTempPath(), $"termyn-restart-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        using var self = Process.GetCurrentProcess();
+        var namesake = Path.Combine(folder, self.ProcessName + ".exe");
+        File.Copy(Path.Combine(Environment.SystemDirectory, "PING.EXE"), namesake);
+
+        using var other = Process.Start(new ProcessStartInfo(namesake, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+        try
+        {
+            var waited = Stopwatch.StartNew();
+
+            Assert.True(Restart.WaitFor(other.Id, TimeSpan.FromSeconds(30)));
+            Assert.True(waited.Elapsed < TimeSpan.FromSeconds(5), waited.Elapsed.ToString());
+            Assert.False(other.HasExited);
+        }
+        finally
+        {
+            other.Kill();
+            other.WaitForExit();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [WinFormsFact]
     public void An_id_now_running_another_program_isnt_waited_for()
     {
         // The id was handed on after the copy it named ended. Waiting for whatever has it now could

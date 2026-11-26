@@ -242,12 +242,6 @@ internal sealed class MainForm : Form
     private AppSettings _settings;
     private Theme _theme;
 
-    /// <summary>
-    /// The theme the window was built in. Only a restart changes what Windows draws, so it's what
-    /// the window stays in, whatever the settings have said since.
-    /// </summary>
-    private readonly ThemePreference _builtIn;
-
     private string? _editingId;
     private string? _editingText;
     private bool _syncingSidebar;
@@ -329,7 +323,6 @@ internal sealed class MainForm : Form
         _shell = shell;
         _settings = shell.Settings;
         _theme = Theme.Resolve(_settings.Theme);
-        _builtIn = _settings.Theme;
 
         Text = "Termyn";
         Icon = AppIcon.Window;
@@ -1211,9 +1204,10 @@ internal sealed class MainForm : Form
     {
         var themeChanged = amended.Theme != _settings.Theme;
 
-        // Against the theme the window was built in rather than the last one saved: going back to
-        // it is going back to what's on screen, and needs no restart.
-        var themePending = amended.Theme != _builtIn;
+        // Against the theme on screen, which is the one the window was built in, rather than the
+        // last one saved. Going back to it needs no restart, and nor does a choice that comes out
+        // the same: System on a dark desktop is Dark.
+        var themePending = Theme.Resolve(amended.Theme) != _theme;
 
         var hotkeyChanged = amended.HotkeyEnabled != _settings.HotkeyEnabled
                             || amended.HotkeyBinding != _settings.HotkeyBinding;
@@ -1254,13 +1248,6 @@ internal sealed class MainForm : Form
         _settings = amended;
         _outline.PriorityTips = _settings.ShowPriorityTips;
 
-        // A new theme isn't painted on here. What Windows draws — the tab headers, scrollbars,
-        // menus, the title bar and the sidebar tree's own look — takes the framework's colour mode,
-        // and that's only read as the first window is made, so repainting the rest left the window
-        // half in each. It's saved below and offered as a restart once it is.
-        if (themePending)
-            notices.Add(Strings.NoticeThemeAtNextStart);
-
         if (hotkeyNotice is not null)
             notices.Add(hotkeyNotice);
 
@@ -1274,9 +1261,16 @@ internal sealed class MainForm : Form
             _presenter.SetDownloadLimits(amended.AttachmentCache);
 
         // Saved last, so the hotkey is applied even when the file can't be written.
+        //
+        // A new theme isn't painted on. What Windows draws — the tab headers, scrollbars, menus, the
+        // title bar and the sidebar tree's own look — takes the framework's colour mode, which is
+        // only read as the first window is made, so repainting the rest left the window half in
+        // each. It's said to be coming once it's on disk, since the next start reads it from there.
         var saved = SaveViewState();
         if (!saved)
             notices.Add(Strings.NoticeSettingsNotSaved);
+        else if (themePending)
+            notices.Insert(0, Strings.NoticeThemeAtNextStart);
 
         // With nothing to say after going back to the theme on screen, what was said about the
         // other one is put right rather than left standing.

@@ -57,8 +57,9 @@ internal static class Restart
     /// <param name="id">The process id of the copy being replaced</param>
     /// <param name="timeout">How long to wait at most</param>
     /// <param name="program">
-    /// The name of the program it should be running. Left out it's this one, which is what a real
-    /// restart wants; a test names something it can start and watch end
+    /// The name of the program it should be running, for a test to name something it can start and
+    /// watch end. Left out, it has to be this program, the same file at the same path, which is
+    /// what a real restart wants
     /// </param>
     /// <returns>False when it was still running at the end of the wait</returns>
     internal static bool WaitFor(int id, TimeSpan timeout, string? program = null)
@@ -78,8 +79,7 @@ internal static class Restart
         {
             try
             {
-                using var self = Process.GetCurrentProcess();
-                if (!process.ProcessName.Equals(program ?? self.ProcessName, StringComparison.OrdinalIgnoreCase))
+                if (!Runs(process, program))
                     return true;
 
                 return process.WaitForExit(timeout);
@@ -91,5 +91,23 @@ internal static class Restart
                 return true;
             }
         }
+    }
+
+    /// <summary>Whether a process is running the program the copy being replaced was.</summary>
+    /// <remarks>
+    /// By path rather than by name, since another program can share the name: an installed Termyn
+    /// and a build of it, say. The copy being replaced started this one from its own path, so the two
+    /// match exactly.
+    /// </remarks>
+    /// <param name="process">The process holding the id</param>
+    /// <param name="program">A name to match instead, for a test</param>
+    /// <returns>True when it's the copy being replaced</returns>
+    private static bool Runs(Process process, string? program)
+    {
+        if (program is not null)
+            return process.ProcessName.Equals(program, StringComparison.OrdinalIgnoreCase);
+
+        return Environment.ProcessPath is { } self
+               && string.Equals(process.MainModule?.FileName, self, StringComparison.OrdinalIgnoreCase);
     }
 }
