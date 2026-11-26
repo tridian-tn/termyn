@@ -16,6 +16,9 @@ public class DescriptionModeTests
 {
     private const int WmKeyDown = 0x0100;
     private const int WmKeyUp = 0x0101;
+    private const int WmLButtonDown = 0x0201;
+    private const int WmLButtonUp = 0x0202;
+    private const int MkLButton = 0x0001;
     private const int VkShift = 0x10;
 
     [DllImport("user32.dll")]
@@ -26,6 +29,12 @@ public class DescriptionModeTests
 
     [DllImport("user32.dll")]
     private static extern short GetKeyState(int key);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetFocus();
+
+    /// <summary>Whichever control has the keyboard, so a key can be sent to it.</summary>
+    private static Control Focused() => Control.FromChildHandle(GetFocus()) ?? throw new InvalidOperationException("Nothing has the keyboard.");
 
     /// <summary>A window on a task whose description is "Notes", with the rendering in front.</summary>
     private static MainForm Window(string settingsName, out MarkdownView view, out MarkdownEditor editor, bool shown = false)
@@ -132,55 +141,173 @@ public class DescriptionModeTests
     // ---- F6 and F7 -------------------------------------------------------------------------------
 
     [WinFormsTheory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void F6_brings_the_description_forward_and_leaves_the_keyboard_where_it_is(bool shut, bool inSidebar)
+    {
+        // So you can keep moving between tasks, or views, with the description following. Tab is
+        // the way into it. From the comments, and from a shut panel, which it opens.
+        using var window = Window("termyn-f6-focus.json", out _, out _, shown: true);
+        var start = KeyboardStart(window, inSidebar);
+
+        if (shut)
+            window.Run(AppCommand.ToggleDescription);
+        else
+            window.ShowPanelTab(comments: true);
+
+        start.Focus();
+        Application.DoEvents();
+        Assert.True(start.Focused, $"the {start.GetType().Name} never took the focus, so this says nothing");
+
+        Press(start, Keys.F6);
+
+        Assert.Equal((true, false), window.PanelTab);
+        Assert.True(start.Focused, $"the keyboard left the {start.GetType().Name}, for the {Focused().GetType().Name}");
+    }
+
+    [WinFormsTheory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void F7_brings_the_comments_forward_and_leaves_the_keyboard_where_it_is(bool shut, bool inSidebar)
+    {
+        using var window = Window("termyn-f7-focus.json", out _, out _, shown: true);
+        var start = KeyboardStart(window, inSidebar);
+
+        if (shut)
+            window.Run(AppCommand.ToggleDescription);
+
+        start.Focus();
+        Application.DoEvents();
+        Assert.True(start.Focused, $"the {start.GetType().Name} never took the focus, so this says nothing");
+
+        Press(start, Keys.F7);
+
+        Assert.Equal((true, true), window.PanelTab);
+        Assert.True(start.Focused, $"the keyboard left the {start.GetType().Name}, for the {Focused().GetType().Name}");
+    }
+
+    /// <summary>Where the keyboard is when F6 or F7 is pressed from outside the panel.</summary>
+    /// <param name="window">The window</param>
+    /// <param name="inSidebar">True for the sidebar, false for the task list</param>
+    /// <returns>The sidebar's tree or the outline</returns>
+    private static Control KeyboardStart(MainForm window, bool inSidebar) =>
+        inSidebar ? TestWindow.Find<SidebarTree>(window) : TestWindow.Find<OutlineView>(window);
+
+    [WinFormsTheory]
     [InlineData(true)]
     [InlineData(false)]
-    public void F6_takes_the_keyboard_to_the_description(bool fromComments)
+    public void The_view_menus_description_and_comments_leave_the_keyboard_in_the_list(bool comments)
     {
-        // So the next key acts there: Enter or Ctrl+E to write, the arrows to read. It used to bring
-        // the tab forward and leave the keyboard in the outline. From the description tab already in
-        // front as well, where nothing about the panel changes but the keyboard still has to move.
-        using var window = Window("termyn-f6-focus.json", out var view, out _, shown: true);
+        // The same commands as F6 and F7, clicked in the menu bar rather than pressed.
+        using var window = Window("termyn-view-menu-focus.json", out _, out _, shown: true);
         var outline = TestWindow.Find<OutlineView>(window);
 
-        if (fromComments)
+        if (!comments)
             window.ShowPanelTab(comments: true);
 
         outline.Focus();
         Application.DoEvents();
         Assert.True(outline.Focused, "the outline never took the focus, so this says nothing");
 
-        Press(outline, Keys.F6);
+        // Opened first, as a click on the menu bar does, since that's when its entries are lit for
+        // what's on screen now.
+        var command = comments ? AppCommand.ViewComments : AppCommand.ViewDescription;
+        var label = Termyn.Presentation.Commands.StateOf(command, window.NewContext(null)).Label;
+        var heading = window.MainMenuStrip!.Items.OfType<ToolStripMenuItem>()
+            .Single(menu => MenuItems(menu.DropDownItems).Any(item => item.Text == label));
 
-        Assert.False(window.NewContext(null).ShowingComments, "the comments stayed in front");
-        Assert.True(view.Focused, "the keyboard stayed where it was");
+        heading.ShowDropDown();
+        Application.DoEvents();
+
+        var entry = MenuItems(heading.DropDownItems).Single(item => item.Text == label);
+        Assert.True(entry.Enabled, $"{label} is greyed, so this says nothing");
+
+        entry.PerformClick();
+        Application.DoEvents();
+
+        Assert.Equal((true, comments), window.PanelTab);
+        Assert.True(outline.Focused, $"the keyboard left the list, for the {Focused().GetType().Name}");
+    }
+
+    /// <summary>Every entry in a menu, and in the menus under it.</summary>
+    /// <param name="items">The menu's items</param>
+    /// <returns>Each entry, a heading before what's under it</returns>
+    private static IEnumerable<ToolStripMenuItem> MenuItems(ToolStripItemCollection items) =>
+        items.OfType<ToolStripMenuItem>().SelectMany(item => MenuItems(item.DropDownItems).Prepend(item));
+
+    [WinFormsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_keyboard_in_the_tab_going_behind_goes_to_the_one_coming_forward(bool toComments)
+    {
+        // Left where it was, it'd be on something no longer showing.
+        using var window = Window("termyn-f6-f7-follow.json", out var view, out _, shown: true);
+        var comments = TestWindow.Find<CommentsView>(window);
+
+        if (toComments)
+        {
+            view.Focus();
+            Application.DoEvents();
+            Assert.True(view.Focused, "the rendering never took the focus, so this says nothing");
+        }
+        else
+        {
+            window.ShowPanelTab(comments: true);
+            comments.Focus();
+            Application.DoEvents();
+            Assert.True(comments.ContainsFocus, "the comments never took the focus, so this says nothing");
+        }
+
+        Press(Focused(), toComments ? Keys.F7 : Keys.F6);
+
+        Assert.Equal((true, toComments), window.PanelTab);
+        Assert.True(toComments ? comments.ContainsFocus : view.Focused, "the keyboard was left behind");
     }
 
     [WinFormsFact]
-    public void F7_takes_the_keyboard_to_the_comments_even_with_them_already_in_front()
+    public void Clicking_the_comments_tab_takes_the_keyboard_there()
     {
-        using var window = Window("termyn-f7-focus.json", out _, out _, shown: true);
+        // Ready to type one. Unlike F7: the click has already taken the keyboard off the list, onto
+        // the strip of tabs, which is no use to anyone. A click rather than setting the tab from
+        // here, because setting it from code moves the keyboard into the page by itself.
+        using var window = Window("termyn-comments-tab-focus.json", out _, out _, shown: true);
         var outline = TestWindow.Find<OutlineView>(window);
-        window.ShowPanelTab(comments: true);
+        var comments = TestWindow.Find<CommentsView>(window);
+        var tabs = TestWindow.Find<TabControl>(window);
 
         outline.Focus();
         Application.DoEvents();
         Assert.True(outline.Focused, "the outline never took the focus, so this says nothing");
 
-        Press(outline, Keys.F7);
+        var page = tabs.TabPages.IndexOf(tabs.TabPages.Cast<TabPage>().Single(p => p.Contains(comments)));
+        var middle = tabs.GetTabRect(page);
+        var at = (middle.Y + middle.Height / 2) << 16 | (middle.X + middle.Width / 2);
 
-        Assert.True(TestWindow.Find<CommentsView>(window).ContainsFocus, "the keyboard stayed where it was");
+        PostMessage(tabs.Handle, WmLButtonDown, MkLButton, at);
+        Application.DoEvents();
+        PostMessage(tabs.Handle, WmLButtonUp, 0, at);
+        Application.DoEvents();
+
+        Assert.Equal((true, true), window.PanelTab);
+        Assert.True(comments.ContainsFocus, $"the keyboard didn't go to the comments, but to the {Focused().GetType().Name}");
     }
 
     [WinFormsFact]
-    public void Return_in_the_rendering_after_F6_opens_the_markdown()
+    public void Return_in_the_rendering_after_F6_and_Tab_opens_the_markdown()
     {
         using var window = Window("termyn-f6-return.json", out var view, out var editor, shown: true);
         var outline = TestWindow.Find<OutlineView>(window);
+        window.ShowPanelTab(comments: true);
         outline.Focus();
         Application.DoEvents();
 
         Press(outline, Keys.F6);
-        Assert.True(view.Focused, "F6 didn't take the keyboard to the rendering, so this says nothing");
+        Press(outline, Keys.Tab);
+        Assert.True(view.Focused, "F6 and Tab didn't take the keyboard to the rendering, so this says nothing");
 
         Press(view, Keys.Return);
 
