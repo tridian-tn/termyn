@@ -2039,6 +2039,13 @@ internal sealed class MainForm : Form
     /// <summary>Whether a search is waiting on the typing to pause, for a test.</summary>
     internal bool SearchPending => _searchIdle.Enabled;
 
+    /// <summary>
+    /// Shortens the pause in the typing a description waits for before it saves, so a test
+    /// needn't sit through the full five seconds.
+    /// </summary>
+    /// <param name="milliseconds">How long the typing has to stop for</param>
+    internal void WaitBeforeSavingDescription(int milliseconds) => _saveIdle.Interval = milliseconds;
+
     private void OnCrumbClicked(object? sender, LinkLabelLinkClickedEventArgs e)
     {
         if (e.Link?.LinkData is ViewSelection target)
