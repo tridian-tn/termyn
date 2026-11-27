@@ -346,7 +346,9 @@ public sealed class AttachmentFetcherTests : IDisposable
         var result = await Fetcher().SaveAsync(File(size: OneGigabyte + 1), _downloads, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Failed, result.Outcome);
+        Assert.Equal("agenda.pdf is over 1 GB, which is more than Termyn will download.", result.Message);
         Assert.Empty(_api.Downloaded);
+        Assert.False(Directory.Exists(_downloads) && Directory.EnumerateFileSystemEntries(_downloads).Any(), "something was saved");
     }
 
     [Fact]
@@ -357,6 +359,35 @@ public sealed class AttachmentFetcherTests : IDisposable
         var result = await Fetcher().FetchAsync(File(size: OneGigabyte), ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(FetchOutcome.Ready, result.Outcome);
+    }
+
+    [Fact]
+    public async Task A_copy_already_here_opens_whatever_size_its_comment_says()
+    {
+        // A comment's size is no promise. One that overstated it could still have been downloaded
+        // in full before the refusal came in, and a file the window offers to open has to open.
+        _api.FileBytes = new byte[8];
+        var fetcher = Fetcher();
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        var result = await fetcher.FetchAsync(File(size: OneGigabyte + 1), ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.Single(_api.Downloaded);
+    }
+
+    [Fact]
+    public async Task A_copy_already_here_saves_whatever_size_its_comment_says()
+    {
+        _api.FileBytes = new byte[8];
+        var fetcher = Fetcher();
+        await fetcher.FetchAsync(File(), ct: TestContext.Current.CancellationToken);
+
+        var result = await fetcher.SaveAsync(File(size: OneGigabyte + 1), _downloads, ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(FetchOutcome.Ready, result.Outcome);
+        Assert.True(System.IO.File.Exists(result.Path));
+        Assert.Single(_api.Downloaded);
     }
 
     [Theory]

@@ -108,6 +108,8 @@ public sealed class AttachmentFetcher
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return new FetchResult(FetchOutcome.Ready, held);
 
+        if (OverCeiling(attachment) is { } tooLarge) return tooLarge;
+
         var read = _secrets.ReadToken();
         if (read.Token is not { } token) return NoToken(attachment, read);
 
@@ -174,6 +176,8 @@ public sealed class AttachmentFetcher
 
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return await CopyOutAsync(attachment, held, folder, ct);
+
+        if (OverCeiling(attachment) is { } tooLarge) return tooLarge;
 
         var read = _secrets.ReadToken();
         if (read.Token is not { } token) return NoToken(attachment, read);
@@ -252,27 +256,33 @@ public sealed class AttachmentFetcher
         }
     }
 
-    /// <summary>The answer for a file there's nothing to fetch for, or null when there is.</summary>
+    /// <summary>The answer for a file there's nothing to fetch for yet, or null when there is.</summary>
     /// <param name="attachment">The file wanted</param>
-    /// <returns>Pending, Missing or Failed, or null for a file that can be fetched</returns>
+    /// <returns>Pending or Missing, or null for a file that can be fetched</returns>
     private static FetchResult? Unfetchable(FileAttachment attachment)
     {
         if (attachment.Pending)
             return new FetchResult(FetchOutcome.Pending, Message: $"{attachment.FileName} is still being processed by Todoist.");
-
-        // Ahead of the cache as well as the download: nothing over the ceiling can have got into it.
-        if (attachment.FileSize > Ceiling)
-        {
-            return new FetchResult(
-                FetchOutcome.Failed,
-                Message: string.Format(CultureInfo.CurrentCulture, Strings.AttachmentOverCeiling, attachment.FileName));
-        }
 
         if (!attachment.CanFetch)
             return new FetchResult(FetchOutcome.Missing, Message: $"{attachment.FileName} has no file to fetch.");
 
         return null;
     }
+
+    /// <summary>
+    /// The answer for a file whose comment says it's over the ceiling, or null when it isn't.
+    /// </summary>
+    /// <remarks>
+    /// Asked only once the cache has missed. A comment's size is no promise, and one that overstated
+    /// it could still have been downloaded in full, so a copy that's already here is opened.
+    /// </remarks>
+    /// <param name="attachment">The file about to be downloaded</param>
+    /// <returns>Failed, saying why, or null for a file that may be downloaded</returns>
+    private static FetchResult? OverCeiling(FileAttachment attachment)
+        => attachment.FileSize > Ceiling
+            ? new FetchResult(FetchOutcome.Failed, Message: string.Format(CultureInfo.CurrentCulture, Strings.AttachmentOverCeiling, attachment.FileName))
+            : null;
 
     /// <summary>What a file that has to be downloaded comes to when there's no token to fetch it with.</summary>
     /// <param name="attachment">The file asked for</param>
