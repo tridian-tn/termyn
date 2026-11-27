@@ -64,7 +64,9 @@ public sealed class AttachmentFetcher
     /// </summary>
     /// <remarks>
     /// A comment's size and url are whatever a collaborator's client wrote, so neither is a promise.
-    /// Well above what any Todoist plan uploads, this only stops a stream that doesn't end.
+    /// Well above what any Todoist plan uploads, this only stops a stream that doesn't end. A file
+    /// whose comment already says it's bigger is refused before it's asked for, since it'd only be
+    /// stopped here once the whole allowance had been spent on it.
     /// </remarks>
     private const long Ceiling = 1024L * 1024 * 1024;
 
@@ -105,6 +107,8 @@ public sealed class AttachmentFetcher
 
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return new FetchResult(FetchOutcome.Ready, held);
+
+        if (OverCeiling(attachment) is { } tooLarge) return tooLarge;
 
         var read = _secrets.ReadToken();
         if (read.Token is not { } token) return NoToken(attachment, read);
@@ -172,6 +176,8 @@ public sealed class AttachmentFetcher
 
         if (_cache.Find(attachment.FileUrl, attachment.FileName) is { } held)
             return await CopyOutAsync(attachment, held, folder, ct);
+
+        if (OverCeiling(attachment) is { } tooLarge) return tooLarge;
 
         var read = _secrets.ReadToken();
         if (read.Token is not { } token) return NoToken(attachment, read);
@@ -263,6 +269,20 @@ public sealed class AttachmentFetcher
 
         return null;
     }
+
+    /// <summary>
+    /// The answer for a file whose comment says it's over the ceiling, or null when it isn't.
+    /// </summary>
+    /// <remarks>
+    /// Asked only once the cache has missed. A comment's size is no promise, and one that overstated
+    /// it could still have been downloaded in full, so a copy that's already here is opened.
+    /// </remarks>
+    /// <param name="attachment">The file about to be downloaded</param>
+    /// <returns>Failed, saying why, or null for a file that may be downloaded</returns>
+    private static FetchResult? OverCeiling(FileAttachment attachment)
+        => attachment.FileSize > Ceiling
+            ? new FetchResult(FetchOutcome.Failed, Message: string.Format(CultureInfo.CurrentCulture, Strings.AttachmentOverCeiling, attachment.FileName))
+            : null;
 
     /// <summary>What a file that has to be downloaded comes to when there's no token to fetch it with.</summary>
     /// <param name="attachment">The file asked for</param>
