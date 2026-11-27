@@ -1441,6 +1441,67 @@ public sealed class MainPresenter
             : key;
 
     /// <summary>
+    /// Moves the label view, the row it's lit on and the recent views onto the names a sync has
+    /// given labels.
+    /// </summary>
+    /// <remarks>
+    /// A label view is held by name, so a rename made on another device read as a deletion and the
+    /// window fell back to Today. A label keeps its id across a rename, which is what matches the
+    /// name it had at the last publish to the one it has now. A name another label still answers to
+    /// isn't followed: that view hasn't gone anywhere.
+    /// </remarks>
+    /// <param name="before">The account as the last publish saw it, or null before the first</param>
+    /// <param name="after">The account as it stands now</param>
+    private void FollowLabelRename(ModelSnapshot? before, ModelSnapshot after)
+    {
+        if (before is null) return;
+
+        var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var old in before.Labels.Where(l => l.Id.Length > 0))
+        {
+            var id = _engine.Resolve(old.Id);
+            if (after.Labels.FirstOrDefault(l => l.Id == id) is not { } now || now.Name == old.Name) continue;
+            if (after.Labels.Any(l => l.Id != id && string.Equals(l.Name, old.Name, StringComparison.OrdinalIgnoreCase))) continue;
+
+            renames.TryAdd(old.Name, now.Name);
+        }
+
+        if (renames.Count == 0) return;
+
+        // The row is renamed whether or not the selection is: a rename made here has already moved
+        // the selection, but not off the label's copy under Favourites.
+        if (Selection.LabelName is { } name && renames.TryGetValue(name, out var renamed)) Selection = ViewSelection.OfLabel(renamed);
+        SelectedKey = RenamedLabelKey(SelectedKey, renames);
+
+        lock (_recentGate)
+        {
+            for (var i = 0; i < _recent.Count; i++)
+            {
+                _recent[i] = RenamedLabelKey(_recent[i], renames);
+            }
+        }
+    }
+
+    /// <summary>The start of each sidebar key that carries a label's name.</summary>
+    private static readonly string[] LabelKeys =
+    [
+        SidebarKeys.For(SidebarKind.Label, string.Empty),
+        SidebarKeys.Favourite(SidebarKind.Label, string.Empty),
+    ];
+
+    /// <summary>
+    /// The key a label's sidebar row goes by once the label's been renamed.
+    /// </summary>
+    /// <param name="key">A sidebar key that's been held since the row was opened</param>
+    /// <param name="renames">Each label name a sync has taken away, to the name it's now</param>
+    /// <returns>The key under the label's new name, or the same key when it isn't a renamed label's</returns>
+    private static string RenamedLabelKey(string key, Dictionary<string, string> renames)
+        => LabelKeys.FirstOrDefault(p => key.StartsWith(p, StringComparison.Ordinal)) is { } prefix
+            && renames.TryGetValue(key[prefix.Length..], out var renamed)
+            ? prefix + renamed
+            : key;
+
+    /// <summary>
     /// Moves to the next or previous view, skipping the group labels and stopping at either end.
     /// </summary>
     /// <remarks>
@@ -3340,10 +3401,12 @@ public sealed class MainPresenter
             Sidebar = BuildSidebar(snapshot);
 
             // Ahead of everything that asks whether the view is still in the sidebar. One made here
-            // is in it under the server's id by now, and under the old one it would read as gone.
+            // is in it under the server's id by now, and a label renamed elsewhere under its new
+            // name. Under the old ones either would read as gone.
             FollowRename();
             FollowRenameInRecent();
             FollowRenameInTasks();
+            FollowLabelRename(_projectedFrom, snapshot);
 
             // After the sidebar, which is what it's checked against, and before the path and the
             // rows, which follow from wherever it leaves the selection.

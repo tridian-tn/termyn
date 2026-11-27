@@ -1,5 +1,6 @@
 using Termyn.Core.Api;
 using Termyn.Core.Capture;
+using Termyn.Core.Model;
 using Termyn.Core.Sync;
 using Termyn.TestSupport;
 
@@ -171,5 +172,89 @@ public class RenamedViewTests
 
         Assert.Equal(ViewSelection.OfProject("p2"), presenter.Selection);
         Assert.Equal(SidebarKeys.Favourite(SidebarKind.Project, "p2"), presenter.SelectedKey);
+    }
+
+    // ---- A label renamed elsewhere -----------------------------------------------------------------
+
+    /// <summary>An account with a favourite label on a task, and a second label of the same name when asked.</summary>
+    private static (MainPresenter Presenter, FakeApi Api) SeededWithLabel(bool twoOfThem = false)
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("labels", "l1", """{"id":"l1","name":"home","item_order":1,"is_favorite":true}""");
+        if (twoOfThem) store.PutResource("labels", "l2", """{"id":"l2","name":"home","item_order":2}""");
+        store.PutResource("items", "i1", """{"id":"i1","content":"Chores","child_order":1,"labels":["home"]}""");
+
+        var api = new FakeApi();
+        var engine = new SyncEngine(api, store, new FakeSecrets { Stored = "tok" }, new FixedClock(Today));
+        engine.Load();
+
+        var presenter = new MainPresenter(engine, new QuickAddParser(new FixedClock(Today)), new FixedClock(Today));
+        return (presenter, api);
+    }
+
+    /// <summary>The sync that brings back a label renamed on another device, with the task the server carried it to.</summary>
+    private static Func<IReadOnlyList<Command>, SyncResponse> RenamedToHouse()
+        => _ => new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes =
+            [
+                Json.Change("labels", "l1", """{"id":"l1","name":"house","item_order":1,"is_favorite":true}"""),
+                Json.Change("items", "i1", """{"id":"i1","content":"Chores","child_order":1,"labels":["house"]}"""),
+            ],
+        };
+
+    [Fact]
+    public async Task A_label_renamed_by_a_sync_while_it_was_open_stays_open_under_its_new_name()
+    {
+        // Held by name, it read as deleted and the window went back to Today.
+        var (presenter, api) = SeededWithLabel();
+        presenter.Select(ViewSelection.OfLabel("home"));
+
+        api.Next = RenamedToHouse();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.OfLabel("house"), presenter.Selection);
+        Assert.Equal(SidebarKeys.For(SidebarKind.Label, "house"), presenter.SelectedKey);
+        Assert.Equal(["Chores"], presenter.Rows.Select(r => r.Content));
+    }
+
+    [Fact]
+    public async Task A_label_opened_from_Favourites_stays_on_the_Favourites_row_when_renamed_elsewhere()
+    {
+        var (presenter, api) = SeededWithLabel();
+        presenter.SelectByKey(SidebarKeys.Favourite(SidebarKind.Label, "home"));
+
+        api.Next = RenamedToHouse();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(SidebarKeys.Favourite(SidebarKind.Label, "house"), presenter.SelectedKey);
+    }
+
+    [Fact]
+    public async Task A_label_renamed_elsewhere_is_still_offered_among_the_recent_views()
+    {
+        var (presenter, api) = SeededWithLabel();
+        presenter.Select(ViewSelection.OfLabel("home"));
+        presenter.Select(ViewSelection.Of(SmartView.Inbox));
+
+        api.Next = RenamedToHouse();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("@house", presenter.RecentViews.Select(v => v.Label));
+    }
+
+    [Fact]
+    public async Task A_label_view_stays_put_when_another_label_still_has_its_name()
+    {
+        // Two labels named "home" are one view. With one of them renamed the other still answers to
+        // it, so there's nothing to follow.
+        var (presenter, api) = SeededWithLabel(twoOfThem: true);
+        presenter.Select(ViewSelection.OfLabel("home"));
+
+        api.Next = RenamedToHouse();
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.OfLabel("home"), presenter.Selection);
     }
 }

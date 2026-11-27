@@ -463,6 +463,19 @@ public class LabelsAndFiltersTests
     }
 
     [Fact]
+    public void Renaming_a_label_viewed_from_Favourites_stays_on_the_Favourites_row()
+    {
+        // The selection moved with the rename, but the lit row dropped to the label's copy in the
+        // tree below.
+        var presenter = NewPresenter(Seeded());
+        presenter.SelectByKey(SidebarKeys.Favourite(SidebarKind.Label, "home"));
+
+        presenter.RenameLabel("home", "household");
+
+        Assert.Equal(SidebarKeys.Favourite(SidebarKind.Label, "household"), presenter.SelectedKey);
+    }
+
+    [Fact]
     public void Renaming_a_label_leaves_a_different_view_alone()
     {
         var presenter = NewPresenter(Seeded());
