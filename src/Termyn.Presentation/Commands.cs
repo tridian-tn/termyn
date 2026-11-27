@@ -45,6 +45,7 @@ public enum AppCommand
     ToggleFavourite,
     MoveSelectionUp,
     MoveSelectionDown,
+    ShowSelectionInTodoist,
 
     // ---- Anywhere ----
     NewTask,
@@ -271,7 +272,7 @@ public static class Commands
 
     /// <summary>The commands that act on whichever row the sidebar is on.</summary>
     public static bool IsSelectionCommand(AppCommand command)
-        => command is >= AppCommand.RenameSelection and <= AppCommand.MoveSelectionDown;
+        => command is >= AppCommand.RenameSelection and <= AppCommand.ShowSelectionInTodoist;
 
     /// <summary>
     /// The task commands that can act on several tasks at once. Every other one needs a single task
@@ -315,12 +316,12 @@ public static class Commands
     /// away and the account is held read-only.
     /// </summary>
     /// <remarks>
-    /// Show in Todoist only opens a page, and Undo is greyed by its own rule, since the engine says
-    /// there's nothing to undo while it's waiting.
+    /// Show in Todoist only opens a page, for a task or a sidebar row alike, and Undo is greyed by
+    /// its own rule, since the engine says there's nothing to undo while it's waiting.
     /// </remarks>
     public static bool IsWrite(AppCommand command)
         => (IsTaskCommand(command) && command is not AppCommand.ShowInTodoist)
-           || IsSelectionCommand(command)
+           || (IsSelectionCommand(command) && command is not AppCommand.ShowSelectionInTodoist)
            || command is AppCommand.NewTask or AppCommand.NewProject or AppCommand.NewSection or AppCommand.QuickAdd;
 
     /// <summary>How a command should be shown, given what is currently selected.</summary>
@@ -418,6 +419,16 @@ public static class Commands
             AppCommand.MoveSelectionDown => new CommandState(
                 Structure(Strings.CommandMoveProjectDown, Strings.CommandMoveSectionDown),
                 context.SelectionCan.CanMoveDown),
+
+            // Named for the thing, like the entries above, so the palette can tell it from the
+            // task's own. A project or a saved filter, which are the rows with a page of their own;
+            // greyed and named for a project over anything else, and over a project that hasn't
+            // synced yet.
+            AppCommand.ShowSelectionInTodoist => new CommandState(
+                context.Selection?.Kind is SidebarKind.Filter
+                    ? Strings.CommandShowFilterInTodoist
+                    : Strings.CommandShowProjectInTodoist,
+                context.SelectionCan.CanShowInTodoist),
 
             // Greyed where the view has nothing to start a task with — Upcoming, All, a saved filter
             // — which Quick add, starting from nothing, is still there for.

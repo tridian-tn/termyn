@@ -120,6 +120,7 @@ internal sealed class MainForm : Form
 
     /// <summary>The right-click menu on a task, refilled for whichever row it opens over.</summary>
     private readonly ContextMenuStrip _taskMenu;
+    private readonly ContextMenuStrip _sidebarMenu;
 
     /// <summary>Splits the outline from the description panel under it.</summary>
     private readonly SplitContainer _detail;
@@ -422,6 +423,12 @@ internal sealed class MainForm : Form
         _taskMenu = new ContextMenuStrip();
         _taskMenu.Opening += OnTaskMenuOpening;
         _outline.ContextMenuStrip = _taskMenu;
+
+        // The same, for the sidebar's rows. The tree selects the row a right-click lands on
+        // before this opens, so it's filled for that one.
+        _sidebarMenu = new ContextMenuStrip();
+        _sidebarMenu.Opening += OnSidebarMenuOpening;
+        _sidebar.ContextMenuStrip = _sidebarMenu;
 
         _unsupported = new LinkLabel
         {
@@ -745,6 +752,7 @@ internal sealed class MainForm : Form
         _quickAdd?.Dispose();
         _headerFont?.Dispose();
         _taskMenu.Dispose();
+        _sidebarMenu.Dispose();
 
         // Here rather than on closing, which is also Windows asking whether it may shut down. Any
         // other app can still say no to that, and the window then carries on with its work.
@@ -3664,6 +3672,23 @@ internal sealed class MainForm : Form
         return !opening.Cancel;
     }
 
+    /// <summary>
+    /// Rebuilds the sidebar's menu for the row it's about to open over, as the task menu is.
+    /// </summary>
+    private void OnSidebarMenuOpening(object? sender, CancelEventArgs e)
+    {
+        // The keyboard asking with nothing selected. A right-click that missed every row never
+        // gets this far, since the tree turns it away.
+        if (_sidebar.SelectedNode?.Tag is not SidebarNode)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        Refill(_sidebarMenu.Items, Menus.SidebarContext);
+        e.Cancel = _sidebarMenu.Items.Count == 0;
+    }
+
     /// <summary>The menu bar, one top-level heading per group, each refilled as it opens.</summary>
     private MenuStrip BuildMenuBar()
     {
@@ -3996,8 +4021,37 @@ internal sealed class MainForm : Form
             AppCommand.ToggleFavourite => ToggleFavourite(node),
             AppCommand.MoveSelectionUp => MoveStructure(node, -1),
             AppCommand.MoveSelectionDown => MoveStructure(node, 1),
+            AppCommand.ShowSelectionInTodoist => ShowInTodoist(node),
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// Opens a sidebar row's page in the Todoist web app.
+    /// </summary>
+    /// <remarks>
+    /// Still says why when it can't, though the menus grey it: Ctrl+O and the palette reach this
+    /// without a menu having opened to grey anything.
+    /// </remarks>
+    /// <param name="node">The row to open</param>
+    /// <returns>False, since opening a page writes nothing</returns>
+    private bool ShowInTodoist(SidebarNode node)
+    {
+        Guarded(() =>
+        {
+            if (_presenter.TodoistLinkForSelection(node) is not { } link)
+            {
+                _status.Text = node.Kind is SidebarKind.Project
+                    ? Strings.ShowProjectInTodoistNotYet
+                    : Strings.ShowRowInTodoistNowhere;
+            }
+            else if (!AppVersion.OpenLink(link))
+            {
+                _status.Text = Strings.ShowRowInTodoistFailed;
+            }
+        });
+
+        return false;
     }
 
     /// <summary>

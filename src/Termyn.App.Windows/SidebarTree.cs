@@ -28,6 +28,7 @@ internal sealed class SidebarTree : BufferedTreeView
     private const int WmLButtonDown = 0x0201;
     private const int WmLButtonUp = 0x0202;
     private const int WmCaptureChanged = 0x0215;
+    private const int WmContextMenu = 0x007B;
 
     public SidebarTree()
     {
@@ -159,6 +160,10 @@ internal sealed class SidebarTree : BufferedTreeView
                 Release();
                 return;
 
+            // A menu asked for with the mouse, which the keyboard sends with lParam -1.
+            case WmContextMenu when m.LParam != -1 && !SelectForMenu(PointToClient(PointOf(m.LParam))):
+                return;
+
             default:
                 base.WndProc(ref m);
                 return;
@@ -188,6 +193,26 @@ internal sealed class SidebarTree : BufferedTreeView
 
         Pressed = null;
         Invalidate();
+    }
+
+    /// <summary>
+    /// Selects the row a right-click landed on, so the menu it opens is about that row.
+    /// </summary>
+    /// <remarks>
+    /// The tree leaves its selection where it was on a right-click, and the sidebar's commands act
+    /// on the selected row, so without this the menu would open over one project and rename
+    /// another. Selecting it opens its view, as a left click would. A click on a heading or below
+    /// the last row opens no menu, the same as one below the outline's last task.
+    /// </remarks>
+    /// <param name="client">Where the click was, in the tree's own coordinates</param>
+    /// <returns>True when there was a row there to open the menu for</returns>
+    private bool SelectForMenu(Point client)
+    {
+        if (HitTest(client).Node is not { Tag: SidebarNode { Kind: not SidebarKind.Header } } row)
+            return false;
+
+        SelectedNode = row;
+        return true;
     }
 
     /// <summary>

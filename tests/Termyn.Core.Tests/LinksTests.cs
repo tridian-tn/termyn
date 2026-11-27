@@ -74,7 +74,32 @@ public class LinksTests
         // other fails here rather than in the hands of whoever clicks the link.
         Assert.NotNull(Links.Openable(Links.TodoistFilter("276111043", "Assigned to me")));
         Assert.NotNull(Links.Openable(Links.TodoistTask("6XR4GqQQCW6Gv9h4")));
+        Assert.NotNull(Links.Openable(Links.TodoistProject("6Jf8VQXxpwv56VQ7")));
         Assert.NotNull(Links.Openable(UpdateResult.ReleasesPage));
+    }
+
+    [Fact]
+    public void A_project_link_is_the_id_on_its_own()
+    {
+        // No name in front of it, unlike a filter's: Todoist opens a project from the id alone,
+        // tried against a live account.
+        Assert.Equal(
+            "https://app.todoist.com/app/project/6Jf8VQXxpwv56VQ7",
+            Links.TodoistProject("6Jf8VQXxpwv56VQ7"));
+    }
+
+    [Theory]
+    [InlineData("../settings/account")]
+    [InlineData("x?next=https://evil.example")]
+    [InlineData("x#fragment")]
+    public void A_project_link_stays_on_the_project_page_whatever_the_id_held(string id)
+    {
+        var link = Links.Openable(Links.TodoistProject(id));
+
+        Assert.NotNull(link);
+        Assert.StartsWith("https://app.todoist.com/app/project/", link);
+        Assert.DoesNotContain("?", link);
+        Assert.DoesNotContain("#", link);
     }
 
     [Fact]

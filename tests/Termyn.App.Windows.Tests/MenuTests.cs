@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Termyn.Core.Model;
 using Termyn.Presentation;
 using Termyn.TestSupport;
@@ -727,6 +728,126 @@ public class MenuTests
         TestWindow.Find<OutlineView>(window).SelectId("a");
 
         Assert.True(window.OpenTaskMenu());
+    }
+
+    [WinFormsFact]
+    public void The_sidebars_menu_is_the_organise_menu()
+    {
+        // One list for both, as the task menu and the Task menu are, so neither can gain an
+        // entry the other hasn't got.
+        Assert.Equal(Menus.Commands(Organise), Menus.Commands(Menus.SidebarContext));
+        Assert.Contains(AppCommand.ShowSelectionInTodoist, Menus.Commands(Menus.SidebarContext));
+    }
+
+    [WinFormsFact]
+    public void A_right_click_on_a_project_selects_it_and_offers_its_page()
+    {
+        // The tree leaves its selection where it was on a right-click, and the commands act on the
+        // selected row, so the menu would have opened over one project and acted on another.
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+        store.PutResource("projects", "p2", """{"id":"p2","name":"Home","child_order":2}""");
+
+        using var window = TestWindow.Build("termyn-sidebar-menu.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        var sidebar = TestWindow.Find<SidebarTree>(window);
+        var home = Flatten(sidebar.Nodes).Single(n => n.Tag is SidebarNode { Kind: SidebarKind.Project, Id: "p2" });
+        Assert.NotSame(home, sidebar.SelectedNode);
+
+        var menu = RightClick(sidebar, new Point(home.Bounds.Left + (home.Bounds.Width / 2), home.Bounds.Top + (home.Bounds.Height / 2)));
+        try
+        {
+            Assert.Same(home, sidebar.SelectedNode);
+            Assert.True(menu.Visible);
+            Assert.True(Every(menu.Items).Single(i => i.Text == "Show project in Todoist").Enabled);
+        }
+        finally
+        {
+            menu.Close();
+        }
+    }
+
+    [WinFormsFact]
+    public void A_right_click_below_the_last_row_opens_no_menu_and_moves_nothing()
+    {
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-sidebar-menu-below.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        var sidebar = TestWindow.Find<SidebarTree>(window);
+        var before = sidebar.SelectedNode;
+
+        var menu = RightClick(sidebar, new Point(10, sidebar.ClientSize.Height - 2));
+        try
+        {
+            Assert.False(menu.Visible);
+            Assert.Same(before, sidebar.SelectedNode);
+        }
+        finally
+        {
+            menu.Close();
+        }
+    }
+
+    [WinFormsFact]
+    public void The_keyboard_opens_the_sidebars_menu_for_the_row_already_selected()
+    {
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-sidebar-menu-keys.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        var sidebar = TestWindow.Find<SidebarTree>(window);
+        var before = sidebar.SelectedNode;
+
+        // Shift+F10 and the menu key send no point, which Windows writes as -1.
+        SendMessage(sidebar.Handle, WmContextMenu, sidebar.Handle, -1);
+        var menu = sidebar.ContextMenuStrip!;
+        try
+        {
+            Assert.True(menu.Visible);
+            Assert.Same(before, sidebar.SelectedNode);
+        }
+        finally
+        {
+            menu.Close();
+        }
+    }
+
+    private const int WmContextMenu = 0x007B;
+
+    [DllImport("user32.dll")]
+    private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+
+    /// <summary>
+    /// Asks the sidebar for its menu the way a right-click on it does, which is the message the
+    /// tree sends itself once the button comes up.
+    /// </summary>
+    /// <param name="sidebar">The tree</param>
+    /// <param name="client">Where the click was, in the tree's own coordinates</param>
+    /// <returns>The tree's menu, open or not</returns>
+    private static ContextMenuStrip RightClick(SidebarTree sidebar, Point client)
+    {
+        var screen = sidebar.PointToScreen(client);
+        SendMessage(sidebar.Handle, WmContextMenu, sidebar.Handle, (screen.Y << 16) | (screen.X & 0xFFFF));
+        return sidebar.ContextMenuStrip!;
+    }
+
+    private static IEnumerable<TreeNode> Flatten(TreeNodeCollection nodes)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            yield return node;
+            foreach (var child in Flatten(node.Nodes))
+                yield return child;
+        }
     }
 
     private static IReadOnlyList<MenuEntry> Group(string heading)

@@ -979,6 +979,18 @@ The file is deleted from Todoist as well, and that can't be undone.</value>
     <value>Couldn't open the task in Todoist.</value>
     <comment>Status bar when the browser couldn't be started for a task.</comment>
   </data>
+  <data name="ShowProjectInTodoistNotYet" xml:space="preserve">
+    <value>Todoist hasn't got this project yet. It will once it has synced.</value>
+    <comment>Status bar when opening a project in Todoist that hasn't been sent there yet.</comment>
+  </data>
+  <data name="ShowRowInTodoistNowhere" xml:space="preserve">
+    <value>Only a project or a saved filter can be opened in Todoist.</value>
+    <comment>Status bar when Ctrl+O is pressed on a sidebar row with no page to open, such as Today or a label.</comment>
+  </data>
+  <data name="ShowRowInTodoistFailed" xml:space="preserve">
+    <value>Couldn't open it in Todoist.</value>
+    <comment>Status bar when the browser couldn't be started for a project or a saved filter.</comment>
+  </data>
   <data name="CompletedFetching" xml:space="preserve">
     <value>Fetching completed tasks…</value>
     <comment>Status bar while loading the completed tasks list.</comment>

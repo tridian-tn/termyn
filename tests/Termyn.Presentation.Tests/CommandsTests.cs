@@ -91,7 +91,7 @@ public class CommandsTests
     {
         // The two that move it want somewhere to move to as well, which the row alone can't say —
         // so they are given it here rather than left out of the sweep.
-        var anywhere = new TaskAbilities(CanMoveUp: true, CanMoveDown: true);
+        var anywhere = new TaskAbilities(CanMoveUp: true, CanMoveDown: true, CanShowInTodoist: true);
         var context = new CommandContext(Selection: Node(SidebarKind.Project), SelectionAbilities: anywhere);
 
         Assert.All(
@@ -310,6 +310,31 @@ public class CommandsTests
         Assert.Equal("Show in Todoist", State(AppCommand.ShowInTodoist, unsynced).Label);
     }
 
+    [Theory]
+    [InlineData(SidebarKind.Project, "Show project in Todoist")]
+    [InlineData(SidebarKind.Filter, "Show filter in Todoist")]
+    [InlineData(SidebarKind.Section, "Show project in Todoist")]
+    [InlineData(SidebarKind.SmartView, "Show project in Todoist")]
+    public void Showing_a_sidebar_row_in_todoist_names_what_it_would_open(SidebarKind kind, string label)
+    {
+        // Named for the thing, so the palette can tell it from the task's own Show in Todoist.
+        var context = new CommandContext(Selection: Node(kind), SelectionAbilities: new TaskAbilities(CanShowInTodoist: true));
+
+        Assert.Equal(label, State(AppCommand.ShowSelectionInTodoist, context).Label);
+    }
+
+    [Fact]
+    public void A_sidebar_row_is_offered_its_page_only_when_it_has_one()
+    {
+        var unsynced = new CommandContext(Selection: Node(SidebarKind.Project), SelectionAbilities: new TaskAbilities(CanMoveUp: true));
+        var synced = new CommandContext(Selection: Node(SidebarKind.Project), SelectionAbilities: new TaskAbilities(CanShowInTodoist: true));
+        var stale = new CommandContext(SelectionAbilities: new TaskAbilities(CanShowInTodoist: true));
+
+        Assert.False(State(AppCommand.ShowSelectionInTodoist, unsynced).Enabled);
+        Assert.True(State(AppCommand.ShowSelectionInTodoist, synced).Enabled);
+        Assert.False(State(AppCommand.ShowSelectionInTodoist, stale).Enabled);
+    }
+
     [Fact]
     public void Abilities_without_a_task_count_for_nothing()
     {
@@ -415,6 +440,50 @@ public class CommandsTests
         Assert.True(presenter.AbilitiesFor(temp).CanMoveTo);
         Assert.False(presenter.AbilitiesFor(temp).CanShowInTodoist);
         Assert.Null(presenter.TodoistLinkFor(temp));
+    }
+
+    [Fact]
+    public void The_presenter_links_a_project_and_a_filter_to_their_pages_in_todoist()
+    {
+        var store = new InMemorySnapshotStore();
+        store.PutResource("projects", "6Jf8VQXxpwv56VQ7", """{"id":"6Jf8VQXxpwv56VQ7","name":"Work","child_order":1}""");
+        var presenter = NewPresenter(store);
+
+        var project = new SidebarNode(SidebarKind.Project, "6Jf8VQXxpwv56VQ7", "Work", 0, "project:6Jf8VQXxpwv56VQ7");
+        var filter = new SidebarNode(SidebarKind.Filter, "276111043", "Assigned to me", 0, "filter:276111043");
+
+        Assert.Equal("https://app.todoist.com/app/project/6Jf8VQXxpwv56VQ7", presenter.TodoistLinkForSelection(project));
+        Assert.Equal("https://app.todoist.com/app/filter/assigned-to-me-276111043", presenter.TodoistLinkForSelection(filter));
+        Assert.True(presenter.SelectionAbilitiesFor(project).CanShowInTodoist);
+        Assert.True(presenter.SelectionAbilitiesFor(filter).CanShowInTodoist);
+    }
+
+    [Theory]
+    [InlineData(SidebarKind.Section)]
+    [InlineData(SidebarKind.Label)]
+    [InlineData(SidebarKind.SmartView)]
+    public void A_sidebar_row_without_a_page_of_its_own_gets_no_link(SidebarKind kind)
+    {
+        var presenter = NewPresenter(new InMemorySnapshotStore());
+        var node = new SidebarNode(kind, "x", "Work", 0, "key");
+
+        Assert.Null(presenter.TodoistLinkForSelection(node));
+        Assert.False(presenter.SelectionAbilitiesFor(node).CanShowInTodoist);
+        Assert.Null(presenter.TodoistLinkForSelection(null));
+    }
+
+    [Fact]
+    public void A_project_added_here_and_not_yet_synced_has_no_page_to_show()
+    {
+        // The name we gave it until a sync brings the server's back, and Todoist has no page for
+        // that.
+        var presenter = NewPresenter(new InMemorySnapshotStore(), out var engine);
+
+        var temp = engine.AddProject("New");
+        var node = new SidebarNode(SidebarKind.Project, temp, "New", 0, "project:" + temp);
+
+        Assert.Null(presenter.TodoistLinkForSelection(node));
+        Assert.False(presenter.SelectionAbilitiesFor(node).CanShowInTodoist);
     }
 
     [Fact]
