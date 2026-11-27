@@ -68,6 +68,10 @@
     <value>{0} was larger than Todoist said it would be, so the download was stopped.</value>
     <comment>Shown when an attachment's download ran past the size its comment gives. {0} is the file's name.</comment>
   </data>
+  <data name="AttachmentOverCeiling" xml:space="preserve">
+    <value>{0} is over 1 GB, which is more than Termyn will download.</value>
+    <comment>Shown instead of starting a download whose comment gives a size over the 1 GB ceiling in AttachmentFetcher. {0} is the file's name.</comment>
+  </data>
   <data name="AttachmentNotFetched" xml:space="preserve">
     <value>{0} couldn't be downloaded.</value>
     <comment>Shown when an attachment's download failed for a reason there's nothing more to say about. {0} is the file's name.</comment>

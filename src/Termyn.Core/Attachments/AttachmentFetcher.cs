@@ -64,7 +64,9 @@ public sealed class AttachmentFetcher
     /// </summary>
     /// <remarks>
     /// A comment's size and url are whatever a collaborator's client wrote, so neither is a promise.
-    /// Well above what any Todoist plan uploads, this only stops a stream that doesn't end.
+    /// Well above what any Todoist plan uploads, this only stops a stream that doesn't end. A file
+    /// whose comment already says it's bigger is refused before it's asked for, since it'd only be
+    /// stopped here once the whole allowance had been spent on it.
     /// </remarks>
     private const long Ceiling = 1024L * 1024 * 1024;
 
@@ -250,13 +252,21 @@ public sealed class AttachmentFetcher
         }
     }
 
-    /// <summary>The answer for a file there's nothing to fetch for yet, or null when there is.</summary>
+    /// <summary>The answer for a file there's nothing to fetch for, or null when there is.</summary>
     /// <param name="attachment">The file wanted</param>
-    /// <returns>Pending or Missing, or null for a file that can be fetched</returns>
+    /// <returns>Pending, Missing or Failed, or null for a file that can be fetched</returns>
     private static FetchResult? Unfetchable(FileAttachment attachment)
     {
         if (attachment.Pending)
             return new FetchResult(FetchOutcome.Pending, Message: $"{attachment.FileName} is still being processed by Todoist.");
+
+        // Ahead of the cache as well as the download: nothing over the ceiling can have got into it.
+        if (attachment.FileSize > Ceiling)
+        {
+            return new FetchResult(
+                FetchOutcome.Failed,
+                Message: string.Format(CultureInfo.CurrentCulture, Strings.AttachmentOverCeiling, attachment.FileName));
+        }
 
         if (!attachment.CanFetch)
             return new FetchResult(FetchOutcome.Missing, Message: $"{attachment.FileName} has no file to fetch.");
