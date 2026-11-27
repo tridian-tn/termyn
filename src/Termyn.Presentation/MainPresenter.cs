@@ -1448,7 +1448,8 @@ public sealed class MainPresenter
     /// A label view is held by name, so a rename made on another device read as a deletion and the
     /// window fell back to Today. A label keeps its id across a rename, which is what matches the
     /// name it had at the last publish to the one it has now. A name another label still answers to
-    /// isn't followed: that view hasn't gone anywhere.
+    /// isn't followed: that view hasn't gone anywhere. Nor is one whose labels went to different
+    /// names, since neither of them is the view that was open; it falls back as a deletion does.
     /// </remarks>
     /// <param name="before">The account as the last publish saw it, or null before the first</param>
     /// <param name="after">The account as it stands now</param>
@@ -1457,13 +1458,22 @@ public sealed class MainPresenter
         if (before is null) return;
 
         var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var split = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var old in before.Labels.Where(l => l.Id.Length > 0))
         {
             var id = _engine.Resolve(old.Id);
             if (after.Labels.FirstOrDefault(l => l.Id == id) is not { } now || now.Name == old.Name) continue;
             if (after.Labels.Any(l => l.Id != id && string.Equals(l.Name, old.Name, StringComparison.OrdinalIgnoreCase))) continue;
 
-            renames.TryAdd(old.Name, now.Name);
+            if (!renames.TryAdd(old.Name, now.Name) && !string.Equals(renames[old.Name], now.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                split.Add(old.Name);
+            }
+        }
+
+        foreach (var ambiguous in split)
+        {
+            renames.Remove(ambiguous);
         }
 
         if (renames.Count == 0) return;

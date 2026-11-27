@@ -84,6 +84,25 @@ public class RestoredViewTests
     }
 
     [Fact]
+    public async Task A_label_the_first_sync_finds_renamed_stays_open_under_its_new_name()
+    {
+        // Renamed on the phone while the window was closed. Checked before the rename was followed,
+        // the saved key would name a row the sidebar no longer has, and it'd give way to Today.
+        var (presenter, api) = Seeded();
+        presenter.RestoreView(Label("followup"));
+
+        api.Response = new SyncResponse
+        {
+            SyncToken = "s1",
+            Changes = [Json.Change("labels", "l1", """{"id":"l1","name":"chase","item_order":1}""")],
+        };
+        await presenter.SyncAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(ViewSelection.OfLabel("chase"), presenter.Selection);
+        Assert.Equal(Label("chase"), presenter.SelectedKey);
+    }
+
+    [Fact]
     public async Task A_view_the_first_sync_leaves_alone_stays_open()
     {
         var (presenter, api) = Seeded();
