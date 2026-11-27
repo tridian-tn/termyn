@@ -93,6 +93,28 @@ public static class Menus
     /// <summary>The right-click menu on a task.</summary>
     public static IReadOnlyList<MenuEntry> TaskContext => TaskEntries;
 
+    /// <summary>
+    /// What can be done to a sidebar row. The Organise menu and the sidebar's right-click menu are
+    /// this same list.
+    /// </summary>
+    private static readonly MenuEntry[] SelectionEntries =
+    [
+        MenuEntry.Of(AppCommand.RenameSelection),
+        MenuEntry.Of(AppCommand.DeleteSelection),
+        MenuEntry.AfterRule(AppCommand.ToggleFavourite),
+
+        // Their own group. Moving a project is a rare and deliberate thing, and it has no business
+        // sitting next to the entry that renames one.
+        MenuEntry.AfterRule(AppCommand.MoveSelectionUp),
+        MenuEntry.Of(AppCommand.MoveSelectionDown),
+
+        // Out of the app rather than a change to the row, ruled off as the task's own is.
+        MenuEntry.AfterRule(AppCommand.ShowSelectionInTodoist),
+    ];
+
+    /// <summary>The right-click menu on a sidebar row.</summary>
+    public static IReadOnlyList<MenuEntry> SidebarContext => SelectionEntries;
+
     /// <summary>The menu bar, in the order its headings are laid out.</summary>
     public static IReadOnlyList<MenuEntry> Bar { get; } =
     [
@@ -147,17 +169,9 @@ public static class Menus
         // hasn't got.
         new MenuEntry(AppCommand.None, Strings.MenuTask, Children: TaskEntries),
 
-        // Everything the sidebar's own keys do, which had no home outside the sidebar before.
-        MenuEntry.Group(
-            Strings.MenuOrganise,
-            MenuEntry.Of(AppCommand.RenameSelection),
-            MenuEntry.Of(AppCommand.DeleteSelection),
-            MenuEntry.AfterRule(AppCommand.ToggleFavourite),
-
-            // Their own group at the end. Moving a project is a rare and deliberate thing, and it
-            // has no business sitting next to the entry that renames one.
-            MenuEntry.AfterRule(AppCommand.MoveSelectionUp),
-            MenuEntry.Of(AppCommand.MoveSelectionDown)),
+        // Everything the sidebar's own keys do, which had no home outside the sidebar before. The
+        // same entries its right-click menu shows, as the Task menu is the task's.
+        new MenuEntry(AppCommand.None, Strings.MenuOrganise, Children: SelectionEntries),
 
         MenuEntry.Group(
             Strings.MenuHelp,

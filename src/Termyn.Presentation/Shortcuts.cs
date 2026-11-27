@@ -101,6 +101,10 @@ public static class Shortcuts
         Bind(Ctrl | Shift, Key.Up, AppCommand.MoveSelectionUp, Sidebar),
         Bind(Ctrl | Shift, Key.Down, AppCommand.MoveSelectionDown, Sidebar),
 
+        // The outline's key for its own row, since it's the same question: open whatever the
+        // cursor is on in the browser.
+        Bind(Ctrl, Key.O, AppCommand.ShowSelectionInTodoist, Sidebar),
+
         // Anywhere in the window.
         Bind(Ctrl, Key.N, AppCommand.NewTask, Window),
         Bind(None, Key.F5, AppCommand.SyncNow, Window),

@@ -51,6 +51,19 @@ public static class Links
         => $"https://app.todoist.com/app/task/{Uri.EscapeDataString(id)}";
 
     /// <summary>
+    /// The page for one project in the Todoist app.
+    /// </summary>
+    /// <remarks>
+    /// The id alone, like a task, and unlike a filter. Todoist takes a project's page without the
+    /// name in front of it, and sends the Inbox's on to its own page, so there's no slug to keep in
+    /// step with a rename. Escaped for the same reason a task's id is.
+    /// </remarks>
+    /// <param name="id">The id the server knows the project by</param>
+    /// <returns>The URL of that project's page</returns>
+    public static string TodoistProject(string id)
+        => $"https://app.todoist.com/app/project/{Uri.EscapeDataString(id)}";
+
+    /// <summary>
     /// A filter's name in the form a URL carries it.
     /// </summary>
     /// <remarks>

@@ -3087,25 +3087,52 @@ public sealed class MainPresenter
     }
 
     /// <summary>
-    /// Whether a sidebar row has anywhere to go, so a menu can grey out what it can't do.
+    /// Whether a sidebar row has anywhere to go, and a page in Todoist, so a menu can grey out what
+    /// it can't do.
     /// </summary>
     /// <remarks>
-    /// Only the up and down of <see cref="TaskAbilities"/> are filled in. Indenting a project is a
-    /// different operation with a different command behind it, and nothing offers it yet.
+    /// Only the up and down and the Todoist page of <see cref="TaskAbilities"/> are filled in.
+    /// Indenting a project is a different operation with a different command behind it, and nothing
+    /// offers it yet.
     /// </remarks>
     /// <param name="node">The sidebar row in question, or null when there is none</param>
-    /// <returns>Where it could move to</returns>
+    /// <returns>What it can do</returns>
     public TaskAbilities SelectionAbilitiesFor(SidebarNode? node) => node?.Kind switch
     {
         SidebarKind.Project => new TaskAbilities(
             CanMoveUp: _engine.CanMoveProject(node.Id, -1),
-            CanMoveDown: _engine.CanMoveProject(node.Id, 1)),
+            CanMoveDown: _engine.CanMoveProject(node.Id, 1),
+            CanShowInTodoist: TodoistLinkForSelection(node) is not null),
 
         SidebarKind.Section => new TaskAbilities(
             CanMoveUp: _engine.CanMoveSection(node.Id, -1),
             CanMoveDown: _engine.CanMoveSection(node.Id, 1)),
 
+        SidebarKind.Filter => new TaskAbilities(CanShowInTodoist: true),
+
         _ => TaskAbilities.None,
+    };
+
+    /// <summary>
+    /// Where a sidebar row's page is in the Todoist web app.
+    /// </summary>
+    /// <remarks>
+    /// A project or a saved filter. A section, a label and a smart view are left out: Todoist's
+    /// pages for those haven't been tried from here, and a link that lands somewhere else is worse
+    /// than an entry that's greyed. Worked out again when it's followed, as a task's link is, since
+    /// a sync can give a project made here the server's id in between.
+    /// </remarks>
+    /// <param name="node">The sidebar row, or null when there is none</param>
+    /// <returns>The link, or null when the row has no page or Todoist hasn't got it yet</returns>
+    public string? TodoistLinkForSelection(SidebarNode? node) => node?.Kind switch
+    {
+        SidebarKind.Project => _engine.ServerProjectIdOf(node.Id) is { } serverId
+            ? Links.TodoistProject(serverId)
+            : null,
+
+        SidebarKind.Filter => Links.TodoistFilter(node.Id, node.Label),
+
+        _ => null,
     };
 
     /// <summary>

@@ -1983,6 +1983,28 @@ public sealed class SyncEngine
         }
     }
 
+    /// <summary>
+    /// The id Todoist itself knows a project by, for somewhere outside the app to find it.
+    /// </summary>
+    /// <remarks>
+    /// The same question as <see cref="ServerIdOf"/> asks of a task. A project made here goes by
+    /// the name we gave it until a sync brings back the server's, and Todoist has no page for that.
+    /// </remarks>
+    /// <param name="id">The project, by whatever name the caller is holding it under</param>
+    /// <returns>The server's id, or null when it hasn't one or nothing here holds the project</returns>
+    public string? ServerProjectIdOf(string id)
+    {
+        lock (_gate)
+        {
+            id = Promoted(id);
+
+            if (Model.Get(ResourceType.Projects, id) is null)
+                return null;
+
+            return _outbox.Exists(c => c.Type == "project_add" && c.TempId == id) ? null : id;
+        }
+    }
+
     /// <summary>A task with the siblings it is ordered among, or null when the model doesn't hold it.</summary>
     private (TaskItem Item, List<TaskItem> Siblings, int Index)? Placement(string id)
     {

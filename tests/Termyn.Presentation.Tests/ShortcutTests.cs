@@ -214,14 +214,15 @@ public class ShortcutTests
     }
 
     [Fact]
-    public void Showing_a_task_in_todoist_answers_only_in_the_outline()
+    public void Showing_in_todoist_opens_whatever_the_cursor_is_on_and_nothing_window_wide()
     {
-        // The task under the cursor is the one that goes to the browser, so there has to be one.
-        // Window-wide it would also take Ctrl+O from the description editor and the comment box.
+        // The task under the cursor in the outline, and the row under it in the sidebar. Window-wide
+        // it would also take Ctrl+O from the description editor and the comment box.
         Assert.Equal(AppCommand.ShowInTodoist, In(ShortcutScope.Outline, Ctrl, Key.O));
-        Assert.Equal(AppCommand.None, In(ShortcutScope.Sidebar, Ctrl, Key.O));
+        Assert.Equal(AppCommand.ShowSelectionInTodoist, In(ShortcutScope.Sidebar, Ctrl, Key.O));
         Assert.Equal(AppCommand.None, In(ShortcutScope.Window, Ctrl, Key.O));
         Assert.Equal("Ctrl+O", Shortcuts.ShortcutFor(AppCommand.ShowInTodoist));
+        Assert.Equal("Ctrl+O", Shortcuts.ShortcutFor(AppCommand.ShowSelectionInTodoist));
     }
 
     [Fact]

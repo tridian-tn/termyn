@@ -184,6 +184,14 @@
     <value>Show in Todoist</value>
     <comment>Opens the task's page on Todoist's website.</comment>
   </data>
+  <data name="CommandShowProjectInTodoist" xml:space="preserve">
+    <value>Show project in Todoist</value>
+    <comment>Opens the page of the project selected in the sidebar on Todoist's website. Also shown, greyed, over a sidebar row that has no page there.</comment>
+  </data>
+  <data name="CommandShowFilterInTodoist" xml:space="preserve">
+    <value>Show filter in Todoist</value>
+    <comment>Opens the page of the saved filter selected in the sidebar on Todoist's website.</comment>
+  </data>
   <data name="CommandDelete" xml:space="preserve">
     <value>Delete</value>
     <comment>Deletes the selected task.</comment>
