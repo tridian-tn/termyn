@@ -821,6 +821,32 @@ public class MenuTests
         }
     }
 
+    [WinFormsFact]
+    public void The_keyboard_opens_no_menu_on_a_heading()
+    {
+        // The arrow keys can leave a heading selected, and a menu over one would be all greyed.
+        var store = new Termyn.Core.Sync.InMemorySnapshotStore();
+        store.PutResource("projects", "p1", """{"id":"p1","name":"Work","child_order":1}""");
+
+        using var window = TestWindow.Build("termyn-sidebar-menu-heading.json", store, out _, out var presenter);
+        TestWindow.ShowOffScreen(window);
+        presenter.Select(ViewSelection.Of(SmartView.All));
+
+        var sidebar = TestWindow.Find<SidebarTree>(window);
+        sidebar.SelectedNode = Flatten(sidebar.Nodes).First(n => n.Tag is SidebarNode { Kind: SidebarKind.Header });
+
+        SendMessage(sidebar.Handle, WmContextMenu, sidebar.Handle, -1);
+        var menu = sidebar.ContextMenuStrip!;
+        try
+        {
+            Assert.False(menu.Visible);
+        }
+        finally
+        {
+            menu.Close();
+        }
+    }
+
     private const int WmContextMenu = 0x007B;
 
     [DllImport("user32.dll")]

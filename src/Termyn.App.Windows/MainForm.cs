@@ -3677,9 +3677,10 @@ internal sealed class MainForm : Form
     /// </summary>
     private void OnSidebarMenuOpening(object? sender, CancelEventArgs e)
     {
-        // The keyboard asking with nothing selected. A right-click that missed every row never
-        // gets this far, since the tree turns it away.
-        if (_sidebar.SelectedNode?.Tag is not SidebarNode)
+        // The keyboard asking with nothing selected, or with a heading selected, which the arrow
+        // keys can land on. A right-click that missed every row never gets this far, since the
+        // tree turns it away.
+        if (_sidebar.SelectedNode?.Tag is not SidebarNode { Kind: not SidebarKind.Header })
         {
             e.Cancel = true;
             return;
