@@ -21,18 +21,21 @@ public class DescriptionSaveTests
         store.PutResource("items", "a", """{"id":"a","content":"First","description":"Notes","project_id":"p1","child_order":1}""");
 
         using var window = TestWindow.Build("termyn-description-pause-save.json", store, out _, out var presenter);
-        _ = window.Handle;
+        TestWindow.ShowOffScreen(window);
         presenter.Select(ViewSelection.Of(SmartView.All));
         window.ShowPanelTab(comments: false);
 
         var outline = TestWindow.Find<OutlineView>(window);
         var editor = TestWindow.Find<MarkdownEditor>(window);
-        _ = outline.Handle;
-        _ = editor.Handle;
         outline.SelectId("a");
 
+        window.Run(AppCommand.EditDescription);
+        Application.DoEvents();
+        Assert.True(window.NewContext(null).WritingDescription, "the markdown never opened, so this says nothing");
+        Assert.True(editor.Focused, "the markdown never took the keyboard, so this says nothing");
+
         window.WaitBeforeSavingDescription(50);
-        editor.Text = "Notes, and more";
+        editor.AppendText(", and more");
 
         // Not on the keystroke: that would be a write between every two letters.
         Assert.Equal("Notes", presenter.DescriptionOf(SubjectKind.Task, "a"));
@@ -42,5 +45,6 @@ public class DescriptionSaveTests
             Application.DoEvents();
 
         Assert.Equal("Notes, and more", presenter.DescriptionOf(SubjectKind.Task, "a"));
+        Assert.True(editor.Focused, "the keyboard left the markdown, so something other than the pause saved it");
     }
 }
